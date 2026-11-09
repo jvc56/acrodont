@@ -39,13 +39,13 @@
 	import { storeCreated, type Created } from '$lib/local/created';
 	import { getMeta } from '$lib/local/meta';
 	import { preferencesView } from '$lib/local/preferences';
-	import { allCascades, CASCADE_LIMIT, CASCADE_WARNING } from '$lib/cascades/summary';
+	import { allCascades, cascadeWarning } from '$lib/cascades/summary';
 	import { userDb } from '$lib/local/open';
 	import { DEFAULT_OPTIONS, clampPrefill, type QuizOptions } from '$lib/options';
 	import { PREVIEW_MANUAL_ENTRIES } from '$lib/sync/config';
 	import type { Distribution } from '$lib/tiles';
 
-	const cap = $derived(session.me?.max_quiz_questions ?? 300_000);
+	const cap = $derived(session.me?.max_quiz_questions ?? 130_000);
 
 	let quizType = $state<QuizType>('anagram');
 	let lexicons = $state<LexiconInfo[]>([]);
@@ -359,16 +359,16 @@
 				<Input id="name" bind:value={name} maxlength={200} oninput={() => (nameEdited = true)} />
 			</div>
 			{#if createError}<p class="text-sm text-destructive">{createError}</p>{/if}
-			{#if cascadeCount >= CASCADE_LIMIT}
-				<p class="text-sm">You have {cascadeCount} of {CASCADE_LIMIT} cascades. <a class="underline" href="/trash">Empty the Trash</a> to make room.</p>
-			{:else if cascadeCount >= CASCADE_WARNING}
-				<p class="text-sm text-muted-foreground">{cascadeCount} of {CASCADE_LIMIT} cascades used.</p>
+			{#if cascadeCount >= session.cascadeLimit}
+				<p class="text-sm">You have {cascadeCount} of {session.cascadeLimit} cascades. <a class="underline" href="/trash">Empty the Trash</a> to make room.</p>
+			{:else if cascadeCount >= cascadeWarning(session.cascadeLimit)}
+				<p class="text-sm text-muted-foreground">{cascadeCount} of {session.cascadeLimit} cascades used.</p>
 			{/if}
 			<div>
 				<Button
 					type="button"
 					onclick={create}
-					disabled={creating || cascadeCount >= CASCADE_LIMIT || !lexicon || !dist || wire.errors.size > 0 || !name.trim() || threshold < 1 || threshold > 100}
+					disabled={creating || cascadeCount >= session.cascadeLimit || !lexicon || !dist || wire.errors.size > 0 || !name.trim() || threshold < 1 || threshold > 100}
 				>
 					{busy ? 'the server is busy' : creating ? 'Creating…' : 'Create Cascade'}
 				</Button>

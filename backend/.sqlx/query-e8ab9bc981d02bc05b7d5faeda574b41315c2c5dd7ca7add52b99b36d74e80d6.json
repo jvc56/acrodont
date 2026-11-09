@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM users u\n           WHERE u.email_confirmed_at IS NOT NULL\n              OR EXISTS (SELECT 1 FROM email_confirmations c\n                         WHERE c.user_id = u.id AND c.expires_at > now())",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e8ab9bc981d02bc05b7d5faeda574b41315c2c5dd7ca7add52b99b36d74e80d6"
+}

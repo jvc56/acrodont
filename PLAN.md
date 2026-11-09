@@ -48,7 +48,19 @@ Any cascade or quiz can be downloaded as a word list of everything in it, or of
 just what was answered correctly or missed. See
 [Exporting words](#exporting-words).
 
-A cascade's Source quiz can hold up to **300,000 questions**.
+A cascade's Source quiz can hold up to **130,000 questions**.
+
+**Scale assumptions (2026-11).** Wordfall is sized for its owner alone at
+first, perhaps ten more people within months, and **at most about 50
+accounts** (`MAX_ACCOUNTS`, after which registration closes), each with at most
+**20 cascades** of at most **130,000 questions**. The production stack is
+sized and costed for that (see [Deployment and
+Operations](#deployment-and-operations)). Many passages below work through a
+300,000-question cascade or a hundred cascades: those were the original limits,
+and their figures are now upper bounds the smaller limits stay well inside. The
+budgets in [Scale tests](#scale-tests) run at 130,000 questions. The In Word
+List filter's 300,000-entry allowance is unchanged: it limits a search's input,
+not a quiz.
 
 Once a cascade has been downloaded, studying works **offline**: a user can log
 in and start a cascade, board a plane, keep studying, and have everything sync
@@ -212,7 +224,7 @@ The options belong to the **cascade** and to each **quiz**:
 Every option is validated on both sides: segment size is 0, meaning off, or an
 integer from **5** to
 `MAX_QUIZ_QUESTIONS` (the device uses the value `/api/auth/me` reported into
-its `meta` store, and 300,000 before its first login), progression is Ladder
+its `meta` store, and 130,000 before its first login), progression is Ladder
 or Drill, and alphabetical order is a flag. The cap bounds **new** values only:
 it can be lowered on the server, and a cascade, quiz or preference that already
 holds a larger segment size keeps it and keeps working, since nothing
@@ -228,8 +240,8 @@ one card and one Trash entry and breaks nothing. Nor does the minimum bound the
 work on its own. **An
 attempt creates at most `ceil(question_count / S)` chain quizzes**, one per run
 that missed something, each of which becomes a Trash entry, so the segment size
-is the user's choice of how much that will be: 5 on a 300,000-question quiz can
-leave 60,000 of them. The builder and the quiz settings menu therefore warn
+is the user's choice of how much that will be: 5 on a 130,000-question quiz can
+leave 26,000 of them. The builder and the quiz settings menu therefore warn
 when `question_count / segment_size` is above 2,000, saying how many levels the
 attempt could create; the count is the quiz's own in the quiz settings menu,
 and the cascade's in the builder and the cascade's options dialog. A segment size at or above a quiz's question count means the same as 0 for
@@ -404,13 +416,14 @@ Moving on from the last question of a run that is not the last run:
 
 ### Cascade limit
 
-A user can have at most **100 cascades** (`MAX_CASCADES_PER_USER`). Cascades in
+A user can have at most **20 cascades** (`MAX_CASCADES_PER_USER`, which
+`/api/auth/me` reports as `max_cascades_per_user`). Cascades in
 the Trash count toward the limit, because they still take storage and can be
 restored. Only purging frees a slot, either automatically after the retention
 period or with **Delete forever**.
 
-- **Visibility.** The Cascades page shows `87 of 100 cascades`, and the cascade
-  builder shows a warning from 90.
+- **Visibility.** The Cascades page shows `17 of 20 cascades`, and the cascade
+  builder shows a warning from 90% of the limit (18).
 - **At the limit.** Create Cascade and Start over are disabled, with a link to
   the Trash, and the server refuses them with `409`.
 - **Restores.** Restoring a quiz or cascade never creates a new cascade, so it is
@@ -568,7 +581,7 @@ because searching runs on the server.
   **Move to Trash**
 
 Selecting a cascade opens the player at its deepest level. The header shows how
-much of the [cascade limit](#cascade-limit) is used (`87 of 100 cascades`) and
+much of the [cascade limit](#cascade-limit) is used (`17 of 20 cascades`) and
 the sync status, which is [`SyncStatus`](#frontend) in every one of its states —
 **Synced**, **3 changes waiting to sync**, **Offline**, **Log in to sync**,
 **not enough room on this device**, **signed out in another tab** and **reload to
@@ -1605,13 +1618,13 @@ Browser
 | Offline app shell | SvelteKit service worker (`src/service-worker.ts`) |
 | Local storage | IndexedDB via the `idb` wrapper |
 | Frontend serving | Nginx container serving the static build and proxying `/api` to the backend |
-| Compute | AWS ECS on Fargate: one task definition with two containers (backend and Nginx) |
+| Compute | AWS ECS on Fargate Spot: one task of two containers (backend and Nginx), 0.5 vCPU and 2 GiB, in public subnets with no NAT gateway; deployed by Terraform from `scripts/deploy.sh` |
 | Load balancer | ALB, HTTPS only (port 80 redirects) |
 | Auth | Built in-house: Argon2 password hashes and PASETO v4.local session cookies |
 | Email | AWS SES (a `console` backend locally) |
 | Rate limiting | `governor` middleware (in-memory token buckets, per backend instance; see [Security](#authentication)) |
 | Compression | `tower-http` gzip and brotli for API responses (answer card pages in particular) |
-| Secrets | AWS SSM Parameter Store, injected into the task as environment variables |
+| Secrets | AWS SSM Parameter Store, injected into the task as environment variables; Terraform references them by ARN and never reads their values |
 | Infrastructure as code | Terraform (VPC, ALB, ECS, RDS, SES, SSM, backups) |
 | Logging | `tracing` with `tracing-subscriber` JSON output to CloudWatch |
 | Local development | Docker Compose: Postgres, backend and Nginx frontend, plus an optional Vite dev server profile for hot reload |
@@ -1628,9 +1641,9 @@ straight into Postgres; the original files are not kept.
 | `contract-fixtures/` | Shared JSON test data: filter types and parameters, cascade rule vectors, shuffle vectors, export fixtures (see [Testing](#testing)). |
 | `fixtures/catalog/` | The committed [fixture catalog](#the-fixture-catalog): unlicensed distributions, lexicons and leave values, used by the unit tests, the end-to-end tests and `./scripts/dev.py` alike. |
 | `e2e/` | Playwright configuration, `globalSetup` and the [journeys](#the-journeys). |
-| `docker/` | Backend Dockerfile (multi-stage Rust build → `debian:bookworm-slim`). |
+| `docker/` | Backend Dockerfile (a Rust build, then two targets: `backend`, the server alone, and `ops`, the tools for the backup, drill and ops tasks), the frontend's, and the Nginx configuration. Base images pinned by digest. |
 | `infra/` | Terraform. |
-| `scripts/` | `stack.py` (the one way to bring a Wordfall up: compose, health, seed, reset, down), `dev.py` (its command line), `backup.py` and `restore.py`. |
+| `scripts/` | `stack.py` (the one way to bring a Wordfall up: compose, health, seed, reset, down), `dev.py` (its command line), `scenarios.py` (study states through the API), `scrub.sql` (a production copy made safe locally), `backup.py`, `restore.py` and `drill.py`; the operator scripts (`deploy.sh`, `rollback.sh`, `set-setting.sh`, `prod-sql.sh`, `prod-shell.sh`, `confirm-user.sh`, `init-db-roles.sh`, `rotate-db-password.sh`, `onboard-deployer.sh`, `check-alerts.sh`) over `lib/ops.sh`, and their checks (`ops-scripts-check.sh` against stand-ins in `lib/ops_fakes.py`, `runbook-check.sh`). |
 | `Makefile` | The [test targets](#running-the-tests), each runnable with no arguments. |
 | `docker-compose.yml` | Local stack. |
 
@@ -1804,11 +1817,11 @@ blames the user's filters. The queue stays short, because an admitted search
 takes tens of milliseconds.
 
 **Result caps.** A cascade's Source quiz holds at most `MAX_QUIZ_QUESTIONS`
-questions, default and ceiling **300,000**. The database enforces the same
+questions, default and ceiling **130,000**. The database enforces the same
 ceiling (see [Schema](#schema)), so configuration can lower the cap but not
 raise it. A search over the cap is refused with the count, so the user knows
 how much to narrow it; results are never silently truncated. For a sense of
-scale, all 7- and 8-letter words in CSW24 fit, but a full English leave value
+scale, all 7- and 8-letter words in CSW24 (about 75,000) fit, but a full English leave value
 set (around a million leaves) does not. Preview returns the count and the first
 20 questions.
 
@@ -2997,7 +3010,24 @@ of divergence (see [Monitoring](#deployment-and-operations)).
 
 There is a single migration, `backend/migrations/0001_initial.sql`, run by SQLx
 at startup (SQLx creates its own `_sqlx_migrations` table). It is edited in
-place until the first deployment, after which migrations are append-only.
+place until the first deployment, and each edit is logged in
+`docs/migration-edits.md`. From the first `terraform apply` on, migrations
+are **append-only and additive**, with no "until the real launch" exception.
+Birdtest kept editing its first migration after going live, which cost it
+production resets, deleted backups and every user re-registering.
+- **Numbered files**, never editing or removing an applied one.
+  `scripts/deploy.sh` refuses a change under `backend/migrations/` that is not
+  an added file, and `backend/build.rs` makes a new file rebuild the crate,
+  since `sqlx::migrate!` embeds the directory at compile time.
+- **Additive only:** new tables, nullable or defaulted columns, indexes. Drops
+  and renames wait a release.
+- **A new enum or CHECK value is not additive:** ship the code that reads it one
+  release before the code that writes it.
+- **The server's migrator ignores migrations it does not know**
+  (`set_ignore_missing`), so a rolled-back image starts on the newer schema.
+  That is safe only because of the rules above.
+- **Prefer designs that need no schema change.** Devices offline with an old app
+  for up to `SYNC_RETENTION_DAYS` must keep syncing, too.
 **Two tasks starting together are safe**: SQLx takes a Postgres advisory lock
 around the run, so a rolling deploy's second task waits and then finds every
 migration applied and proceeds to bind. Nothing else in the plan serialises
@@ -3766,7 +3796,7 @@ Notes on the schema:
   cascade's spec, which nothing else ever references because saved searches and
   Start over each take their own copy, writes tombstones for the cascade and
   each quiz, and bumps the user's sync sequence.
-- **The 300,000 ceiling** lives in `cascades.question_count`,
+- **The 130,000 ceiling** lives in `cascades.question_count`,
   `quizzes.question_count`, `quiz_attempts.question_count`,
   `cascade_questions.idx` and `quiz_questions.position`,
   so no configuration can exceed it.
@@ -3879,6 +3909,13 @@ The flows are the conventional ones, built directly on Axum:
   and that check runs before anything below, so a `400` never also sends an
   email. An email already in use gets the same response as a successful
   registration.
+  **Registration closes at `MAX_ACCOUNTS`** (50 in production). It counts
+  accounts that hold a place: confirmed, or with a confirmation code still
+  valid. At the limit every registration gets `403 registration_closed` and
+  sends nothing, a new address and a known one alike; the check runs before
+  the address is looked up, so a closed site reveals nothing about which
+  addresses have accounts. The register page says Wordfall is not taking new
+  accounts.
   The password is hashed on every path, whether or not the hash is stored, so
   the response takes the same time whichever branch runs.
   If that email belongs to a **confirmed** account, its owner is emailed a
@@ -4426,14 +4463,18 @@ startup rather than falling back to a default.
 | `BIND_ADDR` | `0.0.0.0:8080` | |
 | `SESSION_TTL_SECONDS` | `2592000` (30 days) | |
 | `SECURE_COOKIES` | `false` | `true` in any TLS deployment |
-| `MAIL_BACKEND` | `console` | `console` or `ses` |
+| `MAIL_BACKEND` | `console` | `console`, `ses` or `file`. `file` is the console backend plus one JSON file per message in `MAIL_OUTBOX_DIR`, named for its recipient, which `scripts/stack.py` and the end-to-end tests read instead of the log; every local stack uses it |
+| `MAIL_OUTBOX_DIR` | — | Required with `MAIL_BACKEND=file` |
+| `MAIL_MAX_PER_SECOND` | `1` | With `ses`: messages wait in a bounded queue (an hour's worth) drained at this rate, the SES account's maximum send rate (1 in the sandbox, usually 14 after), since SES refuses a faster burst. Each send times out at 30 s; a message whose link expired while queued is dropped; every failure is logged with `alarm = "mail_failed"` |
 | `MAIL_FROM` | `no-reply@wordfall.local` | |
 | `PUBLIC_URL` | `http://localhost:5173` | Base URL for email links |
-| `MAX_QUIZ_QUESTIONS` | `300000` | May be lowered; a value above 300,000 fails startup. Lowering it bounds **new** values only: cascades, quizzes and preferences already holding a larger segment size keep working and are never rewritten, and the forms clamp what they prefill (see [Quiz options](#quiz-options)) |
-| `MAX_CASCADES_PER_USER` | `100` | Counts cascades in the Trash |
+| `MAX_QUIZ_QUESTIONS` | `130000` | May be lowered; a value above 130,000 fails startup. Lowering it bounds **new** values only: cascades, quizzes and preferences already holding a larger segment size keep working and are never rewritten, and the forms clamp what they prefill (see [Quiz options](#quiz-options)) |
+| `MAX_CASCADES_PER_USER` | `20` | Counts cascades in the Trash; reported by `/api/auth/me` |
+| `MAX_ACCOUNTS` | `50` | Registration closes once this many accounts hold a place (confirmed, or with a confirmation code still valid). Every registration is then answered `403 registration_closed` alike, before the address is looked up, so a closed site reveals nothing about which addresses have accounts. Registrations take turns under a transaction-scoped advisory lock, so two at the limit cannot both pass it. Local stacks set it far higher (`docker/backend.defaults.env`), since the end-to-end journeys register an account per spec |
 | `MAX_SAVED_SEARCHES_PER_USER` | `200` | Checked inside the save transaction, like the cascade limit |
-| `SEARCH_TIMEOUT_MS` | `2000` | |
+| `SEARCH_TIMEOUT_MS` | `2000` | Production sets 4,000: on half a vCPU a search runs at half a core's speed |
 | `SEARCH_CONCURRENCY` | `2` | Searches running at once per instance, sized to the task's vCPUs. A request waiting longer than `SEARCH_TIMEOUT_MS` for a permit gets `503` with `Retry-After`, never `422` |
+| `EXPORT_CONCURRENCY` | `2` | Server-streamed exports at once per instance (production sets 1). A permit is held for the whole stream and taken before the token is spent; a request waits up to 50 seconds for one, then gets `503` with `Retry-After`. It is what bounds peak memory (the catalog plus this many exports) whatever the number of users |
 | `TRASH_RETENTION_DAYS` | `30` | Y: how long cleared quizzes and trashed cascades stay in the Trash |
 | `SYNC_RETENTION_DAYS` | `90` | How long operation records and tombstones are kept |
 | `SYNC_MAX_OPS` | `500` | Operations accepted per sync request; a request carrying more is a `400` |
@@ -4453,6 +4494,7 @@ startup rather than falling back to a default.
 | `AUTH_RATE_PER_IP_PER_MINUTE` | `30` | Per IP; register, confirm-email, reset-password and its confirm. Not `GET /api/auth/me`, which needs a session, and not logout |
 | `CATALOG_RECONCILE_SECONDS` | `60` | Fallback reload interval if a notification is missed |
 | `TRUSTED_PROXY_HOPS` | `0` | `1` behind the ALB or compose Nginx |
+| `DEV_LOGIN` | `false` | `true` only on a local stack: adds `POST /api/dev/login {username}`, a session for a confirmed account without its password, answered as `/api/auth/login` is, for `./scripts/dev.py --login-as`. Startup **refuses** it together with `SECURE_COOKIES=true`, so a TLS deployment cannot start with it on; without it the route does not exist (404) |
 
 Client-side limits (14-day download window, 500 MB answer storage soft limit,
 the 2 GB `ROW_STORAGE_BUDGET` for rows and question keys, the 50,000-row
@@ -4470,114 +4512,194 @@ constants in `lib/sync/config.ts`.
 ./scripts/dev.py
 ```
 
-That is the whole setup. With no arguments it brings up a complete Wordfall on
-<http://localhost:5173>, seeded with the
-[fixture catalog](#the-fixture-catalog) and a confirmed admin account, and opens
-the browser. It needs Docker and Python 3.11; everything else is built in
-containers. It is safe to run again at any time — each step checks whether it has
-already been done.
+That is the whole setup. With no arguments it builds and starts a complete
+Wordfall on <http://localhost:5173>, seeded with the
+[fixture catalog](#the-fixture-catalog) and a confirmed admin account `dev`. It
+opens the browser **already signed in**, then stays in the foreground
+streaming a filtered backend log until Ctrl-C, which stops the stack (its data
+is kept). The log shows errors and warnings, sync rejections, and a
+ready-to-click link for every confirmation or reset mail. It needs Docker and
+Python 3.8 or later; everything else is built in containers. It is safe to run
+again at any time, since each step checks whether it has already been done.
 
 What it does, in order:
 
-1. **Builds** the backend and frontend images if their inputs changed. The
+1. **Checks before touching anything**, and fails naming what is missing:
+   - Docker and compose v2;
+   - the site's port is free (or held by this project's own stack);
+   - each `--real-catalog` file exists and has the right number of fields
+     (a two-column lexicon fails here, not as an upload error minutes later).
+
+   It takes a lock per `--project`, so a second run cannot reset or stop the
+   stack under the first, and it reads `.env` for `WORDFALL_PORT` and
+   `BIND_HOST`.
+2. **Builds** the backend and frontend images (unless `--no-build`). The
    frontend is the production-style build, because the Vite dev server does not
    register the service worker and offline studying is half the product.
-2. **Brings up `docker compose`**: Postgres, the backend, and Nginx on :5173.
-   The backend runs `0001_initial.sql` before it binds.
-3. **Waits for `/health`**, which only reports ready once every catalog item in
-   the database has been indexed, so there is no race between seeding and using
-   the app.
-4. **Creates a confirmed user** `dev` through the real registration path:
-   `POST /api/auth/register`, the confirmation code read from the console mail
-   backend's log, `POST /api/auth/confirm-email`, and only then `is_admin` set
-   with SQL, because [no endpoint can](#admin). Registering rather than
-   inserting rows is what gives the account its `user_preferences` row stamped
-   with its first sync sequence and its default bindings, which a hand-written
-   insert would have to reproduce. The password is a fixed passphrase that
-   meets the `zxcvbn` rule, `correct-tile-rack-bingo`, printed on every run.
-5. **Uploads the catalog** through the real admin API, as that user, skipping
-   anything already present. Seeding this way exercises the upload and
-   validation paths every time instead of writing rows behind the API's back.
-6. **Opens the browser**, unless told not to.
+3. **Brings up `docker compose`**: Postgres, the backend, and Nginx on :5173,
+   published on loopback only (Docker's published ports bypass the host
+   firewall; `BIND_HOST=0.0.0.0` to test from a phone). The backend runs every
+   migration before it binds.
+4. **Waits for `/health`**, which only reports ready once every catalog item in
+   the database has been indexed. If the backend stops while starting, it gives
+   up at once with the reason. A migration SQLx refuses as edited means "run
+   with `--reset`"; a port clash points at compose's error and the flag that
+   moves the port.
+5. **Creates a confirmed user** `dev` through the real registration path:
+   `POST /api/auth/register`, the confirmation code read from the stack's mail
+   outbox (`MAIL_BACKEND=file`), `POST /api/auth/confirm-email`, and only then
+   `is_admin` set with SQL, because [no endpoint can](#admin). Registering
+   rather than inserting rows is what gives the account its `user_preferences`
+   row stamped with its first sync sequence and its default bindings. The
+   password is a fixed passphrase that meets the `zxcvbn` rule,
+   `correct-tile-rack-bingo`, printed on every run.
+6. **Uploads the catalog** through the real admin API, as that user, skipping
+   anything already present.
+7. **Seeds the scenarios** asked for, through the real API.
+8. **Opens the browser** at `/dev-login?username=dev`. The page calls
+   `POST /api/dev/login` (`DEV_LOGIN`, which exists only on a local stack) and
+   then makes the session this tab's own exactly as a login does (`adoptSession`
+   in `lib/auth/session.svelte.ts`). A cookie alone would not do: the app signs
+   in from its own IndexedDB pointer, not from whatever cookie the browser
+   holds.
 
 Useful flags:
 
 | Flag | Effect |
 |---|---|
-| `--distribution NAME=FILE`, `--lexicon NAME:DIST=FILE`, `--leaves LEXICON=FILE` | Upload real catalog files as well as the fixtures. Repeatable. |
-| `--no-fixtures` | Seed only what the flags above name. |
-| `--hot-reload` | Also run the Vite dev server on :5174, for fast UI work. The service worker is only on :5173. |
-| `--reset` | Drop the database volume and the built frontend, then start clean. |
-| `--project NAME`, `--port N` | Run an isolated second stack, for comparing two versions or for tests. |
-| `--env KEY=VALUE` | Override any [configuration variable](#configuration). Repeatable. |
-| `--no-browser`, `--quiet` | For scripts and CI. |
-| `--down` | Stop the stack; `--down --volumes` also discards its data. |
-
-So a real-data instance is still one command:
-
-```bash
-./scripts/dev.py \
-  --distribution English=~/wordgame/english.csv \
-  --lexicon CSW24:English=~/wordgame/CSW24.tsv \
-  --leaves CSW24=~/wordgame/CSW24_leaves.csv
-```
+| `--scenario NAME` | Seed a study state through the real API; repeatable. `studying` (Level 1 finished with misses, Level 2 half graded), `finished` (the completion screen), `segments` (runs of five, one finished with a miss), `typed` (typed answers on), `trash`, `limits` (cascades up to the limit warning), `big` (one cascade near `MAX_QUIZ_QUESTIONS` from the real catalog), `saved-searches`. Operations go through `POST /api/sync`, so the server's rules check them; the quiz state they need is read with SQL, as the integration tests do |
+| `--real-catalog [DIR]` | Also upload the licensed files `DIR/manifest.json` lists, in the fixture manifest's form (default `$WORDFALL_CATALOG_DIR`). The files and the manifest stay outside the repository |
+| `--stats` | Print each catalog index's size, its build time, the catalog load time and the backend's memory: what the production task's memory is sized from |
+| `--users N` | N more confirmed users (`dev2`, `dev3`, …) for multi-account work |
+| `--login-as USER`, `--no-login` | Which account the browser opens signed in as, or none |
+| `--two-devices` | Two isolated Chromium profiles signed in as the same user: the quickest way to watch sync |
+| `--fresh` | A new deployment: `--reset`, then no user, no catalog, and the first-admin steps printed |
+| `--snapshot NAME`, `--restore NAME\|DUMP` | Save the database to `.dev/snapshots/NAME`, or restore one. A restore goes into a new database, then is swapped in with both renames in one transaction while the backend is stopped, and the [sync sequences are bumped](#restoring). A dump that is not a local snapshot (a production dump) is always scrubbed with `scripts/scrub.sql`: every address replaced, every password the dev password, every session revoked |
+| `--distribution NAME=FILE`, `--lexicon NAME:DIST=FILE`, `--leaves LEXICON=FILE` | Upload single catalog files as well. Repeatable |
+| `--no-fixtures` | Seed only what the flags above name |
+| `--keep-up`, `--detach` | Leave the stack running on Ctrl-C, or start, seed, open and exit |
+| `--no-build` | Restart without rebuilding the images |
+| `--hot-reload` | Also run the Vite dev server on :5174, for fast UI work. The service worker is only on :5173 |
+| `--reset` | Drop the database volume and the built frontend, then start clean |
+| `--project NAME`, `--port N` | Run an isolated second stack |
+| `--env KEY=VALUE` | Override any [configuration variable](#configuration). Repeatable |
+| `--no-browser`, `--quiet` | For scripts and SSH sessions |
+| `--down` | Stop the stack; `--down --volumes` also discards its data |
 
 ### How it is put together
 
-`dev.py` is a thin command line over `scripts/stack.py`, which is the only place
-that knows how to bring a Wordfall up. It has four entry points, each usable on
-its own:
+`dev.py` is a command line over `scripts/stack.py`, which is the only place
+that knows how to bring a Wordfall up, and `scripts/scenarios.py`, which seeds
+study states. `stack.py`'s entry points:
 
 | Entry point | What it does |
 |---|---|
-| `stack.up(project, port, env, build)` | Compose up, then wait for `/health`, with a deadline and the backend's logs on failure. Returns the base URL. |
-| `stack.seed(base_url, catalog, user)` | Create the confirmed admin user through registration and confirmation, as step 4 above does, then upload each catalog item through the admin API, skipping what already exists. It honours `429` and `Retry-After` like every other client, since `ADMIN_UPLOAD_RATE_PER_MINUTE` is 10 and the fixture catalog alone is six uploads, so a run with real catalog files added passes the limit. |
-| `stack.reset(project)` | `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` and restart the backend. |
-| `stack.down(project, volumes)` | Stop the stack, optionally discarding its volumes. |
+| `stack.up(project, port, env, build)` | Compose up, then wait for `/health`, giving up at once with the backend's last lines if it stops. Each project gets its own env file, signing key and mail outbox under `.stack/`. Returns the base URL |
+| `stack.seed(base_url, catalog, user)` | Create the confirmed admin user, then upload each catalog item through the admin API, skipping what exists. It honours `429` and `Retry-After` like every other client |
+| `stack.ensure_user(base_url, user)` | A confirmed account through registration, logged in |
+| `stack.reset(project)` | `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` and restart the backend |
+| `stack.down(project, volumes)` | Stop the stack, optionally discarding its volumes |
 
-Everything that needs a running Wordfall goes through these four — `dev.py`, the
+Everything that needs a running Wordfall goes through these — `dev.py`, the
 [end-to-end tests](#end-to-end-tests), the [scale tests](#scale-tests) and CI —
-so there is one definition of "a working instance", and a change to the stack
+so there is one definition of "a working instance". A change to the stack
 cannot fix the tests while breaking local development, or the other way round.
-See [What the tests reuse](#what-the-tests-reuse).
+See [What the tests reuse](#what-the-tests-reuse). `JOURNEYS.md` is the
+manual walk through a `dev.py` instance that precedes a launch.
 
 ### Day to day
 
-- **Email.** With `MAIL_BACKEND=console` (the default locally), confirmation and
-  reset links appear in `docker compose logs backend`.
-- **Offline.** Use :5173, not :5174, then either the browser DevTools **Offline**
-  toggle or `docker compose stop backend`, which is indistinguishable to the app
-  and leaves the database alone, so restarting picks up where it left off.
-- **After editing `0001_initial.sql`**, run `./scripts/dev.py --reset`. SQLx
-  refuses to run a migration whose checksum has changed, and the site data in the
-  browser has to be cleared too, because local sync cursors no longer match
-  anything on the server. `--reset` prints that reminder.
+- **Email.** Mail is printed as a link in dev.py's log, and kept as files in
+  `.stack/<project>.outbox/`.
+- **Offline.** Use :5173, not :5174, then either the browser DevTools
+  **Offline** toggle or `docker compose stop backend`. The app can't tell the
+  two apart, and stopping the backend leaves the database alone, so restarting
+  picks up where it left off.
+- **After editing a migration**, run `./scripts/dev.py --reset`. SQLx refuses
+  to run a migration whose checksum has changed (dev.py says so), and the site
+  data in the browser has to be cleared too, because local sync cursors no
+  longer match anything on the server. `--snapshot NAME` first keeps a copy.
 - **Two accounts, one browser** is the quickest way to see that IndexedDB is
-  scoped per user; two browser profiles are the quickest way to see sync.
+  scoped per user (`--users 1`, then `--login-as dev2` in another window);
+  `--two-devices` is the quickest way to see sync.
 - **Rust and TypeScript rule changes go together.** Both implement
   [the cascade rules](#rule-implementation), and the shared vectors are what
   keeps them honest, so run `make test-unit` before assuming a divergence is a
   sync bug.
+- **Builds are capped** at two cargo jobs (`CARGO_BUILD_JOBS`), because an
+  uncapped release build of the AWS SDK froze a 16 GB machine.
 
 ---
 
 ## Deployment and Operations
 
+Sized for the [scale assumptions](#overview): one user at first, at most about
+50 accounts. The stack costs about $53 a month (docs/runbook.md, "What it
+costs"). Birdtest, a sibling app on the same stack that has been live since
+October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
+
 - **Terraform** in `infra/` covers:
-  - VPC with public subnets (ALB) and private subnets (ECS, RDS)
-  - ALB with an ACM certificate, HTTP → HTTPS redirect, and a 120-second idle
-    timeout for admin uploads
-  - ECS cluster, service and task definition (backend and Nginx containers),
-    at **2 vCPU**, which is the figure `SEARCH_CONCURRENCY` defaults to; raising
-    the task size means raising it too, and the runbook says so
-  - RDS Postgres, with 30-day point-in-time recovery
-  - SES domain identity
-  - SSM parameters (names only; values are set out of band)
-  - CloudWatch log group
-- **Deploys** build and push both images, then update the ECS service. The
-  backend runs migrations before it binds, and the ALB health check waits for
-  `/health`, which includes catalog indexes being loaded, before sending
-  traffic.
+  - VPC with public subnets for the ALB **and the Fargate tasks**, and private
+    subnets for RDS. There is no NAT gateway (about $37 a month) and no VPC
+    endpoints: the tasks have public addresses, and their security group admits
+    only the ALB.
+  - ALB with an ACM certificate, HTTP → HTTPS redirect, a 120-second idle
+    timeout for admin uploads, and invalid header fields dropped. Nginx's
+    `keepalive_timeout` (130 s) must outlast the idle timeout, or the ALB
+    reuses connections Nginx has closed and answers 502; a Vitest test pins it.
+  - ECS cluster (Container Insights off; ECS Exec sessions never logged), one
+    service of **one task** with backend and Nginx containers, at **0.5 vCPU
+    and 2 GiB**, on **Fargate Spot** by default (`use_fargate_spot`).
+    - **Spot:** Wordfall is local-first. Studying never needs the server and
+      sync retries, so a Spot interruption's minute or two without the API goes
+      unnoticed.
+    - **Sizing:** `SEARCH_CONCURRENCY` is 1, `SEARCH_TIMEOUT_MS` 4,000 and
+      `EXPORT_CONCURRENCY` 1, so the catalog plus one export bounds memory.
+    - **One task:** this makes the in-memory rate limits exact. Deploys still
+      roll with no gap: minimum healthy 100%, maximum 200%. The new task serves
+      before the old one drains, which is safe because Wordfall runs correctly
+      as two instances.
+    - **Startup and shutdown:** a circuit breaker rolls back a release whose
+      task cannot start, and an EventBridge rule mails why. `stopTimeout` is
+      120 s so graceful shutdown can finish a streaming export. The container
+      health check's `startPeriod` (240 s) must stay at least twice the measured
+      catalog load, which the backend logs as `load_ms`.
+  - An **ops task definition** on the ops image (Postgres 16 client and
+    server, python3, `restore.py`, `wordfall-master-psql`). Every SQL step of
+    the runbook runs from it, by `scripts/prod-sql.sh` and
+    `scripts/prod-shell.sh`. There is no bastion, and RDS is never public.
+  - RDS Postgres `db.t4g.micro`, 20 GiB gp3 with storage autoscaling,
+    **7-day** point-in-time recovery (`db_backup_retention_days`); the nightly
+    dumps cover anything older. An RDS event subscription reports low storage,
+    failure and allocation near the autoscaling ceiling.
+  - SES domain identity, MAIL FROM subdomain, account-level suppression of
+    bounces and complaints, and alarms on the bounce and complaint rates and on
+    any failed send.
+  - SSM parameters, referenced **by ARN only**: declared as resources, their
+    decrypted values would sit in Terraform's state. `scripts/init-db-roles.sh`
+    creates them.
+  - CloudWatch log group (30 days), the alarms in docs/runbook.md, an AWS
+    budget and a cost-anomaly subscription.
+  - ECR repositories with immutable tags and a 40-image lifecycle rule.
+  - `infra/tests/` runs `terraform test` offline against a mock provider. It
+    pins each variable validation: every value AWS would otherwise refuse
+    half-way through an apply.
+- **Deploys** run from the operator's machine: `scripts/deploy.sh`, with
+  Terraform as the only deployer, so its state always says what is running.
+  - It refuses a dirty tree, a commit not on `origin/main`, a commit whose CI
+    run is not green, and a change to an applied migration.
+  - It builds only the images ECR lacks: backend, ops and frontend, tagged with
+    the commit.
+  - It sets `image_tag` in `prod.tfvars` (kept in the state bucket), then plans
+    behind a gate that refuses to delete or replace the database, a bucket, the
+    network, a KMS key or an ECR repository.
+  - It applies, then waits until the running task has the applied image, CPU
+    and memory, and the targets are healthy.
+  - `scripts/rollback.sh` puts an earlier release back through the same gate.
+  - The backend runs migrations before it binds, with `ignore_missing`, so a
+    rolled-back image starts on the newer schema. The ALB health check waits
+    for `/health`, which includes the catalog indexes being loaded, before
+    sending traffic.
   - **Security headers:** the content security policy is split between the two
     places that can each express part of it, because neither can hold all of it.
     - **SvelteKit's `kit.csp`, in `hash` mode**, writes a
@@ -4631,21 +4753,23 @@ See [What the tests reuse](#what-the-tests-reuse).
     `SKIP_WAITING` handshake under [App shell](#on-the-device) rather than a bare
     reload; and offline the new worker cannot even be fetched, so the state
     persists until the device is online and the handshake runs.
-- **Granting admin** in production is a one-off SQL statement run through a
-  bastion or an ECS exec session. It is documented in the runbook.
+- **Granting admin** in production is `scripts/confirm-user.sh --admin USER`,
+  one SQL statement run from the ops task. It is documented in the runbook.
 - **Catalog uploads** happen in the browser at `/admin`. Every running instance
   picks up changes through `LISTEN/NOTIFY`, with no restart or redeploy.
 - **Backups** have their own section: see [Backups](#backups).
-- **Capacity**: RDS storage autoscaling is on, with an alarm on free storage,
-  because large cascades (about 45 MB at 300,000 questions, plus about 30 MB for
-  each large level) are the main driver of database growth. Filter specs are the
+- **Capacity**: RDS storage autoscaling is on (20 GiB, growing up to five
+  times that), with RDS storage events mailed, because large cascades (about
+  20 MB at 130,000 questions, plus about 13 MB for each large level) are the
+  main driver of database growth. At 50 accounts of 20 such cascades the
+  worst case is around 35 GB; a realistic one is a small fraction of the
+  starting allocation. Filter specs are the
   second: a 300,000-entry In Word List costs roughly 6 MB of
   `search_condition_words` rows, which is the **most one spec can hold**, since
   the 300,000 entries are a whole tree's allowance and not one row's (see
   [In Word List](#filter-reference)), and `MAX_CASCADES_PER_USER` and
   `MAX_SAVED_SEARCHES_PER_USER` are what bound how many of them one account can
-  hold: about 1.8 GB at both limits, which is what the free-storage alarm is set
-  against. `sync_operations` would have outgrown both: studying emits about two
+  hold: about 1.2 GB at both limits. `sync_operations` would have outgrown both: studying emits about two
   operations per card (a grade and, online, its own cursor move), at roughly
   250 bytes a record with its indexes, so keeping every record for 90 days
   would hold about 150 MB for each 300,000-card pass, ten times the cascade it
@@ -4675,12 +4799,14 @@ database is the only thing whose loss could not be undone.
 
 | Layer | What | Where | Kept |
 |---|---|---|---|
-| **Point in time** | RDS automated backups with PITR | The RDS backup store, same region | 30 days |
+| **Point in time** | RDS automated backups with PITR | The RDS backup store, same region | 7 days (`db_backup_retention_days`); the nightly dumps cover anything older, at up to a day's loss |
 | **Nightly dump** | `pg_dump --format=custom` of the whole database | An encrypted, versioned, object-locked S3 bucket in a second region | 90 days, then a monthly dump for a year |
 | **Schema only** | `pg_dump --schema-only`, committed nowhere but attached to each release | The same bucket | With its dump |
 
-The nightly dump runs as a scheduled Fargate task using the same image as the
-backend, with a read-only database role. It writes to a key named for the day,
+The nightly dump runs as a scheduled Fargate task on the ops image (the
+backend's build plus Postgres 16 and python3), with a read-only database role.
+Its task role can write dumps but read only the daily dump it copies to
+`monthly/`; the drill's can only read. It writes to a key named for the day,
 so a corrupted dump cannot overwrite a good one, and the bucket's versioning and
 object lock mean neither can a mistake or a compromised task role.
 
@@ -4692,8 +4818,12 @@ Wordfall never stores as files, only as rows, and those rows are in the dump.
 - No successful dump in **36 hours**.
 - A dump more than 30% smaller than the previous one, which catches a truncated
   or partial run.
-- RDS free storage below its threshold, since a full disk stops backups as well
-  as writes ([Capacity](#deployment-and-operations)).
+- A backup or drill task that exits non-zero, within minutes (an EventBridge
+  rule on the task's exit code).
+- RDS storage events: low storage, failure, and allocation near the
+  autoscaling ceiling. A fixed free-storage threshold is meaningless under
+  storage autoscaling, since free space is measured against the current
+  allocation.
 
 ### Restoring
 
@@ -4726,23 +4856,29 @@ The runbook has the full procedure; the parts specific to Wordfall are:
 
 ### The drill
 
-A restore drill runs **quarterly** and is not considered done until the restored
-instance serves a real cascade. It restores the latest nightly dump into a
-throwaway instance, runs the [end-to-end suite](#end-to-end-tests) against it,
-performs the sequence-bump step, and checks with a second browser profile whose
-cursor is **ahead** of the restored server and whose outbox holds unsent grades
-that the grades are applied, the device resyncs rather than diverging, and no
-operation is rejected as `invalid`. The date and the
-measured restore time go in the runbook. `scripts/restore.py` performs the
-mechanical parts, and `./scripts/dev.py --env DATABASE_URL=…` is how the drill
-points a local stack at the restored database.
+**Monthly, automatically.** The `wordfall-drill` task (`scripts/drill.py`)
+restores the newest nightly dump into a Postgres started inside its own task,
+never on the production instance. Birdtest's drill once ran against production
+and could fill its storage. It then checks:
+- every table the schema-only dump names is present;
+- migrations are recorded;
+- every cascade has its questions;
+- the sequence bump leaves every user's floor at `sync_seq`, above 2^32.
+
+It reports `DrillSucceeded` and `DrillSeconds`; a failure mails at once.
+
+**Quarterly, by hand**, the part a machine cannot do. Restore the latest dump
+locally with `./scripts/dev.py --restore DUMP` (scrubbed, sequences bumped).
+Use a second browser profile whose cursor is **ahead** of the restored server
+and whose outbox holds unsent grades. Check that the grades are applied, the
+device resyncs rather than diverging, and no operation is rejected as
+`invalid`. The date and the measured restore time go in the runbook.
 
 ### Locally
 
-`scripts/backup.py` and `scripts/restore.py` work against any Wordfall,
-including the development stack, so the same code paths that run nightly in
-production are the ones used to snapshot a local database before a risky
-migration edit.
+`./scripts/dev.py --snapshot NAME` and `--restore NAME` use `scripts/backup.py`
+on the development stack, so the code that runs nightly in production is the
+code that snapshots a local database before a risky migration edit.
 
 ---
 
@@ -4755,7 +4891,7 @@ Five layers, each with a job the others can't do:
 | **[Unit](#unit-tests)** | `make test-unit` | Nothing | The search engine, tiles, probability, the cascade rules on both sides, and the export formatters |
 | **[Integration](#integration-tests)** | `make test-integration` | Postgres | The real router and the real schema: auth, admin, uploads, cascades, sync, purges |
 | **[End-to-end](#end-to-end-tests)** | `make test-e2e` | The whole stack | What a person actually does, including offline and two devices |
-| **[Scale](#scale-tests)** | `make test-scale` | Postgres | 300,000 questions end to end, within a time budget |
+| **[Scale](#scale-tests)** | `make test-scale` | Postgres | 130,000 questions end to end, within a time budget |
 | **[Parity](#zyzzyva-parity)** | `make test-parity` | Licensed data, local only | That a search returns what Zyzzyva returns |
 
 Two things are shared by every layer and by
@@ -5914,10 +6050,17 @@ environment. That is how a deployment is smoke-tested and how the
 
 ### Scale tests
 
+Run at the 130,000-question ceiling ([Scale assumptions](#overview)); the
+budgets were set for 130,000 and are kept, so they are now generous. The
+scale lexicon stays at about CSW24's size (300,001 words), since a real
+lexicon's size does not shrink with the quiz cap. The ten concurrent exports
+run at production's `EXPORT_CONCURRENCY` of one, against the production task's
+2 GiB.
+
 - **Scale tests**:
-  - Create a 300,000-question cascade, download its cards, grade every question
+  - Create a 130,000-question cascade, download its cards, grade every question
     (half missed) through sync, finish, and assert the timings for creation,
-    download, push (300,000 grades in 600 requests back to back, under the
+    download, push (130,000 grades in 260 requests back to back, under the
     per-user sync rate limit), pull and finish stay within budget, assert
     that the rebase work per acknowledged batch stays proportional to the
     batch (the drain's total IndexedDB writes within a small multiple of the
@@ -5933,7 +6076,7 @@ environment. That is how a deployment is smoke-tested and how the
     logging into an account with ten such cascades completes its first sync in
     under 5 seconds with no question rows transferred, since none is opened
     here; after opening all ten, with each Source quiz finished once, creating
-    a 150,000-question Level 2, then fully graded again on its new attempt
+    a 65,000-question Level 2, then fully graded again on its new attempt
     without finishing, and that Level 2 half graded (375,000 graded rows
     per cascade, about 3.75 million in all, 75
     pages), the sync that follows finishes in under 120 seconds on the CI
@@ -5941,11 +6084,11 @@ environment. That is how a deployment is smoke-tested and how the
     and grade rows for unchanged attempts written once); and each cascade
     materialises on open within budget. The budgets are constants in the test beside the row
     counts they measure.
-  - Ten concurrent `GET /api/cascades/:id/export` streams of a 300,000-question
+  - Ten concurrent `GET /api/cascades/:id/export` streams of a 130,000-question
     anagram cascade with definitions, the `EXPORT_RATE_PER_MINUTE` default,
     complete within budget without the task exceeding its memory reservation.
   - Upload a million-row leave file within the upload timeout.
-  - Purge a trashed 300,000-question cascade with three levels within budget
+  - Purge a trashed 130,000-question cascade with three levels within budget
     while a sync for the same user proceeds, on a `quizzes` table padded with
     a million rows of other users, asserting with `EXPLAIN` that the delete
     uses `quizzes_cascade_id`.
@@ -5963,14 +6106,14 @@ environment. That is how a deployment is smoke-tested and how the
     own `user_seq` indexes, that a pull with nothing changed reads a number of
     rows proportional to what changed rather than to the user's quiz count, and
     that it stays within a budget beside the row counts.
-  - Resync a device holding five 300,000-question cascades, one of them with
+  - Resync a device holding five 130,000-question cascades, one of them with
     cleared levels whose rows a Trash export fetched, and assert the full
     pull's base comparison and deletions finish within budget and keep those
     cleared rows. A sixth cascade has run a segmented attempt with a segment
     size of 5 over 20,000 questions, leaving 4,000 chain quizzes in the Trash,
     so its pull pages on quiz rows alone: assert the page count, that no page
     exceeds 50,000 rows, and that the resync stays within the same budget.
-  - Let a 300,000-question cascade leave the download window with the
+  - Let a 130,000-question cascade leave the download window with the
     automatic Keep offline turned off, and assert the drop pass finishes within
     budget and the base holds only its cascade, quiz and attempt rows. Run the
     same pass on forty such cascades all inside the window, every one of them
@@ -5985,7 +6128,7 @@ environment. That is how a deployment is smoke-tested and how the
     download manager issues no request for any of them, the sync request's
     `question_rows_for` names only the kept one, and the base's total stays
     under the budget instead of oscillating. Run the
-    same case on a cascade that also holds five cleared 150,000-question
+    same case on a cascade that also holds five cleared 65,000-question
     levels inside the window, asserting the row count before the pass counts
     them and the pass removes them too.
 
@@ -6013,7 +6156,7 @@ environment. That is how a deployment is smoke-tested and how the
 | `make test-unit` | `cargo test --lib`, `npm run check`, Vitest. No services. Seconds. |
 | `make test-integration` | `cargo test --test '*'` against a throwaway Postgres it starts itself |
 | `make test-e2e` | `stack.up`, `stack.seed`, Playwright, `stack.down` |
-| `make test-scale` | The 300,000-question budgets |
+| `make test-scale` | The 130,000-question budgets |
 | `make test-parity` | Zyzzyva comparison; skipped with a notice unless the licensed files are present |
 | `make test` | Unit, integration and end-to-end |
 

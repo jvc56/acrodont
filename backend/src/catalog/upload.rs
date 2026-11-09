@@ -85,11 +85,10 @@ pub fn parse_decimal(s: &str) -> Option<f64> {
     if int.is_empty() || !int.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    if let Some(f) = frac {
-        if f.is_empty() || !f.bytes().all(|b| b.is_ascii_digit()) {
+    if let Some(f) = frac
+        && (f.is_empty() || !f.bytes().all(|b| b.is_ascii_digit())) {
             return None;
         }
-    }
     let v: f64 = s.parse().ok()?;
     v.is_finite().then_some(v)
 }
@@ -238,14 +237,13 @@ pub fn parse_distribution(bytes: &[u8]) -> Result<ParsedDistribution, UploadErro
     // No blank_letter may equal any tile's letter, so upper-cased typed text
     // maps to one tile.
     for (line, f) in recs.iter().skip(1) {
-        if f.len() == 5 || f.len() == 7 {
-            if let Some(other) = letters.get(f[1]) {
+        if (f.len() == 5 || f.len() == 7)
+            && let Some(other) = letters.get(f[1]) {
                 errors.push(
                     Some(*line),
                     format!("blank_letter {:?} is the letter of line {other}", f[1]),
                 );
             }
-        }
     }
     if recs.is_empty() {
         errors.push(None, "the file has no lines");

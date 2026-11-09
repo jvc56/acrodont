@@ -4,7 +4,7 @@
 // answers rather than a tenth, the ratio Downloads states."
 //
 // Three such cascades rather than ten (PQ-019): the ratios are per cascade and
-// need the full 300,000 questions (a smaller cascade fits its keys in one page
+// need the full 130,000 questions (a smaller cascade fits its keys in one page
 // against several of answers), while ten cost six million IndexedDB writes
 // before the pass is done — a quarter of an hour. Three give 9 requests against
 // the answers' 90, the same tenth.
@@ -16,7 +16,7 @@ import { ids, QUESTIONS, report, ScaleDev, timed } from './testing/scale';
 const CASCADES = 3;
 const KEYS_PASS_BUDGET_MS = 600_000;
 
-describe('the keys-only pass for three 300,000-question cascades (PQ-019)', () => {
+describe('the keys-only pass for three 130,000-question cascades (PQ-019)', () => {
 	it('takes 3 requests a cascade, a tenth of the answers’ 30, moving under a quarter of their bytes', async () => {
 		const server = new FakeServer();
 		const d = await ScaleDev.make(server);

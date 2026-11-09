@@ -1,7 +1,7 @@
 //! PLAN.md § Integration tests → Sync integration tests: database errors
 //! inside a savepoint, a forced serialization failure, purge against a
 //! concurrent sync, the sync and catalog rate limits, the sliding session
-//! (PQ-003), and the 300,000-question finish and reset.
+//! (PQ-003), and the 130,000-question finish and reset.
 
 mod common;
 
@@ -13,9 +13,9 @@ use common::sync::{finish_op, grades, insert_cascade, play_and_finish, result, r
 use common::TestApp;
 use serde_json::json;
 
-/// The budget for one 300,000-question finish, and for its reset, in a debug
+/// The budget for one 130,000-question finish, and for its reset, in a debug
 /// build on the CI runner ("The budgets are constants in the test").
-const FINISH_300K_BUDGET_SECS: u64 = 20;
+const FINISH_FULL_BUDGET_SECS: u64 = 20;
 
 async fn setup<'a>(app: &'a TestApp, s: &Setup) -> Device<'a> {
     let c = app.signed_in("alice").await;
@@ -165,18 +165,18 @@ async fn a_sync_slides_the_session(pool: sqlx::PgPool) {
     assert_eq!(d.sync(vec![]).await.status, StatusCode::OK);
 }
 
-/// "A 300,000-question finish and reset complete within budget, and the reset
+/// "A 130,000-question finish and reset complete within budget, and the reset
 /// is pulled by another device as one quiz row."
 #[sqlx::test]
-async fn a_300000_question_finish_and_reset(pool: sqlx::PgPool) {
+async fn a_130000_question_finish_and_reset(pool: sqlx::PgPool) {
     let app = TestApp::with(pool, &[("SYNC_RATE_PER_MINUTE", "100000")]).await;
-    let s = Setup::new(300_000);
+    let s = Setup::new(130_000);
     let mut d = setup(&app, &s).await;
     let mut b = d.sibling(&app);
     b.qrf = d.qrf.clone();
     b.sync(vec![]).await;
     // Every question graded, half missed, straight in the database (the
-    // 600-request push is the scale test's).
+    // 260-request push is the scale test's).
     sqlx::query(
         "UPDATE quiz_questions SET grade = CASE WHEN question_idx % 2 = 0 THEN 'correct'::grade ELSE 'missed'::grade END,
                 graded_at = now(), graded_by_device_id = $2 WHERE quiz_id = $1",
@@ -186,14 +186,14 @@ async fn a_300000_question_finish_and_reset(pool: sqlx::PgPool) {
     .execute(app.db())
     .await
     .unwrap();
-    sqlx::query("UPDATE quizzes SET correct_count = 150000, missed_count = 150000 WHERE id = $1").bind(s.source_id).execute(app.db()).await.unwrap();
-    // The finish: the Source quiz descends, which resets it, and creates a 150,000-question Level 2.
+    sqlx::query("UPDATE quizzes SET correct_count = 65000, missed_count = 65000 WHERE id = $1").bind(s.source_id).execute(app.db()).await.unwrap();
+    // The finish: the Source quiz descends, which resets it, and creates a 65,000-question Level 2.
     let (f, l2) = finish_op(&app, &mut d, s.source_id, "123").await;
     let t = Instant::now();
     let r = d.sync(vec![f]).await;
-    assert!(t.elapsed().as_secs() < FINISH_300K_BUDGET_SECS, "finish took {:?}", t.elapsed());
+    assert!(t.elapsed().as_secs() < FINISH_FULL_BUDGET_SECS, "finish took {:?}", t.elapsed());
     assert_eq!(result(&r, 0)["outcome"], "descended");
-    assert_eq!(result(&r, 0)["new_quiz_question_count"], 150_000);
+    assert_eq!(result(&r, 0)["new_quiz_question_count"], 65_000);
     // A reset on its own: a reshuffle of the Source quiz.
     sqlx::query(
         "UPDATE quiz_questions SET grade = 'missed', graded_at = now(), graded_by_device_id = $2 WHERE quiz_id = $1",
@@ -203,14 +203,14 @@ async fn a_300000_question_finish_and_reset(pool: sqlx::PgPool) {
     .execute(app.db())
     .await
     .unwrap();
-    sqlx::query("UPDATE quizzes SET correct_count = 0, missed_count = 300000 WHERE id = $1").bind(s.source_id).execute(app.db()).await.unwrap();
+    sqlx::query("UPDATE quizzes SET correct_count = 0, missed_count = 130000 WHERE id = $1").bind(s.source_id).execute(app.db()).await.unwrap();
     // Level 2 is the deepest; clear it out of the way first.
     sqlx::query("UPDATE quizzes SET status = 'cleared', cleared_at = now() WHERE id = $1").bind(l2).execute(app.db()).await.unwrap();
     sqlx::query("UPDATE cascades SET depth = 1").execute(app.db()).await.unwrap();
     let (f, _) = finish_op(&app, &mut d, s.source_id, "456").await;
     let t = Instant::now();
     let r = d.sync(vec![f]).await;
-    assert!(t.elapsed().as_secs() < FINISH_300K_BUDGET_SECS, "reset took {:?}", t.elapsed());
+    assert!(t.elapsed().as_secs() < FINISH_FULL_BUDGET_SECS, "reset took {:?}", t.elapsed());
     assert_eq!(result(&r, 0)["outcome"], "reshuffled");
     // The other device pulls the reset as one quiz row and no question rows.
     let (_, pages) = b.sync_all(vec![]).await;

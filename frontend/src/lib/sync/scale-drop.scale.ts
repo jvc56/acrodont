@@ -1,4 +1,4 @@
-// PLAN.md § Scale tests: "Let a 300,000-question cascade leave the download
+// PLAN.md § Scale tests: "Let a 130,000-question cascade leave the download
 // window with the automatic Keep offline turned off, and assert the drop pass
 // finishes within budget and the base holds only its cascade, quiz and
 // attempt rows. Run the same pass on forty such cascades all inside the
@@ -36,7 +36,7 @@ vi.mock('./config', async (original) => {
 const ONE_DROP_BUDGET_MS = 120_000;
 const FORTY_DROP_BUDGET_MS = 120_000;
 const FORTY = 40;
-/** A tenth of 300,000 (PQ-019). */
+/** A tenth of 130,000 (PQ-019). */
 const TENTH = QUESTIONS / 10;
 const CLEARED_LEVELS = 5;
 const HOUR = 3_600_000;
@@ -48,7 +48,7 @@ async function total(d: ScaleDev) {
 	return (await d.count('quiz_questions')) * ROW_BYTES + keys;
 }
 
-describe('the drop pass at 300,000 questions', () => {
+describe('the drop pass at 130,000 questions', () => {
 	it('drops a cascade that left the window, leaving its cascade, quiz and attempt rows', async () => {
 		const server = new FakeServer();
 		const { cascade, source } = ids(1);

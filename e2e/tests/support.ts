@@ -1,17 +1,45 @@
 // Shared steps for the journeys (PLAN.md § End-to-end tests): each spec
 // registers its own user through the real endpoints, reading the
-// confirmation code from the backend's console mail log exactly as a
-// developer confirms an account locally.
+// confirmation code from the stack's mail outbox (MAIL_BACKEND=file, one JSON
+// file per message, named for its recipient), or from the console mail log.
 import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, type Page } from '@playwright/test';
 import { PROJECT } from '../stack';
 
 export const PASSWORD = 'correct-tile-rack-bingo';
 
+/** The outbox file name's recipient part (backend/src/auth/mail.rs FileMailer::file_stem). */
+function stem(email: string): string {
+	return email
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9.@\-_+]/g, '_');
+}
+
+function fromOutbox(email: string): string | undefined {
+	const dir = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '.stack', `${PROJECT}.outbox`);
+	if (!existsSync(dir)) return undefined;
+	const prefix = `${stem(email)}.`;
+	const files = readdirSync(dir)
+		.filter((f) => f.startsWith(prefix) && f.endsWith('.json'))
+		.sort()
+		.reverse();
+	for (const f of files) {
+		const doc = JSON.parse(readFileSync(resolve(dir, f), 'utf8'));
+		if (doc.confirmation_code) return doc.confirmation_code;
+	}
+	return undefined;
+}
+
 function code(email: string): string {
 	const deadline = Date.now() + 30_000;
 	const pattern = new RegExp(`"mail_to":"${email.replace(/[.+]/g, '\\$&')}".*?"confirmation_code":"([^"]+)"`, 'g');
 	for (;;) {
+		const filed = fromOutbox(email);
+		if (filed) return filed;
 		const logs = execFileSync('docker', ['compose', '-p', PROJECT, 'logs', '--no-color', 'backend'], { encoding: 'utf8' });
 		const found = [...logs.matchAll(pattern)].map((m) => m[1]);
 		if (found.length) return found[found.length - 1];

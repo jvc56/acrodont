@@ -180,9 +180,9 @@ mod tests {
     #[test]
     fn preference_ranges() {
         let m = |v: Value| v.as_object().unwrap().clone();
-        assert!(parse_preferences(&m(json!({ "default_clear_threshold": 0 })), 300_000).is_err());
-        assert!(parse_preferences(&m(json!({ "leave_value_decimals": 4 })), 300_000).is_err());
-        assert!(parse_preferences(&m(json!({ "default_segment_size": 4 })), 300_000).is_err());
-        assert!(parse_preferences(&m(json!({ "anagram_answer_mode": "typed", "default_progression": "drill" })), 300_000).is_ok());
+        assert!(parse_preferences(&m(json!({ "default_clear_threshold": 0 })), 130_000).is_err());
+        assert!(parse_preferences(&m(json!({ "leave_value_decimals": 4 })), 130_000).is_err());
+        assert!(parse_preferences(&m(json!({ "default_segment_size": 4 })), 130_000).is_err());
+        assert!(parse_preferences(&m(json!({ "anagram_answer_mode": "typed", "default_progression": "drill" })), 130_000).is_ok());
     }
 }

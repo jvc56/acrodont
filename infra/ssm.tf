@@ -1,21 +1,11 @@
-# SSM parameters: names only. Values are set out of band and never in state
-# after creation.
+# Secret configuration, referenced by ARN only. Declared as aws_ssm_parameter
+# resources (even with ignore_changes = [value]) the provider reads each value,
+# decrypted, into state on every refresh (BIRDTEST_LESSONS_PLAN.md SEC-1). The
+# parameters are created out of band by scripts/init-db-roles.sh.
 locals {
   ssm_prefix = "/wordfall/${var.environment}"
-  secret_names = {
-    DATABASE_URL        = "${local.ssm_prefix}/DATABASE_URL"
-    SESSION_SIGNING_KEY = "${local.ssm_prefix}/SESSION_SIGNING_KEY"
-    # The nightly dump's read-only role (PLAN.md § Backups); not given to the app.
-    BACKUP_DATABASE_URL = "${local.ssm_prefix}/BACKUP_DATABASE_URL"
-  }
-}
-
-resource "aws_ssm_parameter" "secret" {
-  for_each = local.secret_names
-  name     = each.value
-  type     = "SecureString"
-  value    = "set-out-of-band"
-  lifecycle {
-    ignore_changes = [value]
+  ssm_arn = {
+    for name in ["DATABASE_URL", "SESSION_SIGNING_KEY", "BACKUP_DATABASE_URL"] :
+    name => "arn:${data.aws_partition.current.partition}:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${local.ssm_prefix}/${name}"
   }
 }

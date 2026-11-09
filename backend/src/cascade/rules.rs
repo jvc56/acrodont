@@ -300,7 +300,7 @@ pub fn check_move_cursor(q: &QuizState, position: u32) -> Result<(), Reason> {
 /// inside the quiz. The duplicate and cursor checks come after (see `finish_segment`).
 pub fn check_segment_end(q: &QuizState, end: u32) -> Result<(), Reason> {
     let s = q.opts.segment_size;
-    if q.segment_chain || s == 0 || end % s != 0 || end == 0 || end >= q.question_count {
+    if q.segment_chain || s == 0 || !end.is_multiple_of(s) || end == 0 || end >= q.question_count {
         return Err(Reason::BadSegment);
     }
     Ok(())

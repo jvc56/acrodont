@@ -13,10 +13,7 @@ import { DownloadManager } from '$lib/sync/downloads';
 import { policy } from '$lib/sync/policy';
 import { AUTO_KEEP_OFFLINE_ROWS } from '$lib/sync/config';
 
-/** MAX_CASCADES_PER_USER's documented default; /api/auth/me does not report it (PQ-015). */
-export const CASCADE_LIMIT = 100;
-/** The builder warns from here (§ Cascade limit). */
-export const CASCADE_WARNING = 90;
+export { DEFAULT_CASCADE_LIMIT, cascadeWarning } from './limits';
 
 export type OfflineState = 'available' | 'downloading' | 'answers_need_connection' | 'not_downloaded';
 

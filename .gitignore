@@ -14,3 +14,11 @@ __pycache__/
 /infra/.terraform.lock.hcl.bak
 /backups/
 /frontend/.vitest/
+# The deployed settings live in the state bucket (scripts/lib/ops.sh); the
+# local copy and saved plans (which can hold secrets) are never committed.
+/infra/prod.tfvars
+/infra/prod.tfvars.*
+/infra/*.tfplan
+/infra/backend.tf
+# dev.py: snapshots and the per-project lock and browser profiles.
+/.dev/

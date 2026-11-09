@@ -354,7 +354,7 @@ mod props {
                 }
                 6 => {
                     let Some(q) = c.deepest().cloned() else { continue };
-                    Op::SetQuizOptions { quiz: q.id, segment_size: Some([0, 5, 6, 300_000][(ch as usize / 10) % 4]), progression: None, require_alphabetical: None }
+                    Op::SetQuizOptions { quiz: q.id, segment_size: Some([0, 5, 6, 130_000][(ch as usize / 10) % 4]), progression: None, require_alphabetical: None }
                 }
                 7 => {
                     let cleared: Vec<Uuid> = c.quizzes.values().filter(|q| !q.state.active).map(|q| q.id).collect();

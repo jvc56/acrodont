@@ -5,8 +5,8 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
 ## Current
 
 - **Phase:** 8 — Production, prepared up to the steps that need credentials
-  (see "Phase 8 — what needs the user" below).
-- **Last green checkpoint:** Phase 7h — e2e journeys and scale tests.
+  (see "Next" below), now with the birdtest lessons implemented (Phase 8b).
+- **Last green checkpoint:** Phase 8b — BIRDTEST_LESSONS_PLAN.md.
 
 ## Environment notes (this machine)
 
@@ -450,21 +450,88 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
 - `docs/runbook.md`: one-time setup, deploying, granting admin, backups,
   alarms, restoring, the drill.
 
+### Phase 8b — Lessons from birdtest, and the small-scale limits ✅
+BIRDTEST_LESSONS_PLAN.md, every item, plus the owner's limits of about 50
+accounts, 20 cascades and 130,000 questions per quiz.
+- **Limits:**
+  - `QUESTION_CEILING` and the schema's CHECKs are now 130,000. The contract
+    fixtures were regenerated from `reference.py` with that cap, and only the
+    cap values changed.
+  - `MAX_CASCADES_PER_USER` defaults to 20, and `/api/auth/me` reports it, so
+    the frontend's hard-coded 100 is gone (closes PQ-015).
+  - `MAX_ACCOUNTS` (50) closes registration, under an advisory lock.
+  - `EXPORT_CONCURRENCY` sets global export permits.
+- **Mail:** a queue drained at `MAIL_MAX_PER_SECOND` for SES, with a 30 s
+  timeout and expired mail dropped; `alarm = "mail_failed"` on every failure;
+  hashed addresses in SES logs. `MAIL_BACKEND=file` with an outbox per
+  project.
+- **Dev sign-in:** `DEV_LOGIN`, refused with `SECURE_COOKIES`; the route
+  exists only when the flag is on. The SPA's `/dev-login` and `adoptSession`.
+- **Build and rollback:** `build.rs` (a new migration rebuilds the crate), the
+  migrator with `ignore_missing`, and the catalog `load_ms` logged.
+- **Nginx:** keepalive 130 s above the ALB's 120; `immutable` no longer
+  `always`, plus `try_files =404`; gzip for the build; `absolute_redirect` and
+  `server_tokens` off; `Referrer-Policy`; export tokens kept out of the access
+  log. `frontend/src/lib/nginx-config.test.ts` pins all of it.
+- **Docker:**
+  - One backend Dockerfile with two targets: `backend` (the server alone) and
+    `ops` (Postgres 16, python3, backup.py, restore.py, drill.py and
+    `wordfall-master-psql`).
+  - Files are touched before the cached cargo build, cargo jobs are capped,
+    and base images are pinned by digest.
+  - Compose binds to loopback.
+- **Terraform:**
+  - The app task is one Spot task of 0.5 vCPU and 2 GiB, in public subnets
+    with no NAT gateway.
+  - The service has a circuit breaker and a deploy-failed rule, deploys roll
+    at 100/200, and `stopTimeout` is 120 s. ECS Exec is off on the app and its
+    sessions are not logged; the ops task definition is new.
+  - RDS is a micro with 20 GiB and 7-day PITR, with an event subscription.
+  - SSM parameters are referenced by ARN only. There are SES suppression and
+    reputation alarms, a mail-failed alarm, a budget and an anomaly
+    subscription.
+  - The drill task runs monthly, there are backup and drill failure rules, and
+    the backups bucket requires TLS. The ECR lifecycle keeps 40 images.
+  - `alarm_email` is required, and Terraform 1.11 or later is required.
+  - The variable validations are tested offline by `infra/tests/` (17 cases).
+    `github.tf` and `deploy.yml` are gone.
+- **Scripts:**
+  - The operator scripts run over `scripts/lib/ops.sh`, tested by
+    `ops-scripts-check.sh` with `lib/ops_fakes.py` (24 cases);
+    `runbook-check.sh` checks the docs.
+  - `dev.py` v2 sits on `stack.py`, now with the outbox, `ensure_user` and a
+    fast failure when the backend stops. `scenarios.py`, `scrub.sql`,
+    `drill.py` and `ops_master_psql.py` are new, and `backup.py` handles
+    SIGTERM.
+- **CI:**
+  - Parallel jobs: lint (clippy `-D warnings`), unit, integration, e2e,
+    terraform and scripts.
+  - Actions are pinned by SHA, and a failed nightly run opens an issue.
+- **Docs:** docs/runbook.md rewritten; JOURNEYS.md; PLAN.md updated (scale
+  assumptions, configuration, Development, Deployment and Operations, schema
+  policy, backups, scale tests).
+- **Tests:** backend unit (73) and integration (151) green; frontend check and
+  Vitest (577) green; `make infra-validate` and `make ops-check` green.
+
 ## Next
 
 Phase 8 — what needs the user (nothing below can be done without credentials,
-an AWS account, DNS or licensed data):
-1. AWS account and admin credentials; Terraform state bucket; the first
-   `terraform apply` (docs/runbook.md § One-time setup).
-2. DNS: ACM validation records, SES DKIM records, the site alias.
-3. SES production access (out of the sandbox).
-4. Database roles and the three SSM values (DATABASE_URL with
-   `sslmode=require`, BACKUP_DATABASE_URL, SESSION_SIGNING_KEY).
-5. GitHub: the `production` environment and the `AWS_REGION` /
-   `AWS_DEPLOY_ROLE_ARN` variables; then the first Deploy run.
-6. First catalog upload at /admin from the licensed files (checking the
-   index total against the task memory), and granting the first admin.
-7. The first restore drill, recorded in the runbook.
+an AWS account, DNS or licensed data). docs/runbook.md § One-time setup is now
+the authoritative sequence; in short:
+1. AWS account and an SSO profile; the Terraform state bucket; the first
+   `prod.tfvars`; `scripts/onboard-deployer.sh`; the first `terraform apply`.
+2. DNS: the ACM validation records, `ses_dns_records`, the site alias.
+3. Confirm the SNS subscription; set `anomaly_monitor_arn` if the account
+   already has a services monitor.
+4. `scripts/init-db-roles.sh`, then `scripts/deploy.sh`, then
+   `scripts/set-setting.sh desired_count=1` and pin `azs`.
+5. `scripts/check-alerts.sh`.
+6. SES production access, then `mail_max_per_second=14`; don't announce
+   before it is granted.
+7. The first admin (`scripts/confirm-user.sh --admin`) and the catalog upload
+   at /admin, checking index sizes against `task_memory` (2 GiB).
+8. The first quarterly manual drill, recorded in the runbook (the monthly
+   automated drill runs itself).
 
 ## Open PQs
 
@@ -482,7 +549,7 @@ an AWS account, DNS or licensed data):
 - PQ-012 (sequence wire forms: sync_seq text, cursor number or text) — provisional.
 - PQ-013 (finish/finish_segment check order) — provisional.
 - PQ-014 (singular "1 answer … wasn't kept") — provisional.
-- PQ-015 (cascade limit as a client constant) — provisional.
+- PQ-015 (cascade limit as a client constant) — closed: `/api/auth/me` reports `max_cascades_per_user`.
 - PQ-016 (expired-session journey TTL 20 s, not 2 s) — provisional.
 - PQ-017 (forty-cascade drop pass; ROW_BYTES 150; "only the kept one") — provisional.
 - PQ-018 (answer-limit journey vs "never its cards") — provisional.

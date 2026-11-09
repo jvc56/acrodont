@@ -1,4 +1,4 @@
-//! PLAN.md § Scale tests, the server's half: 300,000 questions end to end
+//! PLAN.md § Scale tests, the server's half: 130,000 questions end to end
 //! against Postgres, each within a time budget. The budgets are constants
 //! beside the row counts they measure. Every test here is `#[ignore]`d so
 //! `make test-integration` stays quick; `make test-scale` runs them with
@@ -18,30 +18,30 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 /// The question ceiling (`MAX_QUIZ_QUESTIONS`' default).
-const QUESTIONS: usize = 300_000;
-/// Operations per sync request (`SYNC_MAX_OPS`): 300,000 grades are 600 requests.
+const QUESTIONS: usize = 130_000;
+/// Operations per sync request (`SYNC_MAX_OPS`): 130,000 grades are 260 requests.
 const BATCH: usize = 500;
 
 const CREATE_BUDGET: Duration = Duration::from_secs(20);
 /// 3 keys pages and 30 answer pages.
 const DOWNLOAD_BUDGET: Duration = Duration::from_secs(60);
-/// 600 requests back to back under `SYNC_RATE_PER_MINUTE` = 120 (a burst of
+/// 260 requests back to back under `SYNC_RATE_PER_MINUTE` = 120 (a burst of
 /// 120, then two a second): at least 240 seconds are the limit's own, and a
 /// `Retry-After` in whole seconds rounds each wait up. "Drains in minutes, not
 /// hours" (§ When the device syncs): ten of them.
 const PUSH_BUDGET: Duration = Duration::from_secs(600);
-/// A second device's full pull of the cascade with its 300,000 graded rows.
+/// A second device's full pull of the cascade with its 130,000 graded rows.
 const PULL_BUDGET: Duration = Duration::from_secs(60);
-/// The finish that resets 300,000 rows and creates the 150,000-question Level 2.
+/// The finish that resets 130,000 rows and creates the 65,000-question Level 2.
 const FINISH_BUDGET: Duration = Duration::from_secs(20);
-/// Ten concurrent streams of a 300,000-question export with definitions.
+/// Ten concurrent streams of a 130,000-question export with definitions.
 const EXPORTS_BUDGET: Duration = Duration::from_secs(120);
-/// The ECS task's memory (`infra/variables.tf` `task_memory`, 8192 MiB).
-const TASK_MEMORY_BYTES: u64 = 8192 * 1024 * 1024;
+/// The ECS task's memory (`infra/variables.tf` `task_memory`, 2048 MiB).
+const TASK_MEMORY_BYTES: u64 = 2048 * 1024 * 1024;
 /// The ALB's idle timeout for admin uploads (`infra/alb.tf`).
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 const LEAVE_ROWS: usize = 1_000_000;
-/// One purge transaction taking a 300,000-question cascade with three levels.
+/// One purge transaction taking a 130,000-question cascade with three levels.
 const PURGE_CASCADE_BUDGET: Duration = Duration::from_secs(30);
 /// One capped purge run of `PURGE_MAX_QUIZZES_PER_USER_PER_RUN` (5,000) chain quizzes.
 const PURGE_RUN_BUDGET: Duration = Duration::from_secs(10);
@@ -65,8 +65,10 @@ async fn app(pool: sqlx::PgPool, extra: &[(&str, &str)]) -> TestApp {
 
 // ---------------------------------------------------------------------------
 // A catalog big enough: a distribution of A–Z with nine of each, and a
-// lexicon of 300,000 eight-letter words with distinct alphagrams, plus one
-// seven-letter word, so a length 7–8 search holds 300,001 questions.
+// lexicon of LEXICON_WORDS words with distinct alphagrams (about CSW's size,
+// whatever the quiz cap): QUESTIONS eight-letter words, so a length 8 search is
+// exactly the cap; one seven-letter word, so a length 7–8 search is one over
+// it; and nine-letter words for the rest.
 // ---------------------------------------------------------------------------
 
 fn distribution_csv() -> String {
@@ -99,9 +101,14 @@ fn letter_sets(k: usize, n: usize) -> Vec<String> {
     out
 }
 
+/// About CSW24's 280,887 words: the upload and index build are measured at a
+/// real lexicon's size, not the quiz cap's.
+const LEXICON_WORDS: usize = 300_000;
+
 fn lexicon_tsv() -> String {
-    let mut s = String::with_capacity(QUESTIONS * 48);
-    for (i, w) in letter_sets(8, QUESTIONS).into_iter().enumerate() {
+    let mut s = String::with_capacity(LEXICON_WORDS * 48);
+    let words = letter_sets(8, QUESTIONS).into_iter().chain(letter_sets(9, LEXICON_WORDS - QUESTIONS));
+    for (i, w) in words.enumerate() {
         s.push_str(&format!("{w}\t{}\ta scale test word, number {i} [n -S]\n", 1 + i % 5000));
     }
     s.push_str("ABCDEFG\t1\tthe one seven-letter word\n");
@@ -176,7 +183,7 @@ async fn pull_all(d: &mut Device<'_>) -> Vec<Value> {
     pages
 }
 
-async fn create_300k(c: &mut Client<'_>) -> (String, Uuid) {
+async fn create_full(c: &mut Client<'_>) -> (String, Uuid) {
     let r = c.post("/api/cascades", cascade_body(length(8, 8))).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
     let j = r.json();
@@ -184,20 +191,20 @@ async fn create_300k(c: &mut Client<'_>) -> (String, Uuid) {
     (j["cascade"]["id"].as_str().unwrap().to_owned(), j["source_quiz"]["id"].as_str().unwrap().parse().unwrap())
 }
 
-/// PLAN.md § Scale tests: "Create a 300,000-question cascade, download its
+/// PLAN.md § Scale tests: "Create a 130,000-question cascade, download its
 /// cards, grade every question (half missed) through sync, finish, and assert
-/// the timings for creation, download, push (300,000 grades in 600 requests
+/// the timings for creation, download, push (130,000 grades in 260 requests
 /// back to back, under the per-user sync rate limit), pull and finish stay
-/// within budget … A 300,001-question search is refused with its count."
+/// within budget … A 130,001-question search is refused with its count."
 /// Run at the default rate limits.
 #[sqlx::test]
 #[ignore = "scale: make test-scale"]
-async fn a_300000_question_cascade_end_to_end(pool: sqlx::PgPool) {
+async fn a_130000_question_cascade_end_to_end(pool: sqlx::PgPool) {
     let app = app(pool, &[]).await;
     scale_catalog(&app).await;
     let mut c = app.signed_in("alice").await;
 
-    // A 300,001-question search is refused with its count.
+    // A 130,001-question search is refused with its count.
     let r = c.post("/api/search/preview", json!({ "lexicon": "SCALE", "quiz_type": "anagram", "filters": length(7, 8) })).await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
     assert_eq!(r.json()["count"], QUESTIONS + 1);
@@ -209,12 +216,12 @@ async fn a_300000_question_cascade_end_to_end(pool: sqlx::PgPool) {
 
     // Creation.
     let t = Instant::now();
-    let (cascade, source) = create_300k(&mut c).await;
+    let (cascade, source) = create_full(&mut c).await;
     let took = t.elapsed();
-    report("creation", took, CREATE_BUDGET, "300,000 questions");
+    report("creation", took, CREATE_BUDGET, "130,000 questions");
     assert!(took <= CREATE_BUDGET);
 
-    // Download: the keys pass (3 pages of 100,000), then the answers (30 of 10,000).
+    // Download: the keys pass (pages of 100,000), then the answers (pages of 10,000).
     let t = Instant::now();
     let (mut keys, mut key_bytes, mut key_pages) = (0, 0, 0);
     while keys < QUESTIONS {
@@ -234,10 +241,10 @@ async fn a_300000_question_cascade_end_to_end(pool: sqlx::PgPool) {
     }
     let took = t.elapsed();
     report("download", took, DOWNLOAD_BUDGET, &format!("{key_pages} keys pages, {key_bytes} bytes; {card_pages} answer pages, {card_bytes} bytes"));
-    assert_eq!((key_pages, card_pages), (3, 30));
+    assert_eq!((key_pages, card_pages), (QUESTIONS.div_ceil(100_000), QUESTIONS.div_ceil(10_000)));
     assert!(took <= DOWNLOAD_BUDGET);
 
-    // Push: every question graded, half missed, 600 requests of 500.
+    // Push: every question graded, half missed, in requests of 500.
     let mut d = Device::new(c);
     d.qrf = vec![cascade.parse().unwrap()];
     assert_eq!(sync_paced(&mut d, vec![]).await.status, StatusCode::OK);
@@ -269,7 +276,7 @@ async fn a_300000_question_cascade_end_to_end(pool: sqlx::PgPool) {
     let mut other = d.sibling(&app);
     other.qrf = d.qrf.clone();
     let t = Instant::now();
-    let pages = loop {
+    let pages = {
         // Paced like the device: a 429 on the first request is retried whole.
         let r = sync_paced(&mut other, vec![]).await;
         assert_eq!(r.status, StatusCode::OK);
@@ -288,7 +295,7 @@ async fn a_300000_question_cascade_end_to_end(pool: sqlx::PgPool) {
             token = r.json().get("next_page_token").cloned();
             pages.push(r.json());
         }
-        break pages;
+        pages
     };
     let took = t.elapsed();
     let graded: usize = common::sync::rows(&pages, "quiz_questions")
@@ -314,7 +321,7 @@ async fn a_300000_question_cascade_end_to_end(pool: sqlx::PgPool) {
         .fetch_one(app.db())
         .await
         .unwrap();
-    report("finish", took, FINISH_BUDGET, "300,000 rows reset, a 150,000-question Level 2");
+    report("finish", took, FINISH_BUDGET, "130,000 rows reset, a 65,000-question Level 2");
     assert_eq!(level2 as usize, QUESTIONS / 2);
     assert!(took <= FINISH_BUDGET);
 }
@@ -337,16 +344,17 @@ fn reset_peak_rss() {
 }
 
 /// PLAN.md § Scale tests: "Ten concurrent GET /api/cascades/:id/export
-/// streams of a 300,000-question anagram cascade with definitions, the
+/// streams of a 130,000-question anagram cascade with definitions, the
 /// EXPORT_RATE_PER_MINUTE default, complete within budget without the task
-/// exceeding its memory reservation."
+/// exceeding its memory reservation", at production's EXPORT_CONCURRENCY of
+/// one: the others wait their turn, which is what bounds the memory.
 #[sqlx::test]
 #[ignore = "scale: make test-scale"]
 async fn ten_concurrent_exports(pool: sqlx::PgPool) {
-    let app = app(pool, &[]).await;
+    let app = app(pool, &[("EXPORT_CONCURRENCY", "1")]).await;
     scale_catalog(&app).await;
     let mut c = app.signed_in("alice").await;
-    let (cascade, _) = create_300k(&mut c).await;
+    let (cascade, _) = create_full(&mut c).await;
     let choices = json!({ "scope": "cascade", "which": "all", "format": "csv", "definitions": true,
                           "columns": ["question", "answer", "definition", "grade"], "order": "study", "decimals": 1 });
     // Ten tokens: the default EXPORT_RATE_PER_MINUTE bucket, exactly.
@@ -408,8 +416,8 @@ fn leave_csv() -> String {
                     break;
                 }
                 let v = idx[i - 1] + 1;
-                for j in i - 1..k {
-                    idx[j] = v;
+                for x in &mut idx[i - 1..k] {
+                    *x = v;
                 }
             }
         }
@@ -556,20 +564,20 @@ async fn add_levels(app: &TestApp, s: &Setup, n2: i32, n3: i32) {
     sqlx::query("UPDATE cascades SET depth = 3, peak_depth = 3 WHERE id = $1").bind(s.cascade_id).execute(app.db()).await.unwrap();
 }
 
-/// PLAN.md § Scale tests: "Purge a trashed 300,000-question cascade with three
+/// PLAN.md § Scale tests: "Purge a trashed 130,000-question cascade with three
 /// levels within budget while a sync for the same user proceeds, on a
 /// quizzes table padded with a million rows of other users, asserting with
 /// EXPLAIN that the delete uses quizzes_cascade_id."
 #[sqlx::test]
 #[ignore = "scale: make test-scale"]
-async fn purging_a_300000_question_cascade(pool: sqlx::PgPool) {
+async fn purging_a_130000_question_cascade(pool: sqlx::PgPool) {
     let app = app(pool, &[("SYNC_RATE_PER_MINUTE", "100000")]).await;
     pad(&app).await;
     let c = app.signed_in("alice").await;
     let user = c.user_id.unwrap();
     let s = Setup::new(QUESTIONS as i32);
     insert_cascade(&app, user, &s).await;
-    add_levels(&app, &s, 150_000, 75_000).await;
+    add_levels(&app, &s, QUESTIONS as i32 / 2, QUESTIONS as i32 / 4).await;
     sqlx::query("UPDATE cascades SET trashed_at = now() - interval '31 days' WHERE id = $1")
         .bind(s.cascade_id)
         .execute(app.db())
@@ -598,7 +606,7 @@ async fn purging_a_300000_question_cascade(pool: sqlx::PgPool) {
     });
     let took = t.elapsed();
     purged.unwrap();
-    report("purge of a trashed cascade", took, PURGE_CASCADE_BUDGET, "300,000 + 150,000 + 75,000 question rows");
+    report("purge of a trashed cascade", took, PURGE_CASCADE_BUDGET, "130,000 + 65,000 + 32,500 question rows");
     assert_eq!(synced.status, StatusCode::OK, "{:?}", synced.json());
     let left: i64 = sqlx::query_scalar("SELECT count(*) FROM quizzes WHERE cascade_id = $1").bind(s.cascade_id).fetch_one(app.db()).await.unwrap();
     assert_eq!(left, 0);

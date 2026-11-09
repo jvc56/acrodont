@@ -25,8 +25,8 @@ use crate::auth::session::{
 use crate::error::{ApiError, ApiResult, FieldError};
 use crate::extract::ApiJson;
 
-pub fn router() -> Router<AppState> {
-    Router::new()
+pub fn router(state: &AppState) -> Router<AppState> {
+    let router = Router::new()
         .route("/api/auth/register", post(register))
         .route("/api/auth/confirm-email", post(confirm_email))
         .route("/api/auth/login", post(login))
@@ -42,7 +42,14 @@ pub fn router() -> Router<AppState> {
             post(sign_out_everywhere),
         )
         .route("/api/account/password", post(change_password))
-        .route("/api/account", delete(delete_account))
+        .route("/api/account", delete(delete_account));
+    // Only on a local stack: the route does not exist otherwise, so production
+    // answers 404 (config.rs refuses DEV_LOGIN with SECURE_COOKIES).
+    if state.config.dev_login {
+        router.route("/api/dev/login", post(dev_login))
+    } else {
+        router
+    }
 }
 
 /// The client address per-IP limits key on.
@@ -73,8 +80,9 @@ fn queue_mail(state: &AppState, ip: IpAddr, email: Email) {
     }
     let mailer = state.mailer.clone();
     tokio::spawn(async move {
+        let to = mail::address_tag(&email.to);
         if let Err(e) = mailer.send(email).await {
-            tracing::error!(error = %e, "sending email failed");
+            tracing::error!(alarm = "mail_failed", %to, error = %e, "sending email failed");
         }
     });
 }
@@ -104,6 +112,9 @@ pub struct RegisterBody {
     email: String,
     password: String,
 }
+
+/// The advisory lock registrations take in turn (an arbitrary constant).
+const REGISTER_LOCK: i64 = 0x5746_5245_4749_5354;
 
 /// The same answer for a new account and an address already in use.
 fn registered() -> Response {
@@ -162,6 +173,28 @@ async fn register(
     )
     .execute(&mut *tx)
     .await?;
+
+    // MAX_ACCOUNTS. Registrations take turns under a transaction lock, so two
+    // at the limit cannot both pass it. Checked for every registration, before
+    // looking the address up, so a closed site says the same to everyone and
+    // reveals nothing about which addresses have accounts.
+    sqlx::query_scalar!(r#"SELECT 1 AS "one!" FROM pg_advisory_xact_lock($1)"#, REGISTER_LOCK)
+        .fetch_one(&mut *tx)
+        .await?;
+    // Accounts that hold a place: confirmed, or with a code still valid, as
+    // for a username. An abandoned registration frees its place when its
+    // codes expire, without waiting for the purge task.
+    let accounts = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM users u
+           WHERE u.email_confirmed_at IS NOT NULL
+              OR EXISTS (SELECT 1 FROM email_confirmations c
+                         WHERE c.user_id = u.id AND c.expires_at > now())"#
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if accounts >= i64::from(state.config.max_accounts) {
+        return Err(ApiError::Forbidden("registration_closed"));
+    }
 
     let existing = sqlx::query!(
         "SELECT id, email::text AS \"email!\", email_confirmed_at FROM users
@@ -338,6 +371,7 @@ pub struct Me {
     is_admin: bool,
     trash_retention_days: u32,
     max_quiz_questions: u32,
+    max_cascades_per_user: u32,
 }
 
 fn me_body(state: &AppState, id: Uuid, username: String, is_admin: bool) -> Me {
@@ -347,6 +381,7 @@ fn me_body(state: &AppState, id: Uuid, username: String, is_admin: bool) -> Me {
         is_admin,
         trash_retention_days: state.config.trash_retention_days,
         max_quiz_questions: state.config.max_quiz_questions,
+        max_cascades_per_user: state.config.max_cascades_per_user,
     }
 }
 
@@ -430,6 +465,34 @@ async fn me(
         .into_response()
 }
 
+#[derive(Deserialize)]
+pub struct DevLoginBody {
+    username: String,
+}
+
+/// `./scripts/dev.py --login-as USER`: a session for an existing, confirmed
+/// account without its password, answered exactly as `/api/auth/login` is, so
+/// the SPA's `/dev-login` page adopts it the way a login would. Registered
+/// only when `DEV_LOGIN=true`, which a TLS deployment refuses to start with.
+async fn dev_login(
+    State(state): State<AppState>,
+    ApiJson(body): ApiJson<DevLoginBody>,
+) -> ApiResult<Response> {
+    let user = sqlx::query!(
+        "SELECT id, username::text AS \"username!\", email_confirmed_at, is_admin, session_generation
+         FROM users WHERE username = $1",
+        body.username.trim() as &str,
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(ApiError::NotFound)?;
+    if user.email_confirmed_at.is_none() {
+        return Err(ApiError::Forbidden("email_unconfirmed"));
+    }
+    let cookies = SessionCookies::issue(&state, user.id, user.session_generation, None);
+    Ok((cookies, Json(me_body(&state, user.id, user.username, user.is_admin))).into_response())
+}
+
 /// Clears both cookies. Needs neither a session nor a CSRF token when no
 /// session cookie arrives; with one, it is CSRF-checked like any other write.
 /// Exempt from the account binding. Never `401`.
@@ -468,7 +531,7 @@ async fn reset_password(
     let st = state.clone();
     tokio::spawn(async move {
         if let Err(e) = send_reset(&st, ip, &email).await {
-            tracing::error!(error = %e, "password reset failed");
+            tracing::error!(alarm = "mail_failed", error = %e, "password reset failed");
         }
     });
     Ok((StatusCode::ACCEPTED, Json(json!({}))).into_response())

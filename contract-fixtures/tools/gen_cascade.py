@@ -288,7 +288,7 @@ def scenarios():
     v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 0})  # run_start survives
     v.op({"type": "move_cursor", "quiz": v.source, "attempt": 1, "attempt_seed": str(v.quiz(v.source).seed),
           "position": 99}, expect="bad_cursor")
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 300000})
+    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 130000})
     v.op({"type": "move_cursor", "quiz": v.source, "attempt": 1, "attempt_seed": str(v.quiz(v.source).seed),
           "position": 99}, expect="bad_cursor")
     v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 100})
@@ -551,7 +551,7 @@ def random_sequences(n_seqs=40, n_steps=160):
                      checkpoint=False)
             elif r < 78 and active:
                 q = active[pick(len(active))]
-                size = [0, 5, 6, 7, 9, 13, 300000, len(q.idx), len(q.idx) + 5][pick(9)]
+                size = [0, 5, 6, 7, 9, 13, 130000, len(q.idx), len(q.idx) + 5][pick(9)]
                 v.op({"type": "set_quiz_options", "quiz": q.id, "segment_size": size}, checkpoint=False)
             elif r < 83:
                 v.op({"type": "set_cascade_options", "segment_size": [0, 5, 8, 20][pick(4)],

@@ -1,13 +1,34 @@
 # PLAN.md § Deployment and Operations: security headers and caching.
 # Rendered by the nginx image's envsubst step from BACKEND_UPSTREAM,
-# REAL_IP_FROM and HSTS.
+# REAL_IP_FROM and HSTS. frontend/src/lib/nginx-config.test.ts pins the rules
+# below that production taught birdtest (BIRDTEST_LESSONS_PLAN.md EDGE-1..4).
 
 map $request_uri $wordfall_hsts { default "${HSTS}"; }
+
+# The export token is single-use and short-lived, but it need not sit in the
+# access log either: log export requests without their query string.
+map $request_uri $wordfall_logged_uri {
+    "~^(?<path>/api/cascades/[^/?]+/export)\?" "$path?…";
+    default $request_uri;
+}
+log_format wordfall '$remote_addr - $remote_user [$time_local] "$request_method $wordfall_logged_uri $server_protocol" '
+                    '$status $body_bytes_sent "$http_referer" "$http_user_agent"';
 
 server {
     listen 80;
     server_name _;
     root /usr/share/nginx/html;
+    access_log /var/log/nginx/access.log wordfall;
+
+    # Longer than the ALB's idle_timeout (infra/alb.tf: 120 s). At the image's
+    # 65 s Nginx closed pooled connections the ALB still thought open, and a
+    # request sent on one as it closed was answered 502.
+    keepalive_timeout 130s;
+
+    # A redirect names no host or scheme (behind the ALB an absolute one said
+    # http://localhost/…), and no version in the Server header.
+    absolute_redirect off;
+    server_tokens off;
 
     # The client address: the ALB's in production, the peer locally. The
     # backend reads exactly one hop (TRUSTED_PROXY_HOPS=1).
@@ -18,10 +39,19 @@ server {
     # Admin uploads carry up to ADMIN_UPLOAD_MAX_BYTES (100 MB) plus multipart framing.
     client_max_body_size 110m;
 
+    # The build's JavaScript, CSS, SVG and JSON go out compressed: most of a
+    # first visit's bytes and the service worker's whole precache. The API
+    # compresses its own responses (backend/src/app.rs), so not under /api/.
+    gzip on;
+    gzip_types text/css application/javascript text/javascript image/svg+xml application/json application/manifest+json;
+    gzip_vary on;
+    gzip_proxied any;
+
     include /etc/nginx/conf.d/wordfall-headers.inc;
 
     location /api/ {
         include /etc/nginx/conf.d/wordfall-headers.inc;
+        gzip off;
         proxy_pass http://${BACKEND_UPSTREAM};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -49,10 +79,14 @@ server {
         add_header Cache-Control "no-cache" always;
     }
 
-    # Hashed assets never change.
+    # Hashed assets never change, and a missing one is a 404, never the SPA's
+    # index.html (a 200 of HTML that nosniff refuses to run: a blank page).
+    # Not `always`: that put a year's `immutable` on the 404 too, and a browser
+    # kept a missing chunk missing through a rollback.
     location /_app/immutable/ {
         include /etc/nginx/conf.d/wordfall-headers.inc;
-        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable";
     }
 
     location / {

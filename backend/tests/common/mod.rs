@@ -371,16 +371,14 @@ impl<'a> Client<'a> {
                 .join("; ");
             b = b.header(header::COOKIE, cookie);
         }
-        if self.send_csrf {
-            if let Some(t) = self.csrf() {
+        if self.send_csrf
+            && let Some(t) = self.csrf() {
                 b = b.header("x-csrf-token", t.clone());
             }
-        }
-        if self.send_user_header {
-            if let Some(u) = self.user_id {
+        if self.send_user_header
+            && let Some(u) = self.user_id {
                 b = b.header("x-wordfall-user", u.to_string());
             }
-        }
         let req = match body {
             Some(v) => b
                 .header(header::CONTENT_TYPE, "application/json")
@@ -404,13 +402,11 @@ impl<'a> Client<'a> {
                 self.cookies.insert(name.into(), value.into());
             }
         }
-        if resp.status == StatusCode::OK {
-            if let Some(id) = resp.json().get("user_id").and_then(|v| v.as_str()) {
-                if self.user_id.is_none() {
+        if resp.status == StatusCode::OK
+            && let Some(id) = resp.json().get("user_id").and_then(|v| v.as_str())
+                && self.user_id.is_none() {
                     self.user_id = id.parse().ok();
                 }
-            }
-        }
     }
 
     pub async fn get(&mut self, path: &str) -> TestResponse {

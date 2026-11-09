@@ -21440,7 +21440,7 @@
      "op": {
       "type": "set_quiz_options",
       "quiz": "00000000-0000-4000-8000-000000000002",
-      "segment_size": 300000
+      "segment_size": 130000
      },
      "result": {
       "status": "applied"
@@ -21467,7 +21467,7 @@
         "origin_attempt": null,
         "origin_segment_end": null,
         "segment_chain": false,
-        "segment_size": 300000,
+        "segment_size": 130000,
         "progression": "ladder",
         "require_alphabetical": false,
         "attempt": 1,
@@ -21796,7 +21796,7 @@
         "origin_attempt": null,
         "origin_segment_end": null,
         "segment_chain": false,
-        "segment_size": 300000,
+        "segment_size": 130000,
         "progression": "ladder",
         "require_alphabetical": false,
         "attempt": 1,

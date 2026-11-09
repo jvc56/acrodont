@@ -129,16 +129,14 @@ pub fn tokenize(text: &str) -> Result<Vec<RawTok<'_>>, PatternError> {
             };
             (raw, &rest[end..])
         };
-        if let RawTok::Letter(l) = &tok {
-            if l.chars().any(|c| c.is_lowercase()) {
+        if let RawTok::Letter(l) = &tok
+            && l.chars().any(|c| c.is_lowercase()) {
                 return Err(PatternError::NotCanonical);
             }
-        }
-        if let RawTok::Set(tiles) = &tok {
-            if tiles.iter().any(|l| l.chars().any(|c| c.is_lowercase())) {
+        if let RawTok::Set(tiles) = &tok
+            && tiles.iter().any(|l| l.chars().any(|c| c.is_lowercase())) {
                 return Err(PatternError::NotCanonical);
             }
-        }
         out.push(tok);
         if after.is_empty() {
             return Ok(out);

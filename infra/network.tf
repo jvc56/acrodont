@@ -1,10 +1,21 @@
-# VPC with public subnets (ALB) and private subnets (ECS, RDS).
+# VPC: public subnets carry the ALB and the Fargate tasks; private subnets hold
+# RDS, which is never reachable from outside the VPC. The tasks have public
+# addresses instead of a NAT gateway (~$37/month) or VPC endpoints (more): their
+# security group admits only the ALB (BIRDTEST_LESSONS_PLAN.md COST-2).
+
 data "aws_availability_zones" "available" {
-  state = "available"
+  filter {
+    name   = "zone-type"
+    values = ["availability-zone"]
+  }
+  filter {
+    name   = "opt-in-status"
+    values = ["opt-in-not-required"]
+  }
 }
 
 locals {
-  azs = slice(data.aws_availability_zones.available.names, 0, 2)
+  azs = var.azs != null ? var.azs : slice(sort(data.aws_availability_zones.available.names), 0, 2)
 }
 
 resource "aws_vpc" "main" {
@@ -27,6 +38,7 @@ resource "aws_subnet" "public" {
   tags                    = { Name = "wordfall-public-${count.index}" }
 }
 
+# No route out: only the database lives here.
 resource "aws_subnet" "private" {
   count             = length(local.azs)
   vpc_id            = aws_vpc.main.id
@@ -49,34 +61,11 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Private tasks reach ECR, SSM, SES and CloudWatch through a NAT gateway.
-resource "aws_eip" "nat" {
-  domain = "vpc"
-}
-
-resource "aws_nat_gateway" "main" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public[0].id
-  depends_on    = [aws_internet_gateway.main]
-}
-
-resource "aws_route_table" "private" {
-  vpc_id = aws_vpc.main.id
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main.id
-  }
-}
-
-resource "aws_route_table_association" "private" {
-  count          = length(aws_subnet.private)
-  subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private.id
-}
-
+# EC2 refuses an apostrophe in a security group description (birdtest cc3c863).
 resource "aws_security_group" "alb" {
-  name   = "wordfall-alb"
-  vpc_id = aws_vpc.main.id
+  name        = "wordfall-alb"
+  description = "Public HTTP and HTTPS to the load balancer"
+  vpc_id      = aws_vpc.main.id
   ingress {
     from_port   = 80
     to_port     = 80
@@ -97,9 +86,12 @@ resource "aws_security_group" "alb" {
   }
 }
 
+# The app, backup, drill and ops tasks. Only the ALB may reach them, so a
+# public address admits nothing.
 resource "aws_security_group" "tasks" {
-  name   = "wordfall-tasks"
-  vpc_id = aws_vpc.main.id
+  name        = "wordfall-tasks"
+  description = "ECS tasks, reachable only from the load balancer"
+  vpc_id      = aws_vpc.main.id
   ingress {
     from_port       = 80
     to_port         = 80
@@ -115,8 +107,9 @@ resource "aws_security_group" "tasks" {
 }
 
 resource "aws_security_group" "db" {
-  name   = "wordfall-db"
-  vpc_id = aws_vpc.main.id
+  name        = "wordfall-db"
+  description = "Postgres, reachable only from the ECS tasks"
+  vpc_id      = aws_vpc.main.id
   ingress {
     from_port       = 5432
     to_port         = 5432

@@ -121,11 +121,10 @@ async fn save(State(state): State<AppState>, Session(user): Session, ApiJson(b):
             None
         }
     };
-    if let Some(t) = &tree {
-        if let Err(e) = validate(t, b.quiz_type, None) {
+    if let Some(t) = &tree
+        && let Err(e) = validate(t, b.quiz_type, None) {
             errors.extend(e);
         }
-    }
     if !errors.is_empty() {
         return Err(path_errors(errors));
     }

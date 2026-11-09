@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, username::text AS \"username!\", email_confirmed_at, is_admin, session_generation\n         FROM users WHERE username = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "username!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "email_confirmed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "email_confirmed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "is_admin",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "is_admin"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "session_generation",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "session_generation"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        {
+          "Custom": {
+            "name": "citext",
+            "kind": "Simple"
+          }
+        }
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "df09c80620ab1cef0d5cc4bf567a507feab7120eed788551c32d888221dbadbc"
+}

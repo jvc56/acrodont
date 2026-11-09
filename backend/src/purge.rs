@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::app::AppState;
 
 /// Advisory lock key for the purge task.
-pub const PURGE_LOCK_KEY: i64 = 0x5746_5055_5247_45; // "WFPURGE"
+pub const PURGE_LOCK_KEY: i64 = 0x0057_4650_5552_4745; // "WFPURGE"
 
 pub fn spawn(state: AppState) {
     tokio::spawn(async move {

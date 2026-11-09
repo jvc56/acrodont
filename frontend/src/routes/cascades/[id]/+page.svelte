@@ -45,7 +45,7 @@
 	let typedInput = $state<HTMLInputElement | null>(null);
 	let typedFocused = $state(false);
 	let quizOptions = $state<QuizOptions | null>(null);
-	let maxQuiz = $state(300_000);
+	let maxQuiz = $state(130_000);
 	let busy = $state(false);
 
 	const actions = new Debounce(120);

@@ -15,6 +15,8 @@
 	const PUBLIC = [
 		'/',
 		'/login',
+		// Signs in itself (local stacks only); it must not be sent to /login first.
+		'/dev-login',
 		'/register',
 		'/register/check-email',
 		'/confirm-email',

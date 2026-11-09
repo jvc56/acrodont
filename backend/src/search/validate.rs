@@ -269,12 +269,11 @@ impl Validator<'_> {
         if self.errors.len() > before {
             return None;
         }
-        if let Some(c) = ceiling {
-            if min == floor && max as u64 == c {
+        if let Some(c) = ceiling
+            && min == floor && max as u64 == c {
                 self.err(path, "min", format!("{floor}–{c} includes everything, so this row narrows nothing."));
                 return None;
             }
-        }
         if min > i64::from(u32::MAX) || max > i64::from(u32::MAX) {
             self.err(path, "max", "The bound is too large.");
             return None;
@@ -503,12 +502,11 @@ impl Validator<'_> {
                     self.err(path, "min", "Fill in at least one bound.");
                     return None;
                 }
-                if let (Some(a), Some(b)) = (min, max) {
-                    if a > b {
+                if let (Some(a), Some(b)) = (min, max)
+                    && a > b {
                         self.err(path, "min", "The minimum is above the maximum.");
                         return None;
                     }
-                }
                 Some(ConditionKind::LeaveValue { min: *min, max: *max })
             }
             _ => {

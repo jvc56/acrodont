@@ -68,8 +68,9 @@ impl Mailer for ConsoleMailer {
 
 /// `MAIL_BACKEND=ses`: sent through the SES v2 API as `MAIL_FROM`, with the
 /// task role's credentials and region from the environment (PLAN.md §
-/// Deployment and Operations: "SES domain identity"). The code or token is
-/// never logged.
+/// Deployment and Operations: "SES domain identity"). Neither the code, the
+/// token nor the address is logged: only a short hash of the address, which
+/// still lets an operator match a complaint to a log line.
 pub struct SesMailer {
     client: aws_sdk_sesv2::Client,
     from: String,
@@ -97,9 +98,140 @@ impl Mailer for SesMailer {
                 .destination(Destination::builder().to_addresses(&email.to).build())
                 .content(EmailContent::builder().simple(message).build())
                 .send()
-                .await?;
-            tracing::info!(mail_to = %email.to, subject = %email.subject, "mail sent");
+                .await
+                .map_err(|e| anyhow::anyhow!("SES refused the send: {}", aws_sdk_sesv2::error::DisplayErrorContext(e)))?;
+            tracing::info!(to = %address_tag(&email.to), kind = kind_name(&email.kind), "mail sent");
             Ok(())
+        })
+    }
+}
+
+/// A short, stable tag for an address, for logs that must not hold it.
+pub fn address_tag(address: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(address.trim().to_lowercase().as_bytes());
+    hex::encode(&digest[..6])
+}
+
+pub fn kind_name(kind: &MailKind) -> &'static str {
+    match kind {
+        MailKind::Confirmation { .. } => "confirmation",
+        MailKind::AccountExists => "account_exists",
+        MailKind::PasswordReset { .. } => "password_reset",
+    }
+}
+
+/// `MAIL_BACKEND=file`: everything the console backend logs, plus one JSON
+/// file per message in `MAIL_OUTBOX_DIR`, named for the recipient, which
+/// `scripts/stack.py` and the end-to-end tests read instead of scraping logs.
+/// Written under a temporary name and renamed, so a reader never sees half.
+pub struct FileMailer {
+    dir: std::path::PathBuf,
+}
+
+impl FileMailer {
+    pub fn new(dir: impl Into<std::path::PathBuf>) -> Self {
+        FileMailer { dir: dir.into() }
+    }
+
+    /// The recipient part of a message's file name.
+    pub fn file_stem(address: &str) -> String {
+        address
+            .trim()
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '@' | '-' | '_' | '+') { c } else { '_' })
+            .collect()
+    }
+}
+
+impl Mailer for FileMailer {
+    fn send<'a>(&'a self, email: Email) -> SendFuture<'a> {
+        Box::pin(async move {
+            ConsoleMailer.send(email.clone()).await?;
+            let mut doc = serde_json::json!({
+                "to": email.to,
+                "subject": email.subject,
+                "body": email.body,
+                "kind": kind_name(&email.kind),
+            });
+            match &email.kind {
+                MailKind::Confirmation { code } => doc["confirmation_code"] = code.clone().into(),
+                MailKind::PasswordReset { token } => doc["reset_token"] = token.clone().into(),
+                MailKind::AccountExists => {}
+            }
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let name = format!("{}.{stamp}.{}.json", Self::file_stem(&email.to), uuid::Uuid::new_v4().simple());
+            let tmp = self.dir.join(format!(".{name}.tmp"));
+            tokio::fs::write(&tmp, serde_json::to_vec_pretty(&doc)?).await?;
+            tokio::fs::rename(&tmp, self.dir.join(&name)).await?;
+            Ok(())
+        })
+    }
+}
+
+/// How long a message is still worth sending: its link's own lifetime.
+fn lifetime(kind: &MailKind) -> Option<std::time::Duration> {
+    match kind {
+        MailKind::Confirmation { .. } => Some(std::time::Duration::from_secs(24 * 3600)),
+        MailKind::PasswordReset { .. } => Some(std::time::Duration::from_secs(30 * 60)),
+        MailKind::AccountExists => None,
+    }
+}
+
+/// SES refuses sends above the account's rate (1 a second in the sandbox,
+/// usually 14 after), so a burst of registrations, a club signing up together,
+/// lost mail when sent at once (birdtest). Messages wait in a bounded queue,
+/// an hour's worth, drained at `MAIL_MAX_PER_SECOND` by one task; each send
+/// times out at 30 s; a message whose link has expired while queued is
+/// dropped. Every failure is logged with `alarm = "mail_failed"`, which a
+/// CloudWatch metric filter alarms on (BIRDTEST_LESSONS_PLAN.md MAIL-1/2).
+/// A queued message and when it was queued.
+type Queued = (tokio::time::Instant, Email);
+
+pub struct QueuedMailer {
+    tx: tokio::sync::mpsc::Sender<Queued>,
+}
+
+pub const SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+impl QueuedMailer {
+    pub fn spawn(inner: Arc<dyn Mailer>, per_second: u32) -> Self {
+        let per_second = per_second.max(1);
+        let capacity = (per_second as usize * 3600).min(10_000);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Queued>(capacity);
+        let gap = std::time::Duration::from_secs_f64(1.0 / f64::from(per_second));
+        tokio::spawn(async move {
+            let mut next = tokio::time::Instant::now();
+            while let Some((queued, email)) = rx.recv().await {
+                let to = address_tag(&email.to);
+                let kind = kind_name(&email.kind);
+                if lifetime(&email.kind).is_some_and(|life| queued.elapsed() > life) {
+                    tracing::warn!(%to, kind, "mail expired in the queue; not sent");
+                    continue;
+                }
+                tokio::time::sleep_until(next).await;
+                next = tokio::time::Instant::now() + gap;
+                match tokio::time::timeout(SEND_TIMEOUT, inner.send(email)).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => tracing::error!(alarm = "mail_failed", %to, kind, error = %e, "sending email failed"),
+                    Err(_) => tracing::error!(alarm = "mail_failed", %to, kind, "sending email timed out"),
+                }
+            }
+        });
+        QueuedMailer { tx }
+    }
+}
+
+impl Mailer for QueuedMailer {
+    fn send<'a>(&'a self, email: Email) -> SendFuture<'a> {
+        Box::pin(async move {
+            self.tx
+                .try_send((tokio::time::Instant::now(), email))
+                .map_err(|_| anyhow::anyhow!("the mail queue is full"))
         })
     }
 }
@@ -213,6 +345,69 @@ pub fn reset_email(public_url: &str, to: &str, token: &str) -> Email {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn confirmation(to: &str) -> Email {
+        confirmation_email("http://x", to, "code")
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_queue_sends_at_the_configured_rate() {
+        let rec = RecordingMailer::default();
+        let q = QueuedMailer::spawn(Arc::new(rec.clone()), 2);
+        for i in 0..5 {
+            q.send(confirmation(&format!("u{i}@x.y"))).await.unwrap();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        assert_eq!(rec.sent.lock().unwrap().len(), 1, "the first goes at once");
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        assert_eq!(rec.sent.lock().unwrap().len(), 3, "two a second after that");
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        assert_eq!(rec.sent.lock().unwrap().len(), 5);
+    }
+
+    /// A mailer that never answers.
+    struct Stuck;
+    impl Mailer for Stuck {
+        fn send<'a>(&'a self, _email: Email) -> SendFuture<'a> {
+            Box::pin(std::future::pending())
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reset_mail_whose_link_expired_in_the_queue_is_dropped() {
+        // One stuck send holds the queue for SEND_TIMEOUT; behind a long line
+        // of them a reset mail outlives its 30 minutes.
+        let q = QueuedMailer::spawn(Arc::new(Stuck), 1);
+        for i in 0..70 {
+            q.send(confirmation(&format!("u{i}@x.y"))).await.unwrap();
+        }
+        q.send(reset_email("http://x", "r@x.y", "t")).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(71 * 31)).await;
+        // Nothing to assert on a stuck mailer but that the worker moved on:
+        // the queue drained, so a new message is accepted at once.
+        q.send(confirmation("late@x.y")).await.unwrap();
+    }
+
+    #[test]
+    fn address_tags_hide_the_address_but_match_it() {
+        let t = address_tag(" Alice@Example.org");
+        assert_eq!(t, address_tag("alice@example.org"));
+        assert_eq!(t.len(), 12);
+        assert!(!t.contains("alice"));
+    }
+
+    #[tokio::test]
+    async fn the_file_backend_writes_one_message_per_file() {
+        let dir = std::env::temp_dir().join(format!("wordfall-outbox-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        FileMailer::new(&dir).send(confirmation("Bob+x@Example.org")).await.unwrap();
+        let files: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        assert_eq!(files.len(), 1, "{files:?}");
+        assert!(files[0].starts_with("bob+x@example.org.") && files[0].ends_with(".json"), "{files:?}");
+        let doc: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join(&files[0])).unwrap()).unwrap();
+        assert_eq!(doc["confirmation_code"], "code");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn caps_per_ip_and_per_address() {

@@ -25,6 +25,8 @@
 			await goto(`/register/check-email?email=${encodeURIComponent(email)}`);
 		} catch (err) {
 			if (err instanceof ApiError && err.fieldErrors.length) errors = err.fieldErrors;
+			else if (err instanceof ApiError && err.code === 'registration_closed')
+				error = 'Wordfall is not taking new accounts at the moment.';
 			else error = describe(err);
 		} finally {
 			busy = false;

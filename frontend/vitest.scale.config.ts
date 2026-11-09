@@ -23,7 +23,7 @@ export default mergeConfig(
 				enabled: true,
 				headless: true,
 				// A persistent profile: a fresh context is incognito, whose small
-				// in-memory storage quota a 300,000-question cascade exceeds.
+				// in-memory storage quota a 130,000-question cascade exceeds.
 				provider: playwright({
 					persistentContext: 'node_modules/.cache/wordfall-scale-profile',
 					launchOptions: { args: ['--js-flags=--max-old-space-size=8192'] }

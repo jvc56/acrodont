@@ -324,11 +324,11 @@ async fn the_grades_endpoint(pool: sqlx::PgPool) {
     let app = app(pool).await;
     let mut d = device(&app, "alice").await;
     let user = d.client.user_id.unwrap();
-    let s = Setup::new(300_000);
+    let s = Setup::new(130_000);
     insert_cascade(&app, user, &s).await;
     sqlx::query(
         "UPDATE quiz_questions SET grade = 'missed', graded_at = now(), graded_by_device_id = $2
-         WHERE quiz_id = $1 AND question_idx >= 299600",
+         WHERE quiz_id = $1 AND question_idx >= 129600",
     )
     .bind(s.source_id)
     .bind(d.id)
@@ -336,7 +336,7 @@ async fn the_grades_endpoint(pool: sqlx::PgPool) {
     .await
     .unwrap();
     let q = common::sync::quiz_now(&app, s.source_id).await;
-    for page in 0..6 {
+    for page in 0..3 {
         let from = page * 50_000;
         let r = d.client.get(&format!("/api/cascades/{}/quizzes/{}/grades?from={from}&limit=50000", s.cascade_id, s.source_id)).await;
         assert_eq!(r.status, StatusCode::OK);
@@ -346,7 +346,7 @@ async fn the_grades_endpoint(pool: sqlx::PgPool) {
         assert_eq!(b["shuffle_seed"], q.seed);
         let idx: Vec<i64> = b["question_idx"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
         assert!(idx.iter().all(|i| (from..from + 50_000).contains(i)), "inside its own window");
-        assert_eq!(idx.len(), if page < 5 { 0 } else { 400 });
+        assert_eq!(idx.len(), if page < 2 { 0 } else { 400 });
         assert_eq!(b["grade"].as_array().unwrap().len(), idx.len());
     }
     let mut bob = device(&app, "bob").await;

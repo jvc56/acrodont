@@ -8,6 +8,7 @@ data "aws_iam_policy_document" "ecs_assume" {
   }
 }
 
+# Pulls images, writes logs and reads the SSM secrets for every task family.
 resource "aws_iam_role" "execution" {
   name               = "wordfall-execution"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -21,7 +22,7 @@ resource "aws_iam_role_policy_attachment" "execution" {
 data "aws_iam_policy_document" "execution_ssm" {
   statement {
     actions   = ["ssm:GetParameters"]
-    resources = [for p in aws_ssm_parameter.secret : p.arn]
+    resources = values(local.ssm_arn)
   }
 }
 
@@ -31,6 +32,7 @@ resource "aws_iam_role_policy" "execution_ssm" {
   policy = data.aws_iam_policy_document.execution_ssm.json
 }
 
+# The app task: sends mail, and nothing else.
 resource "aws_iam_role" "task" {
   name               = "wordfall-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -49,19 +51,13 @@ resource "aws_iam_role_policy" "task_ses" {
   policy = data.aws_iam_policy_document.task_ses.json
 }
 
-# ECS Exec sessions into the backend container (docs/runbook.md: granting admin).
-data "aws_iam_policy_document" "task_exec" {
+# EventBridge Scheduler runs the backup and drill task families.
+data "aws_iam_policy_document" "scheduler_assume" {
   statement {
-    actions = [
-      "ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel",
-      "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel",
-    ]
-    resources = ["*"]
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["scheduler.amazonaws.com"]
+    }
   }
-}
-
-resource "aws_iam_role_policy" "task_exec" {
-  name   = "ecs-exec"
-  role   = aws_iam_role.task.id
-  policy = data.aws_iam_policy_document.task_exec.json
 }

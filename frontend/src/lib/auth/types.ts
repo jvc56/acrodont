@@ -5,4 +5,5 @@ export interface Me {
 	is_admin: boolean;
 	trash_retention_days: number;
 	max_quiz_questions: number;
+	max_cascades_per_user: number;
 }

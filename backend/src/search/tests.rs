@@ -545,7 +545,7 @@ mod props {
         prop_oneof![
             (1i64..=8, 0i64..=4).prop_map(|(a, d)| c("length", json!({ "min": a, "max": (a + d).min(15) }))),
             (0i64..=3, 0i64..=2).prop_map(|(a, d)| c("num_vowels", json!({ "min": a, "max": a + d }))),
-            prop::sample::select(vec!["A", "E", "S", "T", "Q", "Z", "AE", "ST"]).prop_map(|t| includes(t)),
+            prop::sample::select(vec!["A", "E", "S", "T", "Q", "Z", "AE", "ST"]).prop_map(includes),
             prop::sample::select(vec!["A", "E", "S", "T", "Q", "Z"]).prop_map(|t| not(includes(t))),
             prop::sample::select(vec!["A T", "E I N R S T A", "Q I", "T . P", ". . . .", "E T X ."])
                 .prop_map(|p| c("anagram_match", json!({ "pattern": p }))),

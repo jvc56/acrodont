@@ -1,7 +1,7 @@
 # Local stack (PLAN.md § Development). Brought up by scripts/stack.py.
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16@sha256:a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6
     environment:
       POSTGRES_USER: wordfall
       POSTGRES_PASSWORD: wordfall
@@ -18,10 +18,16 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      target: backend
+      args:
+        CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-2}
     env_file:
       - path: docker/backend.defaults.env
       - path: ${WORDFALL_ENV_FILE:-.stack/default.env}
         required: false
+    # MAIL_BACKEND=file writes here (scripts/stack.py sets it per project).
+    volumes:
+      - ${WORDFALL_OUTBOX_DIR:-./.stack/outbox}:/outbox
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,7 +40,9 @@ services:
         APP_BUILD: ${WORDFALL_APP_BUILD:-0}
         TEST_LIMITS: ${WORDFALL_TEST_LIMITS:-}
     ports:
-      - "${WORDFALL_PORT:-5173}:80"
+      # Loopback only: Docker's published ports bypass the host firewall, and
+      # this stack has fixed credentials. BIND_HOST=0.0.0.0 to test from a phone.
+      - "${BIND_HOST:-127.0.0.1}:${WORDFALL_PORT:-5173}:80"
     depends_on:
       - backend
 
@@ -51,7 +59,7 @@ services:
       - ./frontend:/src/frontend
       - ./contract-fixtures:/src/contract-fixtures
     ports:
-      - "${WORDFALL_VITE_PORT:-5174}:5174"
+      - "${BIND_HOST:-127.0.0.1}:${WORDFALL_VITE_PORT:-5174}:5174"
 
 volumes:
   pgdata:

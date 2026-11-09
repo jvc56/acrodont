@@ -392,7 +392,7 @@ class Cascade:
         return {}
 
     @staticmethod
-    def check_option_values(op, cap=300000):
+    def check_option_values(op, cap=130000):
         if "segment_size" in op:
             s = op["segment_size"]
             if not isinstance(s, int) or not (s == 0 or 5 <= s <= cap):

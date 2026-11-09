@@ -7,12 +7,15 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 /// The hard ceiling on questions per quiz; `MAX_QUIZ_QUESTIONS` may only lower it.
-pub const QUESTION_CEILING: u32 = 300_000;
+pub const QUESTION_CEILING: u32 = 130_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MailBackend {
     Console,
     Ses,
+    /// Console, plus one file per message in `MAIL_OUTBOX_DIR`, for tests and
+    /// `scripts/stack.py` (no log scraping).
+    File,
 }
 
 #[derive(Clone, Debug)]
@@ -24,12 +27,16 @@ pub struct Config {
     pub secure_cookies: bool,
     pub mail_backend: MailBackend,
     pub mail_from: String,
+    pub mail_outbox_dir: Option<String>,
+    pub mail_max_per_second: u32,
     pub public_url: String,
     pub max_quiz_questions: u32,
     pub max_cascades_per_user: u32,
+    pub max_accounts: u32,
     pub max_saved_searches_per_user: u32,
     pub search_timeout_ms: u64,
     pub search_concurrency: u32,
+    pub export_concurrency: u32,
     pub trash_retention_days: u32,
     pub sync_retention_days: u32,
     pub sync_max_ops: u32,
@@ -49,6 +56,9 @@ pub struct Config {
     pub auth_rate_per_ip_per_minute: u32,
     pub catalog_reconcile_seconds: u64,
     pub trusted_proxy_hops: u32,
+    /// `POST /api/dev/login` for `./scripts/dev.py`. Refused with secure
+    /// cookies, so a TLS deployment cannot start with it on.
+    pub dev_login: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -68,12 +78,24 @@ impl Config {
         let mail_backend = match r.string("MAIL_BACKEND", "console").as_str() {
             "console" => MailBackend::Console,
             "ses" => MailBackend::Ses,
+            "file" => MailBackend::File,
             other => {
                 return Err(ConfigError(format!(
-                    "MAIL_BACKEND must be console or ses, not {other:?}"
+                    "MAIL_BACKEND must be console, ses or file, not {other:?}"
                 )));
             }
         };
+        let mail_outbox_dir = r.get("MAIL_OUTBOX_DIR").filter(|v| !v.is_empty()).map(str::to_owned);
+        if mail_backend == MailBackend::File && mail_outbox_dir.is_none() {
+            return Err(ConfigError("MAIL_BACKEND=file needs MAIL_OUTBOX_DIR".into()));
+        }
+        let secure_cookies = r.parse_bool("SECURE_COOKIES", false)?;
+        let dev_login = r.parse_bool("DEV_LOGIN", false)?;
+        if dev_login && secure_cookies {
+            return Err(ConfigError(
+                "DEV_LOGIN=true is for a local stack, and refused with SECURE_COOKIES=true".into(),
+            ));
+        }
         let max_quiz_questions: u32 = r.parse("MAX_QUIZ_QUESTIONS", QUESTION_CEILING)?;
         if max_quiz_questions > QUESTION_CEILING || max_quiz_questions == 0 {
             return Err(ConfigError(format!(
@@ -84,20 +106,32 @@ impl Config {
         if search_concurrency == 0 {
             return Err(ConfigError("SEARCH_CONCURRENCY must be at least 1".into()));
         }
+        let export_concurrency: u32 = r.parse("EXPORT_CONCURRENCY", 2)?;
+        if export_concurrency == 0 {
+            return Err(ConfigError("EXPORT_CONCURRENCY must be at least 1".into()));
+        }
+        let max_cascades_per_user: u32 = r.parse("MAX_CASCADES_PER_USER", 20)?;
+        if max_cascades_per_user == 0 {
+            return Err(ConfigError("MAX_CASCADES_PER_USER must be at least 1".into()));
+        }
         Ok(Config {
             database_url: r.required("DATABASE_URL")?,
             session_signing_key,
             bind_addr: r.parse("BIND_ADDR", "0.0.0.0:8080".parse().unwrap())?,
             session_ttl_seconds: r.parse("SESSION_TTL_SECONDS", 2_592_000)?,
-            secure_cookies: r.parse_bool("SECURE_COOKIES", false)?,
+            secure_cookies,
             mail_backend,
             mail_from: r.string("MAIL_FROM", "no-reply@wordfall.local"),
+            mail_outbox_dir,
+            mail_max_per_second: r.parse_rate("MAIL_MAX_PER_SECOND", 1)?,
             public_url: r.string("PUBLIC_URL", "http://localhost:5173"),
             max_quiz_questions,
-            max_cascades_per_user: r.parse("MAX_CASCADES_PER_USER", 100)?,
+            max_cascades_per_user,
+            max_accounts: r.parse("MAX_ACCOUNTS", 50)?,
             max_saved_searches_per_user: r.parse("MAX_SAVED_SEARCHES_PER_USER", 200)?,
             search_timeout_ms: r.parse("SEARCH_TIMEOUT_MS", 2000)?,
             search_concurrency,
+            export_concurrency,
             trash_retention_days: r.parse("TRASH_RETENTION_DAYS", 30)?,
             sync_retention_days: r.parse("SYNC_RETENTION_DAYS", 90)?,
             sync_max_ops: r.parse("SYNC_MAX_OPS", 500)?,
@@ -120,6 +154,7 @@ impl Config {
             auth_rate_per_ip_per_minute: r.parse_rate("AUTH_RATE_PER_IP_PER_MINUTE", 30)?,
             catalog_reconcile_seconds: r.parse("CATALOG_RECONCILE_SECONDS", 60)?,
             trusted_proxy_hops: r.parse("TRUSTED_PROXY_HOPS", 0)?,
+            dev_login,
         })
     }
 }
@@ -202,7 +237,11 @@ mod tests {
     fn defaults_apply() {
         let c = Config::from_map(&base()).unwrap();
         assert_eq!(c.session_ttl_seconds, 2_592_000);
-        assert_eq!(c.max_quiz_questions, 300_000);
+        assert_eq!(c.max_quiz_questions, 130_000);
+        assert_eq!(c.max_cascades_per_user, 20);
+        assert_eq!(c.max_accounts, 50);
+        assert_eq!(c.export_concurrency, 2);
+        assert!(!c.dev_login);
         assert_eq!(c.search_concurrency, 2);
         assert_eq!(c.api_max_body_bytes, 16_777_216);
         assert_eq!(c.mail_backend, MailBackend::Console);
@@ -215,13 +254,36 @@ mod tests {
             ("SESSION_TTL_SECONDS", "abc"),
             ("SECURE_COOKIES", "yes"),
             ("MAIL_BACKEND", "smtp"),
-            ("MAX_QUIZ_QUESTIONS", "300001"),
+            ("MAX_QUIZ_QUESTIONS", "130001"),
+            ("MAX_CASCADES_PER_USER", "0"),
+            ("EXPORT_CONCURRENCY", "0"),
+            ("MAIL_MAX_PER_SECOND", "0"),
+            ("DEV_LOGIN", "yes"),
             ("SESSION_SIGNING_KEY", "abcd"),
         ] {
             let mut env = base();
             env.insert(k.into(), v.into());
             assert!(Config::from_map(&env).is_err(), "{k}={v} accepted");
         }
+    }
+
+    #[test]
+    fn dev_login_is_refused_with_secure_cookies() {
+        let mut env = base();
+        env.insert("DEV_LOGIN".into(), "true".into());
+        assert!(Config::from_map(&env).unwrap().dev_login);
+        env.insert("SECURE_COOKIES".into(), "true".into());
+        let err = Config::from_map(&env).unwrap_err();
+        assert!(err.0.contains("DEV_LOGIN"), "{err}");
+    }
+
+    #[test]
+    fn file_mail_needs_an_outbox() {
+        let mut env = base();
+        env.insert("MAIL_BACKEND".into(), "file".into());
+        assert!(Config::from_map(&env).is_err());
+        env.insert("MAIL_OUTBOX_DIR".into(), "/tmp/outbox".into());
+        assert_eq!(Config::from_map(&env).unwrap().mail_backend, MailBackend::File);
     }
 
     #[test]

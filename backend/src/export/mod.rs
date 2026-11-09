@@ -216,6 +216,9 @@ async fn export_token(
     Ok(Json(json!({ "url": url })).into_response())
 }
 
+/// How long a server export waits for a permit before answering 503.
+const EXPORT_PERMIT_WAIT: std::time::Duration = std::time::Duration::from_secs(50);
+
 async fn export(
     State(state): State<AppState>,
     Path(cascade): Path<Uuid>,
@@ -229,6 +232,14 @@ async fn export(
     if claims.cascade != cascade || claims.h != hash(&p.query) || claims.exp <= state.clock.now() {
         return nothing();
     }
+    // EXPORT_CONCURRENCY: peak memory is the catalog plus this many exports,
+    // whatever the number of users (BIRDTEST_LESSONS_PLAN.md COST-1). Taken
+    // before the token is spent, so a request that gives up wastes nothing;
+    // the permit then lives as long as the stream.
+    let permit = match tokio::time::timeout(EXPORT_PERMIT_WAIT, state.export_permits.clone().acquire_owned()).await {
+        Ok(Ok(permit)) => permit,
+        _ => return Err(ApiError::Unavailable { retry_after_secs: 10 }),
+    };
     // One use, recorded where any task sees it.
     let spent = sqlx::query!(
         "INSERT INTO export_tokens_spent (jti, expires_at) VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -249,6 +260,7 @@ async fn export(
     };
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(8);
     tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         format::format_each(&input, 2000, &mut |chunk| {
             let _ = tx.blocking_send(Ok(Bytes::from(chunk)));
         });

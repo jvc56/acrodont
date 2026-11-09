@@ -1,4 +1,4 @@
-// PLAN.md § Scale tests: "Resync a device holding five 300,000-question
+// PLAN.md § Scale tests: "Resync a device holding five 130,000-question
 // cascades, one of them with cleared levels whose rows a Trash export
 // fetched, and assert the full pull's base comparison and deletions finish
 // within budget and keep those cleared rows. A sixth cascade has run a
@@ -33,7 +33,7 @@ function rowsIn(p: SyncResponse): number {
 	);
 }
 
-describe('a resync of a device holding five 300,000-question cascades and 4,000 chain quizzes', () => {
+describe('a resync of a device holding five 130,000-question cascades and 4,000 chain quizzes', () => {
 	it('compares and deletes within budget, keeps the exported cleared rows, and pages under 50,000 rows', async () => {
 		const server = new FakeServer();
 		const big = Array.from({ length: 5 }, (_, i) => ids(i + 1));
@@ -49,7 +49,7 @@ describe('a resync of a device holding five 300,000-question cascades and 4,000 
 		await d.engine.sync();
 		await d.dl.run().catch(() => undefined);
 
-		// The first cascade clears a 150,000-question Level 2 …
+		// The first cascade clears a 65,000-question Level 2 …
 		const [first] = big;
 		const level2 = uuid('b', 1);
 		other.grade(first.cascade, first.source, (p) => p % 2 === 1);

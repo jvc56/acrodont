@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Nginx serving the SvelteKit static build and proxying /api to the backend.
-FROM node:22-bookworm-slim AS build
+# Pinned by digest, as in backend.Dockerfile.
+FROM node:22-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9 AS build
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
@@ -14,7 +15,7 @@ ARG TEST_LIMITS=""
 ENV WORDFALL_BUILD=$APP_BUILD WORDFALL_COMMIT=$APP_COMMIT WORDFALL_TEST_LIMITS=$TEST_LIMITS
 RUN npm run build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
 COPY docker/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY docker/wordfall-headers.inc /etc/nginx/conf.d/wordfall-headers.inc
 COPY --from=build /src/frontend/build /usr/share/nginx/html

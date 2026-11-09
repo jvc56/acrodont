@@ -435,7 +435,8 @@ async fn login_sets_session_and_csrf_cookies_with_one_ttl(pool: sqlx::PgPool) {
     assert_eq!(body["username"], "ivy");
     assert_eq!(body["is_admin"], false);
     assert_eq!(body["trash_retention_days"], 30);
-    assert_eq!(body["max_quiz_questions"], 300000);
+    assert_eq!(body["max_quiz_questions"], 130000);
+    assert_eq!(body["max_cascades_per_user"], 20);
     let session = r.set_cookie("wordfall_session").unwrap();
     let csrf = r.set_cookie("wordfall_csrf").unwrap();
     assert!(session.contains("HttpOnly"));
@@ -1078,3 +1079,71 @@ async fn purge_deletes_stale_unconfirmed_accounts(pool: sqlx::PgPool) {
 
 #[allow(dead_code)]
 fn _unused(_: Client) {}
+
+/// MAX_ACCOUNTS: once the site holds that many accounts, every registration
+/// is refused alike, a new address and a known one, so a closed site reveals
+/// nothing about which addresses have accounts.
+#[sqlx::test]
+async fn registration_closes_at_max_accounts(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("MAX_ACCOUNTS", "2")]).await;
+    app.signed_in("first").await;
+    let mut c = app.client();
+    let r = c.post("/api/auth/register", reg("second", "second@example.com")).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    for (u, e) in [("third", "third@example.com"), ("again", "first@example.com")] {
+        let r = c.post("/api/auth/register", reg(u, e)).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{u}");
+        assert_eq!(r.json()["error"], "registration_closed");
+    }
+    assert!(app.settled_mail_to("third@example.com").await.is_empty());
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM users").fetch_one(app.db()).await.unwrap();
+    assert_eq!(n, 2);
+}
+
+/// Unconfirmed accounts whose codes have all expired give their place back:
+/// they are deleted before the count, as they are for their username.
+#[sqlx::test]
+async fn an_expired_unconfirmed_account_does_not_hold_a_place(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("MAX_ACCOUNTS", "1")]).await;
+    let mut c = app.client();
+    assert_eq!(c.post("/api/auth/register", reg("stale", "stale@example.com")).await.status, StatusCode::ACCEPTED);
+    assert_eq!(c.post("/api/auth/register", reg("fresh", "fresh@example.com")).await.status, StatusCode::FORBIDDEN);
+    sqlx::query("UPDATE email_confirmations SET expires_at = now() - interval '1 second'").execute(app.db()).await.unwrap();
+    assert_eq!(c.post("/api/auth/register", reg("fresh", "fresh@example.com")).await.status, StatusCode::ACCEPTED);
+}
+
+/// /api/auth/me reports the cascade limit, so the device shows the server's.
+#[sqlx::test]
+async fn me_reports_the_cascade_limit(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("MAX_CASCADES_PER_USER", "7")]).await;
+    let mut c = app.signed_in("limits").await;
+    assert_eq!(c.get("/api/auth/me").await.json()["max_cascades_per_user"], 7);
+}
+
+/// DEV_LOGIN: absent by default (404), and with it a confirmed account gets a
+/// session without its password, answered as /api/auth/login answers.
+#[sqlx::test]
+async fn dev_login_exists_only_when_configured(pool: sqlx::PgPool) {
+    let app = TestApp::new(pool.clone()).await;
+    app.signed_in("dev").await;
+    let r = app.client().post("/api/dev/login", json!({ "username": "dev" })).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test]
+async fn dev_login_signs_in_a_confirmed_account(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("DEV_LOGIN", "true")]).await;
+    app.signed_in("dev").await;
+    let mut c = app.client();
+    let r = c.post("/api/dev/login", json!({ "username": "dev" })).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["username"], "dev");
+    assert_eq!(c.get("/api/auth/me").await.json()["username"], "dev");
+
+    assert_eq!(c.post("/api/dev/login", json!({ "username": "nobody" })).await.status, StatusCode::NOT_FOUND);
+    let mut other = app.client();
+    other.post("/api/auth/register", reg("pending", "pending@example.com")).await;
+    let r = other.post("/api/dev/login", json!({ "username": "pending" })).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.json()["error"], "email_unconfirmed");
+}

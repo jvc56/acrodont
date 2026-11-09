@@ -22,7 +22,7 @@ test('the Cascades page lists a cascade, the Trash takes it and gives it back', 
 	const row = page.getByRole('listitem').filter({ hasText: name });
 	await expect(row).toBeVisible();
 	await expect(row.getByText(/of \d+ cascades/)).toHaveCount(0);
-	await expect(page.getByText(/\d+ of 100 cascades/)).toBeVisible();
+	await expect(page.getByText(/\d+ of 20 cascades/)).toBeVisible();
 	await expect(row.getByText('Available offline')).toBeVisible({ timeout: 30_000 });
 	await row.getByRole('button', { name: 'Move to Trash' }).click();
 	await expect(page.getByText(name)).toHaveCount(0);

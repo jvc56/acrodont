@@ -1,12 +1,14 @@
 terraform {
-  required_version = ">= 1.9"
+  # 1.11: use_lockfile for the S3 backend's state lock (no DynamoDB table).
+  required_version = ">= 1.11"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.80"
     }
   }
-  # State backend is configured at init time (-backend-config), out of band.
+  # Configured at init by scripts/onboard-deployer.sh (-backend-config), so no
+  # bucket name is committed.
   backend "s3" {}
 }
 
@@ -16,3 +18,6 @@ provider "aws" {
     tags = { Project = "wordfall", Environment = var.environment }
   }
 }
+
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}

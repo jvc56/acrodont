@@ -106,7 +106,7 @@ def previous_size(s3, bucket: str, key: str) -> Optional[int]:
 
 
 def to_s3(args: argparse.Namespace, day: dt.date) -> int:
-    import boto3  # the backend image carries python3-boto3
+    import boto3  # the ops image carries python3-boto3
 
     s3 = boto3.client("s3", region_name=args.s3_region)
     key = f"daily/{day.isoformat()}.dump"
@@ -140,7 +140,17 @@ def to_s3(args: argparse.Namespace, day: dt.date) -> int:
     return size
 
 
+def stop_on_sigterm() -> None:
+    """As a container's PID 1, Python ignores SIGTERM unless it handles it, and
+    ECS's StopTask then SIGKILLs it 30 s later with no cleanup. Exiting lets
+    boto3 abort a half-finished multipart upload (birdtest KL-80)."""
+    import signal
+
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+
+
 def main(argv: Optional[List[str]] = None) -> int:
+    stop_on_sigterm()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     src = p.add_mutually_exclusive_group()
     src.add_argument("--database-url", help="the database to dump (default: DATABASE_URL)")

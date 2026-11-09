@@ -1,8 +1,9 @@
 # Backups (PLAN.md § Backups). RDS point-in-time recovery is in rds.tf; this
-# is the nightly dump: `pg_dump --format=custom` plus `--schema-only`, run by
-# scripts/backup.py as a scheduled Fargate task on the backend image with a
-# read-only database role, into an encrypted, versioned, object-locked bucket
-# in a second region. Daily dumps are kept 90 days, monthly dumps a year.
+# is the nightly dump (scripts/backup.py) into an encrypted, versioned,
+# object-locked bucket in a second region, and the monthly restore drill
+# (scripts/drill.py), which restores the newest dump into a Postgres inside its
+# own task, never touching production. Both run on the ops image.
+# Daily dumps are kept 90 days, monthly dumps a year.
 
 provider "aws" {
   alias  = "backup"
@@ -11,8 +12,6 @@ provider "aws" {
     tags = { Project = "wordfall", Environment = var.environment }
   }
 }
-
-data "aws_caller_identity" "current" {}
 
 resource "aws_s3_bucket" "backups" {
   provider            = aws.backup
@@ -28,9 +27,8 @@ resource "aws_s3_bucket_versioning" "backups" {
   }
 }
 
-# Neither a mistake nor a compromised task role can remove a dump early: the
-# task role has no s3:BypassGovernanceRetention, and each key is named for its
-# day, so a bad run cannot overwrite a good one either.
+# Neither a mistake nor a compromised role can remove a dump early: no role
+# has s3:BypassGovernanceRetention, and each key is named for its day.
 resource "aws_s3_bucket_object_lock_configuration" "backups" {
   provider = aws.backup
   bucket   = aws_s3_bucket.backups.id
@@ -60,6 +58,31 @@ resource "aws_s3_bucket_public_access_block" "backups" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+data "aws_iam_policy_document" "backups_bucket" {
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    resources = [aws_s3_bucket.backups.arn, "${aws_s3_bucket.backups.arn}/*"]
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "backups" {
+  provider   = aws.backup
+  bucket     = aws_s3_bucket.backups.id
+  policy     = data.aws_iam_policy_document.backups_bucket.json
+  depends_on = [aws_s3_bucket_public_access_block.backups]
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "backups" {
@@ -94,8 +117,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
   depends_on = [aws_s3_bucket_versioning.backups]
 }
 
-# The backup task: the backend image, scripts/backup.py as its entry point,
-# the read-only role's DATABASE_URL from SSM (set out of band; see the runbook).
+# The backup role writes (reading only the daily dump it copies to monthly/)
+# and the drill role only reads, so neither can both read the archive and
+# replace it.
 resource "aws_iam_role" "backup_task" {
   name               = "wordfall-backup-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -103,9 +127,15 @@ resource "aws_iam_role" "backup_task" {
 
 data "aws_iam_policy_document" "backup_task" {
   statement {
-    actions   = ["s3:PutObject", "s3:PutObjectRetention", "s3:GetObject"]
+    actions   = ["s3:PutObject", "s3:PutObjectRetention", "s3:AbortMultipartUpload"]
     resources = ["${aws_s3_bucket.backups.arn}/*"]
   }
+  # The first of the month's dump is copied to monthly/, which reads it.
+  statement {
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.backups.arn}/daily/*"]
+  }
+  # Sizes the previous dump for DumpSizeRatio from the listing.
   statement {
     actions   = ["s3:ListBucket"]
     resources = [aws_s3_bucket.backups.arn]
@@ -127,19 +157,50 @@ resource "aws_iam_role_policy" "backup_task" {
   policy = data.aws_iam_policy_document.backup_task.json
 }
 
+resource "aws_iam_role" "drill_task" {
+  name               = "wordfall-drill-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
+}
+
+data "aws_iam_policy_document" "drill_task" {
+  statement {
+    actions   = ["s3:GetObject", "s3:GetObjectVersion"]
+    resources = ["${aws_s3_bucket.backups.arn}/*"]
+  }
+  statement {
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.backups.arn]
+  }
+  statement {
+    actions   = ["cloudwatch:PutMetricData"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["Wordfall/Backups"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "drill_task" {
+  name   = "drill"
+  role   = aws_iam_role.drill_task.id
+  policy = data.aws_iam_policy_document.drill_task.json
+}
+
 resource "aws_ecs_task_definition" "backup" {
   family                   = "wordfall-backup"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = 1024
-  memory                   = 2048
+  cpu                      = 512
+  memory                   = 1024
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.backup_task.arn
 
   container_definitions = jsonencode([
     {
       name       = "backup"
-      image      = var.backend_image
+      image      = local.ops_image
       essential  = true
       entryPoint = ["python3", "/opt/wordfall/scripts/backup.py"]
       command = [
@@ -147,66 +208,127 @@ resource "aws_ecs_task_definition" "backup" {
         "--s3-region", var.backup_region,
         "--metrics-region", var.region,
       ]
-      secrets          = [{ name = "DATABASE_URL", valueFrom = aws_ssm_parameter.secret["BACKUP_DATABASE_URL"].arn }]
+      secrets          = [{ name = "DATABASE_URL", valueFrom = local.ssm_arn["BACKUP_DATABASE_URL"] }]
       logConfiguration = merge(local.log_config, { options = merge(local.log_config.options, { awslogs-stream-prefix = "backup" }) })
     },
   ])
 }
 
-# Nightly, by EventBridge Scheduler.
-data "aws_iam_policy_document" "scheduler_assume" {
-  statement {
-    actions = ["sts:AssumeRole"]
-    principals {
-      type        = "Service"
-      identifiers = ["scheduler.amazonaws.com"]
-    }
+# Postgres runs inside this task, so it needs room for a dump and its restore.
+resource "aws_ecs_task_definition" "drill" {
+  family                   = "wordfall-drill"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = 1024
+  memory                   = 2048
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.drill_task.arn
+  ephemeral_storage {
+    size_in_gib = 30
   }
+
+  container_definitions = jsonencode([
+    {
+      name       = "drill"
+      image      = local.ops_image
+      essential  = true
+      entryPoint = ["python3", "/opt/wordfall/scripts/drill.py"]
+      command = [
+        "--s3-bucket", aws_s3_bucket.backups.bucket,
+        "--s3-region", var.backup_region,
+        "--metrics-region", var.region,
+      ]
+      logConfiguration = merge(local.log_config, { options = merge(local.log_config.options, { awslogs-stream-prefix = "drill" }) })
+    },
+  ])
 }
 
-resource "aws_iam_role" "backup_scheduler" {
-  name               = "wordfall-backup-scheduler"
+resource "aws_iam_role" "scheduler" {
+  name               = "wordfall-scheduler"
   assume_role_policy = data.aws_iam_policy_document.scheduler_assume.json
 }
 
-data "aws_iam_policy_document" "backup_scheduler" {
+data "aws_iam_policy_document" "scheduler" {
   statement {
-    actions   = ["ecs:RunTask"]
-    resources = [aws_ecs_task_definition.backup.arn_without_revision, "${aws_ecs_task_definition.backup.arn_without_revision}:*"]
+    actions = ["ecs:RunTask"]
+    resources = [
+      aws_ecs_task_definition.backup.arn_without_revision, "${aws_ecs_task_definition.backup.arn_without_revision}:*",
+      aws_ecs_task_definition.drill.arn_without_revision, "${aws_ecs_task_definition.drill.arn_without_revision}:*",
+    ]
   }
   statement {
     actions   = ["iam:PassRole"]
-    resources = [aws_iam_role.execution.arn, aws_iam_role.backup_task.arn]
+    resources = [aws_iam_role.execution.arn, aws_iam_role.backup_task.arn, aws_iam_role.drill_task.arn]
   }
 }
 
-resource "aws_iam_role_policy" "backup_scheduler" {
-  name   = "run-backup"
-  role   = aws_iam_role.backup_scheduler.id
-  policy = data.aws_iam_policy_document.backup_scheduler.json
+resource "aws_iam_role_policy" "scheduler" {
+  name   = "run-scheduled-tasks"
+  role   = aws_iam_role.scheduler.id
+  policy = data.aws_iam_policy_document.scheduler.json
 }
 
-resource "aws_scheduler_schedule" "backup" {
-  name                         = "wordfall-nightly-dump"
-  schedule_expression          = "cron(15 3 * * ? *)"
+locals {
+  schedules = {
+    # Nightly dump; RDS's own backup window is 07:00.
+    backup = { expression = "cron(15 3 * * ? *)", task = aws_ecs_task_definition.backup }
+    # Monthly drill, on the 1st, after that night's dump.
+    drill = { expression = "cron(0 5 1 * ? *)", task = aws_ecs_task_definition.drill }
+  }
+}
+
+resource "aws_scheduler_schedule" "tasks" {
+  for_each                     = local.schedules
+  name                         = "wordfall-${each.key}"
+  schedule_expression          = each.value.expression
   schedule_expression_timezone = "UTC"
   flexible_time_window {
     mode = "OFF"
   }
   target {
     arn      = aws_ecs_cluster.main.arn
-    role_arn = aws_iam_role.backup_scheduler.arn
+    role_arn = aws_iam_role.scheduler.arn
     ecs_parameters {
-      task_definition_arn = aws_ecs_task_definition.backup.arn_without_revision
+      # The revision Terraform registered: Terraform deploys every image.
+      task_definition_arn = each.value.task.arn
       launch_type         = "FARGATE"
       network_configuration {
-        subnets          = aws_subnet.private[*].id
-        security_groups  = [aws_security_group.tasks.id]
-        assign_public_ip = false
+        subnets          = local.task_network.subnets
+        security_groups  = local.task_network.security_groups
+        assign_public_ip = true
       }
     }
     retry_policy {
       maximum_retry_attempts = 2
     }
+  }
+}
+
+# A backup or drill task that exits non-zero mails within minutes, rather than
+# leaving it to the 36-hour staleness alarm (BAK-2).
+resource "aws_cloudwatch_event_rule" "task_failed" {
+  for_each    = { backup = "wordfall-backup", drill = "wordfall-drill" }
+  name        = "wordfall-${each.key}-failed"
+  description = "The ${each.key} task stopped with a non-zero exit code"
+  event_pattern = jsonencode({
+    source      = ["aws.ecs"]
+    detail-type = ["ECS Task State Change"]
+    detail = {
+      clusterArn = [aws_ecs_cluster.main.arn]
+      group      = ["family:${each.value}"]
+      lastStatus = ["STOPPED"]
+      containers = { exitCode = [{ "anything-but" = 0 }] }
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "task_failed" {
+  for_each  = aws_cloudwatch_event_rule.task_failed
+  rule      = each.value.name
+  target_id = "sns"
+  arn       = aws_sns_topic.alarms.arn
+  input_transformer {
+    input_paths    = { task = "$.detail.taskArn", reason = "$.detail.stoppedReason" }
+    input_template = "\"wordfall ${each.key} task FAILED (<task>): <reason>. Its log stream is ${each.key}/${each.key}/<task id> in ${aws_cloudwatch_log_group.app.name}.\""
   }
 }

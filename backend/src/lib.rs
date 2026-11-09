@@ -1,5 +1,8 @@
 //! Wordfall backend (PLAN.md § Architecture).
 
+// Row tuples from sqlx::query_as read clearer inline than behind aliases.
+#![allow(clippy::type_complexity)]
+
 pub mod app;
 pub mod auth;
 pub mod cascade;

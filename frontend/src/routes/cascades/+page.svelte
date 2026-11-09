@@ -14,7 +14,6 @@
 	import {
 		allCascades,
 		cascadeSummaries,
-		CASCADE_LIMIT,
 		keepHint,
 		ladderText,
 		type CascadeSummary
@@ -34,7 +33,7 @@
 	let opens = $state<Record<string, string>>({});
 	/** Budget-dropped cascades: "kept automatically once opened" until they are opened again. */
 	let dropped = $state<string[]>([]);
-	let maxQuiz = $state(300_000);
+	let maxQuiz = $state(130_000);
 	let editing = $state<{ id: string; count: number; options: QuizOptions } | null>(null);
 	let error = $state<string | null>(null);
 	let online = $state(true);
@@ -136,11 +135,11 @@
 	<header class="mb-6 flex flex-wrap items-center justify-between gap-4">
 		<div>
 			<h1 class="text-2xl font-semibold">Cascades</h1>
-			<p class="text-sm text-muted-foreground">{count} of {CASCADE_LIMIT} cascades</p>
+			<p class="text-sm text-muted-foreground">{count} of {session.cascadeLimit} cascades</p>
 		</div>
 		<div class="flex items-center gap-4">
 			<SyncStatus />
-			{#if count >= CASCADE_LIMIT}
+			{#if count >= session.cascadeLimit}
 				<span class="text-sm">At the limit — <a class="underline" href="/trash">Trash</a></span>
 			{:else}
 				<Button href="/cascades/new">New cascade</Button>
@@ -172,7 +171,7 @@
 				<div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
 					<Button size="sm" variant="outline" onclick={() => editOptions(s)}>Quiz options</Button>
 					<Button size="sm" variant="outline" href={`/cascades/${s.cascade.id}/export`}>Export…</Button>
-					<Button size="sm" variant="outline" disabled={count >= CASCADE_LIMIT} onclick={() => startOver(s)}>Start over</Button>
+					<Button size="sm" variant="outline" disabled={count >= session.cascadeLimit} onclick={() => startOver(s)}>Start over</Button>
 					<label class="flex items-center gap-1">
 						<input type="checkbox" checked={s.keptByUser || s.keptAutomatically} onchange={(e) => toggleKeep(s, e.currentTarget.checked)} />
 						Keep offline{#if hint}<span class="text-muted-foreground">{` (${hint})`}</span>{/if}

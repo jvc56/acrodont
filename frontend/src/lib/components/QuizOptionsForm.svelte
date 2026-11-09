@@ -11,7 +11,7 @@
 	let {
 		options = $bindable(),
 		questionCount = null,
-		maxQuizQuestions = 300_000,
+		maxQuizQuestions = 130_000,
 		editing = 'cascade',
 		segmentChain = false,
 		source = false,

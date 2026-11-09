@@ -79,6 +79,29 @@ def _env_file(project: str) -> Path:
     return STACK_DIR / f"{project}.env"
 
 
+def outbox_dir(project: str) -> Path:
+    """Where MAIL_BACKEND=file writes this project's mail, one JSON file per
+    message (backend/src/auth/mail.rs FileMailer), mounted at /outbox."""
+    path = STACK_DIR / f"{project}.outbox"
+    path.mkdir(parents=True, exist_ok=True)
+    # The backend runs as nobody.
+    path.chmod(0o777)
+    return path
+
+
+class StackFailed(RuntimeError):
+    """The stack did not come up; `.reason` says why in a word dev.py explains."""
+
+    def __init__(self, message: str, reason: str = "other", logs: str = ""):
+        super().__init__(message)
+        self.reason = reason
+        self.logs = logs
+
+
+# What SQLx says when the database holds an older edit of an applied migration.
+SCHEMA_CHANGED = "was previously applied but has been modified"
+
+
 def _signing_key(project: str) -> str:
     """A per-project session key, generated once and kept, so restarts keep sessions."""
     STACK_DIR.mkdir(exist_ok=True)
@@ -92,6 +115,8 @@ def _write_env(project: str, port: int, env: Dict[str, str]) -> None:
     values = {
         "SESSION_SIGNING_KEY": _signing_key(project),
         "PUBLIC_URL": f"http://localhost:{port}",
+        "MAIL_BACKEND": "file",
+        "MAIL_OUTBOX_DIR": "/outbox",
     }
     values.update(env)
     STACK_DIR.mkdir(exist_ok=True)
@@ -113,7 +138,8 @@ def up(project: str = DEFAULT_PROJECT, port: int = DEFAULT_PORT,
        profiles: Optional[List[str]] = None) -> str:
     """Compose up, then wait for ``/health``. Returns the base URL."""
     _write_env(project, port, env or {})
-    compose_env = {"WORDFALL_PORT": str(port), "WORDFALL_APP_BUILD": app_build()}
+    compose_env = {"WORDFALL_PORT": str(port), "WORDFALL_APP_BUILD": app_build(),
+                   "WORDFALL_OUTBOX_DIR": str(outbox_dir(project))}
     args = []
     for p in profiles or []:
         args += ["--profile", p]
@@ -121,7 +147,10 @@ def up(project: str = DEFAULT_PROJECT, port: int = DEFAULT_PORT,
     if build:
         args.append("--build")
     log(f"bringing up project {project} on :{port}")
-    _compose(project, *args, env=compose_env)
+    try:
+        _compose(project, *args, env=compose_env)
+    except subprocess.CalledProcessError as e:
+        raise StackFailed(f"docker compose up failed (exit {e.returncode}); its error is above", "compose") from e
     base_url = f"http://localhost:{port}"
     wait_healthy(project, base_url)
     return base_url
@@ -129,8 +158,12 @@ def up(project: str = DEFAULT_PROJECT, port: int = DEFAULT_PORT,
 
 def wait_healthy(project: str, base_url: str,
                  deadline_s: float = HEALTH_DEADLINE_SECONDS) -> None:
+    """Polls /health until it answers 200. Gives up at once, with the
+    backend's last lines, when the backend container has stopped: a refused
+    migration otherwise sat out the whole deadline."""
     deadline = time.monotonic() + deadline_s
     last = ""
+    checked = 0.0
     while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(f"{base_url}/health", timeout=5) as resp:
@@ -141,11 +174,22 @@ def wait_healthy(project: str, base_url: str,
             last = f"HTTP {e.code}"
         except (urllib.error.URLError, ConnectionError, OSError) as e:
             last = str(e)
+        if time.monotonic() - checked > 3:
+            checked = time.monotonic()
+            running = _compose(project, "ps", "-q", "--status", "running", "backend",
+                               capture=True, check=False).stdout.strip()
+            if not running:
+                logs = backend_logs(project, 60)
+                reason = "schema_changed" if SCHEMA_CHANGED in logs else "backend_stopped"
+                raise StackFailed("the backend stopped while starting", reason, logs)
         time.sleep(1)
-    logs = _compose(project, "logs", "--no-color", "--tail", "200", "backend",
+    logs = backend_logs(project, 200)
+    raise StackFailed(f"{base_url}/health not ready before the deadline ({last})", "timeout", logs)
+
+
+def backend_logs(project: str, tail: int = 200) -> str:
+    return _compose(project, "logs", "--no-color", "--tail", str(tail), "backend",
                     capture=True, check=False).stdout
-    raise RuntimeError(f"{base_url}/health not ready before the deadline ({last}).\n"
-                       f"Backend logs:\n{logs}")
 
 
 def down(project: str = DEFAULT_PROJECT, volumes: bool = False) -> None:
@@ -259,16 +303,57 @@ def fixture_catalog() -> Catalog:
 
 
 def _confirmation_code(project: str, email: str, deadline_s: float = 30) -> str:
-    """Read the newest confirmation code for ``email`` from the console mail log."""
-    deadline = time.monotonic() + deadline_s
+    """The newest confirmation code for `email`: from the project's mail
+    outbox (MAIL_BACKEND=file), else from the console mail log."""
+    from_file = None
+    stem = "".join(c if c.isascii() and (c.isalnum() or c in ".@-_+") else "_" for c in email.strip().lower())
     pattern = re.compile(r'"mail_to":"' + re.escape(email) + r'".*?"confirmation_code":"([^"]+)"')
+    deadline = time.monotonic() + deadline_s
+    outbox = STACK_DIR / f"{project}.outbox"
     while time.monotonic() < deadline:
+        if outbox.is_dir():
+            for path in sorted(outbox.glob(f"{glob_escape(stem)}.*.json"), reverse=True):
+                doc = json.loads(path.read_text())
+                if doc.get("confirmation_code"):
+                    from_file = doc["confirmation_code"]
+                    break
+            if from_file:
+                return from_file
         logs = _compose(project, "logs", "--no-color", "backend", capture=True).stdout
         found = pattern.findall(logs)
         if found:
             return found[-1]
         time.sleep(0.5)
-    raise RuntimeError(f"no confirmation code for {email} in the backend's console mail log")
+    raise RuntimeError(f"no confirmation code for {email} in the outbox or the backend's log")
+
+
+def glob_escape(s: str) -> str:
+    return re.sub(r"([*?\[])", r"[\1]", s)
+
+
+def ensure_user(base_url: str, user: "User", project: str = DEFAULT_PROJECT) -> "Http":
+    """A confirmed account, through the real registration path, logged in."""
+    http = Http(base_url)
+    status, body = http.json("POST", "/api/auth/login",
+                             {"username": user.username, "password": user.password})
+    if status != 200:
+        status, body = http.json("POST", "/api/auth/register", {
+            "username": user.username, "email": user.email, "password": user.password})
+        if status not in (200, 201, 202):
+            raise RuntimeError(f"registration of {user.username} failed: {status} {body}")
+        code = _confirmation_code(project, user.email)
+        status, body = http.json("POST", "/api/auth/confirm-email", {"code": code})
+        if status not in (200, 204):
+            raise RuntimeError(f"confirmation failed: {status} {body}")
+        status, body = http.json("POST", "/api/auth/login",
+                                 {"username": user.username, "password": user.password})
+        if status != 200:
+            raise RuntimeError(f"login of {user.username} failed: {status} {body}")
+    status, me = http.json("GET", "/api/auth/me")
+    if status != 200:
+        raise RuntimeError(f"/api/auth/me failed: {status} {me}")
+    http.user_id = me["user_id"]
+    return http
 
 
 def seed(base_url: str, catalog: Optional[Catalog] = None, user: Optional[User] = None,
@@ -277,29 +362,9 @@ def seed(base_url: str, catalog: Optional[Catalog] = None, user: Optional[User] 
     upload each catalog item through the admin API, skipping what exists."""
     user = user or User()
     catalog = catalog if catalog is not None else fixture_catalog()
-    http = Http(base_url)
-
-    status, body = http.json("POST", "/api/auth/login",
-                             {"username": user.username, "password": user.password})
-    if status != 200:
-        status, body = http.json("POST", "/api/auth/register", {
-            "username": user.username, "email": user.email, "password": user.password})
-        if status not in (200, 201, 202):
-            raise RuntimeError(f"registration failed: {status} {body}")
-        code = _confirmation_code(project, user.email)
-        status, body = http.json("POST", "/api/auth/confirm-email", {"code": code})
-        if status not in (200, 204):
-            raise RuntimeError(f"confirmation failed: {status} {body}")
-        status, body = http.json("POST", "/api/auth/login",
-                                 {"username": user.username, "password": user.password})
-        if status != 200:
-            raise RuntimeError(f"login failed: {status} {body}")
+    http = ensure_user(base_url, user, project)
     # No endpoint can grant admin (PLAN.md § Admin).
     psql(project, f"UPDATE users SET is_admin = true WHERE username = '{user.username}'")
-    status, me = http.json("GET", "/api/auth/me")
-    if status != 200:
-        raise RuntimeError(f"/api/auth/me failed: {status} {me}")
-    http.user_id = me["user_id"]
     log(f"user {user.username} ready (password {user.password})")
 
     if catalog.items:

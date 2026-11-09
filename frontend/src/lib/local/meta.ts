@@ -11,7 +11,7 @@ export interface MetaValues {
 	device: { device_id: string; next_device_seq: number };
 	/** `upgrade_required`: a 426 was the last answer; cleared by a sync that succeeds. */
 	sync: { cursor: number | null; last_sync_at: string | null; upgrade_required?: boolean };
-	server: { trash_retention_days: number; max_quiz_questions: number };
+	server: { trash_retention_days: number; max_quiz_questions: number; max_cascades_per_user?: number };
 	/** When this device last opened each cascade (ISO time). */
 	opens: Record<string, string>;
 	keep_offline: string[];
@@ -26,7 +26,7 @@ export const META_DEFAULTS: { [K in MetaKey]: () => MetaValues[K] } = {
 	identity: () => ({ user_id: '', username: '' }),
 	device: () => ({ device_id: crypto.randomUUID(), next_device_seq: 1 }),
 	sync: () => ({ cursor: null, last_sync_at: null }),
-	server: () => ({ trash_retention_days: 30, max_quiz_questions: 300_000 }),
+	server: () => ({ trash_retention_days: 30, max_quiz_questions: 130_000, max_cascades_per_user: 20 }),
 	opens: () => ({}),
 	keep_offline: () => [],
 	auto_keep_optout: () => [],

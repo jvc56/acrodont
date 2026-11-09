@@ -287,3 +287,19 @@ async fn the_cascade_stack_constraints(pool: sqlx::PgPool) {
     let r = sqlx::query("UPDATE cascades SET depth = 0 WHERE id = $1").bind(c2).execute(app.db()).await;
     assert!(r.is_err());
 }
+
+/// A rolled-back image starts on a schema holding a migration it does not
+/// know (BIRDTEST_LESSONS_PLAN.md DEP-4): the server's migrator ignores it,
+/// where SQLx's default refuses and the rollback would crash-loop.
+#[sqlx::test]
+async fn an_older_image_starts_on_a_newer_schema(pool: sqlx::PgPool) {
+    sqlx::query(
+        "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
+         VALUES (99990001, 'from a newer release', true, '\\x00', 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(wordfall::app::MIGRATOR.run(&pool).await.is_err(), "SQLx's default refuses");
+    wordfall::app::migrator().run(&pool).await.expect("the server's migrator starts");
+}

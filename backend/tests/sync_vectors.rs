@@ -3,6 +3,7 @@
 //! vector's expected state at every checkpoint, and the application-level
 //! invariants under PLAN.md § Schema checked there too. The 1,200-operation
 //! vector goes in three batches (§ Contract fixtures → Attempt seeds).
+#![allow(clippy::type_complexity)]
 
 mod common;
 

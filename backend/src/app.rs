@@ -10,7 +10,7 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tower_http::compression::CompressionLayer;
 
-use crate::auth::mail::{ConsoleMailer, EmailCaps, Mailer, SesMailer};
+use crate::auth::mail::{ConsoleMailer, EmailCaps, FileMailer, Mailer, QueuedMailer, SesMailer};
 use crate::auth::tokens::Keys;
 use crate::catalog::Catalog;
 use crate::clock::Clock;
@@ -29,6 +29,9 @@ pub struct AppState {
     pub catalog: Arc<Catalog>,
     /// `SEARCH_CONCURRENCY` permits, taken before `spawn_blocking`.
     pub search_permits: Arc<tokio::sync::Semaphore>,
+    /// `EXPORT_CONCURRENCY` permits, held for a server export's whole stream:
+    /// what bounds peak memory whatever the number of users.
+    pub export_permits: Arc<tokio::sync::Semaphore>,
     /// Set once every catalog item present at startup has been indexed.
     pub catalog_ready: Arc<AtomicBool>,
     /// Argon2 verifies run by login, for the log and the rate-limit tests.
@@ -47,6 +50,7 @@ impl AppState {
             mailer,
             catalog: Arc::new(Catalog::default()),
             search_permits: Arc::new(tokio::sync::Semaphore::new(config.search_concurrency as usize)),
+            export_permits: Arc::new(tokio::sync::Semaphore::new(config.export_concurrency as usize)),
             config: Arc::new(config),
             catalog_ready: Arc::new(AtomicBool::new(false)),
             argon2_verifies: Arc::new(AtomicU64::new(0)),
@@ -62,7 +66,7 @@ pub fn build_router(state: AppState) -> Router {
     let api_limit = state.config.api_max_body_bytes as usize;
     Router::new()
         .route("/health", get(crate::health::health))
-        .merge(crate::auth::routes::router())
+        .merge(crate::auth::routes::router(&state))
         .merge(crate::catalog::routes::router(&state))
         .merge(crate::search::routes::router())
         .merge(crate::search::saved::router())
@@ -76,10 +80,26 @@ pub fn build_router(state: AppState) -> Router {
 
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
+/// The migrator the server runs. `ignore_missing`: a rolled-back image starts
+/// on a schema holding migrations it does not know. Migrations are additive
+/// (PLAN.md § Schema), so it can run there; without this SQLx refuses and the
+/// rollback crash-loops (birdtest; BIRDTEST_LESSONS_PLAN.md DEP-4).
+pub fn migrator() -> sqlx::migrate::Migrator {
+    let mut m = sqlx::migrate::Migrator::with_migrations(MIGRATOR.migrations.to_vec());
+    m.set_ignore_missing(true);
+    m
+}
+
 pub async fn mailer_for(config: &Config) -> anyhow::Result<Arc<dyn Mailer>> {
     match config.mail_backend {
         MailBackend::Console => Ok(Arc::new(ConsoleMailer)),
-        MailBackend::Ses => Ok(Arc::new(SesMailer::from_env(config.mail_from.clone()).await)),
+        MailBackend::File => Ok(Arc::new(FileMailer::new(
+            config.mail_outbox_dir.clone().expect("checked by Config"),
+        ))),
+        MailBackend::Ses => {
+            let ses: Arc<dyn Mailer> = Arc::new(SesMailer::from_env(config.mail_from.clone()).await);
+            Ok(Arc::new(QueuedMailer::spawn(ses, config.mail_max_per_second)))
+        }
     }
 }
 
@@ -90,7 +110,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .max_connections(20)
         .connect(&config.database_url)
         .await?;
-    MIGRATOR.run(&db).await?;
+    migrator().run(&db).await?;
     let bind_addr = config.bind_addr;
     let mailer = mailer_for(&config).await?;
     let state = AppState::new(db, config, mailer);
@@ -99,11 +119,14 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     tracing::info!(%bind_addr, instance_id = %state.catalog.instance_id, "listening");
     let st = state.clone();
     tokio::spawn(async move {
+        let started = std::time::Instant::now();
         if let Err(e) = crate::catalog::startup(&st).await {
             tracing::error!(error = %e, "catalog startup load failed");
             std::process::exit(1);
         }
-        tracing::info!("catalog loaded; ready");
+        // Compare with the container health check's startPeriod (MIG-4).
+        let load_ms = started.elapsed().as_millis() as u64;
+        tracing::info!(load_ms, "catalog loaded; ready");
     });
     crate::purge::spawn(state.clone());
 

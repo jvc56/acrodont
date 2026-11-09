@@ -232,3 +232,24 @@ async fn export_and_session_tokens_never_stand_in_for_each_other(pool: sqlx::PgP
     let swapped = format!("{}token={session}", url.split("token=").next().unwrap());
     assert_eq!(app.get(&swapped).await.status, StatusCode::NO_CONTENT);
 }
+
+/// EXPORT_CONCURRENCY: a server export waits for a permit, held for the whole
+/// stream, so peak memory is the catalog plus that many exports whatever the
+/// number of users; the token is spent only once the permit is held.
+#[sqlx::test]
+async fn a_server_export_waits_for_an_export_permit(pool: sqlx::PgPool) {
+    let app = app(pool, &[("EXPORT_CONCURRENCY", "1")]).await;
+    let mut c = app.seed_fixture_catalog("root").await;
+    let (cascade, _) = create(&mut c, "anagram", "EN-FIX sevens").await;
+    let r = token(&mut c, &cascade, json!({ "scope": "cascade", "which": "all", "format": "txt", "lines": "questions", "order": "study", "decimals": 1 })).await;
+    let url = r.json()["url"].as_str().unwrap().to_owned();
+
+    let held = app.state.export_permits.clone().acquire_owned().await.unwrap();
+    let download = tokio::spawn(app.stream_len(&url));
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!download.is_finished(), "the export ran without a permit");
+    drop(held);
+    let (status, len) = download.await.unwrap();
+    assert_eq!(status, StatusCode::OK);
+    assert!(len > 0);
+}

@@ -1,6 +1,12 @@
-# PLAN.md § Running the tests: CI runs `make test` on every push and
-# `make test-scale` nightly. Parity never runs here: its data cannot be
-# committed. Every job uses the same one-command entry points a developer does.
+# PLAN.md § Running the tests: CI runs the test targets on every push, in
+# parallel jobs, and `make test-scale` nightly. Every job uses the same
+# one-command Makefile entry points a developer does. Parity never runs here:
+# its data cannot be committed. Deploys do not run here either: they run from
+# an operator's machine with scripts/deploy.sh, which refuses a commit whose
+# CI run on this workflow is not green.
+#
+# Actions are pinned by commit SHA (a tag can be moved); the comment names the
+# tag. ubuntu-24.04 is pinned: on 26.04 Playwright cannot install its browser.
 name: CI
 
 on:
@@ -13,20 +19,71 @@ concurrency:
   group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  CARGO_BUILD_JOBS: 4
+
 jobs:
-  test:
+  lint:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: "1.98"
-      - uses: Swatinem/rust-cache@v2
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: backend
-      - uses: actions/setup-node@v4
+      - name: cargo clippy
+        run: cd backend && SQLX_OFFLINE=true cargo clippy --locked --all-targets -- -D warnings
+
+  unit:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.98"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: backend
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: make test-unit (cargo test --lib, svelte-check, Vitest, the Nginx config test)
+        run: make test-unit
+
+  integration:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.98"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: backend
+      - name: make test-integration (against a throwaway Postgres)
+        run: make test-integration
+
+  e2e:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -35,8 +92,8 @@ jobs:
             e2e/package-lock.json
       - name: Chromium and its system libraries for Playwright
         run: cd e2e && npm ci && npx playwright install --with-deps chromium
-      - name: make test (unit, integration, end-to-end)
-        run: make test
+      - name: make test-e2e (every pass, each on its own stack)
+        run: make test-e2e
       # § End-to-end tests → What the tests reuse: "CI runs it once more with
       # ADMIN_UPLOAD_RATE_PER_MINUTE=2, where seeding must wait out 429s and still finish".
       - name: Seeding under a two-a-minute upload limit
@@ -51,30 +108,74 @@ jobs:
           done
       - name: Traces of failed journeys
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-results
           path: e2e/test-results
           if-no-files-found: ignore
+
+  terraform:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.16.5
+      - name: make infra-validate (fmt, validate, and the offline variable tests)
+        run: make infra-validate
+
+  scripts:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: make ops-check (operator scripts against fakes, runbook blocks parse)
+        run: make ops-check
 
   scale:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: "1.98"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: backend
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Chromium and its system libraries for the device's scale suites
         run: cd frontend && npm ci && npx playwright install --with-deps chromium
-      - name: make test-scale (the 300,000-question budgets)
+      - name: make test-scale (the 130,000-question budgets)
         run: make test-scale
+
+  # birdtest's nightly failed for weeks before anyone noticed. A failed
+  # scheduled run opens (or comments on) one issue, and scripts/deploy.sh warns.
+  nightly-failure:
+    needs: scale
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the nightly-failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Nightly scale run failing"
+          n=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "Failed again: $RUN_URL"
+          else
+            gh issue create --title "$title" --body "The scheduled \`make test-scale\` run failed: $RUN_URL"
+          fi

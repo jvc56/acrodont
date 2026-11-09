@@ -21,7 +21,7 @@ struct Ctx<'a> {
 impl Ctx<'_> {
     fn tick(&mut self) -> Result<(), SearchError> {
         self.ticks += 1;
-        if self.ticks % CHECK_EVERY == 0 && Instant::now() > self.deadline {
+        if self.ticks.is_multiple_of(CHECK_EVERY) && Instant::now() > self.deadline {
             return Err(SearchError::TooBroad);
         }
         Ok(())

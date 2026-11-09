@@ -1,7 +1,7 @@
 // PLAN.md § Scale tests, the device's half of the first bullet: "Create a
-// 300,000-question cascade, download its cards, grade every question (half
+// 130,000-question cascade, download its cards, grade every question (half
 // missed) through sync, finish, and assert the timings for creation,
-// download, push (300,000 grades in 600 requests back to back …), pull and
+// download, push (130,000 grades in 260 requests back to back …), pull and
 // finish stay within budget, assert that the rebase work per acknowledged
 // batch stays proportional to the batch (the drain's total IndexedDB writes
 // within a small multiple of the operation count), and assert the IndexedDB
@@ -17,13 +17,13 @@ import { ids, QUESTIONS, report, ScaleDev, timed, writes } from './testing/scale
 
 // Budgets for disk-backed Chromium IndexedDB, about twice what the development
 // machine measured (in brackets), which writes 5,000–15,000 indexed rows a second.
-/** 300,000 Source rows with positions, written in one transaction [45 s]. */
+/** 130,000 Source rows with positions, written in one transaction [45 s]. */
 const CREATE_BUDGET_MS = 120_000;
 /** 3 keys pages and 30 answer pages into IndexedDB [74 s]. */
 const DOWNLOAD_BUDGET_MS = 180_000;
 /** 600 requests, each acknowledged batch rebased [425 s, before the in-memory server's own fix]. */
 const PUSH_BUDGET_MS = 900_000;
-/** The finish: 300,000 rows reset and a 150,000-question Level 2, then acknowledged [177 s]. */
+/** The finish: 130,000 rows reset and a 65,000-question Level 2, then acknowledged [177 s]. */
 const FINISH_BUDGET_MS = 400_000;
 /** The drain's IndexedDB writes per operation it pushed. */
 const WRITES_PER_OP = 6;
@@ -32,7 +32,7 @@ const OVERLAY_ROWS = 10;
 const KEY_BYTES_MIN = 2.5e6;
 const KEY_BYTES_MAX = 3.5e6;
 
-describe('a 300,000-question cascade on the device', () => {
+describe('a 130,000-question cascade on the device', () => {
 	it('creates, downloads, pushes 600 batches with proportional rebase work, pulls and finishes within budget', async () => {
 		const server = new FakeServer();
 		const { cascade, source } = ids(1);
@@ -60,10 +60,10 @@ describe('a 300,000-question cascade on the device', () => {
 		expect(downloadMs).toBeLessThanOrEqual(DOWNLOAD_BUDGET_MS);
 
 		// Every question graded here, half missed, then the outbox drained. The
-		// grades are queued in one transaction (what 300,000 applyLocally calls
+		// grades are queued in one transaction (what 130,000 applyLocally calls
 		// leave; testing/scale.test.ts): the budget is the drain, not the tapping.
 		const [, gradeMs] = await timed(() => d.queueGrades(source, (p) => p % 2 === 1));
-		report('queueing 300,000 grades (setup)', gradeMs, null, `${await d.count('outbox')} operations queued`);
+		report('queueing 130,000 grades (setup)', gradeMs, null, `${await d.count('outbox')} operations queued`);
 		expect(await d.count('outbox')).toBe(QUESTIONS);
 		const before = writes.n;
 		const serverBefore = d.serverMs;

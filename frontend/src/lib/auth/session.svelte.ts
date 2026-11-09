@@ -13,6 +13,8 @@ import {
 } from '$lib/local/accounts';
 import { closeUserDb, onUpdatedElsewhere, userDb } from '$lib/local/open';
 import { authApi } from './client';
+import { DEFAULT_CASCADE_LIMIT } from '$lib/cascades/limits';
+import { getMeta } from '$lib/local/meta';
 import type { Me } from './types';
 
 class Session {
@@ -27,6 +29,8 @@ class Session {
 	/** The server no longer accepts this tab's session: "Log in to sync". */
 	needsLogin = $state(false);
 	me = $state<Me | null>(null);
+	/** MAX_CASCADES_PER_USER as the server last reported it, offline included. */
+	cascadeLimit = $state(DEFAULT_CASCADE_LIMIT);
 	/** Signing out on the way to the landing page (a deleted account), not to /login. */
 	toLanding = $state(false);
 }
@@ -54,10 +58,19 @@ function applyMe(me: Me) {
 	session.me = me;
 	session.isAdmin = me.is_admin;
 	session.username = me.username;
-	// The trash retention period and max_quiz_questions as /api/auth/me last reported them.
+	if (me.max_cascades_per_user) session.cascadeLimit = me.max_cascades_per_user;
+	// The server's limits as /api/auth/me last reported them.
 	void userDb(me.user_id, me.username)
 		.then((db) =>
-			db.put('meta', { trash_retention_days: me.trash_retention_days, max_quiz_questions: me.max_quiz_questions }, 'server')
+			db.put(
+				'meta',
+				{
+					trash_retention_days: me.trash_retention_days,
+					max_quiz_questions: me.max_quiz_questions,
+					max_cascades_per_user: me.max_cascades_per_user
+				},
+				'server'
+			)
 		)
 		.catch(() => undefined);
 }
@@ -76,7 +89,12 @@ export async function initSession() {
 		session.userId = id;
 		session.username = row?.username ?? '';
 		bindUser(id);
-		void userDb(id, session.username).catch(() => undefined);
+		void userDb(id, session.username)
+			.then(async (db) => {
+				const server = await getMeta(db, 'server');
+				if (server.max_cascades_per_user) session.cascadeLimit = server.max_cascades_per_user;
+			})
+			.catch(() => undefined);
 	} else {
 		await retryQueuedLogout(sendQueuedLogout);
 	}
@@ -110,7 +128,15 @@ export async function initSession() {
 }
 
 export async function login(username: string, password: string): Promise<Me> {
-	const me = await authApi.login(username, password);
+	return adoptSession(await authApi.login(username, password));
+}
+
+/**
+ * Makes `me`, whose session cookie the server has just set, this tab's
+ * signed-in account: the bookkeeping a login does. Shared by the login form
+ * and the local-only /dev-login page, so the two cannot drift.
+ */
+export async function adoptSession(me: Me): Promise<Me> {
 	await recordLogin(me.user_id, me.username);
 	session.userId = me.user_id;
 	session.needsLogin = false;

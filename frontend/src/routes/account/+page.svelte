@@ -41,7 +41,7 @@
 
 	let db = $state<UserDb | null>(null);
 	let prefs = $state<PreferencesRow | null>(null);
-	let maxQuiz = $state(300_000);
+	let maxQuiz = $state(130_000);
 
 	async function refreshPrefs() {
 		if (db) prefs = await preferencesView(db);

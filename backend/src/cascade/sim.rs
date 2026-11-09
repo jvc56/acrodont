@@ -118,7 +118,7 @@ impl SimCascade {
             purged: false,
             quizzes,
             purged_quizzes: HashSet::new(),
-            max_quiz_questions: 300_000,
+            max_quiz_questions: crate::config::QUESTION_CEILING,
         }
     }
 

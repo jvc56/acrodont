@@ -147,7 +147,7 @@ CREATE TABLE user_preferences (
     -- Defaults for new cascades only; changing one never touches an existing cascade.
     default_segment_size      INTEGER NOT NULL DEFAULT 0
                                   CHECK (default_segment_size = 0
-                                         OR default_segment_size BETWEEN 5 AND 300000),
+                                         OR default_segment_size BETWEEN 5 AND 130000),
     default_progression       quiz_progression NOT NULL DEFAULT 'ladder',
     default_require_alphabetical BOOLEAN NOT NULL DEFAULT false,
     changed_at                TIMESTAMPTZ NOT NULL DEFAULT now(), -- device time of the latest
@@ -442,7 +442,7 @@ CREATE TABLE cascades (
 
     -- Quiz options: what every quiz created for this cascade starts with.
     segment_size         INTEGER NOT NULL DEFAULT 0
-                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 300000),
+                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 130000),
                                  -- 0 = no segments; the minimum of 5 rules out the
                                  -- one-question run. See Quiz options for the
                                  -- ceil(question_count / S) bound on chain quizzes
@@ -454,7 +454,7 @@ CREATE TABLE cascades (
     options_device_id    UUID NOT NULL,              -- the device that made it (the creator at first);
                                                      -- its own next change always applies
 
-    question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 300000),
+    question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 130000),
     depth             INTEGER NOT NULL CHECK (depth >= 1),
                           -- number of active levels; Level 1 is always the Source quiz
     peak_depth        INTEGER NOT NULL DEFAULT 1 CHECK (peak_depth >= depth),
@@ -484,7 +484,7 @@ CREATE INDEX cascades_leave_set_id ON cascades (leave_set_id) WHERE leave_set_id
 -- The cascade's questions, in search order. Immutable.
 CREATE TABLE cascade_questions (
     cascade_id    UUID NOT NULL REFERENCES cascades (id) ON DELETE CASCADE,
-    idx           INTEGER NOT NULL CHECK (idx BETWEEN 0 AND 299999),
+    idx           INTEGER NOT NULL CHECK (idx BETWEEN 0 AND 129999),
     question_key  TEXT NOT NULL CHECK (char_length(question_key) BETWEEN 1 AND 300),
                       -- alphagram, word or canonical leave, in MAGPIE notation
     PRIMARY KEY (cascade_id, idx)
@@ -511,7 +511,7 @@ CREATE TABLE quizzes (
 
     -- Quiz options, copied from the cascade at creation and editable afterwards.
     segment_size         INTEGER NOT NULL DEFAULT 0
-                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 300000),
+                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 130000),
     progression          quiz_progression NOT NULL DEFAULT 'ladder',
     require_alphabetical BOOLEAN NOT NULL DEFAULT false,
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
@@ -530,7 +530,7 @@ CREATE TABLE quizzes (
                                                   -- shuffle_seed above: a hash with its top bit set
                                                   -- reads back negative, and the wire form is the
                                                   -- unsigned decimal either way (see API)
-    question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 300000),
+    question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 130000),
     correct_count     INTEGER NOT NULL DEFAULT 0 CHECK (correct_count >= 0),
     missed_count      INTEGER NOT NULL DEFAULT 0 CHECK (missed_count >= 0),
     cursor            INTEGER NOT NULL DEFAULT 0,
@@ -571,9 +571,9 @@ CREATE UNIQUE INDEX quizzes_one_per_segment
 
 CREATE TABLE quiz_questions (
     quiz_id       UUID NOT NULL REFERENCES quizzes (id) ON DELETE CASCADE,
-    question_idx  INTEGER NOT NULL CHECK (question_idx BETWEEN 0 AND 299999),
+    question_idx  INTEGER NOT NULL CHECK (question_idx BETWEEN 0 AND 129999),
                       -- index into cascade_questions
-    position      INTEGER NOT NULL CHECK (position BETWEEN 0 AND 299999),
+    position      INTEGER NOT NULL CHECK (position BETWEEN 0 AND 129999),
     grade         grade,
     graded_at     TIMESTAMPTZ,                    -- device time, for latest-wins between devices
     graded_by_device_id UUID,                     -- a device's own regrade always applies
@@ -597,7 +597,7 @@ CREATE TABLE quiz_attempts (
                         -- without it the candidate set is every quiz the user owns:
                         -- 60,000 chain quizzes would mean 60,000 seeks per sync
     attempt         INTEGER NOT NULL CHECK (attempt >= 1),
-    question_count  INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 300000),
+    question_count  INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 130000),
     correct_count   INTEGER NOT NULL CHECK (correct_count >= 0),
     missed_count    INTEGER NOT NULL CHECK (missed_count >= 0),
     outcome         finish_outcome NOT NULL,

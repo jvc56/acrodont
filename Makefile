@@ -18,7 +18,11 @@ endif
 # database is needed to build.
 export SQLX_OFFLINE := true
 
-.PHONY: infra-validate test test-unit test-integration test-e2e test-scale test-parity \
+# Uncapped, cargo's release build of the AWS SDK froze a 16 GB machine
+# (birdtest); CI raises it.
+export CARGO_BUILD_JOBS ?= 2
+
+.PHONY: infra-validate ops-check test test-unit test-integration test-e2e test-scale test-parity \
         frontend-deps sqlx-db sqlx-prepare
 
 test: test-unit test-integration test-e2e
@@ -91,16 +95,36 @@ sqlx-db:
 	  docker exec wordfall-sqlx pg_isready -h 127.0.0.1 -U wordfall >/dev/null 2>&1 && break
 	  sleep 0.5
 	done
-	docker exec -i wordfall-sqlx psql -v ON_ERROR_STOP=1 -q -U wordfall -d wordfall \
-	  < backend/migrations/0001_initial.sql
+	# Every migration, in order: a schema built from the first file alone falls
+	# behind once there is a second (birdtest's nightly did).
+	for f in backend/migrations/*.sql; do
+	  docker exec -i wordfall-sqlx psql -v ON_ERROR_STOP=1 -q -U wordfall -d wordfall < "$$f"
+	done
 
 sqlx-prepare:
 	cd backend && SQLX_OFFLINE=false DATABASE_URL=postgres://wordfall:wordfall@127.0.0.1:55432/wordfall \
 	  cargo sqlx prepare -- --all-targets
 
-## terraform validate for infra/, in a container.
-TERRAFORM := docker run --rm -u $$(id -u):$$(id -g) -v $(CURDIR)/infra:/infra -w /infra hashicorp/terraform:1.9
+## Terraform's format, validity and the offline variable tests (a mock
+## provider, no credentials), with the local terraform if it is 1.11 or later,
+## else the pinned image. fmt checks the committed files only: -recursive would
+## also flag the git-ignored prod.tfvars.
+TERRAFORM_VERSION := 1.16.5
+LOCAL_TF_OK := $(shell terraform version 2>/dev/null | head -1 | grep -qE 'v1\.(1[1-9]|[2-9][0-9])\.' && echo yes)
+ifeq ($(LOCAL_TF_OK),yes)
+TF := terraform -chdir=infra
+else
+TF := docker run --rm -u $$(id -u):$$(id -g) -v $(CURDIR)/infra:/infra -w /infra hashicorp/terraform:$(TERRAFORM_VERSION)
+endif
 infra-validate:
-	$(TERRAFORM) init -backend=false -input=false >/dev/null
-	$(TERRAFORM) validate
-	$(TERRAFORM) fmt -check -recursive
+	$(TF) init -backend=false -input=false >/dev/null
+	$(TF) validate
+	$(TF) fmt -check $$(cd infra && git ls-files '*.tf' '*.tftest.hcl')
+	$(TF) test
+
+## Operator scripts: the runbook's fenced blocks (labelled, parsing, AWS_PAGER
+## off), and scripts/*.sh against stand-ins for aws, terraform, gh and docker.
+.PHONY: ops-check
+ops-check:
+	scripts/runbook-check.sh
+	scripts/ops-scripts-check.sh
