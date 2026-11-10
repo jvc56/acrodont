@@ -28,7 +28,7 @@ async function next(page: Page, completes: boolean) {
 		await keep.click({ timeout: 15_000 });
 		await expect(keep).toHaveCount(0);
 	}
-	await expect(page.getByText(/✓ Correct|✗ Missed/)).toHaveCount(0);
+	await expect(page.locator('[data-grade="correct"], [data-grade="missed"]')).toHaveCount(0);
 	await expect(page.getByText('1 / 1')).toBeVisible();
 }
 
@@ -44,7 +44,7 @@ test('typed mode', async ({ page }) => {
 	await type(page, 'EINARST');
 	await expect(page.getByText('EINARST')).toBeVisible();
 	await type(page, '');
-	await expect(page.getByText('✗ Missed')).toBeVisible();
+	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
 	await next(page, false);
 
 	// A repeated entry is ignored; two words on one line stay in the input.
@@ -57,17 +57,17 @@ test('typed mode', async ({ page }) => {
 	await expect(page.getByLabel('Type an answer')).toHaveValue('RETAINS NASTIER');
 	// Every anagram found: correct.
 	for (const w of AEINRST_WORDS.filter((w) => w !== 'RETAINS')) await type(page, w);
-	await expect(page.getByText('✓ Correct')).toBeVisible();
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	await next(page, true);
 
-	// Before the reveal, a right click still toggles; a left click only focuses the input.
+	// Before the reveal, a right click (Toggle) does nothing; a left click only focuses the input.
 	await page.getByLabel('Type an answer').blur();
 	const area = page.getByRole('application', { name: 'Quiz area' });
-	await area.click({ button: 'right', position: { x: 20, y: 20 } });
-	await expect(page.getByText('Marked missed')).toBeVisible();
-	await area.click({ position: { x: 20, y: 20 } });
+	await area.click({ button: 'right', position: { x: 200, y: 300 } });
+	await expect(page.locator('[data-grade]')).toHaveCount(0);
+	await area.click({ position: { x: 200, y: 300 } });
 	await expect(page.getByLabel('Type an answer')).toBeFocused();
-	await expect(page.getByText('✓ Correct')).toHaveCount(0);
+	await expect(page.locator('[data-grade="correct"]')).toHaveCount(0);
 	// Switching modes mid-card clears the entries.
 	await type(page, 'RETAINS');
 	await expect(page.getByText('1 of 9 found')).toBeVisible();
@@ -84,7 +84,7 @@ test('alphabetical order in typed mode', async ({ page }) => {
 	await playerPref(page, 'Anagram answer mode', 'typed');
 	// In order: correct.
 	for (const w of AEINRST_WORDS) await type(page, w);
-	await expect(page.getByText('✓ Correct')).toBeVisible();
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	await next(page, true);
 	// Out of order: marked, found, and the card missed; a later in-order answer is accepted.
 	await type(page, 'NASTIER');
@@ -94,11 +94,11 @@ test('alphabetical order in typed mode', async ({ page }) => {
 	await type(page, 'RATINES');
 	await expect(page.getByText('3 of 9 found')).toBeVisible();
 	for (const w of ['ANESTRI', 'RETAINS', 'RETINAS', 'RETSINA', 'STAINER', 'STEARIN']) await type(page, w);
-	await expect(page.getByText('✗ Missed')).toBeVisible();
+	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
 	await next(page, false);
 	// With the option off, the same sequence grades correct.
 	const plain = await apiCascade(page, { name: 'Plain', filters: AEINRST });
 	await open(page, plain);
 	for (const w of ['NASTIER', 'ANTSIER', 'RATINES', 'ANESTRI', 'RETAINS', 'RETINAS', 'RETSINA', 'STAINER', 'STEARIN']) await type(page, w);
-	await expect(page.getByText('✓ Correct')).toBeVisible();
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 });

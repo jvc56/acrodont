@@ -7,7 +7,7 @@ import { playwright } from '@vitest/browser-playwright';
 import { defineConfig, mergeConfig } from 'vitest/config';
 import base from './vite.config';
 
-export default mergeConfig(
+const config = mergeConfig(
 	base,
 	defineConfig({
 		test: {
@@ -33,3 +33,8 @@ export default mergeConfig(
 		}
 	})
 );
+// mergeConfig concatenates arrays, which would add the unit tests' include
+// (some read files with node:fs, which a browser cannot): the scale suites only.
+config.test!.include = ['src/**/*.scale.ts'];
+
+export default config;

@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """./scripts/dev.py: a complete Wordfall on http://localhost:5173 in one command.
 
-With no arguments it builds and starts the stack, seeds the fixture catalog
-and a confirmed admin `dev`, opens the browser already signed in, and streams
+With no arguments it builds and starts the stack, seeds the licensed catalog
+in fixtures/licensed/ (English, CSW24 with definitions, and its leave values:
+scripts/build-licensed-catalog.py makes it; the small test catalog of EN-FIX,
+EN-FIX-OLD and CA-FIX stands in only when it is missing, or with --fixtures)
+and a confirmed admin `dev`, opens the browser already signed in on the home
+page, and streams
 a filtered backend log (errors, sync rejections, and a ready-to-click link for
 every mail) until Ctrl-C, which stops the stack (its data is kept).
 
     ./scripts/dev.py --scenario studying --scenario trash   # seed study states
-    ./scripts/dev.py --real-catalog --stats                 # licensed files, index sizes
+    ./scripts/dev.py --stats                                # index sizes and memory
+    ./scripts/dev.py --fixtures                             # the small test catalog too
     ./scripts/dev.py --two-devices                          # watch sync between two profiles
     ./scripts/dev.py --fresh                                # as a new deployment starts
 
@@ -184,8 +189,22 @@ def real_catalog(directory: Path) -> "stack.Catalog":
     return stack.Catalog(items)
 
 
+LICENSED = ROOT / "fixtures" / "licensed"
+
+
+def default_catalog_dir() -> Optional[str]:
+    """$WORDFALL_CATALOG_DIR, else fixtures/licensed/ when it has a manifest."""
+    if os.environ.get("WORDFALL_CATALOG_DIR"):
+        return os.environ["WORDFALL_CATALOG_DIR"]
+    return str(LICENSED) if (LICENSED / "manifest.json").is_file() else None
+
+
 def build_catalog(args) -> "stack.Catalog":
-    catalog = stack.Catalog() if (args.no_fixtures or args.fresh) else stack.fixture_catalog()
+    # The test catalog (EN-FIX, EN-FIX-OLD, CA-FIX) is for the automated tests;
+    # a developer gets the real one, and the test one only when asked or when
+    # there is no real one, so the builder is never empty.
+    fixtures = args.fixtures or (not args.real_catalog and not args.fresh)
+    catalog = stack.fixture_catalog() if fixtures else stack.Catalog()
     if args.real_catalog:
         catalog.items += real_catalog(Path(args.real_catalog).expanduser()).items
     for d in args.distribution:
@@ -198,9 +217,18 @@ def build_catalog(args) -> "stack.Catalog":
     for lv in args.leaves:
         name, path = _pair(lv, "=", "--leaves")
         catalog.items.append(stack.CatalogItem("leaves", name, Path(path).expanduser()))
-    # Distributions first, then lexicons, then leave sets.
+    # One upload per name (the fixture and licensed catalogs both carry
+    # `english`; the first listed wins), distributions first, then lexicons,
+    # then leave sets.
+    seen = set()
+    unique = []
+    for item in catalog.items:
+        if (item.kind, item.name) not in seen:
+            seen.add((item.kind, item.name))
+            unique.append(item)
     order = {"distribution": 0, "lexicon": 1, "leaves": 2}
-    catalog.items.sort(key=lambda i: order[i.kind])
+    unique.sort(key=lambda i: order[i.kind])
+    catalog.items = unique
     return catalog
 
 
@@ -461,19 +489,24 @@ def build_parser() -> argparse.ArgumentParser:
                       help="drop the database volume and the built frontend, then start clean")
     data.add_argument("--fresh", action="store_true",
                       help="a new deployment: --reset, then no user and no catalog; prints the first-admin steps")
-    data.add_argument("--real-catalog", nargs="?", const=os.environ.get("WORDFALL_CATALOG_DIR", ""), default=None,
-                      metavar="DIR", help="also upload the licensed files DIR/manifest.json lists "
-                                          "(default DIR: $WORDFALL_CATALOG_DIR)")
+    data.add_argument("--real-catalog", nargs="?", const="", default=None, metavar="DIR",
+                      help="upload the licensed files DIR/manifest.json lists. Done by default from "
+                           "$WORDFALL_CATALOG_DIR, else fixtures/licensed/ when it has a manifest.json "
+                           "(scripts/build-licensed-catalog.py makes one)")
+    data.add_argument("--no-real-catalog", action="store_true",
+                      help="skip the licensed catalog: the small fixture catalog only")
     data.add_argument("--distribution", action="append", default=[], metavar="NAME=FILE",
                       help="upload a letter distribution file as well")
     data.add_argument("--lexicon", action="append", default=[], metavar="NAME:DIST=FILE",
                       help="upload a lexicon file as well")
     data.add_argument("--leaves", action="append", default=[], metavar="LEXICON=FILE",
                       help="upload a leave values file as well")
-    data.add_argument("--no-fixtures", action="store_true", help="seed only what the flags above name")
+    data.add_argument("--fixtures", action="store_true",
+                      help="also upload the small test catalog (EN-FIX, EN-FIX-OLD, CA-FIX and their leave "
+                           "values), which is otherwise used only when there is no licensed catalog")
     data.add_argument("--scenario", action="append", default=[], choices=sorted(scenarios.SCENARIOS),
                       help="seed a study state through the real API; repeatable: " + "; ".join(
-                          f"{s.name}: {s.describe}" for s in scenarios.SCENARIOS.values()))
+                          f"{s.name}: {s.describe}" for s in scenarios.SCENARIOS.values()).replace("%", "%%"))
     data.add_argument("--users", type=int, default=0, metavar="N",
                       help="N more confirmed users (dev2, dev3, …), same password")
     data.add_argument("--stats", action="store_true",
@@ -495,10 +528,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     load_env_file()
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.real_catalog == "":
-        parser.error("--real-catalog needs a directory, or WORDFALL_CATALOG_DIR set")
-    if args.fresh and (args.scenario or args.users or args.login_as or args.real_catalog):
+    if args.fresh and (args.scenario or args.users or args.login_as or args.real_catalog is not None):
         parser.error("--fresh seeds nothing: no --scenario, --users, --login-as or --real-catalog")
+    if args.real_catalog is not None and args.no_real_catalog:
+        parser.error("--real-catalog and --no-real-catalog contradict each other")
+    if args.real_catalog == "":
+        args.real_catalog = default_catalog_dir()
+        if args.real_catalog is None:
+            parser.error("--real-catalog needs a directory, WORDFALL_CATALOG_DIR set, or fixtures/licensed/manifest.json")
+    elif args.real_catalog is None and not (args.no_real_catalog or args.fresh):
+        args.real_catalog = default_catalog_dir()
+        if args.real_catalog is None and not args.quiet:
+            log("catalog: the small fixture catalog only; no fixtures/licensed/manifest.json "
+                "(scripts/build-licensed-catalog.py makes one with CSW24)")
     if args.fresh:
         args.reset = args.no_login = True
 

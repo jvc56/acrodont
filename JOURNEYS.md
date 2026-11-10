@@ -28,11 +28,11 @@ That gives you:
 |---|---|
 | Admin `dev`, password `correct-tile-rack-bingo`; the browser opens signed in as `dev` | dev.py's log |
 | A second user, `dev2`, same password | `--login-as dev2`, or log in |
-| The fixture catalog: `english`, `catalan`, `EN-FIX`, `EN-FIX-OLD`, `CA-FIX`, leave values for EN-FIX and CA-FIX | `/admin` |
-| "Studying: EN-FIX 2–7": Level 1 finished with misses, Level 2 half graded | `/cascades` |
-| "Finished: EN-FIX sevens" | `/cascades` |
-| "Segments: EN-FIX 2–5 in fives" | `/cascades` |
-| "Trashed: EN-FIX eights" | `/trash` |
+| CSW24 with definitions and leave values, from `fixtures/licensed/` (`scripts/build-licensed-catalog.py` makes it; without it, the test catalog's EN-FIX stands in, and the names below say EN-FIX) | `/admin`, the builder |
+| "Studying: CSW24 2–7" (the 20 most probable of each length): Level 1 finished with misses, Level 2 half graded | `/cascades` |
+| "Finished: CSW24 sevens" (the 25 most probable) | `/cascades` |
+| "Segments: CSW24 2–5 in fives" | `/cascades` |
+| "Trashed: CSW24 eights" | `/trash` |
 | Three saved searches | the builder's Load dialog |
 | Filler cascades up to the limit warning (18 of 20) | `/cascades` |
 
@@ -44,7 +44,8 @@ as a link (`[mail] confirm …`).
 
 ## Part 1: visitors
 
-- [ ] **V-1** **Do** open `/` signed out (`./scripts/dev.py --no-login`). **Expect** the landing page, with Log in and Create an account.
+- [ ] **V-1** **Do** open `/` signed out (`./scripts/dev.py --no-login`). **Expect** the log-in page, with Create an account; there is no landing page.
+- [ ] **V-9** **Do** log in. **Expect** the Cascades page. The header shows Cascades, New cascade, Trash, Admin (admins only), the sync status and your name; Wordfall leads back to Cascades.
 - [ ] **V-2** **Do** register a new account. **Expect** "check your email"; dev.py prints a `[mail] confirm` link; following it confirms the account, and you can log in.
 - [ ] **V-3** **Do** register with a taken username. **Expect** "That username is taken." under the field, and no mail.
 - [ ] **V-4** **Do** register with an address that already has an account. **Expect** the same "check your email" page; dev.py prints a mail saying the address already has an account.
@@ -67,7 +68,7 @@ as a link (`[mail] confirm …`).
 
 ## Part 3: cascades, Trash, export, account
 
-- [ ] **C-1** **Do** build a cascade: Anagram, EN-FIX, Length 7–8, then preview. **Expect** a count and a sample; Create opens it.
+- [ ] **C-1** **Do** build a cascade: Anagram, CSW24, Length 7–8, then preview. **Expect** a count and a sample; Create opens it.
 - [ ] **C-2** **Do** look at the header on `/cascades`. **Expect** "18 of 20 cascades" (or your count), with the warning in the builder.
 - [ ] **C-3** **Do** create two more cascades. **Expect** "20 of 20"; Create and Start over are disabled, with a link to the Trash.
 - [ ] **C-4** **Do** restore "Trashed" from `/trash`. **Expect** it back on `/cascades`; restoring never counts as a new cascade.
@@ -76,14 +77,14 @@ as a link (`[mail] confirm …`).
 - [ ] **C-7** **Do** export "Studying" as text and as CSV, all and missed only. **Expect** downloads whose names say what is in them; offline, the export still works from the device.
 - [ ] **C-8** **Do** change preferences and a binding on `/account`, then reload. **Expect** they persist, and reach the other device.
 - [ ] **C-9** **Do** Sign out everywhere, then use the other device. **Expect** "Log in to sync"; studying still works.
-- [ ] **C-10** **Do** delete an account. **Expect** the landing page; logging in again fails.
+- [ ] **C-10** **Do** delete an account. **Expect** the log-in page; logging in again fails.
 
 ## Part 4: admins
 
 - [ ] **A-1** **Do** open `/admin` as `dev`. **Expect** the catalog, each index's size, and the instances.
 - [ ] **A-2** **Do** open `/admin` as `dev2`. **Expect** "not found", never a hint that the page exists.
 - [ ] **A-3** **Do** upload a lexicon file with an error on some lines. **Expect** a list of errors with line numbers, and nothing stored.
-- [ ] **A-4** **Do** `./scripts/dev.py --real-catalog DIR --stats` with the launch catalog. **Expect** the uploads succeed, and the printed index sizes and memory stay well inside `task_memory` (2 GiB).
+- [ ] **A-4** **Do** `./scripts/dev.py --stats` with the launch catalog in `fixtures/licensed/`. **Expect** the uploads succeed, and the printed index sizes and memory stay well inside `task_memory` (2 GiB).
 - [ ] **A-5** **Do** try to delete a lexicon a cascade uses. **Expect** the delete is disabled, with the reason shown.
 
 ## Part 5: from the command line

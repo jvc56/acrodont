@@ -169,7 +169,6 @@ async fn a_save_validates_its_tree(pool: sqlx::PgPool) {
             { "op": "and", "children": [{ "op": "and", "children": [length(2, 3)] }] }] }] }] })),
         ("does not apply", json!({ "op": "and", "children": [
             { "type": "leave_value", "negated": false, "min": 1.0, "max": null }] })),
-        ("narrows nothing", json!({ "op": "and", "children": [length(1, 15)] })),
         ("text too long", json!({ "op": "and", "children": [
             { "type": "definition", "negated": false, "text": "x".repeat(501) }] })),
         ("word list total", json!({ "op": "and", "children": [
@@ -184,6 +183,13 @@ async fn a_save_validates_its_tree(pool: sqlx::PgPool) {
     }
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM search_specs").fetch_one(app.db()).await.unwrap();
     assert_eq!(n, 0, "nothing written");
+    // A whole range, and a search with no rows (the whole lexicon), are valid searches.
+    for (what, filters) in [
+        ("whole range", json!({ "op": "and", "children": [length(1, 15)] })),
+        ("no rows", json!({ "op": "and", "children": [] })),
+    ] {
+        assert_eq!(c.post("/api/searches", save_body(Uuid::new_v4(), what, filters)).await.status, StatusCode::CREATED, "{what}");
+    }
     // A tile that is not in some other lexicon's distribution is not an error:
     // a saved search carries no lexicon.
     let filters = json!({ "op": "and", "children": [

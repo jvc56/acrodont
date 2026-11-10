@@ -343,7 +343,8 @@ export function toWire(root: GroupState, quizType: QuizType, dist: Distribution 
 		groups++;
 		if (groups === MAX_GROUPS + 1) errors.set(g.key, `A search can hold at most ${MAX_GROUPS} groups.`);
 		if (depth > MAX_DEPTH) errors.set(g.key, `Groups nest at most ${MAX_DEPTH} deep.`);
-		if (g.children.length === 0) errors.set(g.key, 'A group must hold at least one row or group.');
+		// An empty search is the whole lexicon; a nested group with nothing in it adds nothing.
+		if (g.children.length === 0 && depth > 1) errors.set(g.key, 'A group must hold at least one row or group.');
 		const children = g.children.map((c): WireGroup | WireCondition => {
 			if (c.kind === 'group') return walk(c, depth + 1);
 			count++;

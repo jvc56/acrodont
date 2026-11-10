@@ -12,7 +12,7 @@ import { ApiError, api } from '$lib/api';
 import { questionsHash } from '$lib/cascade/order';
 import type { UserDb } from '$lib/local/db';
 import { getMeta, readMeta, writeMeta } from '$lib/local/meta';
-import type { CardRow, CascadeRow, QuestionRow, QuizRow } from '$lib/local/rows';
+import type { CardRow, CascadeRow, QuestionRow, QuizRow, WordHooks } from '$lib/local/rows';
 import { preferencesView } from '$lib/local/preferences';
 import type { RwTx } from '$lib/local/view';
 import { ANSWER_STORAGE_SOFT_LIMIT_BYTES, ROW_STORAGE_BUDGET } from './config';
@@ -23,6 +23,16 @@ import { withPositions } from './rebase';
 export const INDEX_PAGE = 50_000;
 export const KEYS_PAGE = 100_000;
 export const CARDS_PAGE = 10_000;
+/**
+ * Rows written per IndexedDB transaction. A page is written in chunks, each
+ * its own transaction, because the player's reads and writes queue behind any
+ * transaction over the stores they touch (every operation writes `meta`): one
+ * 100,000-key transaction held them for over ten seconds after a large cascade
+ * was created. At ~7,500 rows a second a chunk takes about 30 milliseconds,
+ * and a background download starts no chunk while the player is acting
+ * (`whilePlayerActs`), so an action waits for one chunk at most.
+ */
+export const WRITE_CHUNK = 250;
 /**
  * Bytes a base question row with its position costs, for the budget: the
  * middle of PLAN.md's "roughly 100–200 bytes per question per level", which
@@ -51,9 +61,26 @@ export interface DownloadApi {
 		limit: number,
 		hooks: boolean,
 		definitions: boolean
-	): Promise<{ idx: number; key: string; answer: unknown }[]>;
+	): Promise<WireCard[]>;
+	/** Cards named one by one (at most MAX_CARDS_BY_IDX): the player's read-ahead. */
+	cardsByIdx?(cascade: string, idx: number[], hooks: boolean, definitions: boolean): Promise<WireCard[]>;
 	distribution(name: string): Promise<{ name: string; tiles: never[] }>;
 }
+
+/** A card as the server sends it: a Definition card asked with hooks carries its word's. */
+export type WireCard = { idx: number; key: string; answer: unknown; word?: WordHooks };
+
+/**
+ * Whether a cascade's cards are fetched with hooks: an Anagram cascade's when
+ * the preference asks, and always a Definition cascade's, whose answer shows
+ * its word with hooks above the definition.
+ */
+export function wantsHooks(quizType: string, prefs: { anagram_show_hooks: boolean }): boolean {
+	return quizType === 'definition' || (quizType === 'anagram' && prefs.anagram_show_hooks);
+}
+
+/** The server's cap on cards named with `idx=`. */
+export const MAX_CARDS_BY_IDX = 1_000;
 
 const q = (params: Record<string, string | number | boolean>) =>
 	Object.entries(params)
@@ -67,6 +94,8 @@ export const httpApi: DownloadApi = {
 	keys: (c, from, limit) => api.get(`/api/cascades/${c}/cards?${q({ from, limit, keys: true })}`),
 	cards: (c, from, limit, hooks, definitions) =>
 		api.get(`/api/cascades/${c}/cards?${q({ from, limit, hooks, definitions })}`),
+	cardsByIdx: (c, idx, hooks, definitions) =>
+		api.get(`/api/cascades/${c}/cards?${q({ idx: idx.join(','), hooks, definitions })}`),
 	distribution: (name) => api.get(`/api/letter-distributions/${encodeURIComponent(name)}`, { bindUser: false })
 };
 
@@ -120,6 +149,35 @@ export class DownloadManager {
 		} finally {
 			if (--this.priority === 0) this.wake?.();
 		}
+	}
+
+	/**
+	 * A player action (a reveal, Next, Previous): background downloads start
+	 * no new chunk until it is done, so its own reads and writes never queue
+	 * behind one chunk after another. Writes the action itself causes (a card
+	 * fetched for it) do not wait.
+	 */
+	async whilePlayerActs<T>(fn: () => Promise<T>): Promise<T> {
+		if (this.acting++ === 0) this.actsDone = new Promise((r) => (this.actsWake = r));
+		try {
+			return await fn();
+		} finally {
+			if (--this.acting === 0) this.actsWake?.();
+		}
+	}
+
+	private acting = 0;
+	private actsDone: Promise<void> = Promise.resolve();
+	private actsWake: (() => void) | null = null;
+
+	/**
+	 * Before a background chunk: let a player action finish first, waiting a
+	 * second at most, since an action can itself wait on a download (a level
+	 * whose rows are not here yet) and must never wait on its own yield.
+	 */
+	private async yieldToActs() {
+		if (this.acting === 0) return;
+		await Promise.race([this.actsDone, new Promise((r) => setTimeout(r, 1_000))]);
 	}
 
 	/** Resolves when no page the player needs is outstanding. */
@@ -348,16 +406,20 @@ export class DownloadManager {
 		if (!c) return;
 		for (const from of await this.missingRanges('questions', c, KEYS_PAGE)) {
 			const p = await this.page(() => this.api.keys(c.id, from, KEYS_PAGE));
-			await this.unit(async () => {
-				const tx = this.db.transaction(['questions', 'meta'], 'readwrite');
-				let bytes = 0;
-				for (const k of p.keys) bytes += k.length * 2 + KEY_OVERHEAD;
-				// Issued together: IndexedDB pipelines a transaction's requests.
-				const store = tx.objectStore('questions');
-				await Promise.all(p.keys.map((key, i) => store.put({ cascade_id: c.id, idx: p.from + i, key })));
-				await addSize(tx as unknown as RwTx, c.id, bytes, 0);
-				await tx.done;
-			});
+			for (let at = 0; at < p.keys.length; at += WRITE_CHUNK) {
+				const part = p.keys.slice(at, at + WRITE_CHUNK);
+				await this.yieldToActs();
+				await this.unit(async () => {
+					const tx = this.db.transaction(['questions', 'meta'], 'readwrite');
+					let bytes = 0;
+					for (const k of part) bytes += k.length * 2 + KEY_OVERHEAD;
+					// Issued together: IndexedDB pipelines a transaction's requests.
+					const store = tx.objectStore('questions');
+					await Promise.all(part.map((key, i) => store.put({ cascade_id: c.id, idx: p.from + at + i, key })));
+					await addSize(tx as unknown as RwTx, c.id, bytes, 0);
+					await tx.done;
+				});
+			}
 			this.opts.onProgress?.(cascadeId);
 		}
 	}
@@ -366,7 +428,7 @@ export class DownloadManager {
 		const c = await this.db.get('cascades', cascadeId);
 		if (!c) return;
 		const prefs = await preferencesView(this.db);
-		const hooks = c.quiz_type === 'anagram' && prefs.anagram_show_hooks;
+		const hooks = wantsHooks(c.quiz_type, prefs);
 		const definitions = c.quiz_type === 'anagram' && prefs.anagram_show_definitions;
 		// Cards record which extras they hold; a preference asking for more refetches them.
 		let froms = await this.missingRanges('cards', c, CARDS_PAGE);
@@ -374,34 +436,78 @@ export class DownloadManager {
 			const lacking = new Set(froms);
 			for (let from = 0; from < c.question_count; from += CARDS_PAGE) {
 				const first = await this.db.get('cards', [c.id, from]);
-				if (first && ((hooks && !first.hooks) || (definitions && !first.definitions))) lacking.add(from);
+				// Hooks fetched before inner hooks were sent lack them: those pages come again.
+				if (first && ((hooks && (!first.hooks || !first.inner)) || (definitions && !first.definitions))) lacking.add(from);
 			}
 			froms = [...lacking].sort((a, b) => a - b);
 		}
 		for (const from of froms) {
 			const page = await this.page(() => this.api.cards(c.id, from, CARDS_PAGE, hooks, definitions));
-			await this.writeCards(c, page, hooks, definitions);
+			await this.writeCards(c, page, hooks, definitions, true);
 			this.opts.onProgress?.(cascadeId);
 		}
 	}
 
 	/**
-	 * The page the player needs on the current card, ahead of any download:
-	 * the manager starts nothing while it is outstanding (§ Downloads).
+	 * What the player needs on the current card, ahead of any download: the
+	 * manager starts nothing while it is outstanding (§ Downloads). With
+	 * `ahead`, the next cards in the quiz's own order come in the same small
+	 * request rather than the current card's 10,000-card page: a new quiz's
+	 * order is a shuffle, so consecutive cards fall in different pages.
 	 */
-	async fetchForPlayer(cascadeId: string, idx: number): Promise<void> {
+	async fetchForPlayer(cascadeId: string, idx: number, ahead: number[] = []): Promise<void> {
 		const c = await this.db.get('cascades', cascadeId);
 		if (!c) return;
 		const prefs = await preferencesView(this.db);
-		const hooks = c.quiz_type === 'anagram' && prefs.anagram_show_hooks;
+		const hooks = wantsHooks(c.quiz_type, prefs);
 		const definitions = c.quiz_type === 'anagram' && prefs.anagram_show_definitions;
+		if (this.api.cardsByIdx) {
+			const want = [idx, ...(await this.missingCards(c.id, ahead))].slice(0, MAX_CARDS_BY_IDX);
+			const cards = await this.forPlayer(() => this.api.cardsByIdx!(c.id, want, hooks, definitions));
+			await this.writeCards(c, cards, hooks, definitions);
+			return;
+		}
 		const from = Math.floor(idx / CARDS_PAGE) * CARDS_PAGE;
 		const page = await this.forPlayer(() => this.api.cards(c.id, from, CARDS_PAGE, hooks, definitions));
 		await this.writeCards(c, page, hooks, definitions);
 	}
 
-	private async writeCards(c: CascadeRow, page: { idx: number; key: string; answer: unknown }[], hooks: boolean, definitions: boolean) {
-		{
+	/**
+	 * The player's read-ahead: the named cards this device lacks, in one small
+	 * request, so the next cards are here before they are shown while the
+	 * cascade's pages are still downloading.
+	 */
+	async fetchAhead(cascadeId: string, idx: number[]): Promise<void> {
+		if (!this.api.cardsByIdx || idx.length === 0) return;
+		const c = await this.db.get('cascades', cascadeId);
+		if (!c) return;
+		const want = (await this.missingCards(c.id, idx)).slice(0, MAX_CARDS_BY_IDX);
+		if (want.length === 0) return;
+		const prefs = await preferencesView(this.db);
+		const hooks = wantsHooks(c.quiz_type, prefs);
+		const definitions = c.quiz_type === 'anagram' && prefs.anagram_show_definitions;
+		const cards = await this.forPlayer(() => this.api.cardsByIdx!(c.id, want, hooks, definitions));
+		await this.writeCards(c, cards, hooks, definitions);
+	}
+
+	private async missingCards(cascadeId: string, idx: number[]): Promise<number[]> {
+		if (idx.length === 0) return [];
+		const store = this.db.transaction('cards').objectStore('cards');
+		const have = await Promise.all(idx.map((i) => store.getKey([cascadeId, i])));
+		return idx.filter((_, k) => have[k] === undefined);
+	}
+
+	/** `background`: a download pass, which lets a player action go first between chunks. */
+	private async writeCards(
+		c: CascadeRow,
+		all: WireCard[],
+		hooks: boolean,
+		definitions: boolean,
+		background = false
+	) {
+		for (let at = 0; at < all.length; at += WRITE_CHUNK) {
+			const page = all.slice(at, at + WRITE_CHUNK);
+			if (background) await this.yieldToActs();
 			await this.unit(async () => {
 				const tx = this.db.transaction(['cards', 'questions', 'meta'], 'readwrite');
 				let answerBytes = 0;
@@ -415,7 +521,8 @@ export class DownloadManager {
 				]);
 				const writes: Promise<unknown>[] = [];
 				page.forEach((card, i) => {
-					const row: CardRow = { cascade_id: c.id, idx: card.idx, answer: card.answer, definitions, hooks };
+					const row: CardRow = { cascade_id: c.id, idx: card.idx, answer: card.answer, definitions, hooks, inner: hooks };
+					if (card.word) row.word = card.word;
 					if (before[i]) answerBytes -= JSON.stringify(before[i]!.answer).length;
 					answerBytes += JSON.stringify(card.answer).length;
 					writes.push(cards.put(row));

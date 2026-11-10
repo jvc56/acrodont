@@ -466,10 +466,10 @@ never changes a cascade that already exists.
 | **Default progression** | New cascades | **Ladder** | Ladder / Drill |
 | **Default alphabetical order** | New cascades | off | on / off |
 | **Leave value decimal places** | Leave Value answers | `1` | `0`, `1`, `2`, `3` |
-| **Show definitions with anagrams** | Anagram answers | off | on / off |
-| **Show hooks with anagrams** | Anagram answers | off | on / off |
+| **Show definitions with anagrams** | Anagram answers | **on** | on / off |
+| **Show hooks with anagrams** | Anagram answers (with inner hooks) | **on** | on / off |
 | **Anagram answer mode** | Anagram quizzes | **Flashcard** | Flashcard / Typed |
-| **Controls** | Desktop quiz area | Show / Next: left click or Space · Toggle grade: right click or `X` · Previous: middle click or Backspace | Up to three bindings per action: any mouse button, wheel direction or key, with modifiers. See [Controls](#controls). |
+| **Controls** | Desktop quiz area | Show / Next: left click, Space or `,` · Toggle grade: right click, `X` or `M` · Previous: middle click, Backspace or `J` | Up to three bindings per action: any mouse button, wheel direction or key, with modifiers. See [Controls](#controls). |
 
 Question order is **not** a preference: questions are always shuffled.
 
@@ -583,7 +583,7 @@ because searching runs on the server.
 Selecting a cascade opens the player at its deepest level. The header shows how
 much of the [cascade limit](#cascade-limit) is used (`17 of 20 cascades`) and
 the sync status, which is [`SyncStatus`](#frontend) in every one of its states —
-**Synced**, **3 changes waiting to sync**, **Offline**, **Log in to sync**,
+**Synced**, **Waiting to sync**, **Syncing…**, **Offline**, **Log in to sync**,
 **not enough room on this device**, **signed out in another tab** and **reload to
 keep syncing** — since this is the page a user studies from and the last four
 are the ones that need acting on.
@@ -629,33 +629,94 @@ device's **primary pointer**:
 #### Desktop layout
 
 ```
-┌────────────┬────────────────────────────────────────────┬────────────────┐
-│ Wordfall   │                                            │ Level 2 of 3   │
-│            │                                            │ attempt 3      │
-│ Cascades   │                                            │ 37 / 250       │
-│ New        │                  AEINRST                   │ 31 ✓   5 ✗     │
-│ Trash      │                                            │ clear at 80%   │
-│ Account    │     ANESTRI  ANTSIER  NASTIER  RATINES …   │                │
-│            │                                            │ Ladder         │
-│            │                 ✓ Correct                  │  L1 250 waiting│
-│            │                                            │  L2  38 ◀ now  │
-│ ● Synced   │                 quiz area                  │ ⚙ Preferences  │
-└────────────┴────────────────────────────────────────────┴────────────────┘
+┌────────────┬──────────────────────────────────────────────────────────────┐
+│ Wordfall « │┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓│
+│            │┃                         AEINRST                            ┃│
+│ Cascades   │┃                         ANESTRI                            ┃│
+│ New cascade│┃                         ANTSIER                            ┃│
+│ Trash      │┃                         NASTIER …                          ┃│
+│ Admin      │┃                                                            ┃│
+│ Account    │┃          quiz area: its border is the grade                ┃│
+│ Preferences│┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛│
+│ Levels     ├──────────────────────────────────────────────────────────────┤
+│            │ Level 2 of 3  Pass 3  37 / 250 (14.40%)  31 ✓ 5 ✗ (86.11%)   ● Synced │
+└────────────┴──────────────────────────────────────────────────────────────┘
 ```
 
-- **The quiz area** is the large central panel. It takes the full height and at
-  least 60% of the window width. It shows the question, the answer and the
-  grade, and it is the only place where mouse controls act.
-- **The side rails** hold everything else, so clicking them never counts as a
-  quiz action:
-  - left: navigation and sync status
-  - right: level, attempt, progress, clear threshold, the run indicator when the
-    quiz has a [segment size](#segments) (`run 2 of 3 · 37 of 100`, numbered
-    as [Segments](#segments) defines), the
-    cascade's ladder, and the settings menu (user preferences and this quiz's
-    [options](#quiz-options))
+Users see an *attempt* (a pass through a level's quiz, reshuffled each time) as
+a **pass**: "Pass 3", "after 4 levels and 9 passes". The plan keeps "attempt"
+as the term of the data model and the API.
 
-  Both rails collapse to icons in narrower windows.
+- **The quiz area** takes the rest of the window. The question sits at the top
+  (half a rem below the area's edge by default; a setting moves it lower, up
+  to 800 px in all), with the answer beneath it, so
+  revealing the answer never moves the question. Banners appear at its foot.
+  It is the only place where mouse controls act.
+- **The grade is the quiz area's border**: once the answer is shown, red for
+  Missed and, if the user turns it on, green for Correct (off by default, so
+  only a miss stands out); none before the reveal. It changes at once (no
+  fade) as the grade is toggled. Each colour is its own setting, as is the
+  width (10 px by default). A visually hidden status line says the grade for screen readers;
+  the area carries it as `data-grade` (`correct`, `missed`).
+- **The menu** on the left holds navigation (Admin for admins),
+  **Preferences**, which opens the settings dialog (user preferences, this
+  device's settings, and this quiz's [options](#quiz-options)), **Levels**,
+  which opens the cascade's ladder beside it with the clear threshold ("a level
+  clears when a pass ends with at least 80% correct") and each level's
+  Export…. Quiz options are in Preferences, for the quiz being played, and
+  nowhere else in the player. **A cascade always opens with the menu
+  hidden**, whatever happened last time: **☰** in the quiz area's corner
+  shows it for this visit and **«** hides it again.
+- **The status bar** along the bottom, outside the quiz area, shows the level,
+  the pass, the card shown out of the level with the share of the level graded
+  in this pass in parentheses (with a thin progress line above it), the score
+  with the share of graded questions correct in parentheses — green when it is
+  at or above the clear threshold, so the pass is on track to clear the level,
+  red when it is below — and the run indicator when the quiz has a
+  [segment size](#segments) (`run 2 of 3 · 37 of 100`, numbered as
+  [Segments](#segments) defines). Percentages show two decimal places, rounded.
+  The clear threshold, constant while quizzing, is not on the bar: it is in
+  Levels and in the score's tooltip. An icon at the bar's left end hides it;
+  the same icon, left in the bottom-left corner, brings it back.
+- **The sync status** sits at the very bottom right: the right end of the
+  status bar, or the window's bottom-right corner when the bar is hidden.
+- **The sync status shows what is happening**: "Waiting to sync" after an
+  answer, "Syncing…" while the device talks to the server (a sync starts
+  within about a second of a write), then "Synced"; offline, log in, reload
+  and no room as they arise. It has a fixed width with its label flush right,
+  so a changing label never shifts what is beside it.
+- **On this device.** The question's and the answers' typeface is a choice of
+  the few every device can show offline (Inter, bundled and the default; the
+  system font; serif; monospace). **Definitions** — a Definition quiz's
+  answer and the line under each anagram — have their own typeface, size (20
+  px by default) and letter spacing, beside the question's and the answers'.
+  Every other setting here is a value the user
+  types, not a choice from a list: size
+  in px (36 by default, 8 to 200) and letter spacing in em (0, the browser's
+  normal, by default); the question's position in px from the top (8 by
+  default); whether a correct answer shows its green border (off) and a missed
+  one its red border (on); the grade border's width in px (10 by default, 0 to
+  40); and the
+  repeat guard in ms (0, off, by default). A number takes effect when its
+  field is left, out-of-range values are clamped, and values saved by builds
+  that offered presets are converted. Answers match the question by default. A
+  definition answer is prose, so it takes the answer typeface at a reading
+  size; hooks and anagram definitions stay smaller. These, the question's
+  position, the borders, whether the status bar is shown, and the repeat
+  guard are per device (the `meta` store's `display` value), never synced,
+  since what suits a laptop is wrong on a phone; they are in the settings
+  dialog and on the Account page.
+- **Every setting is a row with its control at the right end**: a checkbox,
+  a choice or a number, in the player's settings dialog, on the Account page
+  and in the quiz options alike (`SettingRow`), so the place to click is
+  always the same. Progression is a choice (Ladder or Drill) with the chosen
+  one's explanation beneath, not a pair of radio buttons.
+- **The logout warning** ("2 changes haven't synced yet. They will sync the
+  next time you log in on this device.") shows on the Account page only when
+  changes cannot sync now (offline, or the session needs a login). Online,
+  every change syncs within a second and the sync status in the header shows
+  it; a line that came and went with each setting changed would only shift
+  the page.
 - **Inside the quiz area**, text selection is off and the browser's context menu
   is suppressed. Middle-click autoscroll and (on Linux) middle-click paste are
   prevented, so all three mouse buttons are free for quiz actions.
@@ -667,12 +728,13 @@ Every quiz is driven by three actions, whatever the device:
 | Action | Before the answer is shown | After the answer is shown |
 |---|---|---|
 | **Show / Next** | Show the answer | Save the grade and go to the next card |
-| **Toggle grade** | Mark the card missed in advance ("I don't know this one") | Flip the grade between Correct and Missed |
+| **Toggle grade** | Nothing: there is no grade until the answer is shown | Flip the grade between Correct and Missed |
 | **Previous** | Go back to the previous card | Go back to the previous card |
 
-- **The grade** appears with the answer, as a large **✓ Correct** or **✗ Missed**.
-  It starts as Correct unless the card was toggled before the reveal, so a user
-  who knows the answer only ever uses Show / Next.
+- **The grade** appears with the answer, as the colour of the quiz area's
+  border (green Correct, red Missed; see the layout above). It starts as
+  Correct, so a user who knows the answer only ever uses Show / Next, and one
+  who does not shows it, then toggles.
 - **Saving.** A grade is saved only when Show / Next moves on. Going back from a
   card discards that card's unsaved reveal and toggle.
 - **Going back.** Previous shows the earlier card with its answer and saved
@@ -681,8 +743,34 @@ Every quiz is driven by three actions, whatever the device:
   current [run](#segments).
 - **The last card.** Moving on from it finishes the attempt (see
   [Finishing a quiz](#finishing-a-quiz)).
-- **Repeats.** The same action fired twice within 120 ms counts once, so a
-  bouncing mouse button or an accidental double tap never skips a card.
+- **Repeats.** The same action fired twice within the **repeat guard** counts
+  once, so a bouncing mouse button or an accidental double tap does not skip a
+  card. The guard is a setting on each device, typed in ms, and **0 (off) by
+  default**, so every press counts; a user whose mouse bounces raises it. It
+  is beside the display settings in the player's settings dialog and on the
+  Account page, since how much a button bounces belongs to the hardware.
+  Settings saved before the default changed with the old default, 50, read as
+  0. The wheel's own 150 ms guard against one flick firing many
+  steps is separate.
+- **Instant at any size.** Show / Next and Previous never wait for IndexedDB,
+  however large the quiz and however slow the browser's storage (Firefox
+  commits each read-write transaction more carefully than Chromium):
+  - the next card is drawn from memory: the player holds the keys and answers
+    of the cards from one behind to fifty ahead, read in the background in one
+    small transaction as it moves;
+  - the grade and cursor writes go to a queue that applies them in order behind
+    the screen; the score and cursor shown are what those writes will leave;
+  - actions are never dropped: they run one at a time, each up to the point its
+    card is shown, and only the end of a run or an attempt waits for the
+    queue, since finishing needs every grade saved;
+  - a reload (after a sync, a preference) takes its turn with the actions and
+    waits for the queue, so it reads what the screen shows;
+  - a write that fails halts the queue: for want of space the player returns
+    to the card it came from with the storage message, holding that write and
+    those after it until Try again; a rejection reloads what the device holds.
+  Measured in the first minute after creating a 103,925-question CSW24
+  cascade, with its download running: Next 2 ms median, 17 ms at worst (from
+  about a second before these changes); reveal the same.
 
 #### Answers
 
@@ -691,9 +779,15 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
 
 - **Anagram**: each valid anagram, one per line, in alphabetical order. The
   card carries the words already in that order, and the device never re-sorts
-  them.
-  - With *show hooks* on, each word is written Zyzzyva-style with its front
-    hooks to the left and back hooks to the right, e.g. `bcfm AA hls`. The
+  them. The words sit in **one straight column**: each line is a row of three
+  columns — front hooks, right-aligned; the word; back hooks, left-aligned —
+  with the two hook columns equally wide, so every word starts at the same
+  place and the column is centred.
+  - With *show hooks* on (the default), each word is written Zyzzyva-style with its front
+    hooks to the left and back hooks to the right, e.g. `bcfm ·AA· hls`, and
+    its **inner hooks** as a dot before the word (the word less its first tile
+    is a word) and after it (less its last tile); an absent dot still takes its
+    space, so the column stays straight. The
     hooks are drawn by `TileText` like any other tiles, in
     [tile order](#tiles), and **lower-cased only where a tile is a single ASCII
     letter**: that is what makes the English display the one Zyzzyva users know,
@@ -701,9 +795,12 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
     lower-case form is its `blank_letter` — `ny`, `l·l` — which means "a blank
     playing that tile" everywhere else in Wordfall and is an error in an upload
     file. So a Catalan front hook reads `NY`, never `ny`.
-  - With *show definitions* on, each word's definition appears in smaller text
-    beneath it.
-- **Definition**: the full definition text.
+  - With *show definitions* on (the default), each word's definition appears
+    beneath it, in the definitions' own typeface and size.
+- **Definition**: the word, written like an anagram's with its hooks and inner
+  hooks, then the full definition text beneath it. A Definition cascade's cards
+  are always fetched with hooks; the card carries its word's (`word`) beside the
+  definition, which stays the answer.
 - **Leave Value**: the value with its sign, rounded to the user's decimal places
   (half away from zero), e.g. `+34.1` or `-8.4`. A value that rounds to zero is
   shown as `0.0`, never `-0.0`. Both sides round the same way, on the `f64`
@@ -778,9 +875,13 @@ The default desktop bindings are:
 
 | Action | Mouse (in the quiz area) | Keyboard |
 |---|---|---|
-| **Show / Next** | Left click | Space |
-| **Toggle grade** | Right click | `X` |
-| **Previous** | Middle click | Backspace |
+| **Show / Next** | Left click | Space, `,` |
+| **Toggle grade** | Right click | `X`, `M` |
+| **Previous** | Middle click | Backspace, `J` |
+
+Each action starts with its three bindings, the most it can hold: adding
+another means removing one first. Accounts made before `,`, `M` and `J` were
+added get them with **Reset to defaults** on the Account page.
 
 - **What can be bound.** Each action can have up to three bindings. A binding
   can be:
@@ -1355,7 +1456,10 @@ The rules:
   most probable V-words of any length cut down to the 7s.
 - **Not** applies to a row, never to a group. A negated group can always be
   written by negating its rows and flipping its operator.
-- **Validation.** A group must hold at least one row or group. An empty group,
+- **Validation.** A search with no rows at all is valid: it is the whole
+  lexicon (or, for a Leave Value cascade, the whole leave set), within the cap
+  on questions like any other search. A nested group must hold at least one row
+  or group. An empty nested group,
   a group nested more than 4 deep, a form with more than 100 rows in total, or
   one with more than **100 groups** counting the top one is an error. The group
   cap matches the column that holds a group's id (see [Schema](#schema)) and is
@@ -1450,17 +1554,15 @@ Details that are easy to get wrong:
   filters, which rank the survivors of a group together whatever their length.
   Reading the target's size for all four would put the two predicates' default
   max past any rank that exists, and a row stopping at the largest bucket would
-  then be accepted although it narrows nothing. On a Leave Value cascade the 15s
+  then never reach the end of the range. On a Leave Value cascade the 15s
   become 6 and
   the Point Value ceiling 6 ×, and the anagram ceiling is the leave set's own
-  largest count; in the degenerate case where that is 0, because every leave in
-  the set holds a blank, no Number of Anagrams range can narrow anything and
-  every such row is refused by the rule below. A row is valid only if it actually narrows
-  something, which means min above **that filter's own smallest allowed value**
-  or max below the ceiling, never min above 0: the floor is 1 for Length and the
-  four order filters, so a test written against 0 would accept `Length 1–15` and
-  `Probability Order 1–N`, which are the defaults and narrow nothing. A row also
-  needs min ≤ max, and a bound above the ceiling is a
+  largest count. **A range that includes everything is valid** — `Length 1–15`,
+  a Leave Value cascade's `Length 1–6`, `Probability Order 1–N`: it matches
+  every candidate, and a user who wants to study everything may say so. A row
+  needs min ≤ max within **that filter's own smallest allowed value** (1 for
+  Length and the four order filters) and the ceiling, and a bound above the
+  ceiling is a
   field error naming the ceiling, so a saved `Length 4–15` loaded into a Leave
   Value cascade is flagged rather than silently clamped. Leave Value rows start with both
   bounds blank and are invalid until one is filled in. Inner hook rows have no
@@ -2079,6 +2181,22 @@ stores are:
 **Downloads.**
 - A cascade starts downloading the moment it is created. That covers the user
   who creates one just before boarding.
+- **Creating shows what it is doing.** The builder (and Start over) shows a
+  screen over the page — finding the questions, then saving them on this device
+  with a progress bar — until the player opens. The Source quiz's rows are
+  written in chunks in position order, so the row at the last position, which
+  witnesses a quiz's whole set, lands last and the quiz never reads as complete
+  before it is. A 103,925-question CSW24 cascade: about 4 s on the server and 6 s
+  on the device.
+- **Downloading never slows the player.** A page is written in chunks of 250
+  rows, each its own transaction, and a background chunk waits (up to a
+  second) while the player is acting, so an action queues behind one chunk at
+  most. While a new cascade's pages are still arriving, the player reads ahead:
+  the next 200 cards in its own order, fetched by `idx` in one small request
+  whenever fewer than 100 are covered, since a shuffled quiz's consecutive cards
+  fall in different 10,000-card pages. Measured in the first minute after
+  creating that cascade: Next 20 ms median, 61 ms at worst; a card being
+  fetched shows a spinner, never the card before.
 - Every cascade **opened or created on this device in the last 14 days** is
   kept downloaded, plus any cascade the user marks **Keep offline**. The
   window is judged entirely locally: the `meta` store records, per device and
@@ -3178,8 +3296,8 @@ CREATE TABLE user_preferences (
                                   CHECK (default_clear_threshold BETWEEN 1 AND 100),
     leave_value_decimals      SMALLINT NOT NULL DEFAULT 1
                                   CHECK (leave_value_decimals BETWEEN 0 AND 3),
-    anagram_show_definitions  BOOLEAN NOT NULL DEFAULT false,
-    anagram_show_hooks        BOOLEAN NOT NULL DEFAULT false,
+    anagram_show_definitions  BOOLEAN NOT NULL DEFAULT false,  -- true from 0002
+    anagram_show_hooks        BOOLEAN NOT NULL DEFAULT false,  -- true from 0002
     anagram_answer_mode       anagram_answer_mode NOT NULL DEFAULT 'flashcard',
     -- Defaults for new cascades only; changing one never touches an existing cascade.
     default_segment_size      INTEGER NOT NULL DEFAULT 0
@@ -4206,7 +4324,7 @@ person to write it copies names rather than choosing them.
 |---|---|---|
 | `POST` | `/api/cascades` | Body `{ id, source_quiz_id, device_id, at, name, lexicon, quiz_type, clear_threshold, segment_size, progression, require_alphabetical, filters }`. `name` is required, 1–200 Unicode scalar values; the device builds the default summary itself (see [Creating a cascade](#creating-a-cascade)). `device_id` is recorded as `options_device_id` on the cascade and the Source quiz, so the creating device's option changes never compete on timestamps. `id` and `source_quiz_id` are device-generated UUIDs minted when the button is pressed and reused for any retry of that press, never regenerated on retry; a request whose `id` the server already holds for this user returns the existing cascade and Source quiz unchanged, so a lost response never makes a duplicate or takes a second slot, and an `id` or `source_quiz_id` held by another user is refused with `409` (`invalid`), never that user's row. `at` is the device's timestamp, used for `options_changed_at` on the cascade and the Source quiz exactly as operations' `at` is, so the creating device's first option change is never `stale` against a server clock. Runs the search **before opening any transaction**, then in one short transaction locks the user's row, re-checks the [cascade limit](#cascade-limit), stores the question index and shuffles the Source quiz with a server-generated seed, and returns `{ cascade, source_quiz, sync_seq }`. A cheap limit check before the search refuses an over-limit request without spending one, and the lock therefore never covers the search's CPU or its wait for a `SEARCH_CONCURRENCY` permit, so a creation can never block the [purge task](#purge-task) on the same user's row for the length of a search. `source_quiz` carries its `shuffle_seed` rather than its positions: the device derives the Source quiz's order with the shared [shuffle](#deterministic-shuffles) over `idx` 0…count−1, and writes the cascade, the Source quiz and its question rows straight into its base stores from this response, so its first pull finds nothing to rebuild. `sync_seq` is informational; the device does **not** advance its sync cursor from this response, so its next sync pulls the rows the creation stamped. The cascade's private spec is stored with this request's `quiz_type`, which is what an In Word List row's entries were canonicalised under and what Start over copies. `422` if the search is empty or over the cap. `409` with `{ error: "cascade_limit", limit, count }` at the [cascade limit](#cascade-limit). A `5xx`, such as a deadlock or timeout inside the creation transaction, is retried by the device with the same body, which the device-minted ids make safe, and so is a `429`, after `Retry-After`, since this endpoint shares `SEARCH_RATE_PER_MINUTE` with the builder's preview. The threshold and the three [quiz options](#quiz-options) are required: the device fills them from its preferences view and the server never reads the preferences row to supply them, so an omitted one is a `400`. The Source quiz is created with a copy of the options. |
 | `POST` | `/api/cascades/:id/start-over` | Body `{ id, source_quiz_id, device_id, at }`, minted per press exactly as for creation and subject to the same repeat, timestamp and `options_device_id` rules. New cascade with a copy of the spec and the same threshold and options; returns the same shape. Subject to the cascade limit. |
-| `GET` | `/api/cascades/:id/cards?from=<idx>&limit=<n>&hooks=<0\|1>&definitions=<0\|1>&keys=<0\|1>` | Answer cards `[{ idx, key, answer }]` for question indexes `from`…`from+limit−1` (`limit` ≤ 10,000). The device splits each row between its `questions` store (the `key`) and its `cards` store (the rest), so eviction can take the answer and leave the question (see [On the device](#on-the-device)). With `keys=1` the response is `{ from, keys: [...] }` — the keys alone, in idx order, since the range makes every index implied — and **`limit` ≤ 100,000**, which at about 10 bytes a key is roughly the size of one 10,000-card page: a 300,000-question cascade's keys are three requests where its answers are thirty, a tenth of the cost in the shared rate bucket, and about a quarter of the bytes of cards without definitions (see [Downloads](#on-the-device)). It is what the download manager fetches first, so a cascade becomes playable and self-gradable before its answers arrive; `hooks` and `definitions` are then a `400`. A Leave Value `answer` is a JSON number written as the shortest text that round-trips the stored `f64`, which `JSON.parse` reads back exactly. Card pages are served `Cache-Control: private, no-store`, because the device keeps every byte it fetches in IndexedDB and a second copy in the browser's HTTP cache would sit outside every budget the plan states; only the questions endpoint, whose index lists are small and refetched by the pending path, keeps immutable caching. Responses are compressed. |
+| `GET` | `/api/cascades/:id/cards?from=<idx>&limit=<n>&hooks=<0\|1>&definitions=<0\|1>&keys=<0\|1>`, or `?idx=<i,j,…>&hooks=…&definitions=…` | Answer cards `[{ idx, key, answer }]` for question indexes `from`…`from+limit−1` (`limit` ≤ 10,000), or for the comma-separated indexes in `idx` (at most 1,000, returned in idx order; never with `from`, `limit` or `keys`, else `400 invalid_idx`) — the player's read-ahead, which asks for the next cards in its quiz's own order. With `hooks=1`, an Anagram answer's words carry `front_hooks`, `back_hooks` and the booleans `front_inner` and `back_inner` (the word less its first, or last, tile is a word), and a Definition card carries `word`: `{ word, front_hooks, back_hooks, front_inner, back_inner }` beside its answer. The device splits each row between its `questions` store (the `key`) and its `cards` store (the rest), so eviction can take the answer and leave the question (see [On the device](#on-the-device)). With `keys=1` the response is `{ from, keys: [...] }` — the keys alone, in idx order, since the range makes every index implied — and **`limit` ≤ 100,000**, which at about 10 bytes a key is roughly the size of one 10,000-card page: a 300,000-question cascade's keys are three requests where its answers are thirty, a tenth of the cost in the shared rate bucket, and about a quarter of the bytes of cards without definitions (see [Downloads](#on-the-device)). It is what the download manager fetches first, so a cascade becomes playable and self-gradable before its answers arrive; `hooks` and `definitions` are then a `400`. A Leave Value `answer` is a JSON number written as the shortest text that round-trips the stored `f64`, which `JSON.parse` reads back exactly. Card pages are served `Cache-Control: private, no-store`, because the device keeps every byte it fetches in IndexedDB and a second copy in the browser's HTTP cache would sit outside every budget the plan states; only the questions endpoint, whose index lists are small and refetched by the pending path, keeps immutable caching. Responses are compressed. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/questions?from=<n>&limit=<n>` | The quiz's question indexes `[idx…]` in idx order, `limit` ≤ 50,000. A quiz's question set never changes, so it is served with the same immutable caching. Fetched when the device materialises a quiz; never part of a pull. `404` for another user's, a purged, or a Source quiz, whose indexes are implied. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/grades?from=<idx>&limit=<n>` | The quiz's graded rows for the attempt its row names, which for a cleared quiz is the attempt it finished on, as the parallel arrays a pull uses, in idx order, with the quiz row's `attempt` and `shuffle_seed` so the device can tell whether they belong to the order it holds. `from` is an **index, not an offset**, as on the card pages: the response holds the graded rows whose `question_idx` is in `from … from+limit−1`, `limit` ≤ 50,000, so the device pages the index space by `from += limit` until `from` reaches the cascade's `question_count` and a sparse page — most of a quiz's questions may be ungraded — means nothing is left behind. The questions endpoint below reads `from` the other way, as an offset into a dense list, which is why the two are written `<idx>` and `<n>`. There is no `min_updated_seq` here, which only a pull's fast path needs; the device stamps these rows with the sequence of the sync it made before the fetch. Not cacheable. Fetched when the device materialises a quiz whose rows it dropped on leaving the download window; never part of a pull. If the device's quiz row names a different attempt or seed, the device discards the response, syncs and fetches again. `404` for another user's or a purged quiz. |
 | `POST` | `/api/cascades/:id/export-token` | Body: the export's choices, as the query of the export row below. Checks the session, `X-Wordfall-User`, the cascade and quiz, and `EXPORT_RATE_PER_MINUTE`, answering `401`, `404` and `429` with `Retry-After` exactly as any other request does, which a navigation could not show the page; on success returns `{ url }`, the export URL with a token valid for **60 seconds and one use**, bound to this user and these choices: a PASETO under the HKDF-derived export key, which any task can verify and no session validator can decrypt, its use recorded in `export_tokens_spent` (see [Exporting words](#exporting-words)). The dialog navigates a hidden `<iframe>` to it at once, and mints a new one for any retry |
@@ -4311,9 +4429,9 @@ SvelteKit static SPA. The routes:
 
 | Route | Page |
 |---|---|
-| `/` | Landing page (logged out) or redirect to `/cascades` |
+| `/` | No page of its own: there is no landing or home page. It goes to the Cascades page when logged in, where logging in lands too, and to the log-in page (with Create an account) when logged out. A deleted account ends on the log-in page. With no lexicon yet, the empty Cascades page says so (and, to an admin, where to upload one). The site header is how to reach every page. Every logged-in page but the player shows the site header: Wordfall (home), Cascades, New cascade, Trash, Admin for admins, the sync status and the account |
 | `/register`, `/register/check-email`, `/confirm-email`, `/login`, `/reset-password`, `/reset-password/confirm` | Auth |
-| `/cascades` | Cascades page |
+| `/cascades` | Cascades page: one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done)`), its download status, Keep offline, and icon buttons for Quiz options, Export…, Start over and Move to Trash |
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, threshold, preview) |
 | `/cascades/:id` | Player for the cascade's deepest level, with the ladder panel |
 | `/trash` | Cleared quizzes and trashed cascades |
@@ -4396,7 +4514,7 @@ Components:
   - desktop mouse and wheel events inside the area, and key events
   - touch zones, with tap-versus-drag detection
   - typed-mode protection
-  - the 120 ms repeat guard
+  - the repeat guard (a per-device setting, 50 ms by default)
   - suppressing the context menu, autoscroll and paste
 
   The rest of the player only ever sees `show_next`, `toggle_grade` and
@@ -4419,7 +4537,7 @@ Components:
 - **`LeaveValue`**: formats a raw value with a sign and the preferred number of
   decimal places.
 - **`FinishBanner`**: the non-blocking message after each finish.
-- **`SyncStatus`**: Synced, *n* changes waiting to sync, Offline, Log in to
+- **`SyncStatus`**: Synced, Waiting to sync, Syncing…, Offline, Log in to
   sync, not enough room on this device, **signed out in another tab** (see
   [Authentication while offline](#authentication-while-offline)), or
   **reload to keep syncing** — the
@@ -4427,7 +4545,7 @@ Components:
   first `426` until a sync succeeds, because the app never reloads on its own,
   a plain reload is served the old build by the old worker, and its own reload
   action can activate the new one only online, so this state can last
-  days and "n changes waiting to sync" would promise a sync that cannot
+  days and "Waiting to sync" would promise a sync that cannot
   happen — plus notices about dropped work.
 - **`OfflineBadge`**: Available offline, download progress, "answers need a
   connection" for a cascade whose cards are gone while the device is offline, or
@@ -4513,9 +4631,13 @@ constants in `lib/sync/config.ts`.
 ```
 
 That is the whole setup. With no arguments it builds and starts a complete
-Wordfall on <http://localhost:5173>, seeded with the
-[fixture catalog](#the-fixture-catalog) and a confirmed admin account `dev`. It
-opens the browser **already signed in**, then stays in the foreground
+Wordfall on <http://localhost:5173>, seeded with the licensed catalog in
+`fixtures/licensed/` (English, CSW24 with its definitions, and CSW24's leave
+values) and a confirmed admin account `dev`. The
+[fixture catalog](#the-fixture-catalog) (EN-FIX, EN-FIX-OLD, CA-FIX) is for the
+automated tests: dev.py uploads it only with `--fixtures`, or when there is no
+licensed catalog, so the builder is never empty. It opens the browser
+on the home page **already signed in**, then stays in the foreground
 streaming a filtered backend log until Ctrl-C, which stops the stack (its data
 is kept). The log shows errors and warnings, sync rejections, and a
 ready-to-click link for every confirmation or reset mail. It needs Docker and
@@ -4527,7 +4649,7 @@ What it does, in order:
 1. **Checks before touching anything**, and fails naming what is missing:
    - Docker and compose v2;
    - the site's port is free (or held by this project's own stack);
-   - each `--real-catalog` file exists and has the right number of fields
+   - each licensed catalog file exists and has the right number of fields
      (a two-column lexicon fails here, not as an upload error minutes later).
 
    It takes a lock per `--project`, so a second run cannot reset or stop the
@@ -4556,7 +4678,7 @@ What it does, in order:
 6. **Uploads the catalog** through the real admin API, as that user, skipping
    anything already present.
 7. **Seeds the scenarios** asked for, through the real API.
-8. **Opens the browser** at `/dev-login?username=dev`. The page calls
+8. **Opens the browser** at `/dev-login?username=dev&next=/`. The page calls
    `POST /api/dev/login` (`DEV_LOGIN`, which exists only on a local stack) and
    then makes the session this tab's own exactly as a login does (`adoptSession`
    in `lib/auth/session.svelte.ts`). A cookie alone would not do: the app signs
@@ -4568,7 +4690,7 @@ Useful flags:
 | Flag | Effect |
 |---|---|
 | `--scenario NAME` | Seed a study state through the real API; repeatable. `studying` (Level 1 finished with misses, Level 2 half graded), `finished` (the completion screen), `segments` (runs of five, one finished with a miss), `typed` (typed answers on), `trash`, `limits` (cascades up to the limit warning), `big` (one cascade near `MAX_QUIZ_QUESTIONS` from the real catalog), `saved-searches`. Operations go through `POST /api/sync`, so the server's rules check them; the quiz state they need is read with SQL, as the integration tests do |
-| `--real-catalog [DIR]` | Also upload the licensed files `DIR/manifest.json` lists, in the fixture manifest's form (default `$WORDFALL_CATALOG_DIR`). The files and the manifest stay outside the repository |
+| `--real-catalog [DIR]`, `--no-real-catalog` | Upload the licensed files `DIR/manifest.json` lists, in the fixture manifest's form. Done by default from `$WORDFALL_CATALOG_DIR`, else from `fixtures/licensed/` when it has a `manifest.json`; `--no-real-catalog` leaves it out, and the fixture catalog stands in. The licensed files never enter the repository (`fixtures/licensed/` is gitignored). `scripts/build-licensed-catalog.py` makes the folder: it joins a word⇥definition file and a playability file into the upload's three-column lexicon, copies the leave values and the distribution, and writes the manifest. The current CSW24 takes its playability from CSW19's values; the 1,814 words added since get 0 |
 | `--stats` | Print each catalog index's size, its build time, the catalog load time and the backend's memory: what the production task's memory is sized from |
 | `--users N` | N more confirmed users (`dev2`, `dev3`, …) for multi-account work |
 | `--login-as USER`, `--no-login` | Which account the browser opens signed in as, or none |
@@ -4576,7 +4698,7 @@ Useful flags:
 | `--fresh` | A new deployment: `--reset`, then no user, no catalog, and the first-admin steps printed |
 | `--snapshot NAME`, `--restore NAME\|DUMP` | Save the database to `.dev/snapshots/NAME`, or restore one. A restore goes into a new database, then is swapped in with both renames in one transaction while the backend is stopped, and the [sync sequences are bumped](#restoring). A dump that is not a local snapshot (a production dump) is always scrubbed with `scripts/scrub.sql`: every address replaced, every password the dev password, every session revoked |
 | `--distribution NAME=FILE`, `--lexicon NAME:DIST=FILE`, `--leaves LEXICON=FILE` | Upload single catalog files as well. Repeatable |
-| `--no-fixtures` | Seed only what the flags above name |
+| `--fixtures` | Also upload the fixture catalog (EN-FIX, EN-FIX-OLD, CA-FIX and their leave values), otherwise used only when there is no licensed catalog |
 | `--keep-up`, `--detach` | Leave the stack running on Ctrl-C, or start, seed, open and exit |
 | `--no-build` | Restart without rebuilding the images |
 | `--hot-reload` | Also run the Vite dev server on :5174, for fast UI work. The service worker is only on :5173 |
@@ -5071,7 +5193,7 @@ Pure functions and in-memory structures, no database and no network.
     the fixture's largest length bucket, not its word count**: the same row
     taken to the word count is a field error naming that bucket, since no
     per-length rank reaches it, while `Limit by Probability Order 1–<word
-    count>` is the row that narrows nothing at the word count, being ranked
+    count>` is a valid row at the word count, being ranked
     over a group's survivors instead, and the two figures the builder reads
     them from are `max_order_rank` and `word_count` on
     [`GET /api/lexicons`](#catalog-and-search); a
@@ -5729,7 +5851,7 @@ they run in parallel and leave nothing behind.
     a 101-scalar-value name each answered `400` with a field error, and a
     100-scalar-value name stored; and a save validating its tree like
     a preview — an empty group, a fifth nesting level, a row that does not apply
-    to the submitted `quiz_type`, a range that narrows nothing, a
+    to the submitted `quiz_type`, a
     `text_value` past the limit and In Word List rows totalling more than
     300,000 entries each answered `400` with the same
     `{ path, field, message }` errors and nothing written, while a tile that is
@@ -6079,9 +6201,16 @@ run at production's `EXPORT_CONCURRENCY` of one, against the production task's
     a 65,000-question Level 2, then fully graded again on its new attempt
     without finishing, and that Level 2 half graded (375,000 graded rows
     per cascade, about 3.75 million in all, 75
-    pages), the sync that follows finishes in under 120 seconds on the CI
-    runner, measured with the staging split (rows of quizzes new to the device
-    and grade rows for unchanged attempts written once); and each cascade
+    pages), the sync that follows finishes within its measured budget —
+    **150 seconds for the one heavily played cascade** (162,500 graded rows at
+    the 130,000-question cap; 49–107 s measured), measured with the staging
+    split (rows of quizzes new to the device and grade rows for unchanged
+    attempts written once). The plan first asked 120 s for all ten, about
+    13,500 graded rows a second; Chromium's IndexedDB, writing a row per
+    question with its indexes, manages 1,500–3,300, and only storing rows
+    differently on the device could close that gap. It is a one-time cost for a
+    new device opening a cascade with a long history, behind the "getting this
+    level ready" screen (PQ-019); and each cascade
     materialises on open within budget. The budgets are constants in the test beside the row
     counts they measure.
   - Ten concurrent `GET /api/cascades/:id/export` streams of a 130,000-question

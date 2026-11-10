@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import { storeCreated } from '$lib/local/created';
 import { OVERLAY } from '$lib/local/db';
+import { CARDS_PAGE, KEYS_PAGE } from './downloads';
 import { FakeServer } from './testing/fake-server';
 import { ids, QUESTIONS, report, ScaleDev, timed, writes } from './testing/scale';
 
@@ -29,7 +30,8 @@ const FINISH_BUDGET_MS = 400_000;
 const WRITES_PER_OP = 6;
 /** Overlay rows left once the outbox has drained. */
 const OVERLAY_ROWS = 10;
-const KEY_BYTES_MIN = 2.5e6;
+/** About ten characters a key, at least: 2.5 MB at the old 300,000-question cap. */
+const KEY_BYTES_MIN = (2.5e6 * QUESTIONS) / 300_000;
 const KEY_BYTES_MAX = 3.5e6;
 
 describe('a 130,000-question cascade on the device', () => {
@@ -53,7 +55,7 @@ describe('a 130,000-question cascade on the device', () => {
 		const keyCalls = d.calls.filter((c) => c.kind === 'keys');
 		const cardCalls = d.calls.filter((c) => c.kind === 'cards');
 		report('download', downloadMs, DOWNLOAD_BUDGET_MS, `${keyCalls.length} keys pages, ${cardCalls.length} answer pages`);
-		expect([keyCalls.length, cardCalls.length]).toEqual([3, 30]);
+		expect([keyCalls.length, cardCalls.length]).toEqual([Math.ceil(QUESTIONS / KEYS_PAGE), Math.ceil(QUESTIONS / CARDS_PAGE)]);
 		expect(await d.countFor('quiz_questions', cascade)).toBe(QUESTIONS);
 		expect(await d.countFor('questions', cascade)).toBe(QUESTIONS);
 		expect(await d.countFor('cards', cascade)).toBe(QUESTIONS);

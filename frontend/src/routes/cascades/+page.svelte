@@ -3,13 +3,16 @@
 	// with its options in short form, a compact ladder, Complete and offline
 	// badges, and a row menu; the header shows the cascade limit and the sync
 	// status. Everything reads the local stores and works offline.
+	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { api } from '$lib/api';
 	import { session } from '$lib/auth/session.svelte';
-	import CascadeLadder from '$lib/components/CascadeLadder.svelte';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
+	import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal';
+	import TrashIcon from '@lucide/svelte/icons/trash';
 	import QuizOptionsForm from '$lib/components/QuizOptionsForm.svelte';
-	import SyncStatus from '$lib/components/SyncStatus.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		allCascades,
@@ -37,6 +40,8 @@
 	let editing = $state<{ id: string; count: number; options: QuizOptions } | null>(null);
 	let error = $state<string | null>(null);
 	let online = $state(true);
+	/** No lexicon on the server: known only online, and asked only while there are no cascades. */
+	let noCatalog = $state(false);
 
 	async function refresh() {
 		if (!db) return;
@@ -53,6 +58,12 @@
 			db = await userDb(session.userId, session.username);
 			maxQuiz = (await getMeta(db, 'server')).max_quiz_questions;
 			await refresh();
+			if (list.length === 0 && navigator.onLine) {
+				api
+					.get<unknown[]>('/api/lexicons', { bindUser: false })
+					.then((l) => (noCatalog = l.length === 0))
+					.catch(() => undefined);
+			}
 		})();
 		const on = () => void refresh();
 		addEventListener('online', on);
@@ -97,17 +108,23 @@
 		editing = null;
 	}
 
+	let starting = $state<{ stage: 'server' | 'device'; progress: number; count: number | null } | null>(null);
+
 	async function startOver(s: CascadeSummary) {
 		if (!db) return;
 		error = null;
+		starting = { stage: 'server', progress: 0, count: null };
 		const { device_id } = await getMeta(db, 'device');
 		const body = { id: crypto.randomUUID(), source_quiz_id: crypto.randomUUID(), device_id, at: new Date().toISOString() };
 		try {
 			const created = await api.post<Created>(`/api/cascades/${s.cascade.id}/start-over`, body);
-			await storeCreated(db, created);
+			starting = { stage: 'device', progress: 0, count: Number(created.source_quiz.question_count) };
+			await storeCreated(db, created, new Date(), (f) => starting && (starting.progress = f));
 			await goto(`/cascades/${body.id}`);
 		} catch {
 			error = 'Start over needs a connection.';
+		} finally {
+			starting = null;
 		}
 	}
 
@@ -138,45 +155,77 @@
 			<p class="text-sm text-muted-foreground">{count} of {session.cascadeLimit} cascades</p>
 		</div>
 		<div class="flex items-center gap-4">
-			<SyncStatus />
 			{#if count >= session.cascadeLimit}
 				<span class="text-sm">At the limit — <a class="underline" href="/trash">Trash</a></span>
 			{:else}
 				<Button href="/cascades/new">New cascade</Button>
 			{/if}
-			<Button href="/trash" variant="outline">Trash</Button>
-			<Button href="/account" variant="outline">{session.username || 'Account'}</Button>
 		</div>
 	</header>
 	{#if error}<p class="mb-4 text-sm text-destructive" role="alert">{error}</p>{/if}
 	{#if list.length === 0}
-		<p class="text-muted-foreground">No cascades yet. <a class="underline" href="/cascades/new">Create one</a>.</p>
+		{#if noCatalog}
+			<!-- Nothing to build from yet: say so, and where to fix it. -->
+			<p class="text-muted-foreground">
+				There are no word lists yet.
+				{#if session.isAdmin}Upload a letter distribution, a lexicon and its leave values in <a class="underline" href="/admin">Admin</a>.{:else}An admin has to upload a lexicon first.{/if}
+			</p>
+		{:else}
+			<p class="text-muted-foreground">No cascades yet. <a class="underline" href="/cascades/new">Create one</a>.</p>
+		{/if}
 	{/if}
-	<ul class="space-y-4">
+	<!-- One row per cascade: what it is and where it stands, its status, and its actions. -->
+	<ul class="divide-y rounded-lg border">
 		{#each list as s (s.cascade.id)}
 			{@const hint = keepHint(s, !!opens[s.cascade.id] && !dropped.includes(s.cascade.id))}
-			<li class="rounded-lg border p-4">
-				<div class="flex flex-wrap items-baseline justify-between gap-2">
-					<a class="text-lg font-medium underline-offset-2 hover:underline" href={`/cascades/${s.cascade.id}`}>{s.cascade.name}</a>
-					<span class="text-sm text-muted-foreground">
-						{s.cascade.quiz_type} · {s.cascade.lexicon} · clear at {s.cascade.clear_threshold}%{#if s.options} · {s.options}{/if}
-					</span>
+			<li class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5 md:flex-nowrap">
+				<div class="min-w-0 flex-1">
+					<div class="flex min-w-0 items-baseline gap-2">
+						<a class="min-w-0 truncate font-medium underline-offset-2 hover:underline" href={`/cascades/${s.cascade.id}`} title={s.cascade.name}>{s.cascade.name}</a>
+						<span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+							{s.cascade.quiz_type.replace('_', ' ')} · {s.cascade.lexicon} · clear at {s.cascade.clear_threshold}%{#if s.options} · {s.options}{/if}
+						</span>
+					</div>
+					<p class="truncate text-xs text-muted-foreground" title={ladderText(s.levels)}>{ladderText(s.levels)}</p>
 				</div>
-				<p class="mt-1 text-sm text-muted-foreground" title={ladderText(s.levels)}>{ladderText(s.levels)}</p>
-				<div class="mt-2"><CascadeLadder rows={s.levels} compact /></div>
-				<div class="mt-2 flex flex-wrap gap-2 text-xs">
-					{#if s.completedAt}<span class="rounded bg-muted px-2 py-1">Complete {new Date(s.completedAt).toLocaleDateString()}</span>{/if}
-					<span class="rounded bg-muted px-2 py-1">{badge(s)}</span>
+				<!-- Status, Keep offline and the actions stay together on the right; the text beside them truncates. -->
+				<div class="flex shrink-0 items-center gap-3">
+				<div class="flex items-center gap-2 text-xs">
+					{#if s.completedAt}<span class="rounded bg-muted px-2 py-0.5">Complete {new Date(s.completedAt).toLocaleDateString()}</span>{/if}
+					<span class="rounded bg-muted px-2 py-0.5">{badge(s)}</span>
 				</div>
-				<div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
-					<Button size="sm" variant="outline" onclick={() => editOptions(s)}>Quiz options</Button>
-					<Button size="sm" variant="outline" href={`/cascades/${s.cascade.id}/export`}>Export…</Button>
-					<Button size="sm" variant="outline" disabled={count >= session.cascadeLimit} onclick={() => startOver(s)}>Start over</Button>
-					<label class="flex items-center gap-1">
-						<input type="checkbox" checked={s.keptByUser || s.keptAutomatically} onchange={(e) => toggleKeep(s, e.currentTarget.checked)} />
-						Keep offline{#if hint}<span class="text-muted-foreground">{` (${hint})`}</span>{/if}
-					</label>
-					<Button size="sm" variant="outline" onclick={() => write({ type: 'trash_cascade', cascade_id: s.cascade.id })}>Move to Trash</Button>
+				<label class="flex items-center gap-1.5 text-xs">
+					Keep offline{#if hint}<span class="text-muted-foreground">{` (${hint})`}</span>{/if}
+					<input type="checkbox" checked={s.keptByUser || s.keptAutomatically} onchange={(e) => toggleKeep(s, e.currentTarget.checked)} />
+				</label>
+				<div class="flex items-center">
+					<Button size="icon-sm" variant="ghost" onclick={() => editOptions(s)} aria-label="Quiz options" title="Quiz options">
+						<SlidersHorizontalIcon class="size-4" />
+					</Button>
+					<Button size="icon-sm" variant="ghost" href={`/cascades/${s.cascade.id}/export`} aria-label="Export…" title="Export…">
+						<DownloadIcon class="size-4" />
+					</Button>
+					<Button
+						size="icon-sm"
+						variant="ghost"
+						disabled={count >= session.cascadeLimit}
+						onclick={() => startOver(s)}
+						aria-label="Start over"
+						title={count >= session.cascadeLimit ? 'Start over: at the cascade limit' : 'Start over'}
+					>
+						<RotateCcwIcon class="size-4" />
+					</Button>
+					<Button
+						size="icon-sm"
+						variant="ghost"
+						class="hover:text-destructive"
+						onclick={() => write({ type: 'trash_cascade', cascade_id: s.cascade.id })}
+						aria-label="Move to Trash"
+						title="Move to Trash"
+					>
+						<TrashIcon class="size-4" />
+					</Button>
+				</div>
 				</div>
 			</li>
 		{/each}
@@ -194,4 +243,8 @@
 			</div>
 		</div>
 	</div>
+{/if}
+
+{#if starting}
+	<CreatingCascade title="Starting over" stage={starting.stage} progress={starting.progress} count={starting.count} />
 {/if}

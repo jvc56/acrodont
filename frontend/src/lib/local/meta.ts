@@ -19,6 +19,34 @@ export interface MetaValues {
 	budget_dropped: string[];
 	/** Bytes of each cascade's question keys and answers, measured as they were written. */
 	sizes: Record<string, { key_bytes: number; answer_bytes: number }>;
+	/** How the player looks and responds on this device (lib/player/display.svelte.ts); never synced. */
+	display: {
+		/** One of lib/player/display's FONTS; Inter by default. */
+		question_font: string;
+		answer_font: string;
+		question_size_px: number;
+		answer_size_px: number;
+		/** Definitions: a Definition quiz's answer, and the line under each anagram. */
+		definition_font: string;
+		definition_size_px: number;
+		definition_spacing: number;
+		/** Extra letter spacing in em; 0 is the browser's normal. */
+		question_spacing: number;
+		answer_spacing: number;
+		/** The question's distance from the top of the quiz area, in px. */
+		question_top_px: number;
+		/** The grade border's width, in px. */
+		border_px: number;
+		/** The repeat guard: the same action twice within this many ms counts once; 0 is off. */
+		repeat_guard_ms: number;
+		/** Whether the grade border shows for a correct answer (off by default) and for a missed one (on). */
+		border_correct: boolean;
+		border_missed: boolean;
+		/** The desktop player's status bar along the bottom is hidden. */
+		status_bar_hidden: boolean;
+		/** Which defaults the stored values were saved under (lib/player/display DISPLAY_VERSION). */
+		version: number;
+	};
 }
 export type MetaKey = keyof MetaValues;
 
@@ -31,7 +59,25 @@ export const META_DEFAULTS: { [K in MetaKey]: () => MetaValues[K] } = {
 	keep_offline: () => [],
 	auto_keep_optout: () => [],
 	budget_dropped: () => [],
-	sizes: () => ({})
+	sizes: () => ({}),
+	display: () => ({
+		question_font: 'Inter',
+		answer_font: 'Inter',
+		question_size_px: 36,
+		answer_size_px: 36,
+		definition_font: 'Inter',
+		definition_size_px: 20,
+		definition_spacing: 0,
+		question_spacing: 0,
+		answer_spacing: 0,
+		question_top_px: 8,
+		border_px: 10,
+		repeat_guard_ms: 0,
+		border_correct: false,
+		border_missed: true,
+		status_bar_hidden: false,
+		version: 2
+	})
 };
 
 type Tx = IDBPTransaction<UserSchema, StoreName[], 'readwrite' | 'readonly'>;

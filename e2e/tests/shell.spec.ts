@@ -11,7 +11,9 @@ test('the app shell boots under its CSP with the Nginx headers', async ({ page }
 	expect(resp?.headers()['content-security-policy']).toBe("frame-ancestors 'self'");
 	expect(resp?.headers()['x-content-type-options']).toBe('nosniff');
 	expect(resp?.headers()['x-frame-options']).toBeUndefined();
-	await expect(page.getByRole('heading', { name: 'Wordfall' })).toBeVisible();
+	// There is no landing page: signed out, / is the log-in page.
+	await expect(page).toHaveURL(/\/login$/);
+	await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible();
 	expect(errors.filter((e) => /Content Security Policy/i.test(e))).toEqual([]);
 });
 

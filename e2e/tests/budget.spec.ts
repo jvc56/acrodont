@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { apiCascade, createCascade, idb, newUser } from './support';
+import { apiCascade, createCascade, idb, newUser, plainAnswers } from './support';
 
 // PLAN.md § End-to-end tests: the answer limit with two automatic keeps, and
 // ROW_STORAGE_BUDGET "lowered with a test constant". Each runs on its own
@@ -18,6 +18,8 @@ const idOf = (path: string) => path.split('/').pop()!;
 test('over the answer limit with two automatic keeps @env @answers', async ({ page, context }) => {
 	test.setTimeout(300_000);
 	await newUser(page, 'ans');
+	// The sizes below are of answers without hooks or definitions, which are on by default.
+	await plainAnswers(page);
 	// Two cascades above the automatic keep, their answers together over the limit:
 	// 83 questions (about 1.7 KB of answers) opened first, then 37 (about 0.9 KB).
 	const a = idOf(await createCascade(page, { name: 'Answers A', min: 2, max: 4 }));

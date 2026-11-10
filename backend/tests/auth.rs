@@ -65,10 +65,13 @@ async fn register_creates_user_preferences_and_bindings(pool: sqlx::PgPool) {
     let expected = [
         ("previous", 0, "mouse_button", "middle"),
         ("previous", 1, "key", "Backspace"),
+        ("previous", 2, "key", "KeyJ"),
         ("show_next", 0, "mouse_button", "left"),
         ("show_next", 1, "key", "Space"),
+        ("show_next", 2, "key", "Comma"),
         ("toggle_grade", 0, "mouse_button", "right"),
         ("toggle_grade", 1, "key", "KeyX"),
+        ("toggle_grade", 2, "key", "KeyM"),
     ];
     let got: Vec<_> = bindings
         .iter()

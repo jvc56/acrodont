@@ -407,31 +407,31 @@ fn validation_messages() {
     let n = f.en.max_order_rank as i64;
     let count = f.en.word_count() as i64;
     assert!(field(&f, w, range("length", 7, 5)).unwrap().1.contains("above the maximum"));
-    // Ranges that narrow nothing, measured against each filter's own floor.
-    assert!(field(&f, w, range("length", 1, 15)).unwrap().1.contains("narrows nothing"));
-    assert!(field(&f, w, order("probability_order", 1, n)).unwrap().1.contains("narrows nothing"));
-    assert!(field(&f, w, c("consists_of", json!({ "tiles": "AEIOU", "min": 0, "max": 100 }))).unwrap().1.contains("narrows nothing"));
+    // A range that includes everything is valid: it matches every candidate.
+    assert!(field(&f, w, range("length", 1, 15)).is_none());
+    assert!(field(&f, w, order("probability_order", 1, n)).is_none());
+    assert!(field(&f, w, c("consists_of", json!({ "tiles": "AEIOU", "min": 0, "max": 100 }))).is_none());
     assert!(field(&f, w, range("length", 2, 15)).is_none());
     assert!(field(&f, w, range("length", 1, 14)).is_none());
     // N is the largest length bucket, not the word count.
     let (fld, msg) = field(&f, w, order("probability_order", 1, count)).unwrap();
     assert_eq!(fld, "max");
     assert!(msg.contains(&n.to_string()), "{msg}");
-    assert!(field(&f, w, order("limit_by_probability_order", 1, count)).unwrap().1.contains("narrows nothing"));
+    assert!(field(&f, w, order("limit_by_probability_order", 1, count)).is_none());
     assert!(field(&f, w, order("limit_by_probability_order", 1, count - 1)).is_none());
     // Number of Anagrams against the target's largest count.
     let a = f.en.max_num_anagrams as i64;
-    assert!(field(&f, w, range("num_anagrams", 0, a)).unwrap().1.contains("narrows nothing"));
+    assert!(field(&f, w, range("num_anagrams", 0, a)).is_none());
     assert!(field(&f, w, range("num_anagrams", 0, a - 1)).is_none());
     assert!(field(&f, w, range("num_anagrams", 0, a + 1)).unwrap().1.contains(&a.to_string()));
     let la = f.en_leaves.max_num_anagrams as i64;
     assert!(la < a);
     let lvq = QuizType::LeaveValue;
-    assert!(field(&f, lvq, range("num_anagrams", 0, la)).unwrap().1.contains("narrows nothing"));
+    assert!(field(&f, lvq, range("num_anagrams", 0, la)).is_none());
     assert!(field(&f, lvq, range("num_anagrams", 0, a)).unwrap().1.contains(&la.to_string()));
     // The quiz type's own ceiling on a Leave Value cascade.
-    assert!(field(&f, lvq, range("length", 1, 6)).unwrap().1.contains("narrows nothing"));
-    assert!(field(&f, lvq, range("num_vowels", 0, 6)).unwrap().1.contains("narrows nothing"));
+    assert!(field(&f, lvq, range("length", 1, 6)).is_none());
+    assert!(field(&f, lvq, range("num_vowels", 0, 6)).is_none());
     let (fld, msg) = field(&f, lvq, range("length", 1, 15)).unwrap();
     assert_eq!((fld.as_str(), msg.contains('6')), ("max", true));
     assert!(field(&f, lvq, range("length", 1, 5)).is_none());

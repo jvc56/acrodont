@@ -12,7 +12,7 @@ import { initMeta } from '$lib/local/meta';
 import { defaultPreferences } from '$lib/local/preferences';
 import type { PreferencesRow } from '$lib/local/rows';
 import { questionsHash } from '$lib/cascade/order';
-import { Player } from './controller';
+import { AHEAD, AHEAD_LOW, Player } from './controller';
 import { bind, inputOwns, actionFor, Debounce } from './bindings';
 import { DEFAULT_BINDINGS } from '$lib/local/preferences';
 import { finishBanner } from './banner';
@@ -70,6 +70,114 @@ function player() {
 const ops = async () => (await db.getAll('outbox')).map((e) => e.op.type);
 
 describe('the player', () => {
+	it('Next shows the next card before its writes are saved, from the cards held in memory', async () => {
+		await cascade(5);
+		let saved = 0;
+		const p = new Player(db, C, { prefs: async () => prefs, ensure: async () => undefined, seed: () => '777', afterWrite: () => saved++ });
+		await p.load();
+		await new Promise((r) => setTimeout(r, 50)); // the background cache fill
+		let savedWhenShown = -1;
+		p.subscribe((v) => {
+			if (v.card?.pos === 1 && savedWhenShown < 0) savedWhenShown = saved;
+		});
+		await p.showNext(); // the reveal: no writes
+		await p.showNext();
+		// Card 1 appeared before either write (the grade, the cursor) was saved,
+		// with the score and cursor those writes leave.
+		expect(savedWhenShown).toBe(0);
+		expect(saved).toBe(2);
+		expect([p.v.quiz!.cursor, p.v.quiz!.correct_count]).toEqual([1, 1]);
+		expect(await ops()).toEqual(['grade', 'move_cursor']);
+	});
+
+	it('a reload arriving between a Next and its writes keeps the new card and the grade', async () => {
+		await cascade(5);
+		const p = player();
+		await p.load();
+		await p.showNext();
+		// A sync's refresh lands while Next's writes are still queued.
+		await Promise.all([p.showNext(), p.load(true)]);
+		expect(p.v.card!.pos).toBe(1);
+		expect(p.v.quiz!.correct_count).toBe(1);
+		// The grade is remembered: Previous shows card 0 graded.
+		await p.previous();
+		expect([p.v.card!.pos, p.v.card!.revealed, p.v.card!.saved]).toEqual([0, true, 'correct']);
+	});
+
+	it('presses in quick succession all count, in order, and the writes follow them', async () => {
+		await cascade(5);
+		const p = player();
+		await p.load();
+		// Reveal, Next, Reveal, Toggle, Next: none awaited.
+		const all = [p.showNext(), p.showNext(), p.showNext(), p.toggle(), p.showNext()];
+		await Promise.all(all);
+		expect(p.v.card!.pos).toBe(2);
+		// The outbox keeps only the latest cursor move per quiz.
+		expect(await ops()).toEqual(['grade', 'grade', 'move_cursor']);
+		const q = (await db.get('overlay_quizzes', Q))!;
+		expect([q.cursor, q.correct_count, q.missed_count]).toEqual([2, 1, 1]);
+	});
+
+	it('reads ahead the next cards in its own order, one request whenever fewer than AHEAD_LOW are covered', async () => {
+		await cascade(AHEAD * 2, { cards: false });
+		const asked: number[][] = [];
+		const fetched: number[] = [];
+		const p = new Player(db, C, {
+			prefs: async () => prefs,
+			ensure: async () => undefined,
+			seed: () => '777',
+			fetchCard: async (_c, idx, ahead) => {
+				fetched.push(idx);
+				asked.push(ahead);
+				for (const i of [idx, ...ahead]) {
+					await db.put('cards', { cascade_id: C, idx: i, answer: WORDS.map((word) => ({ word })), definitions: false, hooks: false });
+				}
+			},
+			fetchAhead: async (_c, idx) => {
+				asked.push(idx);
+			}
+		});
+		await p.load();
+		// The first card's fetch brought the AHEAD after it, in the quiz's order.
+		const order = (await db.getAllFromIndex('quiz_questions', 'quiz_id', Q)).sort((a, b) => a.position! - b.position!).map((r) => r.question_idx);
+		expect(fetched).toEqual([order[0]]);
+		expect(asked).toEqual([order.slice(1, 1 + AHEAD)]);
+		expect(p.v.card!.answer).not.toBeNull();
+		// No new request while more than AHEAD_LOW are covered.
+		for (let i = 0; i < AHEAD - AHEAD_LOW; i++) {
+			await p.showNext();
+			await p.showNext();
+		}
+		expect(asked).toHaveLength(1);
+		await p.showNext();
+		await p.showNext();
+		await new Promise((r) => setTimeout(r, 0));
+		expect(asked).toHaveLength(2);
+		expect(asked[1]).toEqual(order.slice(1 + AHEAD, Math.min(order.length, 2 + AHEAD + AHEAD_LOW)));
+		expect(fetched).toHaveLength(1);
+	});
+
+	it('a created cascade is stored whole, in chunks, reporting progress after each', async () => {
+		const chunk = 100;
+		const n = chunk * 2 + 7;
+		const seen: number[] = [];
+		await cascade(n, { keys: false, cards: false, dist: false });
+		// Every row is there, positions 0 … n − 1 once each.
+		const rows = await db.getAllFromIndex('quiz_questions', 'quiz_id', Q);
+		expect(rows).toHaveLength(n);
+		expect(new Set(rows.map((r) => r.position)).size).toBe(n);
+		// Progress was reported per chunk, ending at 1.
+		await db.clear('quiz_questions');
+		const created = await db.get('cascades', C);
+		expect(created).toBeTruthy();
+		await storeCreated(db, {
+			cascade: { ...(created as unknown as Record<string, unknown>), question_count: n, updated_seq: '1' },
+			source_quiz: { ...((await db.get('quizzes', Q)) as unknown as Record<string, unknown>), created_seq: '1', updated_seq: '1' },
+			sync_seq: '1'
+		}, new Date(), (f) => seen.push(f), chunk);
+		expect(seen).toEqual([0, chunk / n, (2 * chunk) / n, 1]);
+	});
+
 	it('Show / Next reveals Correct, Toggle flips it, and Show / Next saves the grade and moves the cursor', async () => {
 		await cascade(3);
 		const p = player();
@@ -85,12 +193,15 @@ describe('the player', () => {
 		expect(p.v.card!.revealed).toBe(false);
 	});
 
-	it('a card toggled before the reveal starts Missed; Previous shows the earlier card with its saved grade and discards the unsaved reveal', async () => {
+	it('Toggle before the reveal does nothing; Previous shows the earlier card with its saved grade and discards the unsaved reveal', async () => {
 		await cascade(3);
 		const p = player();
 		await p.load();
 		await p.toggle();
+		expect([p.v.card!.revealed, p.v.card!.toggled]).toEqual([false, false]);
 		await p.showNext();
+		expect(p.v.card!.grade).toBe('correct');
+		await p.toggle();
 		expect(p.v.card!.grade).toBe('missed');
 		await p.showNext();
 		await p.showNext(); // reveal card 2
@@ -248,18 +359,34 @@ describe('controls', () => {
 
 	it('a stroke belongs to one action, every action keeps one binding, and Escape cannot be bound', () => {
 		const x = { kind: 'key' as const, code: 'KeyX', ctrl: false, shift: false, alt: false, meta: false };
-		const moved = bind(DEFAULT_BINDINGS, 'previous', x);
+		// Each action starts with the three bindings it can hold: a fourth is not taken.
+		expect(bind(DEFAULT_BINDINGS, 'previous', x).moved ?? null).toBeNull();
+		expect(DEFAULT_BINDINGS.filter((b) => b.action === 'previous')).toHaveLength(3);
+		// With room made (J removed), a stroke of another action moves.
+		const roomy = DEFAULT_BINDINGS.filter((b) => b.code !== 'KeyJ');
+		const moved = bind(roomy, 'previous', x);
 		expect(moved.moved).toBe('toggle_grade');
 		expect(moved.bindings.filter((b) => b.code === 'KeyX').map((b) => b.action)).toEqual(['previous']);
-		const esc = bind(DEFAULT_BINDINGS, 'previous', { ...x, code: 'Escape' });
+		const esc = bind(roomy, 'previous', { ...x, code: 'Escape' });
 		expect(esc.refused).toBe(true);
 	});
 
-	it('the same action twice within 120 ms counts once', () => {
+	it('the same action twice within the repeat guard counts once', () => {
 		const d = new Debounce(120);
 		expect(d.pass('show_next', 1000)).toBe(true);
 		expect(d.pass('show_next', 1100)).toBe(false);
 		expect(d.pass('show_next', 1121)).toBe(true);
+	});
+
+	it('the repeat guard follows the setting as it changes, and 0 turns it off', () => {
+		let ms = 50;
+		const d = new Debounce(() => ms);
+		expect(d.pass('show_next', 1000)).toBe(true);
+		expect(d.pass('show_next', 1040)).toBe(false);
+		expect(d.pass('show_next', 1051)).toBe(true);
+		ms = 0;
+		expect(d.pass('show_next', 1052)).toBe(true);
+		expect(d.pass('show_next', 1052)).toBe(true);
 	});
 });
 
@@ -274,7 +401,7 @@ describe('banners', () => {
 		expect(finishBanner({ ...base, correct: 0, outcome: 'reshuffled' })).toBe('Level 2: 0%. Reshuffled. Try again.');
 		expect(finishBanner({ ...base, correct: 100, misses: 0, outcome: 'cleared' })).toBe('Level 2 cleared with 100%. Back to Level 1.');
 		expect(finishBanner({ ...base, level: 1, correct: 100, misses: 0, outcome: 'completed', completion: { levels: 4, attempts: 9 } })).toBe(
-			'Level 1: 100%. Cascade complete after 4 levels and 9 attempts.'
+			'Level 1: 100%. Cascade complete after 4 levels and 9 passes.'
 		);
 	});
 });

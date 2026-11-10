@@ -16,7 +16,7 @@ test('dev sign-in adopts the session and refuses an off-site next', async ({ pag
 	await expect(tab.getByText(username).first()).toBeVisible();
 	await tab.reload();
 	await expect(tab.getByText(username).first()).toBeVisible();
-	// A next that a browser could read as another host lands on /cascades.
+	// A next that a browser could read as another host lands on the Cascades page.
 	await tab.goto(`/dev-login?username=${username}&next=//evil.example/`);
 	await expect(tab).toHaveURL(/\/cascades$/);
 	await fresh.close();

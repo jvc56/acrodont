@@ -38,7 +38,7 @@ test('updating the app', async ({ context }) => {
 	await b.goto(player);
 	await expect(b.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
 	await press(b, 'Space');
-	await expect(b.getByText('✓ Correct')).toBeVisible();
+	await expect(b.locator('[data-grade="correct"]')).toBeVisible();
 	try {
 		// Deploy a second build.
 		execFileSync('docker', ['compose', '-p', PROJECT, 'up', '-d', '--build', '--no-deps', 'frontend'], {
@@ -70,7 +70,7 @@ test('updating the app', async ({ context }) => {
 		// The other tab did not reload: it keeps its revealed card, says the app was
 		// updated in another tab, and finishes that card from the old build.
 		await expect(b.getByText('Wordfall was updated in another tab — reload to continue')).toBeVisible({ timeout: 30_000 });
-		await expect(b.getByText('✓ Correct')).toBeVisible();
+		await expect(b.locator('[data-grade="correct"]')).toBeVisible();
 		expect(await build(b)).toBe(old);
 		await press(b, 'Space');
 		await expect(b.getByText('2 / 18')).toBeVisible();

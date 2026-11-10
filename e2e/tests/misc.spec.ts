@@ -135,7 +135,7 @@ test('keys before answers: three cascades, offline before their answers arrive, 
 		await expect(page.getByText(/^1 \/ \d+$/)).toBeVisible({ timeout: 30_000 });
 		await expect(page.getByText('This question needs a connection.')).toHaveCount(0);
 		await press(page, 'Space');
-		await expect(page.getByText(/✓ Correct/)).toBeVisible();
+		await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	}
 	await context.setOffline(false);
 });

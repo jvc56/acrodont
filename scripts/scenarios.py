@@ -19,9 +19,20 @@ from typing import Callable, Dict, List, Optional
 
 import stack
 
-# Fixture-catalog filters (fixtures/catalog/EN-FIX.tsv, 154 words).
+# The scenarios run on the stack's lexicon: CSW24 from the licensed catalog
+# when it is there, else the fixture catalog's EN-FIX (154 words). Each is a
+# length range capped by Probability Order, so its size is the same small one
+# on either: `top` questions per length at most.
 def length(lo: int, hi: int) -> dict:
     return {"op": "and", "children": [{"type": "length", "negated": False, "min": lo, "max": hi}]}
+
+
+def small(lo: int, hi: int, top: int) -> dict:
+    """Lengths lo…hi, the `top` most probable of each."""
+    return {"op": "and", "children": [
+        {"type": "length", "negated": False, "min": lo, "max": hi},
+        {"type": "probability_order", "negated": False, "min": 1, "max": top, "lax": False},
+    ]}
 
 
 @dataclass
@@ -42,7 +53,8 @@ class Seeder:
                  real_lexicon: Optional[str] = None):
         self.http = http
         self.project = project
-        self.lexicon = fixture_lexicon
+        # The lexicon every scenario but `big` uses: the real one when there is one.
+        self.lexicon = real_lexicon or fixture_lexicon
         self.real_lexicon = real_lexicon
         self.device_id = str(uuid.uuid4())
         self.cursor: Optional[int] = None
@@ -146,10 +158,10 @@ def quote(s: str) -> str:
 
 
 def studying(s: Seeder) -> None:
-    name = "Studying: EN-FIX 2–7"
+    name = f"Studying: {s.lexicon} 2–7"
     if s.cascade_named(name):
         return
-    c = s.create(name, length(2, 7))
+    c = s.create(name, small(2, 7, 20))
     source = s.deepest_active(c)
     n = s.size(source)
     # Level 1 finished with every fourth word missed, then half of Level 2.
@@ -162,19 +174,19 @@ def studying(s: Seeder) -> None:
 
 
 def finished(s: Seeder) -> None:
-    name = "Finished: EN-FIX sevens"
+    name = f"Finished: {s.lexicon} sevens"
     if s.cascade_named(name):
         return
-    c = s.create(name, length(7, 7))
+    c = s.create(name, small(7, 7, 25))
     source = s.deepest_active(c)
     s.sync(s.grades(source, "C" * s.size(source)) + [s.finish(source)])
 
 
 def segments(s: Seeder) -> None:
-    name = "Segments: EN-FIX 2–5 in fives"
+    name = f"Segments: {s.lexicon} 2–5 in fives"
     if s.cascade_named(name):
         return
-    c = s.create(name, length(2, 5), segment_size=5)
+    c = s.create(name, small(2, 5, 6), segment_size=5)
     source = s.deepest_active(c)
     q = s.quiz(source)
     # The first segment graded with a miss and finished, so a chain quiz
@@ -189,14 +201,16 @@ def segments(s: Seeder) -> None:
 def typed(s: Seeder) -> None:
     """Typed answers for Anagram quizzes: a preference, so it applies to every cascade."""
     s.sync([s.op("set_preferences", anagram_answer_mode="typed")])
-    s.create("Typed: EN-FIX 2–4", length(2, 4))
+    name = f"Typed: {s.lexicon} 2–4"
+    if not s.cascade_named(name):
+        s.create(name, small(2, 4, 10))
 
 
 def trash(s: Seeder) -> None:
-    name = "Trashed: EN-FIX eights"
+    name = f"Trashed: {s.lexicon} eights"
     if s.cascade_named(name):
         return
-    c = s.create(name, length(8, 8))
+    c = s.create(name, small(8, 8, 20))
     s.sync([s.op("trash_cascade", cascade_id=c)])
 
 
@@ -210,15 +224,15 @@ def limits(s: Seeder) -> None:
     while n < target:
         name = f"Filler {i}"
         if not s.cascade_named(name):
-            s.create(name, length(2, 2))
+            s.create(name, small(2, 2, 10))
             n += 1
         i += 1
 
 
 def big(s: Seeder) -> None:
-    """One cascade near MAX_QUIZ_QUESTIONS from --real-catalog, to feel the scale in a browser."""
+    """One cascade near MAX_QUIZ_QUESTIONS from the licensed catalog, to feel the scale in a browser."""
     if not s.real_lexicon:
-        stack.log("scenario big: needs --real-catalog (a real lexicon); skipped")
+        stack.log("scenario big: needs the licensed catalog (fixtures/licensed/, or --real-catalog DIR); skipped")
         return
     name = f"Big: {s.real_lexicon} 7–9"
     if s.cascade_named(name):
@@ -253,7 +267,7 @@ SCENARIOS: Dict[str, Scenario] = {s.name: s for s in [
     Scenario("typed", "typed answers on (a preference, for every Anagram cascade) and a cascade to try them", typed),
     Scenario("trash", "a cascade in the Trash", trash),
     Scenario("limits", "cascades up to the limit warning (90% of MAX_CASCADES_PER_USER)", limits),
-    Scenario("big", "one cascade near MAX_QUIZ_QUESTIONS from the real catalog (needs --real-catalog)", big),
+    Scenario("big", "one cascade near MAX_QUIZ_QUESTIONS from the licensed catalog (CSW24 by default)", big),
     Scenario("saved-searches", "three saved searches in the builder's Load dialog", saved_searches),
 ]}
 

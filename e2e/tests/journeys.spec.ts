@@ -41,7 +41,7 @@ test('answers gone, questions kept; a download stopped part way', async ({ page,
 	await expect(page.getByLabel('Type an answer')).toHaveCount(0);
 	await press(page, 'Space');
 	await expect(page.getByText('Answer needs a connection.')).toBeVisible();
-	await expect(page.getByText('✓ Correct')).toBeVisible();
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	await press(page, 'Space');
 	await context.setOffline(false);
 	await page.goto('/cascades');
@@ -125,6 +125,11 @@ test('trash: export a cleared quiz’s missed words offline, see purge dates, re
 test('export: counts, offline files, the definitions fallback, and one file through the server', async ({ page, context }) => {
 	test.setTimeout(240_000);
 	await newUser(page, 'exp');
+	// Definitions are on by default: off before the cascade downloads, so its
+	// cards never hold them and the definitions fallback below has a cause.
+	await page.goto('/account');
+	await page.getByLabel('Show definitions with anagrams').uncheck();
+	await expect(page.getByLabel('Show definitions with anagrams')).not.toBeChecked();
 	const player = await createCascade(page, { name: 'Export journey' });
 	expect(await playLevel(page, (i) => i < 3)).toMatch(/^Level 1/);
 	// Level 2 part played: its first card missed, its second correct. A cascade

@@ -52,10 +52,12 @@ export function inputOwns(e: KeyboardEvent): boolean {
 /** Drops the same action fired twice within `ms` (120 ms for actions, 150 ms for the wheel). */
 export class Debounce {
 	private last = new Map<string, number>();
-	constructor(private readonly ms: number) {}
+	/** A fixed window, or one read on every press (a setting the user can change). */
+	constructor(private readonly ms: number | (() => number)) {}
 	pass(key: string, now: number): boolean {
 		const t = this.last.get(key);
-		if (t !== undefined && now - t < this.ms) return false;
+		const ms = typeof this.ms === 'function' ? this.ms() : this.ms;
+		if (t !== undefined && now - t < ms) return false;
 		this.last.set(key, now);
 		return true;
 	}

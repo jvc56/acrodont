@@ -410,6 +410,9 @@ async function rebaseCascade(db: UserDb, st: PullState, C: string, work: Cascade
 	);
 }
 
+/** Above this many pulled grades for one quiz, its rows are read in one request. */
+const KEYED_GRADES = 2_000;
+
 /**
  * Step 2 for one pulled quiz: promotion, a rebuild when its attempt or seed
  * differs from the base's (or the base lacks it), a materialisation when its
@@ -459,17 +462,33 @@ async function settleQuiz(
 		return;
 	}
 	const inQrf = st.qrf.has(C);
-	if (bq && !seedChanged && staged.length === 0) {
+	if (bq && !seedChanged) {
 		// The usual case: an unchanged attempt whose rows are all here with
-		// positions needs nothing, however large the quiz. Positions are written
-		// for a quiz's whole set in one transaction, and the one path that removes
-		// single rows marks the quiz pending, so the row at the last position is
-		// the whole set's witness — one key lookup, where counting the rows would
-		// walk all of them on every batch.
+		// positions needs nothing but its pulled grades, however large the quiz.
+		// Positions are written for a quiz's whole set in one transaction, and the
+		// one path that removes single rows marks the quiz pending, so the row at
+		// the last position is the whole set's witness — one key lookup, where
+		// counting the rows would walk all of them on every batch.
 		const last = n > 0 ? await qs.index('quiz_position').getKey([pq.id, n - 1]) : undefined;
 		if (n > 0 && last !== undefined) {
-			await base.put(mergeQuiz(pq, false));
-			return;
+			// The grades (often this device's own, coming back) go onto their rows
+			// by key. The rows are the same set with the same positions, which is
+			// all the full path below would rebuild, so rewriting every row of a
+			// 100,000-question quiz on each sync would only stall the player.
+			// A few grades are looked up by key; a page of them reads the quiz's
+			// rows in one request, which is far cheaper than thousands of lookups.
+			let have: (QuestionRow | undefined)[];
+			if (staged.length <= KEYED_GRADES) {
+				have = await Promise.all(staged.map((g) => qs.get([pq.id, g.question_idx])));
+			} else {
+				const byIdx = new Map((await qs.index('quiz_id').getAll(pq.id)).map((r) => [r.question_idx, r]));
+				have = staged.map((g) => byIdx.get(g.question_idx));
+			}
+			if (have.every((r) => r !== undefined)) {
+				await Promise.all(staged.map((g, i) => qs.put({ ...have[i]!, grade: g.grade, graded_at: g.graded_at, seq: S })));
+				await base.put(mergeQuiz(pq, false));
+				return;
+			}
 		}
 	}
 	let rows = await qs.index('quiz_id').getAll(pq.id);

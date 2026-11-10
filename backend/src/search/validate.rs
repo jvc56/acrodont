@@ -161,7 +161,9 @@ impl Validator<'_> {
         if depth > MAX_DEPTH {
             self.err(path, "op", format!("Groups nest at most {MAX_DEPTH} deep."));
         }
-        if g.children.is_empty() {
+        // An empty search is the whole lexicon (or leave set); the cap on
+        // questions still applies. A nested group with nothing in it adds nothing.
+        if g.children.is_empty() && depth > 1 {
             self.err(path, "children", "A group must hold at least one row or group.");
         }
         let mut children = Vec::with_capacity(g.children.len());
@@ -243,8 +245,9 @@ impl Validator<'_> {
         }
     }
 
-    /// A valid range narrows something: min above the filter's own floor or
-    /// max below its ceiling. A bound above the ceiling names the ceiling.
+    /// A valid range has min ≤ max within the filter's floor and ceiling; the
+    /// whole range is valid and matches every candidate. A bound above the
+    /// ceiling names the ceiling.
     fn range(&mut self, t: ConditionType, min: i64, max: i64, path: &[usize]) -> Option<Range> {
         let floor = Self::floor(t);
         let ceiling = self.ceiling(t);
@@ -269,11 +272,7 @@ impl Validator<'_> {
         if self.errors.len() > before {
             return None;
         }
-        if let Some(c) = ceiling
-            && min == floor && max as u64 == c {
-                self.err(path, "min", format!("{floor}–{c} includes everything, so this row narrows nothing."));
-                return None;
-            }
+        // A range that includes everything is valid: it matches every candidate.
         if min > i64::from(u32::MAX) || max > i64::from(u32::MAX) {
             self.err(path, "max", "The bound is too large.");
             return None;

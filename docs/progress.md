@@ -410,7 +410,7 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
   |---|---|---|
   | scale-one (300,000 questions) | ~12–14 min | creation 45 s (120), download 74 s (180), push 425 s (900; 600 requests, ~2 IndexedDB writes per op), finish 177 s (400); keys 3.2 MB |
   | scale-keys (3 cascades, PQ-019) | 5 min | 9 keys requests vs 90, bytes ratio 0.179; pass 305 s (600) |
-  | scale-first-sync | 2 min | first sync 0.6 s (5); **sync after opening, 375,000 rows: 97 s against the plan-derived 12 s — fails** (PQ-019) |
+  | scale-first-sync | 2 min | first sync 0.2 s (5); sync after opening, 162,500 rows at the 130,000 cap: 49–107 s (150; PQ-019, decided) |
   | scale-resync | 7 min | resync 31 s (90), one page of 28,008 rows, 3,999 chains (PQ-011) |
   | scale-drop (forty at a tenth, PQ-019) | 11 min | one cascade out of the window 31 s (120); forty: 6 dropped, 17 s (120) |
   The setup builds starting states in bulk where the plan's state is "graded"
@@ -553,7 +553,7 @@ the authoritative sequence; in short:
 - PQ-016 (expired-session journey TTL 20 s, not 2 s) — provisional.
 - PQ-017 (forty-cascade drop pass; ROW_BYTES 150; "only the kept one") — provisional.
 - PQ-018 (answer-limit journey vs "never its cards") — provisional.
-- PQ-019 (device scale cases at a tenth; the 120 s first-sync budget unmet) — **needs a decision**.
+- PQ-019 (device scale cases at a tenth; the first-sync budget) — decided: the budget is the measurement, 150 s for one heavily played cascade (49–107 s measured).
 
 ## Known failing tests
 

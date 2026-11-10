@@ -3,7 +3,6 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import { Label } from '$lib/components/ui/label';
 	import Field from '$lib/components/auth/Field.svelte';
 	import FormError from '$lib/components/auth/FormError.svelte';
 	import { ApiError, type FieldError } from '$lib/api';
@@ -13,10 +12,12 @@
 	import { removeAccountData } from '$lib/local/accounts';
 	import { closeUserDb, userDb } from '$lib/local/open';
 	import { onMount } from 'svelte';
-	import SyncStatus from '$lib/components/SyncStatus.svelte';
 	import PreferencesCard from '$lib/components/account/PreferencesCard.svelte';
 	import ControlsEditor from '$lib/components/account/ControlsEditor.svelte';
 	import StorageCard from '$lib/components/account/StorageCard.svelte';
+	import DisplaySettings from '$lib/components/player/DisplaySettings.svelte';
+	import SettingRow from '$lib/components/SettingRow.svelte';
+	import { display } from '$lib/player/display.svelte';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta } from '$lib/local/meta';
 	import { preferencesView } from '$lib/local/preferences';
@@ -52,6 +53,7 @@
 			if (!session.userId) return;
 			db = await userDb(session.userId, session.username);
 			maxQuiz = (await getMeta(db, 'server')).max_quiz_questions;
+			await display.load(db);
 			await refreshPrefs();
 		})();
 	});
@@ -113,7 +115,7 @@
 		// To the landing page; the signed-out guard would otherwise send this page to /login.
 		session.toLanding = true;
 		forgetSession();
-		await goto('/', { replaceState: true });
+		await goto('/login', { replaceState: true });
 	}
 
 	async function doLogout() {
@@ -134,19 +136,18 @@
 </script>
 
 <main class="mx-auto grid max-w-2xl gap-6 p-6">
-	<header class="flex items-center justify-between">
-		<h1 class="text-2xl font-semibold">Account</h1>
-		<Button href="/cascades" variant="outline">Cascades</Button>
-	</header>
+	<h1 class="text-2xl font-semibold">Account</h1>
 
 	<Card.Root>
 		<Card.Header><Card.Title>Signed in as {session.username}</Card.Title></Card.Header>
 		<Card.Content class="grid gap-3">
-			<div class="flex items-center gap-2">
+			<SettingRow label="Remove this account's data from this device" for="remove-data">
 				<Checkbox id="remove-data" bind:checked={removeData} />
-				<Label for="remove-data">Remove this account's data from this device</Label>
-			</div>
-			{#if (syncState.pending ?? 0) > 0}
+			</SettingRow>
+			<!-- Only changes that cannot sync now matter at logout. Online, a change
+			     syncs within a second, and the header's sync status shows that: a
+			     line here would come and go with every setting changed. -->
+			{#if (syncState.pending ?? 0) > 0 && (syncState.status === 'offline' || syncState.status === 'needs_login' || session.needsLogin)}
 				<p class="text-sm" role="status">
 					{syncState.pending === 1 ? '1 change hasn’t' : `${syncState.pending} changes haven’t`} synced yet. {syncState.pending === 1 ? 'It' : 'They'}
 					will sync the next time you log in on this device.
@@ -158,12 +159,15 @@
 				{/if}
 			{/if}
 			<Button variant="outline" onclick={doLogout}>Log out</Button>
-			<SyncStatus />
 		</Card.Content>
 	</Card.Root>
 
 	{#if db && prefs}
 		<PreferencesCard {db} {prefs} {maxQuiz} onchange={refreshPrefs} />
+		<Card.Root id="display">
+			<Card.Header><Card.Title>On this device</Card.Title></Card.Header>
+			<Card.Content><DisplaySettings /></Card.Content>
+		</Card.Root>
 		<ControlsEditor {db} bindings={prefs.bindings} onchange={refreshPrefs} />
 		<StorageCard {db} />
 	{/if}

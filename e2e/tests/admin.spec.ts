@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { apiCascade, login, PASSWORD } from './support';
+import { PASSWORD, apiCascade, login, openPlayerSettings } from './support';
 
 // PLAN.md § End-to-end tests: "As an admin, upload a distribution, lexicon and
 // leave value set, see a deliberately broken file rejected with line numbers,
@@ -100,16 +100,16 @@ test('admin uploads, a broken file, a Leave Value cascade from the new set, dele
 	await expect(page.getByText('11,000 questions').or(page.getByText('11000 questions')).first()).toBeVisible({ timeout: 60_000 });
 	await page.getByLabel('Study in segments').check();
 	await page.getByLabel('Segment size').fill('5');
-	await expect(page.getByText('One attempt could create up to 2,200 drill levels, one for each segment with a miss.')).toBeVisible();
+	await expect(page.getByText('One pass could create up to 2,200 drill levels, one for each segment with a miss.')).toBeVisible();
 	// … and in a quiz's settings menu.
 	await page.getByLabel('Study in segments').uncheck();
 	await page.getByLabel('Cascade name').fill('Big');
 	await page.getByRole('button', { name: 'Create Cascade' }).click();
 	await expect(page).toHaveURL(/\/cascades\/[0-9a-f-]{36}$/, { timeout: 60_000 });
 	await expect(page.getByText(/^1 \/ 11000$/)).toBeVisible({ timeout: 60_000 });
-	await page.getByRole('button', { name: /Preferences|Settings/ }).first().click();
+	await openPlayerSettings(page);
 	const d = page.getByRole('dialog', { name: 'Settings' });
 	await d.getByLabel('Study in segments').check();
 	await d.getByLabel('Segment size').fill('5');
-	await expect(d.getByText('One attempt could create up to 2,200 drill levels, one for each segment with a miss.')).toBeVisible();
+	await expect(d.getByText('One pass could create up to 2,200 drill levels, one for each segment with a miss.')).toBeVisible();
 });

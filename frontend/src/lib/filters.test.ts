@@ -136,7 +136,8 @@ describe('ceilings', () => {
 			const def = filterDef(type);
 			const r = defaultRange(def, ctx);
 			expect(r.max).toBe(ceiling);
-			expect(rangeError(def, r.min, r.max, ctx)).toMatch(/narrows nothing/);
+			// The whole range is a valid search: it matches every candidate.
+			expect(rangeError(def, r.min, r.max, ctx)).toBeNull();
 			expect(rangeError(def, r.min, r.max - 1, ctx)).toBeNull();
 			expect(rangeError(def, r.min, ceiling + 1, ctx)).toContain(String(ceiling));
 		}

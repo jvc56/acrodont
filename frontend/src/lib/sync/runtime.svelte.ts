@@ -36,9 +36,20 @@ export function downloadManager(): DownloadManager | null {
 }
 
 /** The card page the player needs now, in whichever tab it is. */
-export async function fetchCard(db: UserDb, cascadeId: string, idx: number) {
+export async function fetchCard(db: UserDb, cascadeId: string, idx: number, ahead: number[] = []) {
 	if (typeof navigator !== 'undefined' && !navigator.onLine) throw new Error('offline');
-	await (downloads ?? new DownloadManager(db)).fetchForPlayer(cascadeId, idx);
+	await (downloads ?? new DownloadManager(db)).fetchForPlayer(cascadeId, idx, ahead);
+}
+
+/** A player action; this tab's background downloads let it go first (DownloadManager.whilePlayerActs). */
+export function playerActs<T>(fn: () => Promise<T>): Promise<T> {
+	return downloads ? downloads.whilePlayerActs(fn) : fn();
+}
+
+/** The player's read-ahead of the next cards in its order, in whichever tab it is. */
+export async function fetchAhead(db: UserDb, cascadeId: string, idx: number[]) {
+	if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+	await (downloads ?? new DownloadManager(db)).fetchAhead(cascadeId, idx);
 }
 
 /** A first open's fetch sequence, in whichever tab the player is. */
@@ -172,7 +183,7 @@ export async function syncNow() {
 	await refreshPending();
 }
 
-/** Operations waiting in the outbox, for "3 changes waiting to sync". */
+/** Operations waiting in the outbox: whether any are (the sync status), and how many (the logout warning). */
 export async function refreshPending() {
 	if (!currentUser) return;
 	const db = await userDb(currentUser);

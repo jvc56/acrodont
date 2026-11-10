@@ -1,6 +1,7 @@
 <script lang="ts">
 	// The cascade builder (PLAN.md § Creating a cascade), laid out like
 	// Zyzzyva's Search tab. Needs a connection: searching runs on the server.
+	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
@@ -59,6 +60,10 @@
 	let nameEdited = $state(false);
 	let preview = $state<PreviewState | null>(null);
 	let creating = $state(false);
+	/** What the creation is doing, for the screen shown over the builder. */
+	let createStage = $state<'server' | 'device'>('server');
+	let createProgress = $state(0);
+	let createCount = $state<number | null>(null);
 	let busy = $state(false);
 	let createError = $state<string | null>(null);
 	let loadError = $state<string | null>(null);
@@ -145,6 +150,9 @@
 		if (!session.userId) return;
 		createError = null;
 		creating = true;
+		createStage = 'server';
+		createProgress = 0;
+		createCount = null;
 		// This device's id for the account, from the per-user `meta` store.
 		const { device_id } = await getMeta(await userDb(session.userId, session.username), 'device');
 		// Minted once per press and reused for every retry of it.
@@ -165,7 +173,9 @@
 		try {
 			const created = await sendWithRetry(() => api.post<Created>('/api/cascades', body), { onBusy: (b) => (busy = b) });
 			// Into the base at once: a cascade starts downloading the moment it is created.
-			await storeCreated(await userDb(session.userId, session.username), created);
+			createCount = Number(created.source_quiz.question_count);
+			createStage = 'device';
+			await storeCreated(await userDb(session.userId, session.username), created, new Date(), (f) => (createProgress = f));
 			await goto(`/cascades/${body.id}`);
 		} catch (e) {
 			if (e instanceof ApiError && e.code === 'cascade_limit') {
@@ -415,3 +425,7 @@
 		</ul>
 	</Dialog.Content>
 </Dialog.Root>
+
+{#if creating && !busy}
+	<CreatingCascade stage={createStage} progress={createProgress} count={createCount} />
+{/if}

@@ -30,16 +30,16 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await page.waitForTimeout(150);
 
 	// Left click shows and advances, right click toggles, middle click goes back.
-	await area(page).click({ position: { x: 30, y: 30 } });
-	await expect(page.getByText('✓ Correct')).toBeVisible();
+	await area(page).click({ position: { x: 200, y: 300 } });
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	await page.waitForTimeout(150);
-	await area(page).click({ button: 'right', position: { x: 30, y: 30 } });
-	await expect(page.getByText('✗ Missed')).toBeVisible();
+	await area(page).click({ button: 'right', position: { x: 200, y: 300 } });
+	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
 	await page.waitForTimeout(150);
-	await area(page).click({ position: { x: 30, y: 30 } });
+	await area(page).click({ position: { x: 200, y: 300 } });
 	await at(page, 2);
 	await page.waitForTimeout(150);
-	await area(page).click({ button: 'middle', position: { x: 30, y: 30 } });
+	await area(page).click({ button: 'middle', position: { x: 200, y: 300 } });
 	await at(page, 1);
 	// No context menu: the quiz area suppresses it.
 	const prevented = await area(page).evaluate((el) => {
@@ -48,25 +48,29 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 		return ev.defaultPrevented;
 	});
 	expect(prevented).toBe(true);
-	// A double click on a revealed card advances once (back on card 1, its saved grade is shown).
-	await expect(page.getByText('✗ Missed')).toBeVisible();
+	// The repeat guard is off by default, so both clicks of a double click on a
+	// revealed card count (back on card 1, its saved grade is shown): it moves
+	// on, then shows card 2's answer.
+	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
 	await page.waitForTimeout(150);
-	await area(page).dblclick({ position: { x: 30, y: 30 } });
+	await area(page).dblclick({ position: { x: 200, y: 300 } });
 	await at(page, 2);
-	await expect(page.getByText('✓ Correct')).toHaveCount(0);
-	// Clicks on the side rails do nothing to the quiz.
-	await page.getByText(/^clear at \d+%$/).click();
-	await page.getByRole('paragraph').filter({ hasText: /^attempt \d+$/ }).click({ button: 'right' });
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
+	// Clicks on the status bar do nothing to the quiz.
+	await page.getByRole('paragraph').filter({ hasText: /^Level \d+ of \d+$/ }).click();
+	await page.getByRole('paragraph').filter({ hasText: /^Pass \d+$/ }).click({ button: 'right' });
 	await at(page, 2);
-	await expect(page.getByText('✓ Correct')).toHaveCount(0);
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 
 	// Rebind Toggle grade to the wheel and to Shift+T on the Account page: right
-	// click makes way, since an action holds at most three bindings, and X stays
-	// bound for the typed-mode check below.
+	// click and M make way, since an action holds at most three bindings (and
+	// starts with three), and X stays bound for the typed-mode check below.
 	await page.goto('/account');
 	const toggle = section(page, 'Toggle grade');
-	await toggle.getByRole('listitem').filter({ hasText: /^Right click/ }).getByRole('button', { name: 'Remove binding' }).click();
-	await expect(toggle.getByRole('listitem').filter({ hasText: /^Right click/ })).toHaveCount(0);
+	for (const name of [/^Right click/, /^M/]) {
+		await toggle.getByRole('listitem').filter({ hasText: name }).getByRole('button', { name: 'Remove binding' }).click();
+		await expect(toggle.getByRole('listitem').filter({ hasText: name })).toHaveCount(0);
+	}
 	await bindOn(page, 'Toggle grade', async (box) => {
 		await box.hover();
 		await page.mouse.wheel(0, 120);
@@ -76,6 +80,11 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 		await page.keyboard.press('Shift+KeyT');
 	});
 	await expect(page.getByText('Shift+T')).toBeVisible();
+	// Previous starts full (middle click, Backspace, J): J makes way, which also
+	// gives the Escape check below an Add binding button (every other action is full).
+	const previous = section(page, 'Previous');
+	await previous.getByRole('listitem').filter({ hasText: /^J/ }).getByRole('button', { name: 'Remove binding' }).click();
+	await expect(previous.getByRole('listitem').filter({ hasText: /^J/ })).toHaveCount(0);
 	// Escape cancels capture instead of being bound.
 	await page.getByRole('button', { name: 'Add binding' }).first().click();
 	await page.keyboard.press('Escape');
@@ -85,8 +94,10 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 		await page.keyboard.press('Space');
 	});
 	await expect(page.getByText(/Space moved from Show \/ Next\./)).toBeVisible();
-	// A binding can't be removed from an action that has only one.
+	// A binding can't be removed from an action that has only one: Show / Next
+	// keeps left click and comma once Space has moved; comma goes first.
 	const show = section(page, 'Show / Next');
+	await show.getByRole('listitem').filter({ hasText: /^,/ }).getByRole('button', { name: 'Remove binding' }).click();
 	await expect(show.getByRole('button', { name: 'Remove binding' })).toHaveCount(1);
 	await show.getByRole('button', { name: 'Remove binding' }).click();
 	await expect(show.getByRole('button', { name: 'Remove binding' })).toHaveCount(1);
@@ -100,15 +111,15 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await page.goto(player);
 	await at(page, 2);
 	await press(page, 'Space');
-	await expect(page.getByText('✓ Correct')).toBeVisible();
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	await area(page).hover();
 	await page.mouse.wheel(0, 100);
 	await page.mouse.wheel(0, 100);
 	await page.mouse.wheel(0, 100);
-	await expect(page.getByText('✗ Missed')).toBeVisible();
+	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
 	await page.waitForTimeout(200);
 	await page.keyboard.press('Shift+KeyT');
-	await expect(page.getByText('✓ Correct')).toBeVisible();
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 
 	// The change syncs to a second browser.
 	await page.goto('/cascades');
@@ -137,7 +148,7 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await page.keyboard.press('KeyA');
 	await page.keyboard.press('Backspace');
 	await expect(input).toHaveValue('x ');
-	await expect(page.getByText('Marked missed')).toHaveCount(0);
+	await expect(page.locator('[data-grade]')).toHaveCount(0);
 	await page.keyboard.press('Control+Backspace');
 	await at(page, 1);
 	// Middle click still goes back with the input focused.
@@ -145,6 +156,6 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await press(page, 'Space');
 	await at(page, 2);
 	await page.getByLabel('Type an answer').focus();
-	await area(page).click({ button: 'middle', position: { x: 30, y: 30 } });
+	await area(page).click({ button: 'middle', position: { x: 200, y: 300 } });
 	await at(page, 1);
 });

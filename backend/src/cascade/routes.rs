@@ -26,6 +26,9 @@ use crate::search::wire::{tree_to_json, PathError, QuizType};
 
 pub const MAX_CARDS_PER_PAGE: i64 = 10_000;
 pub const MAX_KEYS_PER_PAGE: i64 = 100_000;
+/// Cards named one by one with `idx=`: what the player reads ahead, in the
+/// quiz's own order, while the cascade's pages are still downloading.
+pub const MAX_CARDS_BY_IDX: usize = 1_000;
 /// A device timestamp ahead of the server by more than this is stored at the limit.
 pub const MAX_FUTURE: Duration = Duration::minutes(5);
 
@@ -358,7 +361,9 @@ fn flag(q: &HashMap<String, String>, name: &str) -> Result<bool, ApiError> {
     }
 }
 
-/// Answer cards `[{ idx, key, answer }]`, or with `keys=1` the keys alone as
+/// Answer cards `[{ idx, key, answer }]` for `from`…`from+limit−1`, or for the
+/// comma-separated question indexes in `idx` (at most `MAX_CARDS_BY_IDX`, in
+/// idx order, for the player's read-ahead), or with `keys=1` the keys alone as
 /// `{ from, keys }`. Served `private, no-store`: the device keeps every byte
 /// in IndexedDB, and a second copy in the HTTP cache would sit outside every
 /// budget.
@@ -372,12 +377,35 @@ async fn cards(
     let keys_only = flag(&q, "keys")?;
     let hooks = flag(&q, "hooks")?;
     let definitions = flag(&q, "definitions")?;
-    let from = int_param(&q, "from")?.ok_or_else(|| ApiError::bad_request("missing_from"))?;
-    let limit = int_param(&q, "limit")?.ok_or_else(|| ApiError::bad_request("missing_limit"))?;
-    let max = if keys_only { MAX_KEYS_PER_PAGE } else { MAX_CARDS_PER_PAGE };
-    if from < 0 || limit < 1 || limit > max {
-        return Err(ApiError::bad_request("invalid_range"));
-    }
+    // Either a range or a list of indexes, never both; keys come only by range.
+    let listed: Option<Vec<i32>> = match q.get("idx") {
+        None => None,
+        Some(_) if keys_only || q.contains_key("from") || q.contains_key("limit") => {
+            return Err(ApiError::bad_request("invalid_idx"));
+        }
+        Some(v) => {
+            let list = v
+                .split(',')
+                .map(|x| x.parse::<i32>().ok().filter(|n| *n >= 0))
+                .collect::<Option<Vec<i32>>>()
+                .ok_or_else(|| ApiError::bad_request("invalid_idx"))?;
+            if list.is_empty() || list.len() > MAX_CARDS_BY_IDX {
+                return Err(ApiError::bad_request("invalid_idx"));
+            }
+            Some(list)
+        }
+    };
+    let (from, limit) = if listed.is_some() {
+        (0, 0)
+    } else {
+        let from = int_param(&q, "from")?.ok_or_else(|| ApiError::bad_request("missing_from"))?;
+        let limit = int_param(&q, "limit")?.ok_or_else(|| ApiError::bad_request("missing_limit"))?;
+        let max = if keys_only { MAX_KEYS_PER_PAGE } else { MAX_CARDS_PER_PAGE };
+        if from < 0 || limit < 1 || limit > max {
+            return Err(ApiError::bad_request("invalid_range"));
+        }
+        (from, limit)
+    };
     if keys_only && (q.contains_key("hooks") || q.contains_key("definitions")) {
         return Err(ApiError::bad_request("keys_only"));
     }
@@ -389,17 +417,34 @@ async fn cards(
     .fetch_optional(&state.db)
     .await?
     .ok_or(ApiError::NotFound)?;
-    let end = from.saturating_add(limit).min(i64::from(i32::MAX));
-    let rows = sqlx::query!(
-        "SELECT idx, question_key FROM cascade_questions WHERE cascade_id = $1 AND idx >= $2 AND idx < $3 ORDER BY idx",
-        cascade_id,
-        from.min(i64::from(i32::MAX)) as i32,
-        end as i32,
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let rows: Vec<(i32, String)> = match &listed {
+        Some(list) => sqlx::query!(
+            "SELECT idx, question_key FROM cascade_questions WHERE cascade_id = $1 AND idx = ANY($2) ORDER BY idx",
+            cascade_id,
+            list,
+        )
+        .fetch_all(&state.db)
+        .await?
+        .into_iter()
+        .map(|r| (r.idx, r.question_key))
+        .collect(),
+        None => {
+            let end = from.saturating_add(limit).min(i64::from(i32::MAX));
+            sqlx::query!(
+                "SELECT idx, question_key FROM cascade_questions WHERE cascade_id = $1 AND idx >= $2 AND idx < $3 ORDER BY idx",
+                cascade_id,
+                from.min(i64::from(i32::MAX)) as i32,
+                end as i32,
+            )
+            .fetch_all(&state.db)
+            .await?
+            .into_iter()
+            .map(|r| (r.idx, r.question_key))
+            .collect()
+        }
+    };
     let body = if keys_only {
-        let keys: Vec<&str> = rows.iter().map(|r| r.question_key.as_str()).collect();
+        let keys: Vec<&str> = rows.iter().map(|r| r.1.as_str()).collect();
         json!({ "from": from, "keys": keys })
     } else {
         let snap = state.catalog.snapshot();
@@ -407,10 +452,10 @@ async fn cards(
         let dist = &lex.distribution;
         let leaves = snap.leave_set_for(lex.id);
         let mut cards = Vec::with_capacity(rows.len());
-        for r in &rows {
+        for (idx, question_key) in &rows {
             let answer = match row.quiz_type {
                 QuizType::Anagram => {
-                    let alpha: Vec<Tile> = dist.parse_magpie(&r.question_key, false).unwrap_or_default();
+                    let alpha: Vec<Tile> = dist.parse_magpie(question_key, false).unwrap_or_default();
                     let words: Vec<Value> = lex
                         .anagrams(&alpha)
                         .map(|w| {
@@ -419,6 +464,8 @@ async fn cards(
                             if hooks {
                                 o.insert("front_hooks".into(), json!(dist.to_magpie(&w.front_hooks)));
                                 o.insert("back_hooks".into(), json!(dist.to_magpie(&w.back_hooks)));
+                                o.insert("front_inner".into(), json!(w.has_front_inner_hook));
+                                o.insert("back_inner".into(), json!(w.has_back_inner_hook));
                             }
                             if definitions {
                                 o.insert("definition".into(), json!(&*w.definition));
@@ -429,16 +476,31 @@ async fn cards(
                     Value::Array(words)
                 }
                 QuizType::Definition => {
-                    let tiles = dist.parse_magpie(&r.question_key, false).unwrap_or_default();
+                    let tiles = dist.parse_magpie(question_key, false).unwrap_or_default();
                     json!(lex.find(&tiles).map(|w| &*w.definition))
                 }
                 QuizType::LeaveValue => {
-                    let tiles = dist.parse_magpie(&r.question_key, true).unwrap_or_default();
+                    let tiles = dist.parse_magpie(question_key, true).unwrap_or_default();
                     // The shortest text that round-trips the stored f64.
                     json!(leaves.and_then(|s| s.find(&tiles)).map(|l| l.value))
                 }
             };
-            cards.push(json!({ "idx": r.idx, "key": r.question_key, "answer": answer }));
+            let mut card = json!({ "idx": idx, "key": question_key, "answer": answer });
+            // A Definition card with hooks asked for carries its word's hooks
+            // and inner hooks beside the definition, which stays the answer.
+            if hooks && row.quiz_type == QuizType::Definition {
+                let tiles = dist.parse_magpie(question_key, false).unwrap_or_default();
+                if let Some(w) = lex.find(&tiles) {
+                    card["word"] = json!({
+                        "word": dist.to_magpie(&w.tiles),
+                        "front_hooks": dist.to_magpie(&w.front_hooks),
+                        "back_hooks": dist.to_magpie(&w.back_hooks),
+                        "front_inner": w.has_front_inner_hook,
+                        "back_inner": w.has_back_inner_hook,
+                    });
+                }
+            }
+            cards.push(card);
         }
         Value::Array(cards)
     };

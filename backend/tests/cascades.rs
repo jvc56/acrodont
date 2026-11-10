@@ -241,6 +241,21 @@ async fn names_are_one_to_two_hundred_scalar_values(pool: sqlx::PgPool) {
     assert_eq!(c.post("/api/cascades", b).await.status, StatusCode::BAD_REQUEST);
 }
 
+/// A search with no rows is the whole lexicon; one row over a filter's whole
+/// range is as valid. The cap on questions still applies to both.
+#[sqlx::test]
+async fn a_search_with_no_rows_or_a_whole_range_is_everything(pool: sqlx::PgPool) {
+    let app = TestApp::new(pool).await;
+    let mut c = app.seed_fixture_catalog("root").await;
+    let r = c.post("/api/cascades", body("EN-FIX", "definition", json!({ "op": "and", "children": [] }))).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!(r.json()["source_quiz"]["question_count"], 154);
+    let whole = json!({ "op": "and", "children": [{ "type": "length", "negated": false, "min": 1, "max": 15 }] });
+    let r = c.post("/api/cascades", body("EN-FIX", "definition", whole)).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!(r.json()["source_quiz"]["question_count"], 154);
+}
+
 #[sqlx::test]
 async fn empty_and_over_cap_searches_are_422(pool: sqlx::PgPool) {
     let app = TestApp::with(pool, &[("MAX_QUIZ_QUESTIONS", "10")]).await;
@@ -420,6 +435,8 @@ async fn card_pages(pool: sqlx::PgPool) {
     let card = r.json().as_array().unwrap().iter().find(|c| c["key"] == "AEINRST").unwrap().clone();
     assert!(card["answer"][0]["definition"].is_string());
     assert_eq!(card["answer"][0]["front_hooks"], "");
+    // With hooks, each word says whether it has a front and a back inner hook.
+    assert!(card["answer"][0]["front_inner"].is_boolean() && card["answer"][0]["back_inner"].is_boolean());
     // keys=1: `{ from, keys }`, the same keys in the same order as the full form.
     let r = c.get(&format!("/api/cascades/{id}/cards?from=2&limit=100000&keys=1")).await;
     assert_eq!(r.status, StatusCode::OK);
@@ -434,11 +451,36 @@ async fn card_pages(pool: sqlx::PgPool) {
     assert_eq!(c.get(&format!("/api/cascades/{id}/cards?from=0&limit=10001")).await.status, StatusCode::BAD_REQUEST);
     assert_eq!(c.get(&format!("/api/cascades/{id}/cards?from=0&limit=5&keys=1&hooks=1")).await.status, StatusCode::BAD_REQUEST);
     assert_eq!(c.get(&format!("/api/cascades/{id}/cards?from=0&limit=5&keys=1&definitions=0")).await.status, StatusCode::BAD_REQUEST);
+    // idx=: the cards named, in idx order, the same as their range form.
+    let r = c.get(&format!("/api/cascades/{id}/cards?idx=7,2,15&hooks=1")).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.headers.get(header::CACHE_CONTROL).unwrap(), "private, no-store");
+    let listed = r.json();
+    let idx: Vec<i64> = listed.as_array().unwrap().iter().map(|c| c["idx"].as_i64().unwrap()).collect();
+    assert_eq!(idx, [2, 7, 15]);
+    for card in listed.as_array().unwrap() {
+        let i = card["idx"].as_u64().unwrap() as usize;
+        assert_eq!(card["key"], cards[i]["key"]);
+        assert!(card["answer"][0].get("front_hooks").is_some());
+    }
+    let many = (0..1001).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+    for bad in ["idx=", "idx=1,x", "idx=-1", "idx=1&from=0", "idx=1&limit=5", "idx=1&keys=1"] {
+        assert_eq!(c.get(&format!("/api/cascades/{id}/cards?{bad}")).await.status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    assert_eq!(c.get(&format!("/api/cascades/{id}/cards?idx={many}")).await.status, StatusCode::BAD_REQUEST);
     // Definition and Leave Value answers.
     let def = create(&mut c, "EN-FIX", "definition", json!({ "op": "and", "children": [
         { "type": "anagram_match", "negated": false, "pattern": "Q I" } ] })).await;
     let r = c.get(&format!("/api/cascades/{def}/cards?from=0&limit=5")).await;
     assert_eq!(r.json()[0]["answer"], "the vital force in Chinese thought [n -S]");
+    assert!(r.json()[0].get("word").is_none(), "no hooks asked for");
+    // With hooks, a Definition card carries its word's hooks and inner hooks; the answer stays the definition.
+    let r = c.get(&format!("/api/cascades/{def}/cards?from=0&limit=5&hooks=1")).await;
+    let card = &r.json()[0];
+    assert_eq!(card["answer"], "the vital force in Chinese thought [n -S]");
+    assert_eq!(card["word"]["word"], "QI");
+    assert!(card["word"]["front_hooks"].is_string() && card["word"]["back_hooks"].is_string());
+    assert!(card["word"]["front_inner"].is_boolean() && card["word"]["back_inner"].is_boolean());
     let lv = create(&mut c, "EN-FIX", "leave_value", json!({ "op": "and", "children": [
         { "type": "leave_value", "negated": false, "min": 0.1, "max": 0.3 } ] })).await;
     let r = c.get(&format!("/api/cascades/{lv}/cards?from=0&limit=5")).await;

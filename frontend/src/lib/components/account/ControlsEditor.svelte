@@ -4,6 +4,20 @@
 	// cancels and cannot be bound; a stroke moves from another action with a
 	// notice; every action keeps one binding; Reset to defaults. Saved as one
 	// `set_bindings` operation.
+	/** What a punctuation key shows where the browser has no keyboard layout map (Firefox). */
+	const PUNCTUATION: Record<string, string> = {
+		Comma: ',',
+		Period: '.',
+		Slash: '/',
+		Semicolon: ';',
+		Quote: "'",
+		BracketLeft: '[',
+		BracketRight: ']',
+		Minus: '-',
+		Equal: '=',
+		Backquote: '`',
+		Backslash: '\\'
+	};
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { applyLocally } from '$lib/local/apply';
@@ -33,7 +47,7 @@
 	function label(b: Stroke): string {
 		const mods = [b.ctrl && 'Ctrl', b.alt && 'Alt', b.shift && 'Shift', b.meta && 'Meta'].filter(Boolean).join('+');
 		let base: string;
-		if (b.kind === 'key') base = layout?.get(b.code)?.toUpperCase() ?? b.code.replace(/^Key/, '').replace(/^Digit/, '');
+		if (b.kind === 'key') base = layout?.get(b.code)?.toUpperCase() ?? PUNCTUATION[b.code] ?? b.code.replace(/^Key/, '').replace(/^Digit/, '');
 		else if (b.kind === 'wheel') base = `Wheel ${b.code}`;
 		else base = `${b.code[0].toUpperCase()}${b.code.slice(1)} click`;
 		return mods ? `${mods}+${base}` : base;

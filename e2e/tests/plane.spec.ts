@@ -45,7 +45,7 @@ test('the plane', async ({ baseURL }) => {
 		await page.goto(player);
 		await expect(page.getByText('Level 2 of 2')).toBeVisible({ timeout: 20_000 });
 		await press(page, 'Space');
-		await expect(page.getByText('✓ Correct')).toBeVisible();
+		await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 		await press(page, 'Space');
 		// 6. Online again: Synced.
 		await context.setOffline(false);
@@ -53,7 +53,7 @@ test('the plane', async ({ baseURL }) => {
 		await expect(page.getByText('Synced')).toBeVisible({ timeout: 60_000 });
 		await page.goto(player);
 		await expect(page.getByText('2 / 2')).toBeVisible({ timeout: 30_000 });
-		const card = await page.locator('.text-4xl').first().textContent();
+		const card = await page.locator('[data-question]').first().textContent();
 		await page.goto('/cascades');
 		const state = await page.getByText(/^L1 · 18/).textContent();
 		await context.close();
@@ -66,7 +66,7 @@ test('the plane', async ({ baseURL }) => {
 		await expect(p2.getByText('Level 2 of 2')).toBeVisible({ timeout: 30_000 });
 		await expect(p2.getByText('2 / 2')).toBeVisible();
 		// The same question order: the same card at the same place.
-		await expect(p2.locator('.text-4xl').first()).toHaveText(card!);
+		await expect(p2.locator('[data-question]').first()).toHaveText(card!);
 		await p2.goto('/cascades');
 		await expect(p2.getByText(state!)).toBeVisible({ timeout: 60_000 });
 		await fresh.close();

@@ -1,9 +1,11 @@
 <script lang="ts">
 	// The player for the cascade's deepest level (PLAN.md § Taking a quiz):
-	// the desktop layout with side rails for a fine pointer at least 900 px
-	// wide, tap zones otherwise; the three actions from mouse, wheel, keys and
-	// taps; typed mode; the settings menu with preferences and this quiz's
-	// options; banners, the completion screen, and a trashed cascade's Restore.
+	// for a fine pointer at least 900 px wide, a hideable menu on the left, the
+	// quiz area with the question at the top, and a status bar along the bottom;
+	// tap zones otherwise. The three actions from mouse, wheel, keys and taps;
+	// typed mode; the settings dialog with preferences, this device's display
+	// and this quiz's options; banners, the completion screen, and a trashed
+	// cascade's Restore.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -14,7 +16,12 @@
 	import SyncStatus from '$lib/components/SyncStatus.svelte';
 	import TileText from '$lib/components/TileText.svelte';
 	import AnswerView from '$lib/components/player/AnswerView.svelte';
+	import DisplaySettings from '$lib/components/player/DisplaySettings.svelte';
+	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
+	import SettingRow from '$lib/components/SettingRow.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import * as Popover from '$lib/components/ui/popover';
+	import { display, textStyle } from '$lib/player/display.svelte';
 	import { runIndicator, runIndicatorText } from '$lib/cascade/rules';
 	import { applyLocally, quizState, type NewOp } from '$lib/local/apply';
 	import { storeCreated, type Created } from '$lib/local/created';
@@ -25,7 +32,10 @@
 	import type { AttemptRow, PreferencesRow } from '$lib/local/rows';
 	import type { RwTx } from '$lib/local/view';
 	import { PLAYER_LOCK } from '$lib/sync/downloads';
-	import { afterLocalWrite, ensureCascade, fetchCard, syncState } from '$lib/sync/runtime.svelte';
+	import { afterLocalWrite, ensureCascade, fetchAhead, fetchCard, playerActs, syncState } from '$lib/sync/runtime.svelte';
+	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
+	import PanelBottomCloseIcon from '@lucide/svelte/icons/panel-bottom-close';
+	import PanelBottomOpenIcon from '@lucide/svelte/icons/panel-bottom-open';
 	import { actionFor, Debounce, inputOwns, keyStroke, mouseStroke, wheelStroke, type Action } from '$lib/player/bindings';
 	import { Player, type PlayerView } from '$lib/player/controller';
 	import { levelRows, type LevelRow } from '$lib/player/ladder';
@@ -46,9 +56,9 @@
 	let typedFocused = $state(false);
 	let quizOptions = $state<QuizOptions | null>(null);
 	let maxQuiz = $state(130_000);
-	let busy = $state(false);
 
-	const actions = new Debounce(120);
+	// The repeat guard is a setting on this device (display.repeat_guard_ms), read on every press.
+	const actions = new Debounce(() => display.value.repeat_guard_ms);
 	const wheel = new Debounce(150);
 
 	let rows = $derived<LevelRow[]>(v?.cascade ? levelRows(v.quizzes, v.cascade.depth, attempts) : []);
@@ -57,6 +67,32 @@
 		const ri = runIndicator(quizState(v.quiz));
 		return ri ? runIndicatorText(ri) : null;
 	});
+	let dsp = $derived(display.value);
+	/** How far through the pass the current card is, for the status bar's line. */
+	let progress = $derived(v?.quiz ? (((v.card?.pos ?? v.quiz.cursor) + 1) / Math.max(1, v.quiz.question_count)) * 100 : 0);
+	/** Of the level's questions, the share graded in this pass; of those, the share correct. */
+	let gradedPct = $derived(v?.quiz ? ((v.quiz.correct_count + v.quiz.missed_count) / Math.max(1, v.quiz.question_count)) * 100 : 0);
+	let correctPct = $derived(
+		v?.quiz && v.quiz.correct_count + v.quiz.missed_count > 0
+			? (v.quiz.correct_count / (v.quiz.correct_count + v.quiz.missed_count)) * 100
+			: null
+	);
+	/** A percentage to two decimal places, rounded. */
+	const pct = (p: number) => `${p.toFixed(2)}%`;
+	/** Whether the share correct so far would clear the level: green on track, red not; nothing before a grade. */
+	let onTrack = $derived(correctPct === null || !v?.cascade ? null : correctPct >= v.cascade.clear_threshold);
+	/** The grade the quiz area's border shows once the answer is shown; none before. */
+	let gradeState = $derived(v?.status === 'ready' && v.card?.revealed ? v.card.grade : null);
+	// Each grade's border is a setting: by default a missed answer shows red and a correct one nothing.
+	let gradeBorder = $derived(
+		gradeState === 'correct' && dsp.border_correct
+			? 'border-green-600'
+			: gradeState === 'missed' && dsp.border_missed
+				? 'border-red-600'
+				: 'border-transparent'
+	);
+	/** The menu beside the quiz: hidden whenever a cascade opens, shown for this visit by ☰. */
+	let menuOpen = $state(false);
 
 	async function refreshSide() {
 		if (!db) return;
@@ -83,6 +119,7 @@
 			if (cancelled) return;
 			db = d;
 			maxQuiz = (await getMeta(d, 'server')).max_quiz_questions;
+			await display.load(d);
 			// Navigating to the player is an open (§ Downloads).
 			const tx = d.transaction(['meta'], 'readwrite');
 			await recordOpen(tx as unknown as RwTx, id, new Date().toISOString());
@@ -95,7 +132,8 @@
 			const p = new Player(d, id, {
 				prefs: () => preferencesView(d),
 				ensure: (cid) => ensureCascade(d, cid),
-				fetchCard: (cid, idx) => fetchCard(d, cid, idx),
+				fetchCard: (cid, idx, ahead) => fetchCard(d, cid, idx, ahead),
+				fetchAhead: (cid, idx) => fetchAhead(d, cid, idx),
 				afterWrite: () => {
 					afterLocalWrite();
 					void refreshSide();
@@ -130,29 +168,37 @@
 		if (syncState.progress && player) void player.refreshCard();
 	});
 
-	async function act(a: Action) {
-		if (!player || busy || !actions.pass(a, performance.now())) return;
+	/**
+	 * An action from a key, a click, the wheel or a tap. Never dropped and never
+	 * waited on: the player takes actions in order and changes the screen before
+	 * its writes are saved (PLAN.md § Taking a quiz → Instant at any size).
+	 */
+	function act(a: Action) {
+		if (!player || !actions.pass(a, performance.now())) return;
 		const card = v?.card;
 		// Before the reveal, Show / Next on a typed card focuses the input instead of giving up.
 		if (a === 'show_next' && card?.typed && !card.revealed && !typedFocused) {
 			typedInput?.focus();
 			return;
 		}
-		busy = true;
-		try {
-			if (a === 'show_next') await player.showNext();
-			else if (a === 'toggle_grade') {
-				await player.toggle();
-				navigator.vibrate?.(15);
-			} else await player.previous();
-			if (a !== 'toggle_grade') typedText = '';
-		} finally {
-			busy = false;
-		}
+		const p = player;
+		if (a !== 'toggle_grade') typedText = '';
+		if (a === 'toggle_grade') navigator.vibrate?.(15);
+		// Background downloads start no chunk while the action and its writes run.
+		void playerActs(async () => {
+			if (a === 'show_next') await p.showNext();
+			else if (a === 'toggle_grade') await p.toggle();
+			else await p.previous();
+		}).catch((e) => console.error('player action failed', e));
 	}
 
+
 	function onKey(e: KeyboardEvent) {
-		if (!v || v.status !== 'ready' || settingsOpen) return;
+		if (settingsOpen) {
+			if (e.key === 'Escape') settingsOpen = false;
+			return;
+		}
+		if (!v || v.status !== 'ready') return;
 		const t = e.target as HTMLElement | null;
 		const inTyped = t === typedInput;
 		// Text fields outside the quiz area keep their keys.
@@ -200,6 +246,8 @@
 	}
 
 	async function setPref(field: string, value: unknown) {
+		// Definitions or hooks change what an answer holds: the cards in memory go first.
+		if (field === 'anagram_show_definitions' || field === 'anagram_show_hooks') player?.prefsChanged();
 		await write({ type: 'set_preferences', [field]: value } as NewOp);
 		if (field === 'anagram_answer_mode') await player?.modeChanged();
 	}
@@ -236,13 +284,21 @@
 		await goto('/cascades');
 	}
 
+	let starting = $state<{ stage: 'server' | 'device'; progress: number; count: number | null } | null>(null);
+
 	async function startOver() {
 		if (!db || !session.userId) return;
 		const { device_id } = await getMeta(db, 'device');
 		const body = { id: crypto.randomUUID(), source_quiz_id: crypto.randomUUID(), device_id, at: new Date().toISOString() };
-		const created = await api.post<Created>(`/api/cascades/${id}/start-over`, body);
-		await storeCreated(db, created);
-		await goto(`/cascades/${body.id}`);
+		starting = { stage: 'server', progress: 0, count: null };
+		try {
+			const created = await api.post<Created>(`/api/cascades/${id}/start-over`, body);
+			starting = { stage: 'device', progress: 0, count: Number(created.source_quiz.question_count) };
+			await storeCreated(db, created, new Date(), (f) => starting && (starting.progress = f));
+			await goto(`/cascades/${body.id}`);
+		} finally {
+			starting = null;
+		}
 	}
 
 	function keepStudying() {
@@ -252,13 +308,23 @@
 
 <svelte:window onkeydown={onKey} />
 
+{#snippet waiting(text: string, detail: string | null = null)}
+	<div class="flex flex-col items-center gap-3 text-muted-foreground" role="status" aria-busy="true">
+		<LoaderCircleIcon class="size-8 animate-spin" aria-hidden="true" />
+		<p>{text}</p>
+		{#if detail}<p class="max-w-sm text-center text-sm">{detail}</p>{/if}
+	</div>
+{/snippet}
+
 {#snippet question()}
-	{#if v?.card}
+	{#if v?.fetchingCard}
+		{@render waiting('Loading the next questions…')}
+	{:else if v?.card}
 		{@const card = v.card}
 		{#if card.key === null}
 			<p class="text-center text-muted-foreground">This question needs a connection.</p>
 		{:else}
-			<div class="text-center text-4xl font-semibold tracking-widest"><TileText text={card.key} /></div>
+			<div class="text-center font-semibold" style={textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing)} data-question><TileText text={card.key} /></div>
 			{#if card.typed && !card.revealed}
 				<div class="mx-auto mt-6 max-w-sm space-y-2">
 					<p class="text-center text-sm text-muted-foreground">
@@ -293,14 +359,21 @@
 					{#if card.answer === null}
 						<p class="text-center text-muted-foreground">Answer needs a connection.</p>
 					{:else}
-						<AnswerView quizType={v.cascade!.quiz_type} answer={card.answer} {prefs} found={card.typed?.found ?? null} />
+						<AnswerView
+								quizType={v.cascade!.quiz_type}
+								answer={card.answer}
+								{prefs}
+								found={card.typed?.found ?? null}
+								font={dsp.answer_font}
+								size={dsp.answer_size_px}
+								spacing={dsp.answer_spacing}
+								definition={{ font: dsp.definition_font, size: dsp.definition_size_px, spacing: dsp.definition_spacing }}
+								word={card.word}
+							/>
 					{/if}
 				</div>
-				<p class="mt-6 text-center text-3xl font-bold" class:text-green-700={card.grade === 'correct'} class:text-destructive={card.grade === 'missed'}>
-					{card.grade === 'correct' ? '✓ Correct' : '✗ Missed'}
-				</p>
-			{:else if card.toggled}
-				<p class="mt-6 text-center text-sm text-muted-foreground">Marked missed</p>
+				<!-- The grade is the quiz area's border colour; this says it for screen readers. -->
+				<p class="sr-only" role="status">{card.grade === 'correct' ? 'Correct' : 'Missed'}</p>
 			{/if}
 		{/if}
 		{#if v.distributionMissing}
@@ -321,9 +394,9 @@
 
 {#snippet status()}
 	{#if !v || v.status === 'loading'}
-		<p class="text-muted-foreground">Loading…</p>
+		{@render waiting('Loading…')}
 	{:else if v.status === 'downloading'}
-		<p class="text-muted-foreground">Downloading this level…</p>
+		{@render waiting('Getting this level ready…', 'Its questions are downloading to this device. You can start as soon as they are here.')}
 	{:else if v.status === 'needs_connection'}
 		<p class="text-muted-foreground">This cascade needs a connection to download.</p>
 	{:else if v.status === 'gone'}
@@ -336,53 +409,101 @@
 	{/if}
 {/snippet}
 
-{#snippet side()}
-	{#if v?.quiz && v.cascade}
-		<div class="space-y-1 text-sm">
-			<p class="font-semibold">Level {v.quiz.level} of {v.cascade.depth}</p>
-			<p>attempt {v.quiz.attempt}</p>
-			<p>{(v.card?.pos ?? v.quiz.cursor) + 1} / {v.quiz.question_count}</p>
-			<p>{v.quiz.correct_count} ✓ {v.quiz.missed_count} ✗</p>
-			<p>clear at {v.cascade.clear_threshold}%</p>
-			{#if run}<p>{run}</p>{/if}
-		</div>
-		<div class="mt-4">
-			<CascadeLadder
-				{rows}
-				onOptions={() => openSettings()}
-				onExport={(r) => goto(`/cascades/${id}/export?quiz=${r.quiz.id}`)}
-			/>
-		</div>
-	{/if}
-	<Button variant="ghost" class="mt-4" onclick={openSettings}>⚙ Preferences</Button>
+{#snippet levels()}
+	<Popover.Root>
+		<Popover.Trigger class="rounded px-2 py-1 text-left hover:bg-muted">Levels</Popover.Trigger>
+		<Popover.Content side="right" align="start" class="w-[30rem] max-w-[90vw]">
+			{#if v?.cascade}
+				<p class="mb-3 text-sm text-muted-foreground">
+					A level clears when a pass ends with at least <span class="font-medium text-foreground">{v.cascade.clear_threshold}%</span> correct.
+				</p>
+			{/if}
+			<CascadeLadder {rows} onExport={(r) => goto(`/cascades/${id}/export?quiz=${r.quiz.id}`)} />
+		</Popover.Content>
+	</Popover.Root>
 {/snippet}
 
 {#if desktop}
-	<div class="grid h-screen grid-cols-[12rem_1fr_14rem]">
-		<nav class="flex flex-col gap-2 border-r p-4 text-sm">
-			<a href="/cascades" class="font-semibold">Wordfall</a>
-			<a href="/cascades">Cascades</a>
-			<a href="/cascades/new">New</a>
-			<a href="/trash">Trash</a>
-			<a href="/account">Account</a>
-			<div class="mt-auto"><SyncStatus /></div>
-		</nav>
-		<!-- The quiz area: the only place mouse controls act; no selection, no context menu. -->
-		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-		<div
-			role="application"
-			class="relative flex min-w-[60vw] flex-col items-center justify-center overflow-y-auto p-8 select-none"
-			aria-label="Quiz area"
-			onmousedown={(e) => e.button === 1 && e.preventDefault()}
-			onmouseup={onMouse}
-			oncontextmenu={(e) => e.preventDefault()}
-			onauxclick={(e) => e.preventDefault()}
-			onwheel={onWheel}
-		>
-			{#if v?.banner}<p class="absolute top-4 rounded-md bg-muted px-4 py-2 text-sm" role="status">{v.banner}</p>{/if}
-			{#if v?.status === 'ready'}{@render question()}{:else}{@render status()}{/if}
+	<div class="flex h-screen">
+		{#if menuOpen}
+			<nav class="flex w-48 shrink-0 flex-col gap-1 border-r p-4 text-sm" aria-label="Player menu">
+				<div class="mb-2 flex items-center justify-between">
+					<a href="/cascades" class="font-semibold">Wordfall</a>
+					<button class="rounded px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => (menuOpen = false)} aria-label="Hide menu" title="Hide menu">«</button>
+				</div>
+				<a class="rounded px-2 py-1 hover:bg-muted" href="/cascades">Cascades</a>
+				<a class="rounded px-2 py-1 hover:bg-muted" href="/cascades/new">New cascade</a>
+				<a class="rounded px-2 py-1 hover:bg-muted" href="/trash">Trash</a>
+				{#if session.isAdmin}<a class="rounded px-2 py-1 hover:bg-muted" href="/admin">Admin</a>{/if}
+				<a class="rounded px-2 py-1 hover:bg-muted" href="/account">Account</a>
+				<button class="rounded px-2 py-1 text-left hover:bg-muted" onclick={openSettings}>Preferences</button>
+				{#if v?.quiz && v.cascade}{@render levels()}{/if}
+			</nav>
+		{/if}
+		<div class="relative flex min-w-0 flex-1 flex-col">
+			<!-- The quiz area: the only place mouse controls act; no selection, no context menu.
+			     The question sits at the top, so revealing the answer never moves it. -->
+			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+			<div
+				role="application"
+				class="relative flex flex-1 flex-col items-center overflow-y-auto px-8 pb-8 select-none {gradeBorder}"
+				style={`padding-top: ${dsp.question_top_px}px; border-width: ${dsp.border_px}px; border-style: solid;`}
+				data-grade={gradeState ?? undefined}
+				aria-label="Quiz area"
+				onmousedown={(e) => e.button === 1 && e.preventDefault()}
+				onmouseup={onMouse}
+				oncontextmenu={(e) => e.preventDefault()}
+				onauxclick={(e) => e.preventDefault()}
+				onwheel={onWheel}
+			>
+				{#if !menuOpen}
+					<button class="absolute top-3 left-3 rounded px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => (menuOpen = true)} aria-label="Show menu" title="Show menu">☰</button>
+				{/if}
+				{#if v?.banner}<p class="absolute bottom-4 max-w-[70%] rounded-md bg-muted px-4 py-2 text-center text-sm" role="status">{v.banner}</p>{/if}
+				<div class="w-full max-w-4xl">
+					{#if v?.status === 'ready'}{@render question()}{:else}<div class="text-center">{@render status()}</div>{/if}
+				</div>
+			</div>
+			{#if !dsp.status_bar_hidden}
+			<footer class="shrink-0 border-t text-sm">
+				<div class="h-0.5 bg-muted" aria-hidden="true"><div class="h-full bg-foreground/50" style={`width: ${progress}%`}></div></div>
+				<div class="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-1 py-2 pr-6 pl-3">
+					<button
+						class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+						onclick={() => display.set({ status_bar_hidden: true })}
+						aria-label="Hide status bar"
+						title="Hide status bar"><PanelBottomCloseIcon class="size-4" /></button
+					>
+					{#if v?.quiz && v.cascade}
+						<p class="font-medium">Level {v.quiz.level} of {v.cascade.depth}</p>
+						<p class="text-muted-foreground">Pass {v.quiz.attempt}</p>
+						<p title="The card shown, and the share of the level graded in this pass">
+							<!-- The count in its own element, apart from its percentage: it is read on its own. -->
+							<span>{(v.card?.pos ?? v.quiz.cursor) + 1} / {v.quiz.question_count}</span>
+							<span class="text-muted-foreground">({pct(gradedPct)})</span>
+						</p>
+						<p title={`Correct and missed in this pass, and the share correct: the level clears at ${v.cascade.clear_threshold}%`}>
+							<span>{v.quiz.correct_count} ✓ {v.quiz.missed_count} ✗</span>
+							{#if correctPct !== null}
+								<span class:text-green-600={onTrack} class:text-red-600={onTrack === false} data-on-track={onTrack}>({pct(correctPct)})</span>
+							{/if}
+						</p>
+						{#if run}<p class="text-muted-foreground">{run}</p>{/if}
+					{/if}
+					<div class="ml-auto"><SyncStatus /></div>
+				</div>
+			</footer>
+			{:else}
+				<!-- The status bar hidden: its Show button and the sync status keep the bottom corners, outside the quiz area. -->
+				<button
+					class="absolute bottom-2 left-3 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+					onclick={() => display.set({ status_bar_hidden: false })}
+					aria-label="Show status bar"
+					title="Show status bar"><PanelBottomOpenIcon class="size-4" /></button
+				>
+				<div class="pointer-events-none absolute right-6 bottom-2"><div class="pointer-events-auto"><SyncStatus /></div></div>
+			{/if}
 		</div>
-		<aside class="border-l p-4">{@render side()}</aside>
 	</div>
 {:else}
 	<div class="flex h-screen flex-col">
@@ -400,8 +521,9 @@
 				{#if v.banner}<p class="absolute top-2 left-2 right-2 z-10 rounded-md bg-muted px-3 py-2 text-sm" role="status">{v.banner}</p>{/if}
 				<button class="text-muted-foreground" style={landscape ? 'width:20%' : 'height:15%'} onclick={() => act('previous')}>↶ Previous</button>
 				<div
-					class="overflow-y-auto border-y p-4"
-					style={landscape ? 'width:55%' : 'height:60%'}
+					class="overflow-y-auto p-4 {gradeBorder}"
+					style={`${landscape ? 'width:55%' : 'height:60%'}; border-width: ${dsp.border_px}px; border-style: solid;`}
+					data-grade={gradeState ?? undefined}
 					role="button"
 					tabindex="0"
 					onclick={(e) => !(e.target as HTMLElement).closest('input,button,a') && act('show_next')}
@@ -426,9 +548,9 @@
 {/if}
 
 {#if settingsOpen}
-	<div class="fixed inset-0 z-40 flex justify-end bg-black/30" role="presentation" onclick={() => (settingsOpen = false)}>
+	<div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" role="presentation" onclick={() => (settingsOpen = false)}>
 		<div
-			class="h-full w-full max-w-md space-y-4 overflow-y-auto bg-background p-6"
+			class="max-h-full w-full max-w-lg space-y-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg"
 			role="dialog"
 			aria-label="Settings"
 			tabindex="-1"
@@ -436,28 +558,26 @@
 			onkeydown={(e) => e.key === 'Escape' && (settingsOpen = false)}
 		>
 			<h2 class="text-lg font-semibold">Preferences</h2>
-			<label class="flex items-center gap-2 text-sm">
-				<input type="checkbox" checked={prefs.anagram_show_definitions} onchange={(e) => setPref('anagram_show_definitions', e.currentTarget.checked)} />
-				Show definitions with anagrams
-			</label>
-			<label class="flex items-center gap-2 text-sm">
-				<input type="checkbox" checked={prefs.anagram_show_hooks} onchange={(e) => setPref('anagram_show_hooks', e.currentTarget.checked)} />
-				Show hooks with anagrams
-			</label>
-			<label class="flex items-center gap-2 text-sm">
-				Anagram answer mode
-				<select value={prefs.anagram_answer_mode} onchange={(e) => setPref('anagram_answer_mode', e.currentTarget.value)}>
+			<SettingRow label="Show definitions with anagrams" for="player-definitions">
+				<input id="player-definitions" type="checkbox" checked={prefs.anagram_show_definitions} onchange={(e) => setPref('anagram_show_definitions', e.currentTarget.checked)} />
+			</SettingRow>
+			<SettingRow label="Show hooks with anagrams" for="player-hooks">
+				<input id="player-hooks" type="checkbox" checked={prefs.anagram_show_hooks} onchange={(e) => setPref('anagram_show_hooks', e.currentTarget.checked)} />
+			</SettingRow>
+			<SettingRow label="Anagram answer mode" for="player-mode">
+				<select id="player-mode" class="rounded border bg-background px-2 py-1" value={prefs.anagram_answer_mode} onchange={(e) => setPref('anagram_answer_mode', e.currentTarget.value)}>
 					<option value="flashcard">Flashcard</option>
 					<option value="typed">Typed</option>
 				</select>
-			</label>
-			<label class="flex items-center gap-2 text-sm">
-				Leave value decimal places
-				<select value={String(prefs.leave_value_decimals)} onchange={(e) => setPref('leave_value_decimals', Number(e.currentTarget.value))}>
+			</SettingRow>
+			<SettingRow label="Leave value decimal places" for="player-decimals">
+				<select id="player-decimals" class="rounded border bg-background px-2 py-1" value={String(prefs.leave_value_decimals)} onchange={(e) => setPref('leave_value_decimals', Number(e.currentTarget.value))}>
 					{#each [0, 1, 2, 3] as d (d)}<option value={String(d)}>{d}</option>{/each}
 				</select>
-			</label>
+			</SettingRow>
 			<p class="text-sm"><a class="underline" href="/account#controls">Controls</a> are edited on the Account page.</p>
+			<h2 class="pt-4 text-lg font-semibold">On this device</h2>
+			<DisplaySettings />
 			{#if v?.quiz && quizOptions}
 				<h2 class="pt-4 text-lg font-semibold">This quiz’s options</h2>
 				<QuizOptionsForm
@@ -480,7 +600,7 @@
 	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
 		<div class="max-w-sm space-y-4 rounded-lg bg-background p-6 text-center" role="dialog" aria-label="Cascade complete">
 			<h2 class="text-xl font-semibold">Cascade complete</h2>
-			<p>After {v.completion.levels} levels and {v.completion.attempts} attempts.</p>
+			<p>After {v.completion.levels} levels and {v.completion.attempts} {v.completion.attempts === 1 ? 'pass' : 'passes'}.</p>
 			<div class="flex flex-col gap-2">
 				<Button onclick={keepStudying}>Keep studying</Button>
 				<Button variant="outline" onclick={startOver}>Start over</Button>
@@ -488,4 +608,8 @@
 			</div>
 		</div>
 	</div>
+{/if}
+
+{#if starting}
+	<CreatingCascade title="Starting over" stage={starting.stage} progress={starting.progress} count={starting.count} />
 {/if}

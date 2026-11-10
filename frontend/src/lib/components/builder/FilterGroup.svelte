@@ -2,6 +2,9 @@
 	// An AND / OR group: its operator switch, its ordered children (rows and
 	// nested groups), and drag-and-drop between groups (PLAN.md § Frontend →
 	// FilterGroup). The top of the builder is one of these.
+	import BracketsIcon from '@lucide/svelte/icons/brackets';
+	import ListPlusIcon from '@lucide/svelte/icons/list-plus';
+	import XIcon from '@lucide/svelte/icons/x';
 	import { Button } from '$lib/components/ui/button';
 	import FilterRow from './FilterRow.svelte';
 	import Self from './FilterGroup.svelte';
@@ -88,7 +91,15 @@
 			{group.op === 'and' ? 'every row must match' : 'any row may match'}
 		</span>
 		{#if !top}
-			<Button type="button" size="sm" variant="ghost" class="ml-auto" onclick={onremove} aria-label="Remove group">−</Button>
+			<Button
+				type="button"
+				size="icon-sm"
+				variant="ghost"
+				class="ml-auto text-muted-foreground hover:text-destructive"
+				onclick={onremove}
+				aria-label="Remove group"
+				title="Remove group"><XIcon class="size-4" /></Button
+			>
 		{/if}
 	</div>
 	{#if errors.get(group.key)}<p class="text-sm text-destructive">{errors.get(group.key)}</p>{/if}
@@ -143,21 +154,22 @@
 		ondragleave={() => (dropIndex = null)}
 		ondrop={(e) => drop(e, group.children.length)}
 	></div>
+	{#if top && group.children.length === 0}
+		<p class="text-sm text-muted-foreground">No filters: every word in the lexicon, or every leave for a Leave Value quiz.</p>
+	{/if}
 	{#if group.children.length === 0 || top}
-		<div>
+		<div class="flex flex-wrap gap-2">
+			<Button type="button" size="sm" variant="outline" onclick={() => group.children.push(newRow(defaultType, quizType, ctx))}>
+				<ListPlusIcon class="size-4" />Add row
+			</Button>
 			<Button
 				type="button"
 				size="sm"
 				variant="outline"
-				onclick={() => group.children.push(newRow(defaultType, quizType, ctx))}>Add row</Button
-			>
-			<Button
-				type="button"
-				size="sm"
-				variant="ghost"
 				onclick={() => group.children.push(newGroup(group.op === 'and' ? 'or' : 'and', [newRow(defaultType, quizType, ctx)]))}
-				>Add group</Button
 			>
+				<BracketsIcon class="size-4" />Add group
+			</Button>
 		</div>
 	{/if}
 </div>

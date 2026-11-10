@@ -268,7 +268,7 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   player, it reads "Answers need a connection" offline, and it shows download
   progress again online.
 
-## PQ-019 — Device scale cases too large to run in minutes (open)
+## PQ-019 — Device scale cases too large to run in minutes (decided)
 
 - **Plan:** Scale tests (5930–5985):
   - After opening ten 300,000-question cascades, the sync of about 3.75
@@ -305,3 +305,14 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
 
   Whether 120 s for 3.75 million rows is reachable on real devices is itself
   open: it implies about four times the write rate measured here.
+
+- **Decision (2026-11-09):** The first-sync case keeps its shape, one heavily
+  played cascade of ten, but its budget is the measurement rather than a tenth
+  of the plan's 120 s: 162,500 graded rows (at the 130,000-question cap) took
+  49–107 s in Chromium across runs (slower after other suites have filled the
+  browser profile), 1,500–3,300 graded rows a second, so the budget is 150 s. Meeting 12 s would take about 13,500 a second, which a row per
+  question in IndexedDB cannot reach; only storing rows differently on the
+  device could. The cost is one-time, for a new device opening a cascade with
+  a long history, and the user accepted it. The drop pass runs as many
+  cascades as an account may hold (20) at 56,000 questions each against a
+  tenth of the budget.

@@ -20,10 +20,13 @@ const binding = (action: Binding['action'], kind: Binding['kind'], code: string)
 export const DEFAULT_BINDINGS: Binding[] = [
 	binding('show_next', 'mouse_button', 'left'),
 	binding('show_next', 'key', 'Space'),
+	binding('show_next', 'key', 'Comma'),
 	binding('toggle_grade', 'mouse_button', 'right'),
 	binding('toggle_grade', 'key', 'KeyX'),
+	binding('toggle_grade', 'key', 'KeyM'),
 	binding('previous', 'mouse_button', 'middle'),
-	binding('previous', 'key', 'Backspace')
+	binding('previous', 'key', 'Backspace'),
+	binding('previous', 'key', 'KeyJ')
 ];
 
 export function defaultPreferences(): PreferencesRow {
@@ -31,8 +34,8 @@ export function defaultPreferences(): PreferencesRow {
 	return {
 		default_clear_threshold: 80,
 		leave_value_decimals: 1,
-		anagram_show_definitions: false,
-		anagram_show_hooks: false,
+		anagram_show_definitions: true,
+		anagram_show_hooks: true,
 		anagram_answer_mode: 'flashcard',
 		default_segment_size: 0,
 		default_progression: 'ladder',

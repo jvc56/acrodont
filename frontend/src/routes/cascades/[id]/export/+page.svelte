@@ -23,7 +23,7 @@
 	import * as view from '$lib/local/view';
 	import type { RwTx } from '$lib/local/view';
 	import { DownloadManager } from '$lib/sync/downloads';
-	import { downloadManager, ensureCascade } from '$lib/sync/runtime.svelte';
+	import { downloadManager, ensureCascade, syncState } from '$lib/sync/runtime.svelte';
 
 	const id = $derived(page.params.id as string);
 	let db = $state<UserDb | null>(null);
@@ -87,6 +87,10 @@
 
 	$effect(() => {
 		void JSON.stringify(choices);
+		// A sync or a download that lands changes what the device holds: count again,
+		// so "Counting needs…" never outlasts the data it waits for.
+		void syncState.changed.tick;
+		void syncState.progress;
 		void recount();
 	});
 

@@ -38,10 +38,10 @@ for (const orientation of ['portrait', 'landscape'] as const) {
 		const show = page.locator('[role="button"][tabindex="0"]').first();
 		// Show / Next reveals, Toggle flips, Show / Next advances, Previous goes back.
 		await show.tap();
-		await expect(page.getByText('✓ Correct')).toBeVisible();
+		await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 		await page.waitForTimeout(150);
 		await page.getByRole('button', { name: /Toggle/ }).tap();
-		await expect(page.getByText('✗ Missed')).toBeVisible();
+		await expect(page.locator('[data-grade="missed"]')).toBeVisible();
 		await page.waitForTimeout(150);
 		await show.tap();
 		await at(page, 2);
@@ -53,13 +53,15 @@ for (const orientation of ['portrait', 'landscape'] as const) {
 		await drag(page, box.x + box.width / 2, box.y + box.height * 0.7, box.y + box.height * 0.2);
 		await page.waitForTimeout(300);
 		await at(page, 1);
-		// A quick double tap on a revealed card advances once (back on card 1, its saved grade is shown).
-		await expect(page.getByText(/✓ Correct|✗ Missed/)).toBeVisible();
+		// The repeat guard is off by default, so both taps of a quick double tap on a
+		// revealed card count (back on card 1, its saved grade is shown): it moves on,
+		// then shows card 2's answer.
+		await expect(page.locator('[data-grade="correct"], [data-grade="missed"]')).toBeVisible();
 		await page.waitForTimeout(150);
 		await show.tap();
 		await show.tap();
 		await at(page, 2);
-		await expect(page.getByText(/✓ Correct|✗ Missed/)).toHaveCount(0);
+		await expect(page.locator('[data-grade="correct"], [data-grade="missed"]')).toBeVisible();
 		await ctx.close();
 	});
 }

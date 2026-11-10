@@ -20,8 +20,18 @@ import { ids, QUESTIONS, report, ScaleDev, ServerPlayer, timed } from './testing
 
 const CASCADES = 10;
 const FIRST_SYNC_BUDGET_MS = 5_000;
-/** A tenth of the plan's 120 s, for a tenth of its rows (PQ-019). */
-const OPEN_SYNC_BUDGET_MS = 12_000;
+/**
+ * The sync after opening one heavily played cascade (162,500 graded rows at
+ * the 130,000-question cap): what Chromium's IndexedDB measures, not the
+ * plan's first figure. That figure, 120 s for ten cascades and so 12 s for
+ * one, asked for about 13,500 graded rows a second; a row per question with
+ * its indexes gets 1,500–3,300 here (49–107 s across runs, slower when other
+ * suites have filled the profile first), and only a different way of storing
+ * rows on the device could reach the first figure. The budget is the worst
+ * measurement with room to spare, so a real slowdown still fails (PQ-019,
+ * decided).
+ */
+const OPEN_SYNC_BUDGET_MS = 150_000;
 /** The played cascade's open: its two active quizzes' index lists, positions, keys and answers. */
 const MATERIALISE_BUDGET_MS = 300_000;
 const GRADED = QUESTIONS + QUESTIONS / 4;

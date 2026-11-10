@@ -39,7 +39,15 @@ export async function watchUpdates() {
 	});
 	post(sw.controller, { type: 'HELLO', version });
 	addEventListener('pagehide', () => post(sw.controller, { type: 'CLOSING', version }));
+	// On a first visit the new worker claims the page (clients.claim() on
+	// activate): a controller arriving, not a version changing under the tab.
+	let controlled = !!sw.controller;
 	sw.addEventListener('controllerchange', () => {
+		if (!controlled) {
+			controlled = true;
+			post(sw.controller, { type: 'HELLO', version });
+			return;
+		}
 		if (asked) location.reload();
 		else updates.updatedElsewhere = true;
 	});

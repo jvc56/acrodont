@@ -6,7 +6,6 @@
 	// purge date, or "purges 30 days after this syncs" while it is provisional.
 	import { onMount } from 'svelte';
 	import { session } from '$lib/auth/session.svelte';
-	import SyncStatus from '$lib/components/SyncStatus.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { canDeleteForever, PAGE, trashGroups, type TrashEntry, type TrashGroup } from '$lib/cascades/summary';
 	import { applyLocally, type NewOp } from '$lib/local/apply';
@@ -68,10 +67,6 @@
 <main class="mx-auto max-w-4xl p-6">
 	<header class="mb-6 flex items-center justify-between">
 		<h1 class="text-2xl font-semibold">Trash</h1>
-		<div class="flex items-center gap-4">
-			<SyncStatus />
-			<Button href="/cascades" variant="outline">Cascades</Button>
-		</div>
 	</header>
 	{#if groups.length === 0}<p class="text-muted-foreground">The Trash is empty.</p>{/if}
 	<ul class="space-y-3">

@@ -87,11 +87,16 @@ async fn preview_errors_are_keyed_by_path(pool: sqlx::PgPool) {
     let e = r.json()["errors"].clone();
     assert_eq!(e[0]["path"], json!([1, 0]));
     assert_eq!(e[0]["field"], "extra");
-    let r = c
+    // A whole range, and a search with no rows, are valid: both are every word.
+    let whole = c
         .post("/api/search/preview", preview_body("EN-FIX", "anagram", json!({ "op": "and", "children": [length(1, 15)] })))
         .await;
-    assert_eq!(r.status, StatusCode::BAD_REQUEST);
-    assert_eq!(r.json()["errors"][0]["path"], json!([0]));
+    assert_eq!(whole.status, StatusCode::OK);
+    let empty = c
+        .post("/api/search/preview", preview_body("EN-FIX", "anagram", json!({ "op": "and", "children": [] })))
+        .await;
+    assert_eq!(empty.status, StatusCode::OK);
+    assert_eq!(whole.json()["count"], empty.json()["count"]);
     let r = c
         .post("/api/search/preview", preview_body("NOPE", "anagram", json!({ "op": "and", "children": [length(2, 3)] })))
         .await;

@@ -1,7 +1,12 @@
 <script lang="ts">
 	// One condition row (PLAN.md § Creating a cascade, step 3; § Frontend →
 	// FilterRow), driven by the lib/filters.ts table.
-	import { Button } from '$lib/components/ui/button';
+	import { Button, buttonVariants } from '$lib/components/ui/button';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import BracketsIcon from '@lucide/svelte/icons/brackets';
+	import ListPlusIcon from '@lucide/svelte/icons/list-plus';
+	import PlusIcon from '@lucide/svelte/icons/plus';
+	import XIcon from '@lucide/svelte/icons/x';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
 	import TilePalette from './TilePalette.svelte';
@@ -51,7 +56,6 @@
 			(l) => l.letter_distribution === lexicons.find((x) => x.name === lexicon)?.letter_distribution
 		)
 	);
-	let menu = $state(false);
 
 	function changeType(e: Event) {
 		const t = (e.currentTarget as HTMLSelectElement).value as ConditionType;
@@ -145,15 +149,31 @@
 			<Input class="{inputClass} w-24" type="number" step="any" placeholder="max" bind:value={row.leaveMax} oninput={edited} aria-label="Maximum value" />
 		{/if}
 
-		<div class="relative ml-auto flex gap-1">
-			<Button type="button" size="sm" variant="ghost" onclick={() => (menu = !menu)} aria-label="Add">+</Button>
-			{#if menu}
-				<div class="absolute right-8 top-8 z-10 grid rounded-md border bg-popover p-1 shadow">
-					<button type="button" class="rounded px-3 py-1 text-left text-sm hover:bg-accent" onclick={() => { menu = false; onaddrow(); }}>Add row</button>
-					<button type="button" class="rounded px-3 py-1 text-left text-sm hover:bg-accent" onclick={() => { menu = false; onaddgroup(); }}>Add group</button>
-				</div>
-			{/if}
-			<Button type="button" size="sm" variant="ghost" onclick={onremove} aria-label="Remove row">−</Button>
+		<div class="ml-auto flex items-center gap-0.5">
+			<!-- A menu that floats over the page (never clipped by the card), anchored to the button's right edge. -->
+			<DropdownMenu.Root>
+				<DropdownMenu.Trigger
+					type="button"
+					class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
+					aria-label="Add below this row"
+					title="Add below this row"
+				>
+					<PlusIcon class="size-4" />
+				</DropdownMenu.Trigger>
+				<DropdownMenu.Content align="end" class="w-48">
+					<DropdownMenu.Item onSelect={onaddrow}>
+						<ListPlusIcon />
+						Add row below
+					</DropdownMenu.Item>
+					<DropdownMenu.Item onSelect={onaddgroup}>
+						<BracketsIcon />
+						Add group below
+					</DropdownMenu.Item>
+				</DropdownMenu.Content>
+			</DropdownMenu.Root>
+			<Button type="button" size="icon-sm" variant="ghost" class="text-muted-foreground hover:text-destructive" onclick={onremove} aria-label="Remove row" title="Remove row">
+				<XIcon class="size-4" />
+			</Button>
 		</div>
 	</div>
 

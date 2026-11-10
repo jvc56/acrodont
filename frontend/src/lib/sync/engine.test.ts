@@ -740,6 +740,39 @@ describe('the rebase, continued', () => {
 		expect(a.notices).toEqual([]);
 	});
 
+	// A large quiz's every sync must not rewrite its rows: grades pulled for an
+	// unchanged attempt whose rows are all here go onto those rows by key.
+	it('grades pulled for an unchanged, complete attempt touch only their own rows', async () => {
+		const { server, a } = await setup({ count: 20 });
+		const before = new Map((await a.rows(Q1)).map((r) => [r.question_idx, r]));
+		const q = (await a.quiz(Q1))!;
+		const grade = (idx: number, g: string) => ({
+			type: 'grade',
+			quiz_id: Q1,
+			attempt: q.attempt,
+			attempt_seed: q.shuffle_seed,
+			question_idx: idx,
+			grade: g
+		});
+		remote(server, [grade(3, 'correct'), grade(7, 'missed'), grade(11, 'correct')]);
+		await a.sync();
+		const cursor = (await getMeta(a.db, 'sync')).cursor!;
+		const after = await a.rows(Q1);
+		expect(after).toHaveLength(20);
+		for (const r of after) {
+			const was = before.get(r.question_idx)!;
+			expect(r.position).toBe(was.position);
+			if ([3, 7, 11].includes(r.question_idx)) {
+				expect(r.grade).toBe(r.question_idx === 7 ? 'missed' : 'correct');
+				expect(r.seq).toBe(cursor);
+			} else {
+				expect(r).toEqual(was);
+			}
+		}
+		const q2 = (await a.quiz(Q1))!;
+		expect([q2.correct_count, q2.missed_count, !!q2.pending]).toEqual([2, 1, false]);
+	});
+
 	it('every base row carries the sequence of the response that wrote it', async () => {
 		const { a } = await setup();
 		await a.play(Q1, 'C');

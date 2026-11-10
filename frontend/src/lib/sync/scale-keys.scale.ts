@@ -1,15 +1,16 @@
 // PLAN.md § Scale tests: "assert the keys-only pass for ten such cascades
-// takes 30 card-page requests in all, a tenth of the 300 their answers need,
+// takes a fraction of the card-page requests their answers need (at 130,000
+// questions, 2 keys requests a cascade against 13 answer pages),
 // and that the bytes it moves are within a quarter of those ten cascades'
 // answers rather than a tenth, the ratio Downloads states."
 //
 // Three such cascades rather than ten (PQ-019): the ratios are per cascade and
 // need the full 130,000 questions (a smaller cascade fits its keys in one page
 // against several of answers), while ten cost six million IndexedDB writes
-// before the pass is done — a quarter of an hour. Three give 9 requests against
-// the answers' 90, the same tenth.
+// before the pass is done — a quarter of an hour. Three give 6 requests against
+// the answers' 39, the same ratio.
 import { describe, expect, it } from 'vitest';
-import { CARDS_PAGE } from './downloads';
+import { CARDS_PAGE, KEYS_PAGE } from './downloads';
 import { FakeServer } from './testing/fake-server';
 import { ids, QUESTIONS, report, ScaleDev, timed } from './testing/scale';
 
@@ -17,7 +18,7 @@ const CASCADES = 3;
 const KEYS_PASS_BUDGET_MS = 600_000;
 
 describe('the keys-only pass for three 130,000-question cascades (PQ-019)', () => {
-	it('takes 3 requests a cascade, a tenth of the answers’ 30, moving under a quarter of their bytes', async () => {
+	it('takes 2 requests a cascade against the answers’ 13, moving under a quarter of their bytes', async () => {
 		const server = new FakeServer();
 		const d = await ScaleDev.make(server);
 		const all = Array.from({ length: CASCADES }, (_, i) => ids(i + 1));
@@ -47,8 +48,8 @@ describe('the keys-only pass for three 130,000-question cascades (PQ-019)', () =
 			KEYS_PASS_BUDGET_MS,
 			`${keys.length} requests, ${(keyBytes / 1e6).toFixed(1)} MB; the answers: ${answerPages} requests, ${(answerBytes / 1e6).toFixed(1)} MB; ratio ${(keyBytes / answerBytes).toFixed(3)}`
 		);
-		expect(keys.length).toBe(3 * CASCADES);
-		expect(answerPages).toBe(30 * CASCADES);
+		expect(keys.length).toBe(Math.ceil(QUESTIONS / KEYS_PAGE) * CASCADES);
+		expect(answerPages).toBe(Math.ceil(QUESTIONS / CARDS_PAGE) * CASCADES);
 		expect(keyBytes).toBeLessThanOrEqual(answerBytes / 4);
 		expect(ms).toBeLessThanOrEqual(KEYS_PASS_BUDGET_MS);
 	});

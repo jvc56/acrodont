@@ -95,7 +95,7 @@ test('deleting the account', async ({ browser, baseURL }) => {
 	await page.goto('/account');
 	await page.getByLabel('Password').last().fill(PASSWORD);
 	await page.getByRole('button', { name: 'Delete account' }).click();
-	await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
+	await expect(page).toHaveURL(/\/login$/, { timeout: 30_000 });
 	const dbs = await page.evaluate(async () => {
 		const open = (name: string) =>
 			new Promise<IDBDatabase>((res) => {

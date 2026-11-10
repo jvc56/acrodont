@@ -35,7 +35,7 @@
 				<span>Level {r.level}</span>
 				{#if !compact}
 					<span class="text-muted-foreground">{r.size}</span>
-					<span class="text-muted-foreground">attempt {r.attempt}</span>
+					<span class="text-muted-foreground">Pass {r.attempt}</span>
 					{#if r.lastScore !== null}<span class="text-muted-foreground">last {r.lastScore}%</span>{/if}
 				{/if}
 				{#if r.downloading}

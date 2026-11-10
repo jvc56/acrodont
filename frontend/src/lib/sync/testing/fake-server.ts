@@ -452,8 +452,8 @@ export class FakeServer {
 				changes.preferences = {
 					default_clear_threshold: 80,
 					leave_value_decimals: 1,
-					anagram_show_definitions: false,
-					anagram_show_hooks: false,
+					anagram_show_definitions: true,
+					anagram_show_hooks: true,
 					anagram_answer_mode: 'flashcard',
 					default_segment_size: 0,
 					default_progression: 'ladder',

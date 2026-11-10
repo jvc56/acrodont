@@ -302,9 +302,11 @@ def fixture_catalog() -> Catalog:
     return Catalog(items)
 
 
-def _confirmation_code(project: str, email: str, deadline_s: float = 30) -> str:
+def _confirmation_code(project: str, email: str, deadline_s: float = 30, since_ns: int = 0) -> str:
     """The newest confirmation code for `email`: from the project's mail
-    outbox (MAIL_BACKEND=file), else from the console mail log."""
+    outbox (MAIL_BACKEND=file), else from the console mail log. Only mail
+    written at or after `since_ns` counts: the outbox outlives a stack's
+    database, so an older code for the same address can still be there."""
     from_file = None
     stem = "".join(c if c.isascii() and (c.isalnum() or c in ".@-_+") else "_" for c in email.strip().lower())
     pattern = re.compile(r'"mail_to":"' + re.escape(email) + r'".*?"confirmation_code":"([^"]+)"')
@@ -313,6 +315,9 @@ def _confirmation_code(project: str, email: str, deadline_s: float = 30) -> str:
     while time.monotonic() < deadline:
         if outbox.is_dir():
             for path in sorted(outbox.glob(f"{glob_escape(stem)}.*.json"), reverse=True):
+                written = path.name[len(stem) + 1:].split(".", 1)[0]
+                if written.isdigit() and int(written) < since_ns:
+                    break
                 doc = json.loads(path.read_text())
                 if doc.get("confirmation_code"):
                     from_file = doc["confirmation_code"]
@@ -337,11 +342,13 @@ def ensure_user(base_url: str, user: "User", project: str = DEFAULT_PROJECT) -> 
     status, body = http.json("POST", "/api/auth/login",
                              {"username": user.username, "password": user.password})
     if status != 200:
+        # A second's slack for the container's clock against this one.
+        since_ns = time.time_ns() - 1_000_000_000
         status, body = http.json("POST", "/api/auth/register", {
             "username": user.username, "email": user.email, "password": user.password})
         if status not in (200, 201, 202):
             raise RuntimeError(f"registration of {user.username} failed: {status} {body}")
-        code = _confirmation_code(project, user.email)
+        code = _confirmation_code(project, user.email, since_ns=since_ns)
         status, body = http.json("POST", "/api/auth/confirm-email", {"code": code})
         if status not in (200, 204):
             raise RuntimeError(f"confirmation failed: {status} {body}")

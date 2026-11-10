@@ -8,6 +8,7 @@
 	import { startSync } from '$lib/sync/runtime.svelte';
 	import { applyUpdate, updates, watchUpdates } from '$lib/sw/client.svelte';
 	import Notices from '$lib/components/Notices.svelte';
+	import AppHeader from '$lib/components/AppHeader.svelte';
 
 	let { children } = $props();
 
@@ -24,6 +25,13 @@
 		'/reset-password/confirm'
 	];
 
+	// The signed-in header is on every page but these: the sign-in pages, and
+	// the player, which keeps the whole screen for the quiz.
+	const PLAYER = /^\/cascades\/[0-9a-f-]{36}$/;
+	const showHeader = $derived(
+		!!session.userId && (page.url.pathname === '/' || !PUBLIC.includes(page.url.pathname)) && !PLAYER.test(page.url.pathname)
+	);
+
 	onMount(() => {
 		initSession();
 		void watchUpdates();
@@ -39,9 +47,10 @@
 	$effect(() => {
 		if (!session.ready) return;
 		const path = page.url.pathname;
-		// A deleted account lands on the landing page, not the login page.
+		// A deleted account goes to the log-in page, where it could make a new one.
 		if (!session.userId && session.toLanding) {
-			if (path !== '/') goto('/', { replaceState: true });
+			session.toLanding = false;
+			if (path !== '/login') goto('/login', { replaceState: true });
 			return;
 		}
 		if (!session.userId && !PUBLIC.includes(path)) goto('/login', { replaceState: true });
@@ -68,6 +77,7 @@
 	{/if}
 	<Notices />
 	{#if session.ready}
+		{#if showHeader}<AppHeader />{/if}
 		{@render children()}
 	{/if}
 </div>

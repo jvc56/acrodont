@@ -66,6 +66,7 @@ export async function login(page: Page, username: string) {
 	await page.getByLabel('Username').fill(username);
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Log in' }).click();
+	// Logging in lands on the Cascades page.
 	await expect(page).toHaveURL(/\/cascades$/);
 }
 
@@ -128,8 +129,28 @@ export const AEINRST = { op: 'and', children: [{ type: 'anagram_match', negated:
 export const AEINRST_WORDS = ['ANESTRI', 'ANTSIER', 'NASTIER', 'RATINES', 'RETAINS', 'RETINAS', 'RETSINA', 'STAINER', 'STEARIN'];
 
 /** Sets a preference in the player's settings menu. */
-export async function playerPref(page: Page, label: string, value: string | boolean) {
+/**
+ * Hooks and definitions off, from the Account page: they are on by default, and
+ * the journeys sized in answer bytes were measured on answers without them.
+ */
+export async function plainAnswers(page: Page) {
+	await page.goto('/account');
+	for (const label of ['Show definitions with anagrams', 'Show hooks with anagrams']) {
+		await page.getByLabel(label).uncheck();
+		await expect(page.getByLabel(label)).not.toBeChecked();
+	}
+}
+
+/** Opens the player's settings: on the desktop, through the menu, which a cascade opens with hidden. */
+export async function openPlayerSettings(page: Page) {
+	const show = page.getByRole('button', { name: 'Show menu' });
+	await expect(show.or(page.getByRole('button', { name: /Preferences|Settings/ })).first()).toBeVisible({ timeout: 30_000 });
+	if (await show.isVisible()) await show.click();
 	await page.getByRole('button', { name: /Preferences|Settings/ }).first().click();
+}
+
+export async function playerPref(page: Page, label: string, value: string | boolean) {
+	await openPlayerSettings(page);
 	const control = page.getByRole('dialog', { name: 'Settings' }).getByLabel(label);
 	if (typeof value === 'boolean') await control.setChecked(value);
 	else await control.selectOption(value);
@@ -174,7 +195,7 @@ export async function outboxCount(page: Page, type?: string): Promise<number> {
 	return idb(page, `const all = await req(db.transaction('outbox').objectStore('outbox').getAll()); return all.filter((e) => !arg || e.op.type === arg).length;`, type);
 }
 
-/** A key press at a person's pace: the same action twice within 120 ms counts once. */
+/** A key press at a person's pace: the same action twice within the repeat guard (50 ms by default) counts once. */
 export async function press(page: Page, key: string) {
 	await page.waitForTimeout(150);
 	await page.keyboard.press(key);
@@ -205,9 +226,9 @@ export async function playLevel(page: Page, miss: (i: number) => boolean): Promi
 		await expect(page.getByText(new RegExp(`^${i + 1} / ${count}$`)).first()).toBeVisible({ timeout: 15_000 });
 		// The card is ready once it shows unrevealed: the progress can change a
 		// moment before, and a press in that moment is dropped.
-		await expect(page.getByText(/✓ Correct|✗ Missed/)).toHaveCount(0, { timeout: 15_000 });
+		await expect(page.locator('[data-grade="correct"], [data-grade="missed"]')).toHaveCount(0, { timeout: 15_000 });
 		await press(page, 'Space');
-		await expect(page.getByText(/✓ Correct|✗ Missed/)).toBeVisible();
+		await expect(page.locator('[data-grade="correct"], [data-grade="missed"]')).toBeVisible();
 		if (miss(i - (pos - 1))) await press(page, 'KeyX');
 		await press(page, 'Space');
 		// Either the next card or a banner (the attempt or the run is over).

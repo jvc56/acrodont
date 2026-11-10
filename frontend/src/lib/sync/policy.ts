@@ -63,7 +63,9 @@ export async function questionRowsFor(db: UserDb, now = new Date()): Promise<str
 	const ids = new Set(wanted);
 	const tx = db.transaction(['cascades', 'quiz_questions']);
 	for (const id of await tx.objectStore('cascades').getAllKeys()) {
-		if (!ids.has(id) && (await tx.objectStore('quiz_questions').index('cascade_id').count(id)) > 0) ids.add(id);
+		// One key probe: Chromium answers count() by walking the range, which for
+		// a 100,000-question cascade held the player's writes on every sync.
+		if (!ids.has(id) && (await tx.objectStore('quiz_questions').index('cascade_id').getKey(id)) !== undefined) ids.add(id);
 	}
 	return [...ids].sort();
 }

@@ -175,20 +175,25 @@ export function defaultRange(def: FilterDef, ctx: CeilingContext | null): { min:
 }
 
 /**
- * The client's range check, the server's in miniature: min ≤ max, bounds
- * within floor and ceiling (naming the ceiling), and a range that narrows
- * something. Returns a message for the row, or null.
+ * The client's range check, the server's in miniature: min ≤ max and bounds
+ * within floor and ceiling (naming the ceiling). A range that includes
+ * everything is valid. Returns a message for the row, or null.
  */
 export function rangeError(def: FilterDef, min: number, max: number, ctx: CeilingContext | null): string | null {
 	const floor = def.floor ?? 0;
 	const ceiling = ctx ? ceilingOf(def, ctx) : null;
 	if (!Number.isInteger(min) || !Number.isInteger(max)) return 'Enter whole numbers.';
 	if (min < floor) return `The minimum must be at least ${floor}.`;
-	if (ceiling !== null && max > ceiling) return `The maximum can be at most ${ceiling}.`;
-	if (ceiling !== null && min > ceiling) return `The minimum can be at most ${ceiling}.`;
+	// An order filter ranks within one length, so its ceiling is the lexicon's
+	// largest length group: say so, or a small lexicon's ceiling looks arbitrary.
+	const why =
+		def.ceiling === 'order_rank' && ctx
+			? ` (${ctx.lexicon.name} has at most ${ceiling!.toLocaleString()} ${ctx.quizType === 'leave_value' ? 'leaves' : 'words'} of any one length, and ranks run within a length)`
+			: '';
+	if (ceiling !== null && max > ceiling) return `The maximum can be at most ${ceiling}${why}.`;
+	if (ceiling !== null && min > ceiling) return `The minimum can be at most ${ceiling}${why}.`;
 	if (min > max) return 'The minimum is above the maximum.';
-	if (ceiling !== null && min === floor && max === ceiling)
-		return `${floor}–${ceiling} includes everything, so this row narrows nothing.`;
+	// A range that includes everything is valid: it matches every candidate.
 	return null;
 }
 

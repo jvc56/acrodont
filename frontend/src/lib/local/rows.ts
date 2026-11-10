@@ -107,12 +107,25 @@ export interface QuestionKey {
 }
 
 /** A `cards` store entry: the answer, and which extras it holds. */
+/** A word's hooks and whether it has a front and a back inner hook. */
+export interface WordHooks {
+	word: string;
+	front_hooks: string;
+	back_hooks: string;
+	front_inner: boolean;
+	back_inner: boolean;
+}
+
 export interface CardRow {
 	cascade_id: string;
 	idx: number;
 	answer: unknown;
 	definitions: boolean;
 	hooks: boolean;
+	/** Fetched with inner hooks (a card's hooks without them are refetched). */
+	inner?: boolean;
+	/** A Definition card's word, with its hooks, shown above the definition. */
+	word?: WordHooks;
 }
 
 export interface Binding {

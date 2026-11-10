@@ -1,10 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createCascade, newUser, playLevel, press } from './support';
+import { createCascade, newUser, openPlayerSettings, playLevel, press } from './support';
 
 // PLAN.md § End-to-end tests → Segments and progression.
 
 async function settings(page: Page) {
-	await page.getByRole('button', { name: /Preferences|Settings/ }).first().click();
+	await openPlayerSettings(page);
 	return page.getByRole('dialog', { name: 'Settings' });
 }
 
@@ -40,7 +40,7 @@ test('segments and progression', async ({ page }) => {
 	await setSegment(page, 0);
 	await expect(page.getByText(/^run \d/)).toHaveCount(0);
 	await press(page, 'Backspace');
-	await expect(page.getByText('You have already finished this part of the attempt.')).toBeVisible();
+	await expect(page.getByText('You have already finished this part of the pass.')).toBeVisible();
 	// Finish the quiz: the run's misses still count.
 	for (let i = 6; i <= 18; i++) {
 		await expect(page.getByText(`${i} / 18`)).toBeVisible();
@@ -51,7 +51,7 @@ test('segments and progression', async ({ page }) => {
 
 	// This quiz on Drill: finished below the threshold, it is replaced at the same level.
 	let d = await settings(page);
-	await d.getByRole('radio', { name: /^Drill/ }).check();
+	await d.getByLabel('When a quiz is finished below the clear threshold').selectOption('drill');
 	await d.getByRole('button', { name: 'Save options' }).click();
 	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2: 50%. Replaced with its 1 missed questions.');
 	await expect(page.getByText('Level 2 of 2')).toBeVisible();
@@ -60,16 +60,16 @@ test('segments and progression', async ({ page }) => {
 	const player = new URL(page.url()).pathname;
 	await page.goto('/cascades');
 	await page.getByRole('button', { name: 'Quiz options' }).click();
-	await page.getByRole('dialog', { name: 'Quiz options' }).getByRole('radio', { name: /^Drill/ }).check();
+	await page.getByRole('dialog', { name: 'Quiz options' }).getByLabel('When a quiz is finished below the clear threshold').selectOption('drill');
 	await page.getByRole('button', { name: 'Save' }).click();
 	// Written once the entry's options summary says so.
 	await expect(page.getByText(/· drill/).first()).toBeVisible();
 	await page.goto(player);
 	d = await settings(page);
-	await expect(d.getByRole('radio', { name: /^Drill/ })).not.toBeChecked();
+	await expect(d.getByLabel('When a quiz is finished below the clear threshold')).toHaveValue('ladder');
 	await d.getByRole('button', { name: 'Close' }).click();
 	expect(await playLevel(page, () => false)).toBe('Level 2 cleared with 100%. Back to Level 1.');
 	expect(await playLevel(page, (i) => i < 3)).toMatch(/^Level 1: \d+%\. Reshuffled, and its 3 missed questions are now Level 2\.$/);
 	d = await settings(page);
-	await expect(d.getByRole('radio', { name: /^Drill/ })).toBeChecked();
+	await expect(d.getByLabel('When a quiz is finished below the clear threshold')).toHaveValue('drill');
 });

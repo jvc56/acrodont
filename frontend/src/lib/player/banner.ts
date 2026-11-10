@@ -29,7 +29,7 @@ export function finishBanner(f: FinishFacts): string {
 	const n = f.level;
 	switch (f.outcome) {
 		case 'completed':
-			return `Level 1: 100%. Cascade complete after ${f.completion!.levels} levels and ${f.completion!.attempts} attempts.`;
+			return `Level 1: 100%. Cascade complete after ${f.completion!.levels} levels and ${f.completion!.attempts} ${f.completion!.attempts === 1 ? 'pass' : 'passes'}.`;
 		case 'reshuffled':
 			return `Level ${n}: 0%. Reshuffled. Try again.`;
 		case 'descended':
