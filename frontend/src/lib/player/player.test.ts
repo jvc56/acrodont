@@ -9,6 +9,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { storeCreated } from '$lib/local/created';
 import { openUserDb, type UserDb } from '$lib/local/db';
 import { initMeta } from '$lib/local/meta';
+import { applyLocally } from '$lib/local/apply';
+import * as view from '$lib/local/view';
 import { defaultPreferences } from '$lib/local/preferences';
 import type { PreferencesRow } from '$lib/local/rows';
 import { questionsHash } from '$lib/cascade/order';
@@ -34,7 +36,14 @@ beforeEach(async () => {
 
 async function cascade(
 	count: number,
-	o: { segment_size?: number; keys?: boolean; cards?: boolean; dist?: boolean; quiz_type?: 'anagram' | 'definition' } = {}
+	o: {
+		segment_size?: number;
+		keys?: boolean;
+		cards?: boolean;
+		dist?: boolean;
+		quiz_type?: 'anagram' | 'definition';
+		answer_mode?: 'flashcard' | 'typed';
+	} = {}
 ) {
 	const idx = Array.from({ length: count }, (_, i) => i);
 	const opts = { segment_size: o.segment_size ?? 0, progression: 'ladder', require_alphabetical: false };
@@ -42,7 +51,8 @@ async function cascade(
 		cascade: {
 			id: C, name: 'x', quiz_type: o.quiz_type ?? 'anagram', lexicon: 'EN', letter_distribution: 'english', clear_threshold: 80, ...opts,
 			options_changed_at: T0, options_seq: '1', options_device_id: 'd', question_count: count, depth: 1, peak_depth: 1,
-			attempts_since_completion: 0, created_at: T0, last_activity_at: T0, completed_at: null, trashed_at: null, updated_seq: '1'
+			attempts_since_completion: 0, created_at: T0, last_activity_at: T0, completed_at: null, trashed_at: null, updated_seq: '1',
+			answer_mode: o.answer_mode ?? 'flashcard'
 		},
 		source_quiz: {
 			id: Q, cascade_id: C, level: 1, origin: 'source', origin_quiz_id: null, origin_attempt: null, origin_segment_end: null,
@@ -59,11 +69,19 @@ async function cascade(
 			await db.put('cards', { cascade_id: C, idx: i, answer: WORDS.map((word) => ({ word })), definitions: false, hooks: false });
 		}
 	}
-	if (o.dist !== false) {
-		const tiles = [{ letter: '?', blank_letter: '?', count: 2, value: 0, is_vowel: false }];
-		for (const L of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') tiles.push({ letter: L, blank_letter: L.toLowerCase(), count: 2, value: 1, is_vowel: 'AEIOU'.includes(L) });
-		await db.put('distributions', { name: 'english', tiles });
-	}
+	if (o.dist !== false) await putDistribution();
+}
+
+async function putDistribution() {
+	const tiles = [{ letter: '?', blank_letter: '?', count: 2, value: 0, is_vowel: false }];
+	for (const L of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') tiles.push({ letter: L, blank_letter: L.toLowerCase(), count: 2, value: 1, is_vowel: 'AEIOU'.includes(L) });
+	await db.put('distributions', { name: 'english', tiles });
+}
+
+/** The cascade made typed, as the player's settings would. */
+async function makeTyped() {
+	const c = (await db.get('cascades', C))!;
+	await db.put('cascades', { ...c, answer_mode: 'typed' });
 }
 
 function player() {
@@ -332,7 +350,7 @@ describe('the player', () => {
 
 	it('a typed card whose answer is gone falls back to flashcard mode: Correct to start, Toggle decides, with the reveal saying so', async () => {
 		await cascade(2, { cards: false });
-		prefs = { ...prefs, anagram_answer_mode: 'typed' };
+		await makeTyped();
 		const p = player();
 		await p.load();
 		expect(p.v.card!.typed).toBeNull();
@@ -346,7 +364,7 @@ describe('the player', () => {
 
 	it('typed mode: found, already entered, one word at a time, wrong; all found waits for Enter', async () => {
 		await cascade(2);
-		prefs = { ...prefs, anagram_answer_mode: 'typed' };
+		await makeTyped();
 		const p = player();
 		await p.load();
 		expect((await p.enter('ab'))!.kind).toBe('found');
@@ -363,7 +381,7 @@ describe('the player', () => {
 
 	it('typed mode, every answer found and nothing wrong: Enter on an empty input reveals it correct', async () => {
 		await cascade(2);
-		prefs = { ...prefs, anagram_answer_mode: 'typed' };
+		await makeTyped();
 		const p = player();
 		await p.load();
 		await p.enter('AB');
@@ -373,35 +391,100 @@ describe('the player', () => {
 		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'correct']);
 	});
 
+	it("the cascade's own answer mode decides, never the account default", async () => {
+		await cascade(2, { answer_mode: 'typed' });
+		const p = player();
+		await p.load();
+		// The account default is flashcard; the cascade says typed.
+		expect(p.v.card!.typed).not.toBeNull();
+		await cascade(2, { answer_mode: 'flashcard' });
+		prefs = { ...prefs, anagram_answer_mode: 'typed' };
+		const q = player();
+		await q.load();
+		expect(q.v.card!.typed).toBeNull();
+	});
+
+	it('set_cascade_options carries the answer mode, and nothing but flashcard or typed', async () => {
+		await cascade(2);
+		await applyLocally(db, { type: 'set_cascade_options', cascade_id: C, answer_mode: 'typed' });
+		const read = async () => (await view.cascade(db.transaction(view.VIEW_STORES) as never, C))!.answer_mode;
+		expect(await read()).toBe('typed');
+		await expect(applyLocally(db, { type: 'set_cascade_options', cascade_id: C, answer_mode: 'spoken' as never })).rejects.toThrow();
+	});
+
 	it('typed mode is for anagram quizzes only', async () => {
 		await cascade(2, { quiz_type: 'definition' });
-		prefs = { ...prefs, anagram_answer_mode: 'typed' };
+		await makeTyped();
 		const p = player();
 		await p.load();
 		expect(p.v.card!.typed).toBeNull();
 		expect(await p.enter('AB')).toBeNull();
 	});
 
-	it('typed mode with alphabetical order: an entry before the furthest misses the card at once', async () => {
+	it('typed mode with alphabetical order: an entry that skips an earlier answer misses the card at once', async () => {
 		await cascade(2);
 		const q = (await db.get('quizzes', Q))!;
 		await db.put('quizzes', { ...q, require_alphabetical: true });
-		prefs = { ...prefs, anagram_answer_mode: 'typed' };
+		await makeTyped();
 		const p = player();
 		await p.load();
-		await p.enter('BA');
-		expect((await p.enter('AB'))!.kind).toBe('out_of_order');
-		// Out of order misses the card there and then.
+		// BA skips AB: out of order, and the card is missed there and then.
+		expect((await p.enter('BA'))!.kind).toBe('out_of_order');
 		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'missed']);
+	});
+
+	it('typed mode with alphabetical order: answers in order are found', async () => {
+		await cascade(2);
+		const q = (await db.get('quizzes', Q))!;
+		await db.put('quizzes', { ...q, require_alphabetical: true });
+		await makeTyped();
+		const p = player();
+		await p.load();
+		expect((await p.enter('AB'))!.kind).toBe('found');
+		expect((await p.enter('BA'))!.kind).toBe('found');
+		expect(p.v.card!.revealed).toBe(false);
+		await p.enter('');
+		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'correct']);
 	});
 
 	it('typed mode on a cascade whose distribution is missing needs a connection and falls back', async () => {
 		await cascade(2, { dist: false });
-		prefs = { ...prefs, anagram_answer_mode: 'typed' };
+		await makeTyped();
 		const p = player();
 		await p.load();
 		expect(p.v.distributionMissing).toBe(true);
 		expect(p.v.card!.typed).toBeNull();
+	});
+
+	it('typed mode fetches a missing distribution as the card is shown, online', async () => {
+		await cascade(2, { dist: false });
+		await makeTyped();
+		let fetched = 0;
+		const p = new Player(db, C, {
+			prefs: async () => prefs,
+			ensure: async () => undefined,
+			seed: () => '777',
+			fetchDistribution: async () => {
+				fetched++;
+				await putDistribution();
+			}
+		});
+		await p.load();
+		expect(fetched).toBe(1);
+		expect(p.v.distributionMissing).toBe(false);
+		expect(p.v.card!.typed).not.toBeNull();
+	});
+
+	it('a distribution the download brings later turns the flashcard it fell back to into a typed card', async () => {
+		await cascade(2, { dist: false });
+		await makeTyped();
+		const p = player();
+		await p.load();
+		expect(p.v.card!.typed).toBeNull();
+		await putDistribution();
+		await p.refreshCard();
+		expect(p.v.distributionMissing).toBe(false);
+		expect(p.v.card!.typed).not.toBeNull();
 	});
 
 	it('a QuotaExceededError from applyLocally keeps the card with the storage message until space is freed', async () => {
@@ -445,15 +528,15 @@ describe('controls', () => {
 
 	it('a stroke belongs to one action, every action keeps one binding, and Escape cannot be bound', () => {
 		const x = { kind: 'key' as const, code: 'KeyX', ctrl: false, shift: false, alt: false, meta: false };
-		// Each action starts with the three bindings it can hold: a fourth is not taken.
-		expect(bind(DEFAULT_BINDINGS, 'previous', x).moved ?? null).toBeNull();
-		expect(DEFAULT_BINDINGS.filter((b) => b.action === 'previous')).toHaveLength(3);
-		// With room made (J removed), a stroke of another action moves.
-		const roomy = DEFAULT_BINDINGS.filter((b) => b.code !== 'KeyJ');
-		const moved = bind(roomy, 'previous', x);
+		// Enter is Show / Next by default, beside Space.
+		expect(actionFor(DEFAULT_BINDINGS, { ...x, code: 'Enter' })).toBe('show_next');
+		// An action holds any number: a stroke of another action moves to a fourth.
+		const moved = bind(DEFAULT_BINDINGS, 'previous', x);
+		expect(moved.refused).toBe(false);
 		expect(moved.moved).toBe('toggle_grade');
+		expect(moved.bindings.filter((b) => b.action === 'previous')).toHaveLength(4);
 		expect(moved.bindings.filter((b) => b.code === 'KeyX').map((b) => b.action)).toEqual(['previous']);
-		const esc = bind(roomy, 'previous', { ...x, code: 'Escape' });
+		const esc = bind(DEFAULT_BINDINGS, 'previous', { ...x, code: 'Escape' });
 		expect(esc.refused).toBe(true);
 	});
 

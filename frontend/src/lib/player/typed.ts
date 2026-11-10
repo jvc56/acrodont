@@ -2,10 +2,10 @@
 // input is upper-cased, trimmed and converted to tiles; a word that is one of
 // the answers joins the found list, one already entered is ignored, one with
 // the wrong tile count is left in the input ("type one word at a time"), and
-// anything else is wrong. With alphabetical order on, an answer that sorts
-// before the furthest answer entered so far is still found but marked out of
-// order, which misses the card at once. Finding every answer does not end the
-// card: Enter on an empty input does.
+// anything else is wrong. With alphabetical order on, each answer has to be the
+// first one not yet entered: one that skips an earlier answer is still found
+// but marked out of order, which misses the card at once. Finding every answer
+// does not end the card: Enter on an empty input does.
 import { compareTiles, type Distribution } from '$lib/tiles';
 
 export interface TypedState {
@@ -15,8 +15,6 @@ export interface TypedState {
 	outOfOrder: string[];
 	/** Wrong entries, as typed. */
 	wrong: string[];
-	/** The furthest answer entered so far, for alphabetical order. */
-	furthest: number[] | null;
 }
 
 export type Submit =
@@ -29,7 +27,7 @@ export type Submit =
 	| { kind: 'empty' };
 
 export function emptyTyped(): TypedState {
-	return { found: [], outOfOrder: [], wrong: [], furthest: null };
+	return { found: [], outOfOrder: [], wrong: [] };
 }
 
 const same = (a: number[], b: number[]) => a.length === b.length && a.every((t, i) => t === b[i]);
@@ -56,11 +54,11 @@ export function submitTyped(
 	if (!answer) return { state: { ...state, wrong: [...state.wrong, trimmed] }, result: { kind: 'wrong' } };
 	if (state.found.includes(answer)) return { state, result: { kind: 'already' } };
 	const found = [...state.found, answer].sort((a, b) => compareTiles(dist.parseMagpie(a, false), dist.parseMagpie(b, false)));
-	if (alphabetical && state.furthest && compareTiles(tiles, state.furthest) < 0) {
+	// In alphabetical order, an answer still to find that sorts before this one was skipped.
+	if (alphabetical && answers.some((a) => !state.found.includes(a) && compareTiles(dist.parseMagpie(a, false), tiles) < 0)) {
 		return { state: { ...state, found, outOfOrder: [...state.outOfOrder, answer] }, result: { kind: 'out_of_order', word: answer } };
 	}
-	const furthest = !state.furthest || compareTiles(tiles, state.furthest) > 0 ? tiles : state.furthest;
-	return { state: { ...state, found, furthest }, result: { kind: 'found', word: answer } };
+	return { state: { ...state, found }, result: { kind: 'found', word: answer } };
 }
 
 /** Every anagram found. */

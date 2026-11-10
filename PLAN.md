@@ -473,9 +473,9 @@ never changes a cascade that already exists.
 | **Round leave values to (decimal places)** | Leave Value answers, rounded half away from zero | `1` | `0`, `1`, `2`, `3` |
 | **Show definitions with anagrams** | Anagram answers | **on** | on / off |
 | **Show hooks with anagrams** | Anagram answers (with inner hooks) | **on** | on / off |
-| **Anagram answer mode** | Anagram quizzes | **Flashcard** | Flashcard / Typed |
+| **Default answer mode** (`anagram_answer_mode`) | New Anagram cascades (each keeps its own; see [Typed mode](#typed-mode-anagram-quizzes-only)) | **Flashcard** | Flashcard / Typed |
 | **When an answer is revealed, mark it** (`reveal_correct`) | Flashcard cards (a typed card is graded by what was typed) | **Correct** | Correct / Missed: the grade a card starts with when its answer is shown, before any toggle |
-| **Controls** | Desktop quiz area | Show / Next: left click, Space or `,` · Toggle grade: right click, `X` or `M` · Previous: middle click, Backspace or `J` | Up to three bindings per action: any mouse button, wheel direction or key, with modifiers. See [Controls](#controls). |
+| **Controls** | Desktop quiz area | Show / Next: left click, Space, `,` or Enter · Toggle grade: right click, `X` or `M` · Previous: middle click, Backspace or `J` | Any number of bindings per action: any mouse button, wheel direction or key, with modifiers. See [Controls](#controls). |
 
 Question order is **not** a preference: questions are always shuffled.
 
@@ -846,12 +846,23 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
 
 #### Typed mode (Anagram quizzes only)
 
-- Only Anagram quizzes can be typed: the player's settings offer the answer
-  mode only on an Anagram cascade, and a Definition or Leave Value card is
+- Only Anagram quizzes can be typed: a Definition or Leave Value card is
   always a flashcard.
+- **The answer mode is the cascade's own** (`cascades.answer_mode`), like its
+  clear threshold: chosen on the New cascade page (prefilled from the **Default
+  answer mode** [preference](#preferences)), changed for that cascade alone in
+  the player's settings with `set_cascade_options`, copied by Start over, and
+  never a quiz's.
+- **The tiles typed mode needs** are the cascade's letter distribution. A
+  cascade played card by card (a new one, or one not kept offline) may not
+  have it yet, so the player fetches it as the card is shown, and a card shown
+  as a flashcard for want of it becomes typed when it arrives.
 - The text input sits **at the bottom of the page**, in a bar under the quiz
-  area (above the on-screen keyboard on a phone), with `0 of 9 found` over it
-  and "Enter on an empty box when you are finished" under it.
+  area (above the on-screen keyboard on a phone), with a line under it for the
+  notes below ("already entered", "type one word at a time").
+- **The found count** (`3 of 9 found`) is **off by default**: knowing how many
+  anagrams are left is a hint. A display setting on the device turns it on, and
+  it then shows in the status bar (in the header on a phone) until the reveal.
 - The user types a word and presses **Enter**. Input is upper-cased, trimmed,
   and converted to tiles (see [Tiles](#tiles)).
   - A word that is **one of the answers and not yet entered** joins the found
@@ -886,12 +897,13 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   alphabetical-order option is inert on such a card. This is the same fallback
   a missing distribution forces (see [On the device](#on-the-device)).
 - **Alphabetical order.** With the quiz's **Answers in alphabetical order**
-  [option](#quiz-options) on, each answer has to be entered at or after the
-  answers already given, in tile order (see [Tiles](#tiles)). An entry that is a
-  valid, not-yet-entered answer but sorts before the furthest answer entered so
-  far is **out of order**, and the card is **missed at once**: the answer is
-  revealed with the grade Missed and "Out of order: `ANTSIER`" under it, with
-  no Enter needed, since nothing typed after it could save the card. The
+  [option](#quiz-options) on, the answers have to be entered one after another
+  in tile order (see [Tiles](#tiles)): each entry must be the first answer not
+  yet given. An entry that is a valid, not-yet-entered answer but skips an
+  earlier one (`NASTIER` when `ANTSIER` is still to find) is **out of order**,
+  and the card is **missed at once**: the answer is revealed with the grade
+  Missed and "Out of order: `NASTIER`" under it, with no Enter needed, since
+  nothing typed after it could save the card. The
   input shows a hint of what is expected next ("after `RETSINA`"). The option does nothing in flashcard mode, and nothing at
   all in Definition and Leave Value cascades, but it is stored for every cascade
   so that switching answer modes later keeps it.
@@ -918,15 +930,15 @@ The default desktop bindings are:
 
 | Action | Mouse (in the quiz area) | Keyboard |
 |---|---|---|
-| **Show / Next** | Left click | Space, `,` |
+| **Show / Next** | Left click | Space, `,`, Enter |
 | **Toggle grade** | Right click | `X`, `M` |
 | **Previous** | Middle click | Backspace, `J` |
 
-Each action starts with its three bindings, the most it can hold: adding
-another means removing one first. Accounts made before `,`, `M` and `J` were
-added get them with **Reset to defaults** on the Account page.
+An action can hold any number of bindings, but always at least one. Accounts
+made before `,`, `M`, `J` and Enter were added get them with **Reset to
+defaults** on the Account page.
 
-- **What can be bound.** Each action can have up to three bindings. A binding
+- **What can be bound.** Each action can have any number of bindings. A binding
   can be:
   - a mouse button: left, middle, right, back or forward
   - a wheel direction: up or down
@@ -2550,7 +2562,7 @@ stores are:
 | `move_cursor` | quiz, attempt, attempt seed, position, at | the quiz is active, its cascade is not trashed, the attempt and its seed match, the position is not below `run_start`, is below `next_boundary(quiz)` when the quiz has one and below the question count otherwise, and the cursor is unset, or was last set by this device, or had been seen by the device (`seen_seq`), or the new `at` is later | Set the cursor, `cursor_moved_at` and the device that moved it. The outbox keeps only the latest pending cursor per quiz, re-appended with a fresh `device_seq` (see [The sync cycle](#the-sync-cycle)). A rejected cursor move (`bad_cursor`) is logged but never counted in a notice; it is not the user's work |
 | `finish` | quiz, attempt, attempt seed, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, every question is graded, and `new_quiz_id` is not already a quiz (`invalid`) | Apply [Cascade Rules](#cascade-rules) using the server's grades and the quiz's own progression; any new quiz uses the device's id; record the attempt. A reset or new quiz starts at cursor 0, stamped with the operation's `at` and device. The result carries the outcome the server reached and the new quiz's question count and `questions_hash`, so the device can see when the server's grades led somewhere else (see [Conflicts](#conflicts)) |
 | `finish_segment` | quiz, attempt, attempt seed, segment end, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, its segment size is greater than 0, the segment end is a multiple of it strictly between 0 and the question count and greater than the cursor, every question before the segment end is graded, no quiz already exists for this quiz, attempt and segment end, and `new_quiz_id` is not already a quiz (`invalid`) | Create the drill quiz one level down from the misses in positions `run_start` … segment end − 1 (nothing if there are none), and set the cursor and `run_start` to the segment end, stamping `cursor_moved_at` and `cursor_device_id` from the operation. See [Segments](#segments) |
-| `set_cascade_options` | cascade, changed option fields, at | the cascade exists, is neither trashed nor purged, every carried value is in range (segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, alphabetical order a flag, clear threshold 1–100; otherwise `invalid`, so an out-of-range value is a rejection and never a constraint violation recorded as `error`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit. The three quiz options affect only later quizzes; the clear threshold applies at once, to every finish from then on |
+| `set_cascade_options` | cascade, changed option fields, at | the cascade exists, is neither trashed nor purged, every carried value is in range (segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, alphabetical order a flag, clear threshold 1–100, answer mode `flashcard` or `typed`; otherwise `invalid`, so an out-of-range value is a rejection and never a constraint violation recorded as `error`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit. The three quiz options affect only later quizzes; the clear threshold applies at once, to every finish from then on |
 | `set_quiz_options` | quiz, changed option fields, at | the quiz is active, its cascade is not trashed, every carried value is in range as for `set_cascade_options`, `progression` and `segment_size` are not carried for a `segment_chain` quiz and `progression` is not carried for the Source quiz, which its rules ignore (`invalid`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit |
 | `restore_quiz` | quiz, shuffle seed | the quiz is cleared and not purged | Push it back as the new deepest level with a new attempt shuffled by the seed, cursor 0 stamped from the operation; bring back its cascade if it was trashed, and only then set `cleared_at` to now on its other cleared quizzes |
 | `trash_cascade` | cascade | the cascade is not trashed (`trashed`) | Trash it |
@@ -3345,17 +3357,18 @@ CREATE TABLE user_preferences (
                                   CHECK (default_clear_threshold BETWEEN 1 AND 100),
     leave_value_decimals      SMALLINT NOT NULL DEFAULT 1
                                   CHECK (leave_value_decimals BETWEEN 0 AND 3),
-    anagram_show_definitions  BOOLEAN NOT NULL DEFAULT false,  -- true from 0002
-    anagram_show_hooks        BOOLEAN NOT NULL DEFAULT false,  -- true from 0002
+    anagram_show_definitions  BOOLEAN NOT NULL DEFAULT true,
+    anagram_show_hooks        BOOLEAN NOT NULL DEFAULT true,
     anagram_answer_mode       anagram_answer_mode NOT NULL DEFAULT 'flashcard',
+                                  -- what new Anagram cascades start with; each keeps its own
     -- Defaults for new cascades only; changing one never touches an existing cascade.
     default_segment_size      INTEGER NOT NULL DEFAULT 0
                                   CHECK (default_segment_size = 0
                                          OR default_segment_size BETWEEN 5 AND 300000),
     default_progression       quiz_progression NOT NULL DEFAULT 'ladder',
     default_require_alphabetical BOOLEAN NOT NULL DEFAULT false,
-    reveal_correct            BOOLEAN NOT NULL DEFAULT true,   -- from 0003: a reveal marks
-                                  -- the card correct (false: missed) until toggled
+    reveal_correct            BOOLEAN NOT NULL DEFAULT true,   -- a reveal marks the card
+                                  -- correct (false: missed) until toggled
     changed_at                TIMESTAMPTZ NOT NULL DEFAULT now(), -- device time of the latest
                                   -- set_preferences; an older operation is rejected whole
     changed_by_device_id      UUID,                               -- NULL until the first change;
@@ -3372,7 +3385,7 @@ CREATE TABLE user_preferences (
 CREATE TABLE user_input_bindings (
     user_id  UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     action   input_action NOT NULL,
-    slot     SMALLINT NOT NULL CHECK (slot BETWEEN 0 AND 2),
+    slot     SMALLINT NOT NULL CHECK (slot >= 0),
     kind     input_kind NOT NULL,
     code     TEXT NOT NULL,
     ctrl     BOOLEAN NOT NULL DEFAULT false,
@@ -3654,6 +3667,8 @@ CREATE TABLE cascades (
                                  -- ceil(question_count / S) bound on chain quizzes
     progression          quiz_progression NOT NULL DEFAULT 'ladder',
     require_alphabetical BOOLEAN NOT NULL DEFAULT false,
+    answer_mode          anagram_answer_mode NOT NULL DEFAULT 'flashcard',
+                                 -- the cascade's own, never a quiz's (Typed mode)
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
                              -- set_cascade_options; an older operation is rejected whole
     options_seq          BIGINT NOT NULL,            -- sync sequence of that change, for seen_seq
@@ -4373,7 +4388,7 @@ person to write it copies names rather than choosing them.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/cascades` | Body `{ id, source_quiz_id, device_id, at, name, lexicon, quiz_type, clear_threshold, segment_size, progression, require_alphabetical, filters }`. `name` is required, 1–200 Unicode scalar values; the device builds the default summary itself (see [Creating a cascade](#creating-a-cascade)). `device_id` is recorded as `options_device_id` on the cascade and the Source quiz, so the creating device's option changes never compete on timestamps. `id` and `source_quiz_id` are device-generated UUIDs minted when the button is pressed and reused for any retry of that press, never regenerated on retry; a request whose `id` the server already holds for this user returns the existing cascade and Source quiz unchanged, so a lost response never makes a duplicate or takes a second slot, and an `id` or `source_quiz_id` held by another user is refused with `409` (`invalid`), never that user's row. `at` is the device's timestamp, used for `options_changed_at` on the cascade and the Source quiz exactly as operations' `at` is, so the creating device's first option change is never `stale` against a server clock. Runs the search **before opening any transaction**, then in one short transaction locks the user's row, re-checks the [cascade limit](#cascade-limit), stores the question index and shuffles the Source quiz with a server-generated seed, and returns `{ cascade, source_quiz, sync_seq }`. A cheap limit check before the search refuses an over-limit request without spending one, and the lock therefore never covers the search's CPU or its wait for a `SEARCH_CONCURRENCY` permit, so a creation can never block the [purge task](#purge-task) on the same user's row for the length of a search. `source_quiz` carries its `shuffle_seed` rather than its positions: the device derives the Source quiz's order with the shared [shuffle](#deterministic-shuffles) over `idx` 0…count−1, and writes the cascade, the Source quiz and its question rows straight into its base stores from this response, so its first pull finds nothing to rebuild. `sync_seq` is informational; the device does **not** advance its sync cursor from this response, so its next sync pulls the rows the creation stamped. The cascade's private spec is stored with this request's `quiz_type`, which is what an In Word List row's entries were canonicalised under and what Start over copies. `422` if the search is empty or over the cap. `409` with `{ error: "cascade_limit", limit, count }` at the [cascade limit](#cascade-limit). A `5xx`, such as a deadlock or timeout inside the creation transaction, is retried by the device with the same body, which the device-minted ids make safe, and so is a `429`, after `Retry-After`, since this endpoint shares `SEARCH_RATE_PER_MINUTE` with the builder's preview. The threshold and the three [quiz options](#quiz-options) are required: the device fills them from its preferences view and the server never reads the preferences row to supply them, so an omitted one is a `400`. The Source quiz is created with a copy of the options. |
+| `POST` | `/api/cascades` | Body `{ id, source_quiz_id, device_id, at, name, lexicon, quiz_type, clear_threshold, segment_size, progression, require_alphabetical, answer_mode, filters }`. `name` is required, 1–200 Unicode scalar values; the device builds the default summary itself (see [Creating a cascade](#creating-a-cascade)). `device_id` is recorded as `options_device_id` on the cascade and the Source quiz, so the creating device's option changes never compete on timestamps. `id` and `source_quiz_id` are device-generated UUIDs minted when the button is pressed and reused for any retry of that press, never regenerated on retry; a request whose `id` the server already holds for this user returns the existing cascade and Source quiz unchanged, so a lost response never makes a duplicate or takes a second slot, and an `id` or `source_quiz_id` held by another user is refused with `409` (`invalid`), never that user's row. `at` is the device's timestamp, used for `options_changed_at` on the cascade and the Source quiz exactly as operations' `at` is, so the creating device's first option change is never `stale` against a server clock. Runs the search **before opening any transaction**, then in one short transaction locks the user's row, re-checks the [cascade limit](#cascade-limit), stores the question index and shuffles the Source quiz with a server-generated seed, and returns `{ cascade, source_quiz, sync_seq }`. A cheap limit check before the search refuses an over-limit request without spending one, and the lock therefore never covers the search's CPU or its wait for a `SEARCH_CONCURRENCY` permit, so a creation can never block the [purge task](#purge-task) on the same user's row for the length of a search. `source_quiz` carries its `shuffle_seed` rather than its positions: the device derives the Source quiz's order with the shared [shuffle](#deterministic-shuffles) over `idx` 0…count−1, and writes the cascade, the Source quiz and its question rows straight into its base stores from this response, so its first pull finds nothing to rebuild. `sync_seq` is informational; the device does **not** advance its sync cursor from this response, so its next sync pulls the rows the creation stamped. The cascade's private spec is stored with this request's `quiz_type`, which is what an In Word List row's entries were canonicalised under and what Start over copies. `422` if the search is empty or over the cap. `409` with `{ error: "cascade_limit", limit, count }` at the [cascade limit](#cascade-limit). A `5xx`, such as a deadlock or timeout inside the creation transaction, is retried by the device with the same body, which the device-minted ids make safe, and so is a `429`, after `Retry-After`, since this endpoint shares `SEARCH_RATE_PER_MINUTE` with the builder's preview. The threshold, the three [quiz options](#quiz-options) and the answer mode are required: the device fills them from its preferences view and the server never reads the preferences row to supply them, so an omitted one is a `400`. The Source quiz is created with a copy of the options. |
 | `POST` | `/api/cascades/:id/start-over` | Body `{ id, source_quiz_id, device_id, at }`, minted per press exactly as for creation and subject to the same repeat, timestamp and `options_device_id` rules. New cascade with a copy of the spec and the same threshold and options; returns the same shape. Subject to the cascade limit. |
 | `GET` | `/api/cascades/:id/cards?from=<idx>&limit=<n>&hooks=<0\|1>&definitions=<0\|1>&keys=<0\|1>`, or `?idx=<i,j,…>&hooks=…&definitions=…` | Answer cards `[{ idx, key, answer }]` for question indexes `from`…`from+limit−1` (`limit` ≤ 10,000), or for the comma-separated indexes in `idx` (at most 1,000, returned in idx order; never with `from`, `limit` or `keys`, else `400 invalid_idx`) — the player's read-ahead, which asks for the next cards in its quiz's own order. With `hooks=1`, an Anagram answer's words carry `front_hooks`, `back_hooks` and the booleans `front_inner` and `back_inner` (the word less its first, or last, tile is a word), and a Definition card carries `word`: `{ word, front_hooks, back_hooks, front_inner, back_inner }` beside its answer. The device splits each row between its `questions` store (the `key`) and its `cards` store (the rest), so eviction can take the answer and leave the question (see [On the device](#on-the-device)). With `keys=1` the response is `{ from, keys: [...] }` — the keys alone, in idx order, since the range makes every index implied — and **`limit` ≤ 100,000**, which at about 10 bytes a key is roughly the size of one 10,000-card page: a 300,000-question cascade's keys are three requests where its answers are thirty, a tenth of the cost in the shared rate bucket, and about a quarter of the bytes of cards without definitions (see [Downloads](#on-the-device)). It is what the download manager fetches first, so a cascade becomes playable and self-gradable before its answers arrive; `hooks` and `definitions` are then a `400`. A Leave Value `answer` is a JSON number written as the shortest text that round-trips the stored `f64`, which `JSON.parse` reads back exactly. Card pages are served `Cache-Control: private, no-store`, because the device keeps every byte it fetches in IndexedDB and a second copy in the browser's HTTP cache would sit outside every budget the plan states; only the questions endpoint, whose index lists are small and refetched by the pending path, keeps immutable caching. Responses are compressed. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/questions?from=<n>&limit=<n>` | The quiz's question indexes `[idx…]` in idx order, `limit` ≤ 50,000. A quiz's question set never changes, so it is served with the same immutable caching. Fetched when the device materialises a quiz; never part of a pull. `404` for another user's, a purged, or a Source quiz, whose indexes are implied. |

@@ -23,6 +23,7 @@ use crate::extract::ApiJson;
 use crate::search::routes::{path_errors, prepare, run, Prepared};
 use crate::search::store::{copy_spec, insert_spec, load_spec, SpecKind};
 use crate::search::wire::{tree_to_json, PathError, QuizType};
+use crate::sync::prefs::AnswerMode;
 
 pub const MAX_CARDS_PER_PAGE: i64 = 10_000;
 pub const MAX_KEYS_PER_PAGE: i64 = 100_000;
@@ -58,6 +59,7 @@ pub struct CreateBody {
     segment_size: i64,
     progression: Progression,
     require_alphabetical: bool,
+    answer_mode: AnswerMode,
     filters: Value,
 }
 
@@ -80,6 +82,7 @@ struct NewCascade {
     segment_size: i32,
     progression: Progression,
     require_alphabetical: bool,
+    answer_mode: AnswerMode,
     /// Start over copies the original's spec; creation stores the request's tree.
     copy_of_spec: Option<Uuid>,
 }
@@ -198,8 +201,8 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     sqlx::query!(
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, leave_set_id, spec_id, clear_threshold,
                                segment_size, progression, require_alphabetical, options_changed_at, options_seq,
-                               options_device_id, question_count, depth, peak_depth, updated_seq)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, 1, $13)",
+                               options_device_id, question_count, depth, peak_depth, updated_seq, answer_mode)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, 1, $13, $16)",
         n.id,
         user.id,
         n.name,
@@ -215,6 +218,7 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
         seq,
         n.device_id,
         count_q,
+        n.answer_mode as AnswerMode,
     )
     .execute(&mut *tx)
     .await?;
@@ -296,6 +300,7 @@ async fn create(
         segment_size: b.segment_size as i32,
         progression: b.progression,
         require_alphabetical: b.require_alphabetical,
+        answer_mode: b.answer_mode,
         copy_of_spec: None,
     };
     store(&state, &user, n, p).await
@@ -316,7 +321,7 @@ async fn start_over(
     let mut conn = state.db.acquire().await?;
     let row = sqlx::query!(
         r#"SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS "progression: Progression",
-                  c.require_alphabetical, l.name AS lexicon
+                  c.require_alphabetical, c.answer_mode AS "answer_mode: AnswerMode", l.name AS lexicon
            FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2"#,
         original,
         user.id
@@ -337,6 +342,7 @@ async fn start_over(
         segment_size: row.segment_size,
         progression: row.progression,
         require_alphabetical: row.require_alphabetical,
+        answer_mode: row.answer_mode,
         copy_of_spec: Some(row.spec_id),
     };
     store(&state, &user, n, p).await

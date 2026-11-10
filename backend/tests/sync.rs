@@ -280,10 +280,12 @@ async fn out_of_range_values_are_invalid_never_error(pool: sqlx::PgPool) {
         d.op("set_preferences", json!({ "leave_value_decimals": 4 })),
         d.op("set_bindings", json!({ "bindings": bindings("Escape", "key") })),
         d.op("set_bindings", json!({ "bindings": bindings("thumb", "mouse_button") })),
+        // Any number per action, but never none: Previous is left without one.
         d.op("set_bindings", json!({ "bindings": [
             { "action": "show_next", "kind": "key", "code": "Space" }, { "action": "show_next", "kind": "key", "code": "KeyA" },
             { "action": "show_next", "kind": "key", "code": "KeyB" }, { "action": "show_next", "kind": "key", "code": "KeyC" },
-            { "action": "toggle_grade", "kind": "key", "code": "KeyX" }, { "action": "previous", "kind": "key", "code": "Backspace" }] })),
+            { "action": "toggle_grade", "kind": "key", "code": "KeyX" }] })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "answer_mode": "spoken" })),
     ];
     let r = d.sync(ops).await;
     for x in r.json()["results"].as_array().unwrap() {
@@ -665,7 +667,7 @@ async fn an_options_change_right_after_creation_from_a_slow_clock(pool: sqlx::Pg
         .post("/api/cascades", json!({
             "id": id, "source_quiz_id": Uuid::new_v4(), "device_id": d.id, "at": at, "name": "A cascade",
             "lexicon": "EN-FIX", "quiz_type": "anagram", "clear_threshold": 80, "segment_size": 0,
-            "progression": "ladder", "require_alphabetical": false,
+            "progression": "ladder", "require_alphabetical": false, "answer_mode": "flashcard",
             "filters": { "op": "and", "children": [{ "type": "length", "negated": false, "min": 7, "max": 7 }] },
         }))
         .await;

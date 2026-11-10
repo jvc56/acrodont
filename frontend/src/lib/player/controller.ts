@@ -68,6 +68,8 @@ export interface PlayerOptions {
 	fetchCard?: (cascadeId: string, idx: number, ahead: number[]) => Promise<void>;
 	/** Fetches the named cards the device lacks, in the background (online only). */
 	fetchAhead?: (cascadeId: string, idx: number[]) => Promise<void>;
+	/** Fetches the cascade's tile distribution the device lacks, for typed mode (online only). */
+	fetchDistribution?: (cascadeId: string) => Promise<void>;
 	seed?: () => string;
 	uuid?: () => string;
 }
@@ -299,6 +301,23 @@ export class Player {
 			}
 		}
 		this.prefsNow = await this.opts.prefs();
+		// Typed mode splits words with the cascade's tiles: a cascade played card by
+		// card may not have them yet, so they are fetched now, as the card is.
+		if (!this.dist && this.v.cascade?.quiz_type === 'anagram' && this.v.cascade.answer_mode === 'typed') {
+			await this.ensureDistribution(this.v.cascade);
+			if (!this.dist && this.opts.fetchDistribution) {
+				this.v.fetchingCard = true;
+				this.emit();
+				try {
+					await this.opts.fetchDistribution(this.cascadeId);
+					await this.ensureDistribution(this.v.cascade);
+				} catch {
+					// Offline: typed mode waits for a connection, and the card falls back to a flashcard.
+				} finally {
+					this.v.fetchingCard = false;
+				}
+			}
+		}
 		if (key !== null && card) this.cache.set(idx, { key, answer: card.answer, word: card.word ?? null });
 		this.present(pos, idx, key, card ? card.answer : null, card?.word ?? null);
 	}
@@ -307,7 +326,7 @@ export class Player {
 	private present(pos: number, idx: number, key: string | null, answer: unknown | null, word: WordHooks | null) {
 		const saved = this.rows.get(idx)?.grade ?? null;
 		const prefs = this.prefsNow;
-		const typedWanted = this.v.cascade!.quiz_type === 'anagram' && prefs?.anagram_answer_mode === 'typed';
+		const typedWanted = this.v.cascade!.quiz_type === 'anagram' && this.v.cascade!.answer_mode === 'typed';
 		this.v.distributionMissing = typedWanted && !this.dist;
 		// A card with no answer, or no distribution to split typed text, falls back to flashcard mode.
 		const typed = typedWanted && answer !== null && this.dist && key && saved === null ? emptyTyped() : null;
@@ -765,6 +784,12 @@ export class Player {
 	async refreshCard() {
 		const card = this.v.card;
 		if (!card) return;
+		// The tiles typed mode needs arrived: a card shown as a flashcard for want of them becomes typed.
+		if (!this.dist && this.v.cascade) {
+			await this.ensureDistribution(this.v.cascade);
+			const now = this.v.card;
+			if (this.dist && now?.idx === card.idx && !now.revealed && !now.typed) return this.serial(() => this.loadCard(card.pos));
+		}
 		const key = (await this.db.get('questions', [this.cascadeId, card.idx]))?.key ?? null;
 		const row = await this.db.get('cards', [this.cascadeId, card.idx]);
 		const answer = row?.answer ?? null;

@@ -17,7 +17,9 @@ export const INFO = {
 	anagram_show_hooks:
 		'Shows the letters that can go before and after each anagram (its hooks), and a dot on a side where removing the end letter still leaves a word (its inner hooks).',
 	anagram_answer_mode:
-		'Flashcard: reveal the answer and grade yourself. Typed (anagram quizzes only): type each anagram, then press Enter on an empty box when you are finished; the card is correct only if you found them all and typed nothing else.',
+		'The answer mode new anagram cascades start with. Each cascade keeps its own, which you can change in its player.',
+	answer_mode:
+		'Flashcard: reveal the answer and grade yourself. Typed (anagram cascades only): type each anagram, then press Enter on an empty box when you are finished; the card is correct only if you found them all and typed nothing else.',
 	reveal_correct:
 		'The grade a card gets when you reveal its answer, before you toggle it. “Correct” suits studying words you mostly know; “Missed” makes you mark the ones you got.',
 	// A cascade
@@ -41,6 +43,8 @@ export const INFO = {
 	border_missed: 'Draws a red border around the quiz area when a revealed card is marked missed.',
 	border_width: 'How thick the green and red grade borders are, in pixels.',
 	status_bar: 'The bar under the quiz with the level, pass, progress, score and sync status. Hiding it leaves the quiz area the same size.',
+	found_count:
+		'In typed mode, shows "3 of 9 found" in the status bar. Off by default, since knowing how many anagrams are left is a hint.',
 	repeat_guard:
 		'Ignores the same action pressed again within this many milliseconds, to stop an accidental double press from skipping a card. 0 turns it off.',
 	// Account

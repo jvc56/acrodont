@@ -455,6 +455,17 @@ export class DownloadManager {
 	 * request rather than the current card's 10,000-card page: a new quiz's
 	 * order is a shuffle, so consecutive cards fall in different pages.
 	 */
+	/**
+	 * The cascade's tile distribution, now, for a player that needs it for typed
+	 * mode: a cascade played card by card never had its download pass fetch it.
+	 */
+	async distributionForPlayer(cascadeId: string): Promise<void> {
+		const c = await this.db.get('cascades', cascadeId);
+		if (!c || (await this.db.getKey('distributions', c.letter_distribution))) return;
+		const d = await this.forPlayer(() => this.api.distribution(c.letter_distribution));
+		await this.unit(() => this.db.put('distributions', { name: d.name, tiles: d.tiles }));
+	}
+
 	async fetchForPlayer(cascadeId: string, idx: number, ahead: number[] = []): Promise<void> {
 		const c = await this.db.get('cascades', cascadeId);
 		if (!c) return;

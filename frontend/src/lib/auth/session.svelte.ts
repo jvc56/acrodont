@@ -81,6 +81,8 @@ onUpdatedElsewhere(() => {
 
 let channel: BroadcastChannel | null = null;
 let onlineHooked = false;
+/** Bumped by every login: a session check begun before one must not judge the new session. */
+let logins = 0;
 
 export async function initSession() {
 	const id = await signedIn();
@@ -117,12 +119,16 @@ export async function initSession() {
 	}
 
 	if (id && navigator.onLine) {
+		// A login while the check is out (the dev sign-in page logs in as the
+		// layout starts) makes its answer, about the old cookie, stale.
+		const at = logins;
 		try {
 			const me = await authApi.me();
+			if (at !== logins) return;
 			if (me.user_id !== id) session.needsLogin = true;
 			else applyMe(me);
 		} catch (e) {
-			if (e instanceof ApiError && e.status === 401) session.needsLogin = true;
+			if (at === logins && e instanceof ApiError && e.status === 401) session.needsLogin = true;
 		}
 	}
 }
@@ -137,6 +143,7 @@ export async function login(username: string, password: string): Promise<Me> {
  * and the local-only /dev-login page, so the two cannot drift.
  */
 export async function adoptSession(me: Me): Promise<Me> {
+	logins++;
 	await recordLogin(me.user_id, me.username);
 	session.userId = me.user_id;
 	session.needsLogin = false;

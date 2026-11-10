@@ -39,7 +39,7 @@ async fn create(c: &mut Client<'_>, quiz_type: &str, name: &str) -> (String, Str
             json!({
                 "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
                 "at": "2026-01-01T00:00:00Z", "name": name, "lexicon": "EN-FIX", "quiz_type": quiz_type,
-                "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false,
+                "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false, "answer_mode": "flashcard",
                 "filters": filters(quiz_type),
             }),
         )

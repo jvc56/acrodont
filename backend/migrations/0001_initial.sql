@@ -141,15 +141,18 @@ CREATE TABLE user_preferences (
                                   CHECK (default_clear_threshold BETWEEN 1 AND 100),
     leave_value_decimals      SMALLINT NOT NULL DEFAULT 1
                                   CHECK (leave_value_decimals BETWEEN 0 AND 3),
-    anagram_show_definitions  BOOLEAN NOT NULL DEFAULT false,
-    anagram_show_hooks        BOOLEAN NOT NULL DEFAULT false,
+    anagram_show_definitions  BOOLEAN NOT NULL DEFAULT true,
+    anagram_show_hooks        BOOLEAN NOT NULL DEFAULT true,
     anagram_answer_mode       anagram_answer_mode NOT NULL DEFAULT 'flashcard',
+                                  -- what new Anagram cascades start with; each keeps its own
     -- Defaults for new cascades only; changing one never touches an existing cascade.
     default_segment_size      INTEGER NOT NULL DEFAULT 0
                                   CHECK (default_segment_size = 0
                                          OR default_segment_size BETWEEN 5 AND 130000),
     default_progression       quiz_progression NOT NULL DEFAULT 'ladder',
     default_require_alphabetical BOOLEAN NOT NULL DEFAULT false,
+    reveal_correct            BOOLEAN NOT NULL DEFAULT true,   -- a reveal marks the card
+                                  -- correct (false: missed) until toggled
     changed_at                TIMESTAMPTZ NOT NULL DEFAULT now(), -- device time of the latest
                                   -- set_preferences; an older operation is rejected whole
     changed_by_device_id      UUID,                               -- NULL until the first change;
@@ -166,7 +169,7 @@ CREATE TABLE user_preferences (
 CREATE TABLE user_input_bindings (
     user_id  UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     action   input_action NOT NULL,
-    slot     SMALLINT NOT NULL CHECK (slot BETWEEN 0 AND 2),
+    slot     SMALLINT NOT NULL CHECK (slot >= 0),  -- any number per action
     kind     input_kind NOT NULL,
     code     TEXT NOT NULL,
     ctrl     BOOLEAN NOT NULL DEFAULT false,
@@ -448,6 +451,8 @@ CREATE TABLE cascades (
                                  -- ceil(question_count / S) bound on chain quizzes
     progression          quiz_progression NOT NULL DEFAULT 'ladder',
     require_alphabetical BOOLEAN NOT NULL DEFAULT false,
+    answer_mode          anagram_answer_mode NOT NULL DEFAULT 'flashcard',
+                                 -- the cascade's own, never a quiz's (Typed mode)
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
                              -- set_cascade_options; an older operation is rejected whole
     options_seq          BIGINT NOT NULL,            -- sync sequence of that change, for seen_seq

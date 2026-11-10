@@ -73,7 +73,7 @@ export async function login(page: Page, username: string) {
 /** A cascade through the builder; returns its player path. */
 export async function createCascade(
 	page: Page,
-	o: { name: string; min?: number; max?: number; segment?: number; threshold?: number } = { name: 'x' }
+	o: { name: string; min?: number; max?: number; segment?: number; threshold?: number; answerMode?: 'flashcard' | 'typed' } = { name: 'x' }
 ): Promise<string> {
 	await page.goto('/cascades/new');
 	await page.getByLabel('Lexicon').selectOption('EN-FIX');
@@ -85,6 +85,7 @@ export async function createCascade(
 		await page.getByLabel('Segment size').fill(String(o.segment));
 	}
 	if (o.threshold !== undefined) await page.getByLabel('Clear threshold (%)').fill(String(o.threshold));
+	if (o.answerMode !== undefined) await page.getByLabel('Answer mode').selectOption(o.answerMode);
 	await page.getByLabel('Cascade name').fill(o.name);
 	await page.getByRole('button', { name: 'Create Cascade' }).click();
 	await expect(page).toHaveURL(/\/cascades\/[0-9a-f-]{36}$/);
@@ -97,7 +98,16 @@ export async function createCascade(
  */
 export async function apiCascade(
 	page: Page,
-	o: { name: string; quiz_type?: string; lexicon?: string; filters: unknown; segment_size?: number; progression?: string; alphabetical?: boolean }
+	o: {
+		name: string;
+		quiz_type?: string;
+		lexicon?: string;
+		filters: unknown;
+		segment_size?: number;
+		progression?: string;
+		alphabetical?: boolean;
+		answer_mode?: 'flashcard' | 'typed';
+	}
 ): Promise<string> {
 	const csrf = (await page.context().cookies()).find((c) => c.name === 'acrodont_csrf')!.value;
 	const me = await (await page.request.get('/api/auth/me')).json();
@@ -116,6 +126,7 @@ export async function apiCascade(
 			segment_size: o.segment_size ?? 0,
 			progression: o.progression ?? 'ladder',
 			require_alphabetical: o.alphabetical ?? false,
+			answer_mode: o.answer_mode ?? 'flashcard',
 			filters: o.filters
 		}
 	});

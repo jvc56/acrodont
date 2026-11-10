@@ -1,5 +1,5 @@
 <script lang="ts">
-	// Controls (PLAN.md § Controls): up to three bindings per action, captured
+	// Controls (PLAN.md § Controls): any number of bindings per action, captured
 	// by pressing a key, clicking or scrolling inside a capture box; Escape
 	// cancels and cannot be bound; a stroke moves from another action with a
 	// notice; every action keeps one binding; Reset to defaults. Saved as one
@@ -100,9 +100,7 @@
 							<button aria-label="Remove binding" onclick={() => save(unbind(bindings, b))}>×</button>
 						</li>
 					{/each}
-					{#if bindings.filter((b) => b.action === a.action).length < 3}
-						<li><Button size="sm" variant="outline" onclick={() => (capturing = a.action)}>Add binding</Button></li>
-					{/if}
+					<li><Button size="sm" variant="outline" onclick={() => (capturing = a.action)}>Add binding</Button></li>
 				</ul>
 			</div>
 		{/each}

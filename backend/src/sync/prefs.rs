@@ -135,7 +135,7 @@ pub fn validate_bindings(v: &Value) -> Result<Vec<Binding>, Reason> {
     }
     for action in [InputAction::ShowNext, InputAction::ToggleGrade, InputAction::Previous] {
         let n = list.iter().filter(|b| b.action == action).count();
-        if !(1..=3).contains(&n) {
+        if n == 0 {
             return Err(Reason::Invalid);
         }
     }
@@ -169,9 +169,11 @@ mod tests {
         v[0]["code"] = json!("thumb");
         assert_eq!(validate_bindings(&v), Err(Reason::Invalid));
         let mut v = defaults();
-        v.as_array_mut().unwrap().push(json!({ "action": "previous", "kind": "wheel", "code": "up" }));
-        v.as_array_mut().unwrap().push(json!({ "action": "previous", "kind": "wheel", "code": "down" }));
-        assert_eq!(validate_bindings(&v), Err(Reason::Invalid), "a fourth binding");
+        for code in ["up", "down"] {
+            v.as_array_mut().unwrap().push(json!({ "action": "previous", "kind": "wheel", "code": code }));
+        }
+        v.as_array_mut().unwrap().push(json!({ "action": "previous", "kind": "key", "code": "KeyJ" }));
+        assert!(validate_bindings(&v).is_ok(), "an action holds any number of bindings");
         let mut v = defaults();
         v[3]["code"] = json!("Space");
         v[3]["action"] = json!("toggle_grade");

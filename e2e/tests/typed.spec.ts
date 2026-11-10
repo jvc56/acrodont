@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { AEINRST, AEINRST_WORDS, apiCascade, newUser, playerPref, press } from './support';
+import { AEINRST, AEINRST_WORDS, apiCascade, createCascade, newUser, playerPref, press } from './support';
 
 // PLAN.md § End-to-end tests: typed mode, and alphabetical order.
 
@@ -37,8 +37,12 @@ test('typed mode', async ({ page }) => {
 	await newUser(page, 'typed');
 	const player = await apiCascade(page, { name: 'AEINRST', filters: AEINRST });
 	await open(page, player);
-	await playerPref(page, 'Anagram answer mode', 'typed');
-	await expect(page.getByText('0 of 9 found')).toBeVisible();
+	await playerPref(page, 'Answer mode for this cascade', 'typed');
+	// The found count hints at how many are left, so it is off until asked for, then sits in the status bar.
+	await expect(page.getByLabel('Type an answer')).toBeVisible();
+	await expect(page.getByText(/of 9 found/)).toHaveCount(0);
+	await playerPref(page, 'Show how many anagrams are found in typed mode', true);
+	await expect(page.locator('footer').getByText('0 of 9 found')).toBeVisible();
 	// The input sits at the bottom of the page, below the question.
 	const box = (await page.getByLabel('Type an answer').boundingBox())!;
 	expect(box.y).toBeGreaterThan(page.viewportSize()!.height * 0.6);
@@ -82,8 +86,8 @@ test('typed mode', async ({ page }) => {
 	// Switching modes mid-card clears the entries.
 	await type(page, 'RETAINS');
 	await expect(page.getByText('1 of 9 found')).toBeVisible();
-	await playerPref(page, 'Anagram answer mode', 'flashcard');
-	await playerPref(page, 'Anagram answer mode', 'typed');
+	await playerPref(page, 'Answer mode for this cascade', 'flashcard');
+	await playerPref(page, 'Answer mode for this cascade', 'typed');
 	await expect(page.getByText('0 of 9 found')).toBeVisible();
 });
 
@@ -92,26 +96,44 @@ test('alphabetical order in typed mode', async ({ page }) => {
 	await newUser(page, 'alpha');
 	const ordered = await apiCascade(page, { name: 'Ordered', filters: AEINRST, alphabetical: true });
 	await open(page, ordered);
-	await playerPref(page, 'Anagram answer mode', 'typed');
+	await playerPref(page, 'Answer mode for this cascade', 'typed');
 	// In order: correct, once Enter on an empty input finishes it.
 	for (const w of AEINRST_WORDS) await type(page, w);
 	await type(page, '');
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	await next(page, true);
-	// Out of order: the card is missed at once, and says which.
-	await type(page, 'NASTIER');
+	// Out of order: an answer that skips an earlier one misses the card at once, and says which.
+	await type(page, 'ANESTRI');
 	await expect(page.locator('[data-grade]')).toHaveCount(0);
-	await type(page, 'ANTSIER');
+	await type(page, 'NASTIER');
 	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
-	await expect(page.getByText('Out of order: ANTSIER')).toBeVisible();
+	await expect(page.getByText('Out of order: NASTIER')).toBeVisible();
 	await expect(page.getByLabel('Type an answer')).toHaveCount(0);
 	await next(page, false);
-	// With the option off, the same sequence grades correct.
-	const plain = await apiCascade(page, { name: 'Plain', filters: AEINRST });
+	// With the option off, the same sequence grades correct. This cascade is made typed: each keeps its own mode.
+	const plain = await apiCascade(page, { name: 'Plain', filters: AEINRST, answer_mode: 'typed' });
 	await open(page, plain);
 	for (const w of ['NASTIER', 'ANTSIER', 'RATINES', 'ANESTRI', 'RETAINS', 'RETINAS', 'RETSINA', 'STAINER', 'STEARIN']) await type(page, w);
 	await type(page, '');
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
+});
+
+test('a cascade made typed opens typed, with its tiles, and keeps its mode apart from the others', async ({ page }) => {
+	test.setTimeout(180_000);
+	await newUser(page, 'madetyped');
+	const typed = await createCascade(page, { name: 'Typed', answerMode: 'typed' });
+	await expect(page.getByLabel('Type an answer')).toBeVisible({ timeout: 30_000 });
+	await expect(page.getByText(/needs a connection/)).toHaveCount(0);
+	// Another cascade starts with the account default, flashcard.
+	await createCascade(page, { name: 'Flash' });
+	await expect(page.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
+	await expect(page.getByLabel('Type an answer')).toHaveCount(0);
+	// Switching this one leaves the first typed.
+	await playerPref(page, 'Answer mode for this cascade', 'typed');
+	await expect(page.getByLabel('Type an answer')).toBeVisible();
+	await playerPref(page, 'Answer mode for this cascade', 'flashcard');
+	await page.goto(typed);
+	await expect(page.getByLabel('Type an answer')).toBeVisible({ timeout: 30_000 });
 });
 
 test('an answer too tall for the screen is shrunk to fit it, definitions and all', async ({ page }) => {

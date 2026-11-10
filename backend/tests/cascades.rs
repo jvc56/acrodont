@@ -21,7 +21,7 @@ fn body(lexicon: &str, quiz_type: &str, filters: Value) -> Value {
     json!({
         "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
         "at": "2026-01-01T00:00:00Z", "name": "A cascade", "lexicon": lexicon, "quiz_type": quiz_type,
-        "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false,
+        "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false, "answer_mode": "flashcard",
         "filters": filters,
     })
 }
@@ -134,6 +134,15 @@ async fn every_combination_of_quiz_options(pool: sqlx::PgPool) {
             }
         }
     }
+    // Answer mode is the cascade's own, as the request gives it, and required like the options.
+    for mode in ["flashcard", "typed"] {
+        let mut b = body("EN-FIX", "anagram", sevens());
+        b["answer_mode"] = json!(mode);
+        assert_eq!(c.post("/api/cascades", b).await.json()["cascade"]["answer_mode"], mode);
+    }
+    let mut b = body("EN-FIX", "anagram", sevens());
+    b.as_object_mut().unwrap().remove("answer_mode");
+    assert_eq!(c.post("/api/cascades", b).await.status, StatusCode::BAD_REQUEST);
     // The threshold and the three options are required; a bad value is a field error.
     let mut b = body("EN-FIX", "anagram", sevens());
     b["segment_size"] = json!(4);

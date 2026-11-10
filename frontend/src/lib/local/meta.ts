@@ -44,6 +44,8 @@ export interface MetaValues {
 		border_missed: boolean;
 		/** The desktop player's status bar along the bottom is hidden. */
 		status_bar_hidden: boolean;
+		/** Typed mode's "3 of 9 found" count shows in the status bar (off by default: it hints). */
+		show_found_count: boolean;
 		/** Which defaults the stored values were saved under (lib/player/display DISPLAY_VERSION). */
 		version: number;
 	};
@@ -76,6 +78,7 @@ export const META_DEFAULTS: { [K in MetaKey]: () => MetaValues[K] } = {
 		border_correct: false,
 		border_missed: true,
 		status_bar_hidden: false,
+		show_found_count: false,
 		version: 2
 	})
 };

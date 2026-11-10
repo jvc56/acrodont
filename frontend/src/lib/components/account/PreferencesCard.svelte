@@ -74,7 +74,7 @@
 				<option value="missed">Missed</option>
 			</select>
 		</SettingRow>
-		<SettingRow label="Anagram answer mode" info={INFO.anagram_answer_mode} for="pref-mode">
+		<SettingRow label="Default answer mode for new anagram cascades" info={INFO.anagram_answer_mode} for="pref-mode">
 			<select id="pref-mode" class="rounded border bg-background px-2 py-1" value={prefs.anagram_answer_mode} onchange={(e) => set('anagram_answer_mode', e.currentTarget.value)}>
 				<option value="flashcard">Flashcard</option>
 				<option value="typed">Typed</option>

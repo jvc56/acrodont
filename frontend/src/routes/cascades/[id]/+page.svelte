@@ -32,10 +32,10 @@
 	import { setKeepOffline } from '$lib/sync/keep';
 	import { userDb } from '$lib/local/open';
 	import { defaultPreferences, preferencesView } from '$lib/local/preferences';
-	import type { AttemptRow, PreferencesRow } from '$lib/local/rows';
+	import type { AnswerMode, AttemptRow, PreferencesRow } from '$lib/local/rows';
 	import type { RwTx } from '$lib/local/view';
 	import { PLAYER_LOCK } from '$lib/sync/downloads';
-	import { afterLocalWrite, downloadManager, ensureCascade, fetchAhead, fetchCard, playerActs, syncState } from '$lib/sync/runtime.svelte';
+	import { afterLocalWrite, downloadManager, ensureCascade, fetchAhead, fetchCard, fetchDistribution, playerActs, syncState } from '$lib/sync/runtime.svelte';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import PanelBottomCloseIcon from '@lucide/svelte/icons/panel-bottom-close';
 	import PanelBottomOpenIcon from '@lucide/svelte/icons/panel-bottom-open';
@@ -75,6 +75,12 @@
 		return ri ? runIndicatorText(ri) : null;
 	});
 	let dsp = $derived(display.value);
+	/** Typed mode's "3 of 9 found", when the display setting asks for it and the card is still being typed. */
+	let foundCount = $derived.by(() => {
+		const card = v?.card;
+		if (!dsp.show_found_count || !card?.typed || card.revealed || !player) return null;
+		return `${card.typed.found.length} of ${player.words(card).length} found`;
+	});
 	/** How far through the pass the current card is, for the status bar's line. */
 	let progress = $derived(v?.quiz ? (((v.card?.pos ?? v.quiz.cursor) + 1) / Math.max(1, v.quiz.question_count)) * 100 : 0);
 	/** Of the level's questions, the share graded in this pass; of those, the share correct. */
@@ -150,6 +156,7 @@
 				ensure: (cid) => ensureCascade(d, cid),
 				fetchCard: (cid, idx, ahead) => fetchCard(d, cid, idx, ahead),
 				fetchAhead: (cid, idx) => fetchAhead(d, cid, idx),
+				fetchDistribution: (cid) => fetchDistribution(d, cid),
 				afterWrite: () => {
 					afterLocalWrite();
 					void refreshSide();
@@ -314,7 +321,14 @@
 		// Definitions or hooks change what an answer holds: the cards in memory go first.
 		if (field === 'anagram_show_definitions' || field === 'anagram_show_hooks') player?.prefsChanged();
 		await write({ type: 'set_preferences', [field]: value } as NewOp);
-		if (field === 'anagram_answer_mode') await player?.modeChanged();
+	}
+
+	/** Flashcard or typed, for this cascade alone; switching mid-card resets its typed entries. */
+	async function setAnswerMode(mode: AnswerMode) {
+		const c = v?.cascade;
+		if (!c || mode === c.answer_mode) return;
+		await write({ type: 'set_cascade_options', cascade_id: c.id, answer_mode: mode });
+		await player?.modeChanged();
 	}
 
 	function openSettings() {
@@ -559,12 +573,9 @@
 				</div>
 			{/if}
 			<div class="mx-auto max-w-sm space-y-1">
-				<div class="flex items-baseline justify-between gap-3 text-sm text-muted-foreground">
-					<span>{typed.found.length} of {player?.words(card).length ?? 0} found</span>
-					{#if v.quiz?.require_alphabetical && typed.found.length}
-						<span class="text-xs">after <TileText text={typed.found.at(-1) ?? ''} /></span>
-					{/if}
-				</div>
+				{#if v.quiz?.require_alphabetical && typed.found.length}
+					<p class="text-center text-xs text-muted-foreground">after <TileText text={typed.found.at(-1) ?? ''} /></p>
+				{/if}
 				<input
 					bind:this={typedInput}
 					bind:value={typedText}
@@ -577,9 +588,8 @@
 					autocapitalize="characters"
 					spellcheck="false"
 				/>
-				<p class="text-center text-xs text-muted-foreground" role="status">
-					{card.note ?? 'Enter on an empty box when you are finished.'}
-				</p>
+				<!-- Kept when empty, so a note appearing never moves the input. -->
+				<p class="min-h-4 text-center text-xs text-muted-foreground" role="status">{card.note ?? ''}</p>
 			</div>
 		</div>
 	{/if}
@@ -671,6 +681,7 @@
 								{/if}
 							</p>
 							{#if run}<p class="text-muted-foreground">{run}</p>{/if}
+							{#if foundCount}<p>{foundCount}</p>{/if}
 						{/if}
 					{/if}
 					<div class="ml-auto"><SyncStatus /></div>
@@ -684,7 +695,7 @@
 			<a href="/cascades" aria-label="Menu">☰</a>
 			<span>
 				{#if v?.quiz && v.cascade}
-					L{v.quiz.level} · {(v.card?.pos ?? v.quiz.cursor) + 1}/{v.quiz.question_count} · {v.cascade.clear_threshold}%{#if run} · {run}{/if}
+					L{v.quiz.level} · {(v.card?.pos ?? v.quiz.cursor) + 1}/{v.quiz.question_count} · {v.cascade.clear_threshold}%{#if run} · {run}{/if}{#if foundCount} · {foundCount}{/if}
 				{/if}
 			</span>
 			<span class="flex items-center gap-3">
@@ -799,9 +810,9 @@
 				</select>
 			</SettingRow>
 			{#if v?.cascade?.quiz_type === 'anagram'}
-				<!-- Typing answers is for anagram quizzes only. -->
-				<SettingRow label="Anagram answer mode" info={INFO.anagram_answer_mode} for="player-mode">
-					<select id="player-mode" class="rounded border bg-background px-2 py-1" value={prefs.anagram_answer_mode} onchange={(e) => setPref('anagram_answer_mode', e.currentTarget.value)}>
+				<!-- Typing answers is for anagram quizzes only, and each cascade keeps its own mode. -->
+				<SettingRow label="Answer mode for this cascade" info={INFO.answer_mode} for="player-mode">
+					<select id="player-mode" class="rounded border bg-background px-2 py-1" value={v.cascade.answer_mode} onchange={(e) => setAnswerMode(e.currentTarget.value as AnswerMode)}>
 						<option value="flashcard">Flashcard</option>
 						<option value="typed">Typed</option>
 					</select>

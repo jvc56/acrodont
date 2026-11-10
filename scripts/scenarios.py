@@ -119,7 +119,7 @@ class Seeder:
                 self.cursor = int(b["sync_seq"])
 
     def create(self, name: str, filters: dict, *, lexicon: Optional[str] = None, segment_size: int = 0,
-               quiz_type: str = "anagram") -> str:
+               quiz_type: str = "anagram", answer_mode: str = "flashcard") -> str:
         existing = self.cascade_named(name)
         if existing:
             return existing
@@ -127,7 +127,7 @@ class Seeder:
             "id": str(uuid.uuid4()), "source_quiz_id": str(uuid.uuid4()), "device_id": self.device_id,
             "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
             "name": name, "lexicon": lexicon or self.lexicon, "quiz_type": quiz_type, "clear_threshold": 80,
-            "segment_size": segment_size, "progression": "ladder", "require_alphabetical": False,
+            "segment_size": segment_size, "progression": "ladder", "require_alphabetical": False, "answer_mode": answer_mode,
             "filters": filters,
         })
         if status != 201:
@@ -199,11 +199,10 @@ def segments(s: Seeder) -> None:
 
 
 def typed(s: Seeder) -> None:
-    """Typed answers for Anagram quizzes: a preference, so it applies to every cascade."""
-    s.sync([s.op("set_preferences", anagram_answer_mode="typed")])
+    """Typed answers for Anagram quizzes: the cascade's own answer mode."""
     name = f"Typed: {s.lexicon} 2–4"
     if not s.cascade_named(name):
-        s.create(name, small(2, 4, 10))
+        s.create(name, small(2, 4, 10), answer_mode="typed")
 
 
 def trash(s: Seeder) -> None:

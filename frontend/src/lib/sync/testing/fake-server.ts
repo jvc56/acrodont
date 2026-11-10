@@ -55,6 +55,7 @@ interface CascadeEntry {
 	options_at: string;
 	options_seq: number;
 	options_device: string;
+	answer_mode: 'flashcard' | 'typed';
 	quizzes: Map<string, QuizMeta>;
 }
 
@@ -111,6 +112,7 @@ export class FakeServer {
 			options_at: T0,
 			options_seq: seq,
 			options_device: 'server',
+			answer_mode: 'flashcard',
 			quizzes: new Map()
 		};
 		this.cascades.set(c.id, e);
@@ -135,6 +137,7 @@ export class FakeServer {
 			segment_size: s.opts.segment_size,
 			progression: s.opts.progression,
 			require_alphabetical: s.opts.require_alphabetical,
+			answer_mode: e.answer_mode,
 			options_changed_at: e.options_at,
 			options_seq: String(e.options_seq),
 			options_device_id: e.options_device,
@@ -323,6 +326,7 @@ export class FakeServer {
 		if (type === 'trash_cascade') e.trashed_at = at;
 		if (type === 'restore_cascade' || (type === 'restore_quiz' && !e.sim.state.trashed)) e.trashed_at = null;
 		if (type === 'set_cascade_options') {
+			if (w.answer_mode !== undefined) e.answer_mode = w.answer_mode as 'flashcard' | 'typed';
 			e.options_at = at;
 			e.options_seq = seq;
 			e.options_device = device;
