@@ -3,9 +3,14 @@ import { createCascade, newUser, openPlayerSettings, playLevel, press } from './
 
 // PLAN.md § End-to-end tests → Segments and progression.
 
-async function settings(page: Page) {
+async function prefs(page: Page) {
 	await openPlayerSettings(page);
-	return page.getByRole('dialog', { name: 'Settings' });
+	return page.getByRole('dialog', { name: 'Preferences' });
+}
+
+/** The options of the level being studied, in Preferences. */
+async function settings(page: Page) {
+	return (await prefs(page)).getByRole('group', { name: /the level you are studying/ });
 }
 
 async function setSegment(page: Page, size: number) {
@@ -13,9 +18,9 @@ async function setSegment(page: Page, size: number) {
 	if (size === 0) await d.getByLabel('Study in segments').uncheck();
 	else {
 		await d.getByLabel('Study in segments').check();
-		await d.getByLabel('Segment size').fill(String(size));
+		await d.getByLabel('Segment size', { exact: true }).fill(String(size));
 	}
-	await d.getByRole('button', { name: 'Save options' }).click();
+	await d.getByRole('button', { name: 'Save this level’s options' }).click();
 }
 
 test('segments and progression', async ({ page }) => {
@@ -52,26 +57,25 @@ test('segments and progression', async ({ page }) => {
 	// This quiz on Drill: finished below the threshold, it is replaced at the same level.
 	let d = await settings(page);
 	await d.getByLabel('When a quiz is finished below the clear threshold').selectOption('drill');
-	await d.getByRole('button', { name: 'Save options' }).click();
+	await d.getByRole('button', { name: 'Save this level’s options' }).click();
 	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2: 50%. Replaced with its 1 missed questions.');
 	await expect(page.getByText('Level 2 of 2')).toBeVisible();
 
 	// The cascade on Drill: the quiz in progress keeps its own; the next new one takes it.
 	const player = new URL(page.url()).pathname;
-	// The menu is open already, from the settings above.
-	await page.getByRole('navigation', { name: 'Player menu' }).getByRole('button', { name: 'Levels' }).click();
-	const levels = page.getByRole('dialog', { name: 'Levels' });
+	const dialog = await prefs(page);
+	const levels = dialog.getByRole('group', { name: 'Levels made from now on' });
 	await levels.getByLabel('When a quiz is finished below the clear threshold').selectOption('drill');
-	await levels.getByRole('button', { name: 'Save options' }).click();
+	await levels.getByRole('button', { name: 'Save options for new levels' }).click();
 	// The dialog closes once the change is written.
-	await expect(levels).toHaveCount(0);
+	await expect(dialog).toHaveCount(0);
 	// Written once the Cascades page's options summary says so.
 	await page.goto('/cascades');
 	await expect(page.getByText(/· drill/).first()).toBeVisible();
 	await page.goto(player);
 	d = await settings(page);
 	await expect(d.getByLabel('When a quiz is finished below the clear threshold')).toHaveValue('ladder');
-	await d.getByRole('button', { name: 'Close' }).click();
+	await page.getByRole('dialog', { name: 'Preferences' }).getByRole('button', { name: 'Close' }).click();
 	expect(await playLevel(page, () => false)).toBe('Level 2 cleared with 100%. Back to Level 1.');
 	expect(await playLevel(page, (i) => i < 3)).toMatch(/^Level 1: \d+%\. Reshuffled, and its 3 missed questions are now Level 2\.$/);
 	d = await settings(page);

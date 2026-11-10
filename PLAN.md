@@ -78,7 +78,7 @@ when they land. See [Offline and Sync](#offline-and-sync).
 | **Attempt** | One pass through a quiz's questions, identified by its number and the shuffle seed that produced its order. A quiz that is reset or restored starts a new attempt with a new shuffle. |
 | **Segment** (or **run**) | A fixed-size run of questions inside an attempt, the length of one sitting. Finishing a run drills its misses before the attempt goes on. Off by default. |
 | **Finish** | Move on from the last question of an attempt. Finishing always either sends the quiz to the Trash, sends the user down a level, or resets the quiz in place. |
-| **Clear threshold** | The score (X%) needed to clear a quiz. It is set per cascade when the cascade is created, and can be changed later in the player's Levels dialog; a change applies to every level, the pass in progress included. |
+| **Clear threshold** | The score (X%) needed to clear a quiz. It is set per cascade when the cascade is created, and can be changed later in the player's Preferences, under This cascade; a change applies to every level, the pass in progress included. |
 | **Quiz options** | Segment size, progression and alphabetical order. They are held by the cascade, copied to each new quiz, and editable on either. |
 | **Progression** | What finishing a quiz below the clear threshold does: **Ladder** (keep the quiz and go down a level) or **Drill** (replace the quiz with its misses). |
 | **Clear** | Finish an attempt with a score of at least the clear threshold. The quiz goes to the Trash. The Source quiz is never cleared; see **Complete**. |
@@ -205,8 +205,8 @@ The options belong to the **cascade** and to each **quiz**:
   Cascades page or the player. Changing them affects quizzes created from then
   on, never quizzes that already exist.
 - **Every quiz is created with a copy of its cascade's options**, and that copy
-  can be changed at any time after the quiz exists, from the quiz settings menu
-  in the player or from the level in the cascade's ladder panel. A change takes
+  can be changed at any time after the quiz exists, from the player's
+  Preferences (This cascade → the level you are studying) or from the level in the cascade's ladder panel. A change takes
   effect on the current card.
 - **A quiz created from another quiz's misses** — a replacement, a descent or a
   segment — copies the **cascade's** options, not the finishing quiz's, so a
@@ -233,8 +233,8 @@ its `meta` store, and 130,000 before its first login), progression is Ladder
 or Drill, and alphabetical order is a flag. The cap bounds **new** values only:
 it can be lowered on the server, and a cascade, quiz or preference that already
 holds a larger segment size keeps it and keeps working, since nothing
-re-validates options after they are stored. So the builder, the options dialog
-and the quiz settings menu **clamp what they prefill** to the cap in `meta`,
+re-validates options after they are stored. So the builder and the player's
+Preferences **clamp what they prefill** to the cap in `meta`,
 rather than sending a value the server would refuse as a field the user never
 typed. The minimum of 5 rules out an
 attempt made of one-question runs. It does not rule out a single short run after
@@ -246,10 +246,10 @@ work on its own. **An
 attempt creates at most `ceil(question_count / S)` chain quizzes**, one per run
 that missed something, each of which becomes a Trash entry, so the segment size
 is the user's choice of how much that will be: 5 on a 130,000-question quiz can
-leave 26,000 of them. The builder and the quiz settings menu therefore warn
+leave 26,000 of them. The builder and the player's Preferences therefore warn
 when `question_count / segment_size` is above 2,000, saying how many levels the
-attempt could create; the count is the quiz's own in the quiz settings menu,
-and the cascade's in the builder and the cascade's options dialog. A segment size at or above a quiz's question count means the same as 0 for
+attempt could create; the count is the quiz's own for the level being studied,
+and the cascade's in the builder and for levels made from now on. A segment size at or above a quiz's question count means the same as 0 for
 that quiz.
 
 ### Progression: Ladder or Drill
@@ -413,7 +413,7 @@ Moving on from the last question of a run that is not the last run:
   Purging a cascade purges every quiz in it. Users can also purge from the
   Trash immediately with **Delete forever**.
 - **Start over** on a complete cascade (or any cascade, from the player's
-  **Levels** dialog) creates a new cascade with the same name, a private copy of the
+  **Preferences**) creates a new cascade with the same name, a private copy of the
   same filters, and the same threshold and [quiz options](#quiz-options).
 - **Exporting** works on anything in the Trash that has not been purged, so a
   cleared quiz can still be downloaded as a word list (see
@@ -456,10 +456,13 @@ and delete catalog data (see [Admin](#admin)). See
 ### Preferences
 
 Each user has a set of display and answering preferences. They are edited on
-`/account` and also from a settings menu (gear icon) in the quiz player, where a
-change takes effect on the current card straight away. That same menu also holds
-the current quiz's [options](#quiz-options), which belong to the quiz rather than
-the user. Preferences belong to the user, not to a cascade, and they sync like
+`/account` and also from the player's **Preferences** dialog, where a
+change takes effect on the current card straight away. That same dialog also holds
+the cascade's own settings and the current quiz's [options](#quiz-options), which
+belong to the cascade and the quiz rather than the user, under headings that
+say so. Both places split the user's preferences in two, each group saying
+where it applies: **Every cascade** (applied to every cascade at once) and
+**Defaults for new cascades**. Preferences belong to the user, not to a cascade, and they sync like
 everything else (see [Offline and Sync](#offline-and-sync)). The three
 `Default …` preferences below only prefill the cascade builder; changing one
 never changes a cascade that already exists.
@@ -587,7 +590,7 @@ each, for a glance. Each shows:
 
 With nothing listed the page is empty under its header (or, with no lexicon on
 the server, says so). Selecting a cascade opens the player at its deepest
-level, whose **Levels** dialog holds the rest: the ladder with **Export…** per
+level, whose **Preferences** dialog holds the rest: the ladder with **Export…** per
 level, **Keep offline**, the options for new quizzes, **Start over** and
 **Move to Trash**. The header shows how
 much of the [cascade limit](#cascade-limit) is used (`17 of 20 cascades`) and
@@ -650,7 +653,7 @@ device's **primary pointer**:
 │ Admin      │┃                                                            ┃│
 │ Account    │┃          quiz area: its border is the grade                ┃│
 │ Preferences│┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛│
-│ Levels     ├──────────────────────────────────────────────────────────────┤
+│            ├──────────────────────────────────────────────────────────────┤
 │            │ Level 2 of 3  Pass 3  37 / 250 (14.40%)  31 ✓ 5 ✗ (86.11%)   ● Synced │
 └────────────┴──────────────────────────────────────────────────────────────┘
 ```
@@ -670,17 +673,30 @@ as the term of the data model and the API.
   fade) as the grade is toggled. Each colour is its own setting, as is the
   width (10 px by default). A visually hidden status line says the grade for screen readers;
   the area carries it as `data-grade` (`correct`, `missed`).
-- **The menu** on the left holds navigation (Admin for admins),
-  **Preferences**, which opens the settings dialog (user preferences, this
-  device's settings, and this quiz's [options](#quiz-options)), and **Levels**,
-  a dialog like Preferences (on a phone, Levels beside ⚙ in the header): the
-  clear threshold ("a level clears when a pass ends with at least 80%
-  correct"), the ladder as a table whose columns line up — level, questions,
-  pass, last pass's score, status — with each level's Export…, then the
-  cascade as a whole: its clear threshold (a number, taking effect when the
-  field is left, for the pass in progress too), Keep offline on this device,
-  the options for its new quizzes, Start over and Move to Trash. The quiz being played has its own
-  options in Preferences. **A cascade always opens with the menu
+- **The menu** on the left holds navigation (Admin for admins) and
+  **Preferences** (on a phone, ⚙ in the header). Preferences is the player's
+  one settings dialog: everything that can be set from the player, grouped by
+  **where it applies**. Each group has a heading, a badge saying whether it
+  syncs, and one line saying what it reaches (`SCOPE` in `settings-info.ts`,
+  the same words the Account page uses), and a row of buttons at the top jumps
+  to each group:
+  - **This cascade** (synced; other cascades keep their own): "a level clears
+    when a pass ends with at least 80% correct", the ladder as a table whose
+    columns line up — level, questions, pass, last pass's score, status — with
+    each level's Export…, the clear threshold (a number, taking effect when the
+    field is left, for the pass in progress too), the answer mode (anagram
+    cascades), the [options](#quiz-options) of **the level being studied**
+    (that quiz only, from the current card), the options **levels made from now
+    on** start with (the cascade's), Start over and Move to Trash.
+  - **Every cascade** (the account's; synced; applies to every cascade at
+    once): definitions, hooks, the grade a reveal gives, leave value decimals,
+    and a link to Controls on the Account page.
+  - **Defaults for new cascades** (the account's; synced): the `Default …`
+    preferences, which only prefill the builder.
+  - **This device** (not synced): Keep this cascade offline on this device,
+    and the display settings.
+
+  **A cascade always opens with the menu
   hidden**, whatever happened last time: **☰** in the quiz area's corner
   shows it for this visit and **«** hides it again.
 - **The status bar** along the bottom, outside the quiz area, shows the level,
@@ -692,7 +708,7 @@ as the term of the data model and the API.
   [segment size](#segments) (`run 2 of 3 · 37 of 100`, numbered as
   [Segments](#segments) defines). Percentages show two decimal places, rounded.
   The clear threshold, which rarely changes, is not on the bar: it is in
-  Levels (where it is changed) and in the score's tooltip. An icon at the bar's left end hides it,
+  Preferences (where it is changed) and in the score's tooltip. An icon at the bar's left end hides it,
   and the same icon brings it back: hidden, the bar keeps its place with only
   that icon and the sync status, so the quiz area and its grade border look
   the same either way.
@@ -723,10 +739,10 @@ as the term of the data model and the API.
   have their own. These, the question's
   position, the borders, whether the status bar is shown, and the repeat
   guard are per device (the `meta` store's `display` value), never synced,
-  since what suits a laptop is wrong on a phone; they are in the settings
-  dialog and on the Account page.
+  since what suits a laptop is wrong on a phone; they are in the player's
+  Preferences and on the Account page.
 - **Every setting is a row with its control at the right end**: a checkbox,
-  a choice or a number, in the player's settings dialog, on the Account page
+  a choice or a number, in the player's Preferences, on the Account page
   and in the quiz options alike (`SettingRow`), so the place to click is
   always the same. Progression is a choice (Ladder or Drill) with the chosen
   one's explanation beneath, not a pair of radio buttons.
@@ -779,7 +795,7 @@ Every quiz is driven by three actions, whatever the device:
   once, so a bouncing mouse button or an accidental double tap does not skip a
   card. The guard is a setting on each device, typed in ms, and **0 (off) by
   default**, so every press counts; a user whose mouse bounces raises it. It
-  is beside the display settings in the player's settings dialog and on the
+  is beside the display settings in the player's Preferences and on the
   Account page, since how much a button bounces belongs to the hardware.
   Settings saved before the default changed with the old default, 50, read as
   0. The wheel's own 150 ms guard against one flick firing many
@@ -851,7 +867,7 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
 - **The answer mode is the cascade's own** (`cascades.answer_mode`), like its
   clear threshold: chosen on the New cascade page (prefilled from the **Default
   answer mode** [preference](#preferences)), changed for that cascade alone in
-  the player's settings with `set_cascade_options`, copied by Start over, and
+  the player's Preferences with `set_cascade_options`, copied by Start over, and
   never a quiz's.
 - **The tiles typed mode needs** are the cascade's letter distribution. A
   cascade played card by card (a new one, or one not kept offline) may not
@@ -917,6 +933,10 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   Strokes with Ctrl, Alt or Meta still act, and so do Escape, the arrow keys
   and function keys. Every binding acts as usual in flashcard mode and whenever
   the input does not have focus.
+- **Focus.** The input takes the focus as each card comes up to be typed, and
+  again when Preferences or a confirmation closes over it, so answer after
+  answer can be typed with no click in the box. It is focused once per card,
+  never taken back on a later change to the same card.
 - **Protecting against accidental give-ups.** Before the answer is shown, a
   stroke bound to **Show / Next** inside the quiz area focuses the input instead
   of acting. Strokes bound to Toggle grade and Previous, such as the default
@@ -1084,7 +1104,7 @@ All of this works offline.
 ### Exporting words
 
 Any cascade or quiz can be downloaded as a word list. **Export…** appears on
-each level in the player's **Levels** dialog and on each entry on `/trash`, and opens a small dialog:
+each level in the player's **Preferences** (the ladder under This cascade) and on each entry on `/trash`, and opens a small dialog:
 
 | Choice | Options | Default |
 |---|---|---|
@@ -2282,7 +2302,7 @@ stores are:
   against the **14-day window** only. It never holds against
   `ROW_STORAGE_BUDGET` below, which drops automatically kept cascades once
   nothing else is left to drop, and never against the answer limit; only the
-  user's own Keep offline does either. The player's Levels dialog
+  user's own Keep offline does either. The player's Preferences
   shows its Keep offline toggle on, with a hint saying why, and the user can
   turn it off; the opt-out
   is recorded in the `meta` store beside the kept ids, and the window then
@@ -4497,7 +4517,7 @@ SvelteKit static SPA. The routes:
 |---|---|
 | `/` | No page of its own: there is no landing or home page. It goes to the Cascades page when logged in, where logging in lands too, and to the log-in page (with Create an account) when logged out. A deleted account ends on the log-in page. With no lexicon yet, the empty Cascades page says so (and, to an admin, where to upload one). The site header is how to reach every page. Every logged-in page but the player shows the site header: Acrodont (home), Cascades, New cascade, Trash, Admin for admins, the sync status and the account |
 | `/register`, `/register/check-email`, `/confirm-email`, `/login`, `/reset-password`, `/reset-password/confirm` | Auth |
-| `/cascades` | Cascades page: one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done, 31.58%)`), its download status and Move to Trash; the rest is in the player's Levels dialog |
+| `/cascades` | Cascades page: one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done, 31.58%)`), its download status and Move to Trash; the rest is in the player's Preferences |
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, threshold, preview) |
 | `/cascades/:id` | Player for the cascade's deepest level, with the ladder panel |
 | `/trash` | Cleared quizzes and trashed cascades |
@@ -4563,7 +4583,8 @@ Components:
 - **`QuizOptionsForm`**: segment size, progression and alphabetical order, with
   their inline explanations, and the warning when `question_count / segment_size`
   is above 2,000 (see [Quiz options](#quiz-options)). The same component serves the cascade builder, the
-  cascade's options dialog and the quiz settings menu; it is told whether it is
+  player's Preferences twice (the level being studied, and levels made from now
+  on, apart by `idPrefix`); it is told whether it is
   editing a cascade or a quiz and saves through the matching operation. For a
   segment-chain quiz it shows progression and segment size as fixed and offers
   only alphabetical order, and for the Source quiz it hides progression.
@@ -6102,8 +6123,8 @@ environment. That is how a deployment is smoke-tested and how the
   shows in the answer space with no hooks or definitions, a wrong entry grades
   missed, finding every anagram reveals nothing until Enter on an empty input,
   which then grades correct, a repeated entry is ignored, a right click before the reveal still toggles the grade while a
-  left click only focuses the input, and switching modes mid-card clears the
-  entries. Two answers typed on one line (`RETAINS NASTIER`) stay in the input
+  left click only focuses the input, the next card's input has the focus with
+  no click, and switching modes mid-card clears the entries. Two answers typed on one line (`RETAINS NASTIER`) stay in the input
   with "type one word at a time" and the card, with every anagram then found,
   still grades correct. With **Enter bound to Toggle grade**, Enter on a typed
   word submits it and leaves the grade alone, and Enter on an empty input

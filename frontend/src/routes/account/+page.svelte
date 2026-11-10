@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { INFO } from '$lib/settings-info';
+	import { INFO, SCOPE } from '$lib/settings-info';
 	import { confirmAction } from '$lib/confirm.svelte';
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
@@ -12,9 +12,10 @@
 	import { describe } from '$lib/auth/errors';
 	import { forgetSession, logout, session } from '$lib/auth/session.svelte';
 	import { removeAccountData } from '$lib/local/accounts';
+	import { applyLocally, type NewOp } from '$lib/local/apply';
 	import { closeUserDb, userDb } from '$lib/local/open';
 	import { onMount } from 'svelte';
-	import PreferencesCard from '$lib/components/account/PreferencesCard.svelte';
+	import AccountPreferences from '$lib/components/account/AccountPreferences.svelte';
 	import ControlsEditor from '$lib/components/account/ControlsEditor.svelte';
 	import StorageCard from '$lib/components/account/StorageCard.svelte';
 	import DisplaySettings from '$lib/components/player/DisplaySettings.svelte';
@@ -24,7 +25,7 @@
 	import { getMeta } from '$lib/local/meta';
 	import { preferencesView } from '$lib/local/preferences';
 	import type { PreferencesRow } from '$lib/local/rows';
-	import { syncNow, syncState } from '$lib/sync/runtime.svelte';
+	import { afterLocalWrite, syncNow, syncState } from '$lib/sync/runtime.svelte';
 
 	let current = $state('');
 	let next = $state('');
@@ -48,6 +49,13 @@
 
 	async function refreshPrefs() {
 		if (db) prefs = await preferencesView(db);
+	}
+
+	async function savePref(field: keyof PreferencesRow, value: unknown) {
+		if (!db) return;
+		await applyLocally(db, { type: 'set_preferences', [field]: value } as NewOp);
+		afterLocalWrite();
+		await refreshPrefs();
 	}
 
 	onMount(() => {
@@ -172,9 +180,26 @@
 	</Card.Root>
 
 	{#if db && prefs}
-		<PreferencesCard {db} {prefs} {maxQuiz} onchange={refreshPrefs} />
+		<!-- Each group of settings says where it applies (SCOPE), in the player's words. -->
+		<Card.Root id="every-cascade">
+			<Card.Header>
+				<Card.Title>Every cascade</Card.Title>
+				<Card.Description>{SCOPE.every}</Card.Description>
+			</Card.Header>
+			<Card.Content><AccountPreferences {prefs} {maxQuiz} part="every" save={savePref} /></Card.Content>
+		</Card.Root>
+		<Card.Root id="new-cascades">
+			<Card.Header>
+				<Card.Title>Defaults for new cascades</Card.Title>
+				<Card.Description>{SCOPE.defaults}</Card.Description>
+			</Card.Header>
+			<Card.Content><AccountPreferences {prefs} {maxQuiz} part="defaults" save={savePref} /></Card.Content>
+		</Card.Root>
 		<Card.Root id="display">
-			<Card.Header><Card.Title>On this device</Card.Title></Card.Header>
+			<Card.Header>
+				<Card.Title>On this device</Card.Title>
+				<Card.Description>{SCOPE.device}</Card.Description>
+			</Card.Header>
 			<Card.Content><DisplaySettings /></Card.Content>
 		</Card.Root>
 		<ControlsEditor {db} bindings={prefs.bindings} onchange={refreshPrefs} />

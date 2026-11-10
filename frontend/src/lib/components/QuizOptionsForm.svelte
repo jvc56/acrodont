@@ -17,7 +17,8 @@
 		editing = 'cascade',
 		segmentChain = false,
 		source = false,
-		showAlphabetical = true
+		showAlphabetical = true,
+		idPrefix = ''
 	}: {
 		options: QuizOptions;
 		/** The cascade's count in the builder and options dialog, the quiz's own in its menu. */
@@ -27,6 +28,8 @@
 		segmentChain?: boolean;
 		source?: boolean;
 		showAlphabetical?: boolean;
+		/** Keeps the controls' ids apart when two forms share a page. */
+		idPrefix?: string;
 	} = $props();
 
 	let sizeText = $state(String(options.segment_size));
@@ -55,14 +58,14 @@
 	{:else}
 		<SettingRow
 			label="Study in segments" info={INFO.segmented}
-			for="segmented"
+			for={`${idPrefix}segmented`}
 			hint="A segment of 40 means you study 40 at a time and drill what you missed before going on."
 		>
-			<Checkbox id="segmented" bind:checked={segmented} />
+			<Checkbox id={`${idPrefix}segmented`} bind:checked={segmented} />
 		</SettingRow>
 		{#if segmented}
-			<SettingRow label="Segment size" info={INFO.segment_size} for="segment-size">
-				<Input id="segment-size" class="h-8 w-28" type="number" min="5" max={maxQuizQuestions} bind:value={sizeText} />
+			<SettingRow label="Segment size" info={INFO.segment_size} for={`${idPrefix}segment-size`}>
+				<Input id={`${idPrefix}segment-size`} class="h-8 w-28" type="number" min="5" max={maxQuizQuestions} bind:value={sizeText} />
 				<span class="text-muted-foreground">questions each</span>
 			</SettingRow>
 		{/if}
@@ -73,8 +76,8 @@
 			</p>
 		{/if}
 		{#if !source}
-			<SettingRow label="When a quiz is finished below the clear threshold" info={INFO.progression} for="progression" hint={PROGRESSIONS[options.progression]}>
-				<select id="progression" class="rounded border bg-background px-2 py-1" bind:value={options.progression}>
+			<SettingRow label="When a quiz is finished below the clear threshold" info={INFO.progression} for={`${idPrefix}progression`} hint={PROGRESSIONS[options.progression]}>
+				<select id={`${idPrefix}progression`} class="rounded border bg-background px-2 py-1" bind:value={options.progression}>
 					<option value="ladder">Ladder</option>
 					<option value="drill">Drill</option>
 				</select>
@@ -82,8 +85,8 @@
 		{/if}
 	{/if}
 	{#if showAlphabetical}
-		<SettingRow label="Typed answers must be in alphabetical order" info={INFO.alphabetical} for="alphabetical">
-			<Checkbox id="alphabetical" bind:checked={options.require_alphabetical} />
+		<SettingRow label="Typed answers must be in alphabetical order" info={INFO.alphabetical} for={`${idPrefix}alphabetical`}>
+			<Checkbox id={`${idPrefix}alphabetical`} bind:checked={options.require_alphabetical} />
 		</SettingRow>
 	{/if}
 	{#if editing === 'quiz' && !segmentChain}

@@ -3,10 +3,11 @@
 	// for a fine pointer at least 900 px wide, a hideable menu on the left, the
 	// quiz area with the question at the top, and a status bar along the bottom;
 	// tap zones otherwise. The three actions from mouse, wheel, keys and taps;
-	// typed mode; the settings dialog with preferences, this device's display
-	// and this quiz's options; banners, the completion screen, and a trashed
+	// typed mode; the Preferences dialog, which holds everything else, grouped
+	// by where it applies (this cascade and its levels, every cascade, new
+	// cascades, this device); banners, the completion screen, and a trashed
 	// cascade's Restore.
-	import { INFO } from '$lib/settings-info';
+	import { INFO, SCOPE } from '$lib/settings-info';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -18,6 +19,7 @@
 	import TileText from '$lib/components/TileText.svelte';
 	import AnswerView from '$lib/components/player/AnswerView.svelte';
 	import DisplaySettings from '$lib/components/player/DisplaySettings.svelte';
+	import AccountPreferences from '$lib/components/account/AccountPreferences.svelte';
 	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
 	import SettingRow from '$lib/components/SettingRow.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -106,8 +108,6 @@
 	);
 	/** The menu beside the quiz: hidden whenever a cascade opens, shown for this visit by ☰. */
 	let menuOpen = $state(false);
-	/** The Levels dialog: the ladder, and what is done to the cascade as a whole. */
-	let levelsOpen = $state(false);
 	let cascadeOptions = $state<QuizOptions | null>(null);
 	let kept = $state<{ byUser: boolean; automatically: boolean }>({ byUser: false, automatically: false });
 	let atLimit = $state(false);
@@ -222,8 +222,8 @@
 	function onKey(e: KeyboardEvent) {
 		// A confirmation owns the keyboard: Space or Enter there must not also act on the quiz.
 		if (confirmState.current) return;
-		if (settingsOpen || levelsOpen) {
-			if (e.key === 'Escape') settingsOpen = levelsOpen = false;
+		if (settingsOpen) {
+			if (e.key === 'Escape') settingsOpen = false;
 			return;
 		}
 		if (!v || v.status !== 'ready') return;
@@ -300,6 +300,24 @@
 		};
 	});
 
+	/**
+	 * The card being typed, if any: changes only when another card comes up to
+	 * type, so the input is focused once per card, not on every keystroke.
+	 */
+	let typingCard = $derived(
+		v?.status === 'ready' && v.card?.typed && !v.card.revealed && v.card.key !== null && !v.completion && v.quiz
+			? `${v.quiz.id}:${v.card.pos}`
+			: null
+	);
+
+	// Typed mode: each card's input takes focus as the card comes up (and when
+	// Preferences or a confirmation closes over it), so the next answer can be
+	// typed straight away, with no click in the box.
+	$effect(() => {
+		const input = typedInput;
+		if (typingCard && input && !settingsOpen && !confirmState.current) input.focus();
+	});
+
 	async function onTypedKey(e: KeyboardEvent) {
 		if (e.key !== 'Enter' || !player) return;
 		e.preventDefault();
@@ -317,7 +335,7 @@
 		await player?.load(true);
 	}
 
-	async function setPref(field: string, value: unknown) {
+	async function setPref(field: keyof PreferencesRow, value: unknown) {
 		// Definitions or hooks change what an answer holds: the cards in memory go first.
 		if (field === 'anagram_show_definitions' || field === 'anagram_show_hooks') player?.prefsChanged();
 		await write({ type: 'set_preferences', [field]: value } as NewOp);
@@ -331,16 +349,25 @@
 		await player?.modeChanged();
 	}
 
-	function openSettings() {
+	/** Preferences: what is read fresh each time it opens, then the dialog. */
+	async function openSettings() {
 		const q = v?.quiz;
-		if (q) {
-			quizOptions = {
-				segment_size: q.segment_size,
-				progression: q.progression,
-				require_alphabetical: q.require_alphabetical
-			};
+		quizOptions = q ? { segment_size: q.segment_size, progression: q.progression, require_alphabetical: q.require_alphabetical } : null;
+		const c = v?.cascade;
+		cascadeOptions = c
+			? { segment_size: clampPrefill(c.segment_size, maxQuiz), progression: c.progression, require_alphabetical: c.require_alphabetical }
+			: null;
+		cascadeError = null;
+		if (db) {
+			atLimit = (await allCascades(db)).length >= session.cascadeLimit;
+			await readKeep();
 		}
 		settingsOpen = true;
+	}
+
+	/** Brings a section of Preferences into view, from the dialog's index. */
+	function jump(section: string) {
+		document.getElementById(section)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 	}
 
 	async function saveQuizOptions() {
@@ -358,20 +385,6 @@
 		if (!db) return;
 		const keep = await getMeta(db, 'keep_offline');
 		kept = { byUser: keep.includes(id), automatically: (await policy(db)).autoKept.has(id) };
-	}
-
-	async function openLevels() {
-		const c = v?.cascade;
-		if (!db || !c) return;
-		cascadeError = null;
-		cascadeOptions = {
-			segment_size: clampPrefill(c.segment_size, maxQuiz),
-			progression: c.progression,
-			require_alphabetical: c.require_alphabetical
-		};
-		atLimit = (await allCascades(db)).length >= session.cascadeLimit;
-		await readKeep();
-		levelsOpen = true;
 	}
 
 	async function toggleKeep(on: boolean) {
@@ -406,7 +419,7 @@
 		if (cascadeOptions.progression !== c.progression) op.progression = cascadeOptions.progression;
 		if (cascadeOptions.require_alphabetical !== c.require_alphabetical) op.require_alphabetical = cascadeOptions.require_alphabetical;
 		if (Object.keys(op).length > 2) await write(op as unknown as NewOp);
-		levelsOpen = false;
+		settingsOpen = false;
 	}
 
 	async function restore() {
@@ -445,7 +458,7 @@
 			const created = await api.post<Created>(`/api/cascades/${id}/start-over`, body);
 			starting = { stage: 'device', progress: 0, count: Number(created.source_quiz.question_count) };
 			await storeCreated(db, created, new Date(), (f) => starting && (starting.progress = f));
-			levelsOpen = false;
+			settingsOpen = false;
 			await goto(`/cascades/${body.id}`);
 		} catch {
 			cascadeError = 'Start over needs a connection.';
@@ -595,10 +608,6 @@
 	{/if}
 {/snippet}
 
-{#snippet levels()}
-	<button class="rounded px-2 py-1 text-left hover:bg-muted" onclick={openLevels}>Levels</button>
-{/snippet}
-
 {#if desktop}
 	<div class="flex h-screen">
 		{#if menuOpen}
@@ -613,7 +622,6 @@
 				{#if session.isAdmin}<a class="rounded px-2 py-1 hover:bg-muted" href="/admin">Admin</a>{/if}
 				<a class="rounded px-2 py-1 hover:bg-muted" href="/account">Account</a>
 				<button class="rounded px-2 py-1 text-left hover:bg-muted" onclick={openSettings}>Preferences</button>
-				{#if v?.quiz && v.cascade}{@render levels()}{/if}
 			</nav>
 		{/if}
 		<div class="relative flex min-w-0 flex-1 flex-col">
@@ -699,8 +707,7 @@
 				{/if}
 			</span>
 			<span class="flex items-center gap-3">
-				{#if v?.quiz && v.cascade}<button onclick={openLevels}>Levels</button>{/if}
-				<button onclick={openSettings} aria-label="Settings">⚙</button>
+				<button onclick={openSettings} aria-label="Preferences" title="Preferences">⚙</button>
 			</span>
 		</header>
 		{#if v?.status === 'ready'}
@@ -729,117 +736,140 @@
 	</div>
 {/if}
 
-{#if levelsOpen && v?.cascade}
-	<div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" role="presentation" onclick={() => (levelsOpen = false)}>
-		<div
-			class="max-h-full w-full max-w-2xl space-y-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg"
-			role="dialog"
-			aria-label="Levels"
-			tabindex="-1"
-			onclick={(e) => e.stopPropagation()}
-			onkeydown={(e) => e.key === 'Escape' && (levelsOpen = false)}
-		>
-			<h2 class="text-lg font-semibold">Levels</h2>
-			<p class="text-sm text-muted-foreground">
-				A level clears when a pass ends with at least <span class="font-medium text-foreground">{v.cascade.clear_threshold}%</span> correct.
-			</p>
-			<CascadeLadder {rows} onExport={(r) => goto(`/cascades/${id}/export?quiz=${r.quiz.id}`)} />
-			<h2 class="pt-4 text-lg font-semibold">This cascade</h2>
-			<SettingRow label="Clear threshold (%)" info={INFO.clear_threshold} for="cascade-threshold" hint="For every level, the pass in progress included">
-				<input
-					id="cascade-threshold"
-					class="w-24 rounded-md border bg-background px-2 py-1"
-					type="number"
-					min="1"
-					max="100"
-					step="1"
-					value={v.cascade.clear_threshold}
-					onchange={(e) => setThreshold(e.currentTarget)}
-				/>
-			</SettingRow>
-			<SettingRow label="Keep offline on this device" info={INFO.keep_offline} for="cascade-keep" {hint}>
-				<input id="cascade-keep" type="checkbox" checked={kept.byUser || kept.automatically} onchange={(e) => toggleKeep(e.currentTarget.checked)} />
-			</SettingRow>
-			{#if cascadeOptions}
-				<h3 class="pt-2 text-sm font-semibold">Options for new quizzes</h3>
-				<QuizOptionsForm
-					bind:options={cascadeOptions}
-					questionCount={v.cascade.question_count}
-					maxQuizQuestions={maxQuiz}
-					editing="cascade"
-					showAlphabetical={v.cascade.quiz_type === 'anagram'}
-				/>
-				<Button onclick={saveCascadeOptions}>Save options</Button>
-			{/if}
-			{#if cascadeError}<p class="text-sm text-destructive" role="alert">{cascadeError}</p>{/if}
-			<div class="flex flex-wrap gap-2 pt-2">
-				<Button
-					variant="outline"
-					disabled={atLimit}
-					title={atLimit ? 'Start over: at the cascade limit' : 'A new cascade of the same questions, from Level 1'}
-					onclick={startOver}>Start over</Button
-				>
-				<Button variant="outline" class="hover:text-destructive" onclick={moveToTrash}>Move to Trash</Button>
-				<Button variant="outline" class="ml-auto" onclick={() => (levelsOpen = false)}>Close</Button>
-			</div>
+{#snippet scopeHead(id: string, title: string, badge: string, text: string)}
+	<div class="space-y-1 border-b pb-2">
+		<div class="flex flex-wrap items-center gap-2">
+			<h3 {id} class="text-base font-semibold">{title}</h3>
+			<span class="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">{badge}</span>
 		</div>
+		<p class="text-xs text-muted-foreground">{text}</p>
 	</div>
-{/if}
+{/snippet}
 
 {#if settingsOpen}
 	<div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" role="presentation" onclick={() => (settingsOpen = false)}>
+		<!-- Everything that can be set from the player, in one place, grouped by
+		     where it applies; each group says so above its settings (SCOPE). -->
 		<div
-			class="max-h-full w-full max-w-lg space-y-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg"
+			class="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-lg border bg-background shadow-lg"
 			role="dialog"
-			aria-label="Settings"
+			aria-label="Preferences"
 			tabindex="-1"
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.key === 'Escape' && (settingsOpen = false)}
 		>
-			<h2 class="text-lg font-semibold">Preferences</h2>
-			<SettingRow label="Show definitions with anagrams" info={INFO.anagram_show_definitions} for="player-definitions">
-				<input id="player-definitions" type="checkbox" checked={prefs.anagram_show_definitions} onchange={(e) => setPref('anagram_show_definitions', e.currentTarget.checked)} />
-			</SettingRow>
-			<SettingRow label="Show hooks with anagrams" info={INFO.anagram_show_hooks} for="player-hooks">
-				<input id="player-hooks" type="checkbox" checked={prefs.anagram_show_hooks} onchange={(e) => setPref('anagram_show_hooks', e.currentTarget.checked)} />
-			</SettingRow>
-			<SettingRow label="When an answer is revealed, mark it" info={INFO.reveal_correct} for="player-reveal">
-				<select id="player-reveal" class="rounded border bg-background px-2 py-1" value={prefs.reveal_correct === false ? 'missed' : 'correct'} onchange={(e) => setPref('reveal_correct', e.currentTarget.value === 'correct')}>
-					<option value="correct">Correct</option>
-					<option value="missed">Missed</option>
-				</select>
-			</SettingRow>
-			{#if v?.cascade?.quiz_type === 'anagram'}
-				<!-- Typing answers is for anagram quizzes only, and each cascade keeps its own mode. -->
-				<SettingRow label="Answer mode for this cascade" info={INFO.answer_mode} for="player-mode">
-					<select id="player-mode" class="rounded border bg-background px-2 py-1" value={v.cascade.answer_mode} onchange={(e) => setAnswerMode(e.currentTarget.value as AnswerMode)}>
-						<option value="flashcard">Flashcard</option>
-						<option value="typed">Typed</option>
-					</select>
-				</SettingRow>
-			{/if}
-			<SettingRow label="Round leave values to (decimal places)" info={INFO.leave_value_decimals} for="player-decimals">
-				<select id="player-decimals" class="rounded border bg-background px-2 py-1" value={String(prefs.leave_value_decimals)} onchange={(e) => setPref('leave_value_decimals', Number(e.currentTarget.value))}>
-					{#each [0, 1, 2, 3] as d (d)}<option value={String(d)}>{d}</option>{/each}
-				</select>
-			</SettingRow>
-			<p class="text-sm"><a class="underline" href="/account#controls">Controls</a> are edited on the Account page.</p>
-			<h2 class="pt-4 text-lg font-semibold">On this device</h2>
-			<DisplaySettings />
-			{#if v?.quiz && quizOptions}
-				<h2 class="pt-4 text-lg font-semibold">This quiz’s options</h2>
-				<QuizOptionsForm
-					bind:options={quizOptions}
-					questionCount={v.quiz.question_count}
-					maxQuizQuestions={maxQuiz}
-					editing="quiz"
-					segmentChain={v.quiz.segment_chain}
-					source={v.quiz.origin === 'source'}
-					showAlphabetical={v.cascade?.quiz_type === 'anagram'}
-				/>
-				<Button onclick={saveQuizOptions}>Save options</Button>
-			{/if}
-			<Button variant="outline" onclick={() => (settingsOpen = false)}>Close</Button>
+			<div class="space-y-2 border-b px-6 pt-5 pb-3">
+				<div class="flex items-center justify-between gap-4">
+					<h2 class="text-lg font-semibold">Preferences</h2>
+					<Button variant="outline" size="sm" onclick={() => (settingsOpen = false)}>Close</Button>
+				</div>
+				<nav class="flex flex-wrap gap-1 text-xs" aria-label="Preferences sections">
+					{#each [
+						...(v?.cascade && v.quiz ? [['prefs-cascade', 'This cascade']] : []),
+						['prefs-every', 'Every cascade'],
+						['prefs-defaults', 'New cascades'],
+						['prefs-device', 'This device']
+					] as [target, label] (target)}
+						<button class="rounded-full border px-2.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => jump(target)}>{label}</button>
+					{/each}
+				</nav>
+			</div>
+			<div class="space-y-8 overflow-y-auto px-6 py-5">
+				{#if v?.cascade && v.quiz}
+					{@const c = v.cascade}
+					<section class="space-y-4" aria-labelledby="prefs-cascade">
+						{@render scopeHead('prefs-cascade', 'This cascade', 'Synced', SCOPE.cascade)}
+						<p class="text-sm text-muted-foreground">
+							A level clears when a pass ends with at least <span class="font-medium text-foreground">{c.clear_threshold}%</span> correct.
+						</p>
+						<div class="overflow-x-auto"><CascadeLadder {rows} onExport={(r) => goto(`/cascades/${id}/export?quiz=${r.quiz.id}`)} /></div>
+						<SettingRow label="Clear threshold (%)" info={INFO.clear_threshold} for="cascade-threshold" hint="For every level, the pass in progress included">
+							<input
+								id="cascade-threshold"
+								class="w-24 rounded-md border bg-background px-2 py-1"
+								type="number"
+								min="1"
+								max="100"
+								step="1"
+								value={c.clear_threshold}
+								onchange={(e) => setThreshold(e.currentTarget)}
+							/>
+						</SettingRow>
+						{#if c.quiz_type === 'anagram'}
+							<!-- Typing answers is for anagram quizzes only, and each cascade keeps its own mode. -->
+							<SettingRow label="Answer mode for this cascade" info={INFO.answer_mode} for="player-mode">
+								<select id="player-mode" class="rounded border bg-background px-2 py-1" value={c.answer_mode} onchange={(e) => setAnswerMode(e.currentTarget.value as AnswerMode)}>
+									<option value="flashcard">Flashcard</option>
+									<option value="typed">Typed</option>
+								</select>
+							</SettingRow>
+						{/if}
+						{#if v.quiz && quizOptions}
+							<div class="space-y-3 rounded-md border p-4" role="group" aria-labelledby="prefs-level">
+								<h4 id="prefs-level" class="text-sm font-semibold">Level {v.quiz.level}, the level you are studying</h4>
+								<QuizOptionsForm
+									bind:options={quizOptions}
+									idPrefix="quiz-"
+									questionCount={v.quiz.question_count}
+									maxQuizQuestions={maxQuiz}
+									editing="quiz"
+									segmentChain={v.quiz.segment_chain}
+									source={v.quiz.origin === 'source'}
+									showAlphabetical={c.quiz_type === 'anagram'}
+								/>
+								<Button size="sm" onclick={saveQuizOptions}>Save this level’s options</Button>
+							</div>
+						{/if}
+						{#if cascadeOptions}
+							<div class="space-y-3 rounded-md border p-4" role="group" aria-labelledby="prefs-new-levels">
+								<div>
+									<h4 id="prefs-new-levels" class="text-sm font-semibold">Levels made from now on</h4>
+									<p class="text-xs text-muted-foreground">
+										Each new level this cascade makes from your misses starts with these. Levels it already has keep their own.
+									</p>
+								</div>
+								<QuizOptionsForm
+									bind:options={cascadeOptions}
+									idPrefix="cascade-"
+									questionCount={c.question_count}
+									maxQuizQuestions={maxQuiz}
+									editing="cascade"
+									showAlphabetical={c.quiz_type === 'anagram'}
+								/>
+								<Button size="sm" onclick={saveCascadeOptions}>Save options for new levels</Button>
+							</div>
+						{/if}
+						{#if cascadeError}<p class="text-sm text-destructive" role="alert">{cascadeError}</p>{/if}
+						<div class="flex flex-wrap gap-2">
+							<Button
+								variant="outline"
+								disabled={atLimit}
+								title={atLimit ? 'Start over: at the cascade limit' : 'A new cascade of the same questions, from Level 1'}
+								onclick={startOver}>Start over</Button
+							>
+							<Button variant="outline" class="hover:text-destructive" onclick={moveToTrash}>Move to Trash</Button>
+						</div>
+					</section>
+				{/if}
+				<section class="space-y-4" aria-labelledby="prefs-every">
+					{@render scopeHead('prefs-every', 'Every cascade', 'Account · synced', SCOPE.every)}
+					<AccountPreferences {prefs} {maxQuiz} part="every" save={setPref} />
+					<p class="text-sm"><a class="underline" href="/account#controls">Controls</a> (keys, mouse and wheel) are edited on the Account page.</p>
+				</section>
+				<section class="space-y-4" aria-labelledby="prefs-defaults">
+					{@render scopeHead('prefs-defaults', 'Defaults for new cascades', 'Account · synced', SCOPE.defaults)}
+					<AccountPreferences {prefs} {maxQuiz} part="defaults" save={setPref} />
+				</section>
+				<section class="space-y-4" aria-labelledby="prefs-device">
+					{@render scopeHead('prefs-device', 'This device', 'Not synced', SCOPE.device)}
+					{#if v?.cascade}
+						<SettingRow label="Keep this cascade offline on this device" info={INFO.keep_offline} for="cascade-keep" {hint}>
+							<input id="cascade-keep" type="checkbox" checked={kept.byUser || kept.automatically} onchange={(e) => toggleKeep(e.currentTarget.checked)} />
+						</SettingRow>
+					{/if}
+					<DisplaySettings />
+				</section>
+			</div>
 		</div>
 	</div>
 {/if}

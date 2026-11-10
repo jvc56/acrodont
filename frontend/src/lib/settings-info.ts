@@ -1,10 +1,22 @@
 // What each setting does, for the ⓘ beside it (InfoTip). One place, so the
-// Account page and the player's dialogs explain a setting the same way.
+// Account page and the player's Preferences explain a setting the same way.
+
+/**
+ * Where a group of settings applies, said once above the group, in the same
+ * words on the Account page and in the player's Preferences.
+ */
+export const SCOPE = {
+	cascade: 'Saved with this cascade and synced to your other devices. Your other cascades keep their own.',
+	every: 'Synced to all your devices. A change applies to every cascade at once.',
+	defaults:
+		'Synced to all your devices. A new cascade is prefilled with these when you build it; the cascades you already have keep their own, which you change in each cascade’s Preferences.',
+	device: 'Kept on this device only and not synced, so your other devices keep their own.'
+} as const;
 
 export const INFO = {
 	// Preferences (synced to every device)
 	default_clear_threshold:
-		'The score a new cascade needs to clear a level, prefilled in the builder. Each cascade keeps its own, which you can change later in its Levels dialog.',
+		'The score a new cascade needs to clear a level, prefilled in the builder. Each cascade keeps its own, which you can change later in its Preferences.',
 	default_segment_size:
 		'Prefills “Study in segments” for new cascades. 0 studies each level in one pass; 40 studies 40 cards at a time and drills each run’s misses before moving on.',
 	default_progression:
@@ -17,7 +29,7 @@ export const INFO = {
 	anagram_show_hooks:
 		'Shows the letters that can go before and after each anagram (its hooks), and a dot on a side where removing the end letter still leaves a word (its inner hooks).',
 	anagram_answer_mode:
-		'The answer mode new anagram cascades start with. Each cascade keeps its own, which you can change in its player.',
+		'The answer mode new anagram cascades start with. Each cascade keeps its own, which you can change in its Preferences.',
 	answer_mode:
 		'Flashcard: reveal the answer and grade yourself. Typed (anagram cascades only): type each anagram, then press Enter on an empty box when you are finished; the card is correct only if you found them all and typed nothing else.',
 	reveal_correct:

@@ -152,20 +152,20 @@ export async function plainAnswers(page: Page) {
 	}
 }
 
-/** Opens the player's settings: on the desktop, through the menu, which a cascade opens with hidden. */
+/** Opens the player's Preferences: on the desktop, through the menu, which a cascade opens with hidden. */
 export async function openPlayerSettings(page: Page) {
 	const show = page.getByRole('button', { name: 'Show menu' });
-	await expect(show.or(page.getByRole('button', { name: /Preferences|Settings/ })).first()).toBeVisible({ timeout: 30_000 });
+	await expect(show.or(page.getByRole('button', { name: 'Preferences' })).first()).toBeVisible({ timeout: 30_000 });
 	if (await show.isVisible()) await show.click();
-	await page.getByRole('button', { name: /Preferences|Settings/ }).first().click();
+	await page.getByRole('button', { name: 'Preferences' }).first().click();
 }
 
 export async function playerPref(page: Page, label: string, value: string | boolean) {
 	await openPlayerSettings(page);
-	const control = page.getByRole('dialog', { name: 'Settings' }).getByLabel(label);
+	const control = page.getByRole('dialog', { name: 'Preferences' }).getByLabel(label);
 	if (typeof value === 'boolean') await control.setChecked(value);
 	else await control.selectOption(value);
-	await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close' }).click();
+	await page.getByRole('dialog', { name: 'Preferences' }).getByRole('button', { name: 'Close' }).click();
 }
 
 /**

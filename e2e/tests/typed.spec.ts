@@ -30,6 +30,8 @@ async function next(page: Page, completes: boolean) {
 	}
 	await expect(page.locator('[data-grade="correct"], [data-grade="missed"]')).toHaveCount(0);
 	await expect(page.getByText('1 / 1')).toBeVisible();
+	// The next card's input is focused, so its first answer can be typed with no click.
+	if (await input.count()) await expect(input).toBeFocused();
 }
 
 test('typed mode', async ({ page }) => {
@@ -38,6 +40,8 @@ test('typed mode', async ({ page }) => {
 	const player = await apiCascade(page, { name: 'AEINRST', filters: AEINRST });
 	await open(page, player);
 	await playerPref(page, 'Answer mode for this cascade', 'typed');
+	// Closing Preferences gives the card's input the focus.
+	await expect(page.getByLabel('Type an answer')).toBeFocused();
 	// The found count hints at how many are left, so it is off until asked for, then sits in the status bar.
 	await expect(page.getByLabel('Type an answer')).toBeVisible();
 	await expect(page.getByText(/of 9 found/)).toHaveCount(0);

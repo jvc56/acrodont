@@ -19,6 +19,7 @@
 		Backslash: '\\'
 	};
 	import * as Card from '$lib/components/ui/card';
+	import { SCOPE } from '$lib/settings-info';
 	import { Button } from '$lib/components/ui/button';
 	import { applyLocally } from '$lib/local/apply';
 	import type { UserDb } from '$lib/local/db';
@@ -88,7 +89,10 @@
 </script>
 
 <Card.Root id="controls">
-	<Card.Header><Card.Title>Controls</Card.Title></Card.Header>
+	<Card.Header>
+		<Card.Title>Controls</Card.Title>
+		<Card.Description>{SCOPE.every}</Card.Description>
+	</Card.Header>
 	<Card.Content class="grid gap-4 text-sm">
 		{#each ACTIONS as a (a.action)}
 			<div>

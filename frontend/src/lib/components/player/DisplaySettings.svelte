@@ -40,7 +40,6 @@
 {/snippet}
 
 <div class="grid gap-4 text-sm">
-	<p class="text-muted-foreground">These apply to this device only.</p>
 	{#each [
 		{ which: 'question', title: 'Question', limit: 'size_px', sample: 'AEINRST' },
 		{ which: 'answer', title: 'Answers', limit: 'size_px', sample: 'NASTIER' },
