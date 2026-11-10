@@ -141,7 +141,7 @@ function cell(input: ExportInput, q: ExportQuestion, g: Grade | undefined, col: 
 		case 'answer':
 			if (t === 'anagram') return q.words!.map((w) => w.word).join(' ');
 			if (t === 'definition') return q.definition!;
-			return leaveValueText(q.value!, d, false);
+			return leaveValueText(q.value!, d);
 		case 'definition':
 			if (t === 'anagram') return q.words!.map((w) => w.definition ?? '').join(' | ');
 			if (t === 'definition') return q.definition!;
@@ -167,7 +167,7 @@ export function* formatExport(input: ExportInput, chunk = 5000): Generator<strin
 			if (ch.lines === 'questions') buf.push(q.key + '\n');
 			else if (input.quiz_type === 'anagram') for (const w of q.words!) buf.push(w.word + '\n');
 			else if (input.quiz_type === 'definition') buf.push(q.definition! + '\n');
-			else buf.push(leaveValueText(q.value!, ch.decimals, false) + '\n');
+			else buf.push(leaveValueText(q.value!, ch.decimals) + '\n');
 			if (buf.length >= chunk) yield* flush();
 		}
 		yield* flush();

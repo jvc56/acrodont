@@ -62,9 +62,10 @@ pub struct PreferenceChanges {
     pub default_segment_size: Option<i32>,
     pub default_progression: Option<crate::cascade::rows::Progression>,
     pub default_require_alphabetical: Option<bool>,
+    pub reveal_correct: Option<bool>,
 }
 
-pub const PREFERENCE_FIELDS: [&str; 8] = [
+pub const PREFERENCE_FIELDS: [&str; 9] = [
     "default_clear_threshold",
     "leave_value_decimals",
     "anagram_show_definitions",
@@ -73,6 +74,7 @@ pub const PREFERENCE_FIELDS: [&str; 8] = [
     "default_segment_size",
     "default_progression",
     "default_require_alphabetical",
+    "reveal_correct",
 ];
 
 fn int_in(v: &Value, lo: i64, hi: i64) -> Result<i64, Reason> {
@@ -102,6 +104,7 @@ pub fn parse_preferences(fields: &Map<String, Value>, cap: u32) -> Result<Prefer
                 c.default_progression = Some(serde_json::from_value(v.clone()).map_err(|_| Reason::Invalid)?)
             }
             "default_require_alphabetical" => c.default_require_alphabetical = Some(boolean(v)?),
+            "reveal_correct" => c.reveal_correct = Some(boolean(v)?),
             _ => return Err(Reason::Invalid),
         }
     }

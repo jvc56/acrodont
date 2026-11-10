@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createCascade, newUser } from './support';
+import { createCascade, login, newUser } from './support';
 
 // PLAN.md § Taking a quiz, § Saving progress, § Offline and Sync: study a new
 // cascade with the default keys, go offline, keep studying, reload with no
@@ -52,8 +52,8 @@ test('the player studies with the default keys, offline too', async ({ page, con
 	await expect(page.getByText('Synced')).toBeVisible({ timeout: 40_000 });
 });
 
-test('the question stays put at the top, the menu hides, and display settings apply', async ({ page }) => {
-	await newUser(page, 'layout');
+test('the question stays put at the top, the menu hides, and display settings apply', async ({ page, browser, baseURL }) => {
+	const { username } = await newUser(page, 'layout');
 	const path = await createCascade(page, { name: 'Layout' });
 	await expect(page.getByText('1 / 18')).toBeVisible({ timeout: 20_000 });
 	const area = page.getByRole('application', { name: 'Quiz area' });
@@ -91,7 +91,37 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await expect(page.getByRole('navigation', { name: 'Player menu' })).toHaveCount(0);
 	await page.getByRole('button', { name: 'Show menu' }).click();
 
-	// The ladder is one click away in the menu.
+	// The ladder is one click away in the menu, in a dialog of its own.
 	await page.getByRole('button', { name: 'Levels' }).click();
-	await expect(page.getByRole('list', { name: 'Ladder' })).toBeVisible();
+	const levels = page.getByRole('dialog', { name: 'Levels' });
+	await expect(levels.getByRole('table', { name: 'Ladder' })).toBeVisible();
+	await expect(levels.getByRole('columnheader')).toHaveText(['Level', 'Questions', 'Pass', 'Last pass', 'Status', 'Actions']);
+	// The clear threshold changes there, for the pass in progress too; out of range is put back.
+	const threshold = levels.getByLabel('Clear threshold (%)');
+	await expect(threshold).toHaveValue('80');
+	await threshold.fill('0');
+	await threshold.press('Tab');
+	await expect(threshold).toHaveValue('80');
+	await threshold.fill('55');
+	await threshold.press('Tab');
+	await expect(levels.getByText(/at least\s+55%\s+correct/)).toBeVisible();
+	await levels.getByRole('button', { name: 'Close' }).click();
+	await expect(levels).toHaveCount(0);
+	// It syncs to another device.
+	await expect(page.getByText('Synced')).toBeVisible({ timeout: 30_000 });
+	const other = await browser.newContext({ baseURL });
+	const p2 = await other.newPage();
+	await login(p2, username);
+	await expect(p2.getByText(/clear at 55%/)).toBeVisible({ timeout: 30_000 });
+	await other.close();
+
+	// Hiding the status bar leaves the quiz area, and so its grade border, where it was.
+	const quizArea = page.getByRole('application', { name: 'Quiz area' });
+	const box = await quizArea.boundingBox();
+	await page.getByRole('button', { name: 'Hide status bar' }).click();
+	await expect(page.getByText(/^Level \d+ of \d+$/)).toHaveCount(0);
+	expect(await quizArea.boundingBox()).toEqual(box);
+	await page.getByRole('button', { name: 'Show status bar' }).click();
+	await expect(page.getByText(/^Level \d+ of \d+$/)).toBeVisible();
+	expect(await quizArea.boundingBox()).toEqual(box);
 });

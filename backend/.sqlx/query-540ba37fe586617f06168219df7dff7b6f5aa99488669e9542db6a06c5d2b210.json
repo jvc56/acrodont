@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_preferences SET\n            default_clear_threshold = coalesce($2, default_clear_threshold),\n            leave_value_decimals = coalesce($3, leave_value_decimals),\n            anagram_show_definitions = coalesce($4, anagram_show_definitions),\n            anagram_show_hooks = coalesce($5, anagram_show_hooks),\n            anagram_answer_mode = coalesce($6, anagram_answer_mode),\n            default_segment_size = coalesce($7, default_segment_size),\n            default_progression = coalesce($8, default_progression),\n            default_require_alphabetical = coalesce($9, default_require_alphabetical),\n            changed_at = $10, changed_by_device_id = $11, updated_seq = $12,\n            reveal_correct = coalesce($13, reveal_correct)\n         WHERE user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2",
+        "Int2",
+        "Bool",
+        "Bool",
+        {
+          "Custom": {
+            "name": "anagram_answer_mode",
+            "kind": {
+              "Enum": [
+                "flashcard",
+                "typed"
+              ]
+            }
+          }
+        },
+        "Int4",
+        {
+          "Custom": {
+            "name": "quiz_progression",
+            "kind": {
+              "Enum": [
+                "ladder",
+                "drill"
+              ]
+            }
+          }
+        },
+        "Bool",
+        "Timestamptz",
+        "Uuid",
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "540ba37fe586617f06168219df7dff7b6f5aa99488669e9542db6a06c5d2b210"
+}

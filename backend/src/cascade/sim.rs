@@ -56,7 +56,13 @@ pub enum Op {
     RestoreCascade,
     PurgeQuiz { quiz: Uuid },
     PurgeCascade,
-    SetCascadeOptions { segment_size: Option<i64>, progression: Option<Progression>, require_alphabetical: Option<bool> },
+    SetCascadeOptions {
+        segment_size: Option<i64>,
+        progression: Option<Progression>,
+        require_alphabetical: Option<bool>,
+        /// The cascade's alone: every finish reads it, the quiz in progress included.
+        clear_threshold: Option<i64>,
+    },
     SetQuizOptions { quiz: Uuid, segment_size: Option<i64>, progression: Option<Progression>, require_alphabetical: Option<bool> },
 }
 
@@ -340,7 +346,7 @@ impl SimCascade {
                 self.quizzes.clear();
                 Ok(Applied::default())
             }
-            Op::SetCascadeOptions { segment_size, progression, require_alphabetical } => {
+            Op::SetCascadeOptions { segment_size, progression, require_alphabetical, clear_threshold } => {
                 if self.purged {
                     return Err(Reason::NotFound);
                 }
@@ -348,6 +354,10 @@ impl SimCascade {
                     return Err(Reason::Trashed);
                 }
                 let size = segment_size.map(|s| rules::check_segment_size(s, self.max_quiz_questions)).transpose()?;
+                let threshold = clear_threshold.map(rules::check_clear_threshold).transpose()?;
+                if let Some(t) = threshold {
+                    self.state.clear_threshold = t;
+                }
                 let o = &mut self.state.opts;
                 if let Some(s) = size {
                     o.segment_size = s;

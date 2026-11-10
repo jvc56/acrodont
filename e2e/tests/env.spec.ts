@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { PROJECT } from '../stack';
-import { createCascade, login, newUser, playLevel, press } from './support';
+import { confirm, createCascade, login, newUser, playLevel, press } from './support';
 
 // PLAN.md § End-to-end tests: the journeys that need the stack configured
 // through the same --env flag a developer uses. Each tag runs in its own pass
@@ -96,8 +96,9 @@ test('@env @limits Save Search at the limit is refused with the limit and count;
 	await save('one too many');
 	await expect(page.getByText(`You have ${limit} of ${limit} saved searches, the most you can keep. Delete one first.`)).toBeVisible();
 	await page.keyboard.press('Escape');
-	page.on('dialog', (d) => void d.accept());
+	// A name already taken asks before replacing.
 	await save('S0');
+	await confirm(page, 'Replace');
 	await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 

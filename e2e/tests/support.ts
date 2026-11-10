@@ -243,3 +243,10 @@ export async function playLevel(page: Page, miss: (i: number) => boolean): Promi
 	await expect(page.getByText(new RegExp(`^${now} / ${count}$`))).toHaveCount(0, { timeout: 5_000 }).catch(() => undefined);
 	return text;
 }
+
+/** Answers the confirmation an action asks for (lib/confirm) with its action button. */
+export async function confirm(page: Page, action: string) {
+	const dialog = page.getByRole('alertdialog');
+	await dialog.getByRole('button', { name: action, exact: true }).click();
+	await expect(dialog).toHaveCount(0);
+}

@@ -40,6 +40,7 @@ export function defaultPreferences(): PreferencesRow {
 		default_segment_size: 0,
 		default_progression: 'ladder',
 		default_require_alphabetical: false,
+		reveal_correct: true,
 		changed_at: epoch,
 		changed_by_device_id: null,
 		bindings_changed_at: epoch,
@@ -57,7 +58,8 @@ const PREFERENCE_FIELDS = [
 	'anagram_answer_mode',
 	'default_segment_size',
 	'default_progression',
-	'default_require_alphabetical'
+	'default_require_alphabetical',
+	'reveal_correct'
 ] as const;
 
 /** The base row with the pending operations laid over it. */

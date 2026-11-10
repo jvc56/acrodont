@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createCascade, login, newUser, press } from './support';
+import { confirm, createCascade, login, newUser, press } from './support';
 
 // PLAN.md § End-to-end tests → Logging out; § Authentication while offline.
 
@@ -90,10 +90,12 @@ test('logging out, online and offline, and a second account on the same browser'
 	// Removing Alice's data leaves Bob's.
 	await page.goto('/account');
 	await page.getByRole('listitem').filter({ hasText: /^alice/ }).getByRole('button', { name: "Remove this account's data from this device" }).click();
+	await confirm(page, 'Remove data');
 	await expect(page.getByText(/^alice\w+: rows and keys/)).toHaveCount(0);
 	await expect(page.getByText(new RegExp(`^${bob.username}: rows and keys`))).toBeVisible();
 	// Removing his own clears the pointer and lands on the login page.
 	await page.getByRole('listitem').filter({ hasText: new RegExp(`^${bob.username}`) }).getByRole('button', { name: "Remove this account's data from this device" }).click();
+	await confirm(page, 'Remove data');
 	await expect(page).toHaveURL(/\/login$/);
 	// Alice's unsent grades went with her data; logging in again she starts from the server.
 	await login(page, alice.username);

@@ -17,7 +17,7 @@ There are three quiz types:
 |---|---|---|
 | **Anagram** | An alphagram (the tiles of a word in alphabetical order), e.g. `AEINRST` | Every valid word in the lexicon made from exactly those tiles, e.g. `ANESTRI, ANTSIER, NASTIER, RATINES, RETAINS, RETINAS, RETSINA, STAINER, STEARIN` |
 | **Definition** | A word, e.g. `QAT` | That word's definition, e.g. `an evergreen shrub [n -S]` |
-| **Leave Value** | An alphabetized set of 1–6 tiles, e.g. `?EIRS` | The leave's value, e.g. `+34.1` |
+| **Leave Value** | An alphabetized set of 1–6 tiles, e.g. `?EIRS` | The leave's value, e.g. `34.1` |
 
 Twenty of the filters match search conditions in Zyzzyva
 (<https://github.com/scrabblewords/collins-zyzzyva>), so experienced players can
@@ -78,7 +78,7 @@ when they land. See [Offline and Sync](#offline-and-sync).
 | **Attempt** | One pass through a quiz's questions, identified by its number and the shuffle seed that produced its order. A quiz that is reset or restored starts a new attempt with a new shuffle. |
 | **Segment** (or **run**) | A fixed-size run of questions inside an attempt, the length of one sitting. Finishing a run drills its misses before the attempt goes on. Off by default. |
 | **Finish** | Move on from the last question of an attempt. Finishing always either sends the quiz to the Trash, sends the user down a level, or resets the quiz in place. |
-| **Clear threshold** | The score (X%) needed to clear a quiz. It is set per cascade when the cascade is created. |
+| **Clear threshold** | The score (X%) needed to clear a quiz. It is set per cascade when the cascade is created, and can be changed later in the player's Levels dialog; a change applies to every level, the pass in progress included. |
 | **Quiz options** | Segment size, progression and alphabetical order. They are held by the cascade, copied to each new quiz, and editable on either. |
 | **Progression** | What finishing a quiz below the clear threshold does: **Ladder** (keep the quiz and go down a level) or **Drill** (replace the quiz with its misses). |
 | **Clear** | Finish an attempt with a score of at least the clear threshold. The quiz goes to the Trash. The Source quiz is never cleared; see **Complete**. |
@@ -219,7 +219,12 @@ The options belong to the **cascade** and to each **quiz**:
   order onto it.
 - The **clear threshold** is not one of these options: it stays a single
   cascade-wide setting, because a cascade whose levels cleared at different
-  scores would be hard to reason about.
+  scores would be hard to reason about. It can still be **changed**: a
+  `set_cascade_options` may carry `clear_threshold` (a whole number from 1 to
+  100, otherwise `invalid`), under the same latest-wins rule as the options.
+  Nothing copies it into a quiz — every finish reads the cascade's — so the new
+  value judges the pass in progress as well as later ones, at every level.
+  Quizzes already cleared stay cleared. `set_quiz_options` never carries it.
 
 Every option is validated on both sides: segment size is 0, meaning off, or an
 integer from **5** to
@@ -407,8 +412,8 @@ Moving on from the last question of a run that is not the last run:
   being purged at once for time that passed while the cascade was trashed.
   Purging a cascade purges every quiz in it. Users can also purge from the
   Trash immediately with **Delete forever**.
-- **Start over** on a complete cascade (or any cascade, from the row menu on
-  `/cascades`) creates a new cascade with the same name, a private copy of the
+- **Start over** on a complete cascade (or any cascade, from the player's
+  **Levels** dialog) creates a new cascade with the same name, a private copy of the
   same filters, and the same threshold and [quiz options](#quiz-options).
 - **Exporting** works on anything in the Trash that has not been purged, so a
   cleared quiz can still be downloaded as a word list (see
@@ -465,10 +470,11 @@ never changes a cascade that already exists.
 | **Default segment size** | New cascades | `0` (off) | 0 (off), or 5 – `MAX_QUIZ_QUESTIONS` |
 | **Default progression** | New cascades | **Ladder** | Ladder / Drill |
 | **Default alphabetical order** | New cascades | off | on / off |
-| **Leave value decimal places** | Leave Value answers | `1` | `0`, `1`, `2`, `3` |
+| **Round leave values to (decimal places)** | Leave Value answers, rounded half away from zero | `1` | `0`, `1`, `2`, `3` |
 | **Show definitions with anagrams** | Anagram answers | **on** | on / off |
 | **Show hooks with anagrams** | Anagram answers (with inner hooks) | **on** | on / off |
 | **Anagram answer mode** | Anagram quizzes | **Flashcard** | Flashcard / Typed |
+| **When an answer is revealed, mark it** (`reveal_correct`) | Flashcard cards (a typed card is graded by what was typed) | **Correct** | Correct / Missed: the grade a card starts with when its answer is shown, before any toggle |
 | **Controls** | Desktop quiz area | Show / Next: left click, Space or `,` · Toggle grade: right click, `X` or `M` · Previous: middle click, Backspace or `J` | Up to three bindings per action: any mouse button, wheel direction or key, with modifiers. See [Controls](#controls). |
 
 Question order is **not** a preference: questions are always shuffled.
@@ -563,24 +569,27 @@ because searching runs on the server.
 
 ### Cascades page
 
-`/cascades` lists the user's cascades, newest activity first. Each shows:
+`/cascades` lists the user's cascades, newest activity first, one compact row
+each, for a glance. Each shows:
 
-- name, quiz type, lexicon and clear threshold
+- name, quiz type, lexicon and clear threshold, and "complete" with the date
+  once the Source quiz has been finished with no misses
 - its [quiz options](#quiz-options) in short form, e.g. `segments of 40 · drill`,
   or nothing when they are all at their defaults
-- a compact ladder of its levels, e.g. `L1 · 250 (waiting, run 3 of 7) →
-  L2 · 38 (waiting) → L3 · 9 (4/9 done)`
-- a **Complete** badge with the date, once the Source quiz has been finished
-  with no misses
+- a compact ladder of its levels, the current one with its progress and that
+  progress as a percentage to two places, e.g. `L1 · 250 (waiting, run 3 of 7) →
+  L2 · 38 (waiting) → L3 · 9 (4/9 done, 44.44%)`
 - an **Available offline** badge, download progress, or "not downloaded on
   this device, open to download" for a cascade whose question rows this
   device does not hold (outside its window or dropped for the storage
   [budget](#on-the-device), not kept offline, nothing pending)
-- a row menu with **Quiz options**, **Export…** (see
-  [Exporting words](#exporting-words)), **Start over**, **Keep offline** and
-  **Move to Trash**
+- **Move to Trash**
 
-Selecting a cascade opens the player at its deepest level. The header shows how
+With nothing listed the page is empty under its header (or, with no lexicon on
+the server, says so). Selecting a cascade opens the player at its deepest
+level, whose **Levels** dialog holds the rest: the ladder with **Export…** per
+level, **Keep offline**, the options for new quizzes, **Start over** and
+**Move to Trash**. The header shows how
 much of the [cascade limit](#cascade-limit) is used (`17 of 20 cascades`) and
 the sync status, which is [`SyncStatus`](#frontend) in every one of its states —
 **Synced**, **Waiting to sync**, **Syncing…**, **Offline**, **Log in to sync**,
@@ -592,17 +601,20 @@ are the ones that need acting on.
 
 `/trash` lists finished quizzes and trashed cascades, grouped by cascade. Each
 entry shows its final score, whether it cleared or was replaced, and when it will
-be purged (`cleared_at` or `trashed_at` plus the retention period from the
-`meta` store). A quiz this device cleared offline has no server `cleared_at`
+be **deleted forever** (`cleared_at` or `trashed_at` plus the retention period
+from the `meta` store). The page never says "purge", which is only the
+operations' and the purge task's name. A quiz this device cleared offline has no server `cleared_at`
 yet, and a cascade it trashed offline has no `trashed_at`, which is what puts a
 cascade in this list at all, so `applyLocally` writes the operation's `at` into
 the overlay row as a provisional one in both cases, which satisfies the row's
 own shape and keeps a cascade trashed on a plane from vanishing from the
 Cascades page and the Trash alike. Such an entry reads
-"purges 30 days after this syncs" until the acknowledged row replaces it.
-Each entry has **Restore**, **Export…** and **Delete forever** actions.
+"deleted forever 30 days after this syncs" until the acknowledged row replaces it.
+Each entry has **Restore**, **Export…** and **Delete forever** actions;
+Delete forever asks for confirmation first.
 **Entries are grouped and not all rendered.** A cascade's group shows its name,
-how many entries it holds and the earliest purge date among them, collapsed;
+how many entries it holds and the earliest date among them that one is deleted
+forever ("deleted forever from …"), collapsed;
 expanding it renders a virtualized list in pages of 100 behind a **Show more**
 control. A group holding one entry is rendered expanded, since collapsing a
 single row hides nothing. One segmented attempt can leave tens of thousands of cleared quizzes
@@ -660,11 +672,15 @@ as the term of the data model and the API.
   the area carries it as `data-grade` (`correct`, `missed`).
 - **The menu** on the left holds navigation (Admin for admins),
   **Preferences**, which opens the settings dialog (user preferences, this
-  device's settings, and this quiz's [options](#quiz-options)), **Levels**,
-  which opens the cascade's ladder beside it with the clear threshold ("a level
-  clears when a pass ends with at least 80% correct") and each level's
-  Export…. Quiz options are in Preferences, for the quiz being played, and
-  nowhere else in the player. **A cascade always opens with the menu
+  device's settings, and this quiz's [options](#quiz-options)), and **Levels**,
+  a dialog like Preferences (on a phone, Levels beside ⚙ in the header): the
+  clear threshold ("a level clears when a pass ends with at least 80%
+  correct"), the ladder as a table whose columns line up — level, questions,
+  pass, last pass's score, status — with each level's Export…, then the
+  cascade as a whole: its clear threshold (a number, taking effect when the
+  field is left, for the pass in progress too), Keep offline on this device,
+  the options for its new quizzes, Start over and Move to Trash. The quiz being played has its own
+  options in Preferences. **A cascade always opens with the menu
   hidden**, whatever happened last time: **☰** in the quiz area's corner
   shows it for this visit and **«** hides it again.
 - **The status bar** along the bottom, outside the quiz area, shows the level,
@@ -675,11 +691,13 @@ as the term of the data model and the API.
   red when it is below — and the run indicator when the quiz has a
   [segment size](#segments) (`run 2 of 3 · 37 of 100`, numbered as
   [Segments](#segments) defines). Percentages show two decimal places, rounded.
-  The clear threshold, constant while quizzing, is not on the bar: it is in
-  Levels and in the score's tooltip. An icon at the bar's left end hides it;
-  the same icon, left in the bottom-left corner, brings it back.
+  The clear threshold, which rarely changes, is not on the bar: it is in
+  Levels (where it is changed) and in the score's tooltip. An icon at the bar's left end hides it,
+  and the same icon brings it back: hidden, the bar keeps its place with only
+  that icon and the sync status, so the quiz area and its grade border look
+  the same either way.
 - **The sync status** sits at the very bottom right: the right end of the
-  status bar, or the window's bottom-right corner when the bar is hidden.
+  status bar, shown or hidden.
 - **The sync status shows what is happening**: "Waiting to sync" after an
   answer, "Syncing…" while the device talks to the server (a sync starts
   within about a second of a write), then "Synced"; offline, log in, reload
@@ -701,7 +719,8 @@ as the term of the data model and the API.
   field is left, out-of-range values are clamped, and values saved by builds
   that offered presets are converted. Answers match the question by default. A
   definition answer is prose, so it takes the answer typeface at a reading
-  size; hooks and anagram definitions stay smaller. These, the question's
+  size; hooks are three quarters of the word's size, and anagram definitions
+  have their own. These, the question's
   position, the borders, whether the status bar is shown, and the repeat
   guard are per device (the `meta` store's `display` value), never synced,
   since what suits a laptop is wrong on a phone; they are in the settings
@@ -711,6 +730,19 @@ as the term of the data model and the API.
   and in the quiz options alike (`SettingRow`), so the place to click is
   always the same. Progression is a choice (Ladder or Drill) with the chosen
   one's explanation beneath, not a pair of radio buttons.
+- **Every setting explains itself**: an ⓘ beside its name (`InfoTip`) shows,
+  on hover or focus, what it does — the preferences, this device's display
+  settings, the quiz options, a cascade's threshold and Keep offline, and the
+  builder's threshold. The texts live in one module (`lib/settings-info`), so a
+  setting reads the same on the Account page and in the player.
+- **Sensitive actions ask first** (`ConfirmDialog`, one per app, in the root
+  layout): Move to Trash, Delete forever, Start over, removing an account's
+  data from the device, deleting the account, resetting the controls,
+  replacing a saved search and the admin's deletes. The dialog says what is
+  about to happen and whether it can be undone; its confirming button names
+  the action (never "OK"), drawn in the destructive colour when data goes for
+  good, and Cancel, Escape or a click outside declines. While it is open, the
+  player takes no keys.
 - **The logout warning** ("2 changes haven't synced yet. They will sync the
   next time you log in on this device.") shows on the Account page only when
   changes cannot sync now (offline, or the session needs a login). Online,
@@ -801,14 +833,15 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   hooks, then the full definition text beneath it. A Definition cascade's cards
   are always fetched with hooks; the card carries its word's (`word`) beside the
   definition, which stays the answer.
-- **Leave Value**: the value with its sign, rounded to the user's decimal places
-  (half away from zero), e.g. `+34.1` or `-8.4`. A value that rounds to zero is
+- **Leave Value**: the value rounded to the user's decimal places (half away
+  from zero), e.g. `34.1` or `-8.4`: a negative value has its `-`, and a
+  positive one no `+`. A value that rounds to zero is
   shown as `0.0`, never `-0.0`. Both sides round the same way, on the `f64`
   value: with `d` decimal places, `n = trunc(|v| × 10^d + 0.5)` computed in
   `f64`; the text is `n` written as an integer, with a `.` inserted `d` digits
   from the right (zero-padded, so `d = 1` and `n = 3` give `0.3`); the sign is
-  an ASCII `-` when `v < 0` and `n > 0`, a `+` on screen when `v > 0` and
-  `n > 0`, no sign when `n = 0`, and never a `+` in exports. Neither side uses `toFixed`, `format!("{:.d}")` or any other
+  an ASCII `-` when `v < 0` and `n > 0`, and otherwise there is none — never a
+  `+`, on screen or in exports. Neither side uses `toFixed`, `format!("{:.d}")` or any other
   library rounding, which round half to even on the binary value.
 
 #### Typed mode (Anagram quizzes only)
@@ -1021,9 +1054,8 @@ All of this works offline.
 
 ### Exporting words
 
-Any cascade or quiz can be downloaded as a word list. **Export…** appears in the
-row menu on `/cascades`, on each level in the player's ladder panel, and on each
-entry on `/trash`, and opens a small dialog:
+Any cascade or quiz can be downloaded as a word list. **Export…** appears on
+each level in the player's **Levels** dialog and on each entry on `/trash`, and opens a small dialog:
 
 | Choice | Options | Default |
 |---|---|---|
@@ -2221,7 +2253,7 @@ stores are:
   against the **14-day window** only. It never holds against
   `ROW_STORAGE_BUDGET` below, which drops automatically kept cascades once
   nothing else is left to drop, and never against the answer limit; only the
-  user's own Keep offline does either. The Cascades page
+  user's own Keep offline does either. The player's Levels dialog
   shows its Keep offline toggle on, with a hint saying why, and the user can
   turn it off; the opt-out
   is recorded in the `meta` store beside the kept ids, and the window then
@@ -2501,7 +2533,7 @@ stores are:
 | `move_cursor` | quiz, attempt, attempt seed, position, at | the quiz is active, its cascade is not trashed, the attempt and its seed match, the position is not below `run_start`, is below `next_boundary(quiz)` when the quiz has one and below the question count otherwise, and the cursor is unset, or was last set by this device, or had been seen by the device (`seen_seq`), or the new `at` is later | Set the cursor, `cursor_moved_at` and the device that moved it. The outbox keeps only the latest pending cursor per quiz, re-appended with a fresh `device_seq` (see [The sync cycle](#the-sync-cycle)). A rejected cursor move (`bad_cursor`) is logged but never counted in a notice; it is not the user's work |
 | `finish` | quiz, attempt, attempt seed, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, every question is graded, and `new_quiz_id` is not already a quiz (`invalid`) | Apply [Cascade Rules](#cascade-rules) using the server's grades and the quiz's own progression; any new quiz uses the device's id; record the attempt. A reset or new quiz starts at cursor 0, stamped with the operation's `at` and device. The result carries the outcome the server reached and the new quiz's question count and `questions_hash`, so the device can see when the server's grades led somewhere else (see [Conflicts](#conflicts)) |
 | `finish_segment` | quiz, attempt, attempt seed, segment end, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, its segment size is greater than 0, the segment end is a multiple of it strictly between 0 and the question count and greater than the cursor, every question before the segment end is graded, no quiz already exists for this quiz, attempt and segment end, and `new_quiz_id` is not already a quiz (`invalid`) | Create the drill quiz one level down from the misses in positions `run_start` … segment end − 1 (nothing if there are none), and set the cursor and `run_start` to the segment end, stamping `cursor_moved_at` and `cursor_device_id` from the operation. See [Segments](#segments) |
-| `set_cascade_options` | cascade, changed option fields, at | the cascade exists, is neither trashed nor purged, every carried value is in range (segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, alphabetical order a flag; otherwise `invalid`, so an out-of-range value is a rejection and never a constraint violation recorded as `error`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit. Only later quizzes are affected |
+| `set_cascade_options` | cascade, changed option fields, at | the cascade exists, is neither trashed nor purged, every carried value is in range (segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, alphabetical order a flag, clear threshold 1–100; otherwise `invalid`, so an out-of-range value is a rejection and never a constraint violation recorded as `error`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit. The three quiz options affect only later quizzes; the clear threshold applies at once, to every finish from then on |
 | `set_quiz_options` | quiz, changed option fields, at | the quiz is active, its cascade is not trashed, every carried value is in range as for `set_cascade_options`, `progression` and `segment_size` are not carried for a `segment_chain` quiz and `progression` is not carried for the Source quiz, which its rules ignore (`invalid`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit |
 | `restore_quiz` | quiz, shuffle seed | the quiz is cleared and not purged | Push it back as the new deepest level with a new attempt shuffled by the seed, cursor 0 stamped from the operation; bring back its cascade if it was trashed, and only then set `cleared_at` to now on its other cleared quizzes |
 | `trash_cascade` | cascade | the cascade is not trashed (`trashed`) | Trash it |
@@ -3305,6 +3337,8 @@ CREATE TABLE user_preferences (
                                          OR default_segment_size BETWEEN 5 AND 300000),
     default_progression       quiz_progression NOT NULL DEFAULT 'ladder',
     default_require_alphabetical BOOLEAN NOT NULL DEFAULT false,
+    reveal_correct            BOOLEAN NOT NULL DEFAULT true,   -- from 0003: a reveal marks
+                                  -- the card correct (false: missed) until toggled
     changed_at                TIMESTAMPTZ NOT NULL DEFAULT now(), -- device time of the latest
                                   -- set_preferences; an older operation is rejected whole
     changed_by_device_id      UUID,                               -- NULL until the first change;
@@ -4403,8 +4437,8 @@ A segment descent and an options change on the wire:
 ```
 
 `set_cascade_options` and `set_quiz_options` carry only the fields that changed,
-out of `segment_size`, `progression` and `require_alphabetical`; any other field
-is a `400`.
+out of `segment_size`, `progression` and `require_alphabetical`, and for
+`set_cascade_options` also `clear_threshold`; any other field is a `400`.
 
 ### Admin
 
@@ -4431,7 +4465,7 @@ SvelteKit static SPA. The routes:
 |---|---|
 | `/` | No page of its own: there is no landing or home page. It goes to the Cascades page when logged in, where logging in lands too, and to the log-in page (with Create an account) when logged out. A deleted account ends on the log-in page. With no lexicon yet, the empty Cascades page says so (and, to an admin, where to upload one). The site header is how to reach every page. Every logged-in page but the player shows the site header: Wordfall (home), Cascades, New cascade, Trash, Admin for admins, the sync status and the account |
 | `/register`, `/register/check-email`, `/confirm-email`, `/login`, `/reset-password`, `/reset-password/confirm` | Auth |
-| `/cascades` | Cascades page: one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done)`), its download status, Keep offline, and icon buttons for Quiz options, Export…, Start over and Move to Trash |
+| `/cascades` | Cascades page: one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done, 31.58%)`), its download status and Move to Trash; the rest is in the player's Levels dialog |
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, threshold, preview) |
 | `/cascades/:id` | Player for the cascade's deepest level, with the ladder panel |
 | `/trash` | Cleared quizzes and trashed cascades |
@@ -5404,7 +5438,7 @@ removing a cascade's question keys along with its rows, and the next open
 fetching both back from the card pages;
 a quiz cleared offline getting a provisional `cleared_at` from the operation's
 `at`, and a cascade trashed offline a provisional `trashed_at`, both entries
-reading "purges 30 days after this syncs", the trashed cascade still listed in
+reading "deleted forever 30 days after this syncs", the trashed cascade still listed in
 the Trash while it is gone from the Cascades page, and the acknowledged rows
 replacing both; the drop pass dropping the least recently opened unkept cascade
 when the base's rows and keys pass `ROW_STORAGE_BUDGET`, before its 14 days are
@@ -5741,7 +5775,8 @@ they run in parallel and leave nothing behind.
     `move_cursor` inside the passed run is rejected `bad_cursor` and its
     `finish_segment` for that boundary `duplicate_segment`.
   - A `set_cascade_options` or `set_quiz_options` carrying a segment size of 3,
-    a segment size above `MAX_QUIZ_QUESTIONS`, or an unknown progression is
+    a segment size above `MAX_QUIZ_QUESTIONS`, or an unknown progression, or a
+    `set_cascade_options` carrying a clear threshold of 0, 101 or 50.5, is
     rejected as `invalid` before any write, so no such operation is ever
     recorded with reason `error`; the same for a `set_preferences` carrying a
     clear threshold of 0 or `leave_value_decimals` of 4, and for a
@@ -6134,7 +6169,7 @@ environment. That is how a deployment is smoke-tested and how the
   dropped — the storage total steady, no download progress reappearing, and the
   Cascades page offering "open to download" — then open one and see it come
   back whole and listed again.
-- Trash a cascade offline and see it listed in the Trash with "purges 30 days
+- Trash a cascade offline and see it listed in the Trash with "deleted forever 30 days
   after this syncs", not missing from both pages.
 - Build a cascade with a segment size that would create more than 2,000 levels
   and see the warning naming the count, on the builder and in a quiz's settings

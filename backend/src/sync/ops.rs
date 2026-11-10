@@ -794,6 +794,12 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         return Err(OpError::Rejected(Reason::Trashed));
     }
     let f = option_fields(op, ctx.cap)?;
+    // The cascade's clear threshold: every finish reads it from the cascade, so
+    // the quiz in progress is judged by the new value too.
+    let threshold = match op.body.get("clear_threshold") {
+        None => None,
+        Some(v) => Some(rules::check_clear_threshold(v.as_i64().ok_or(Reason::Invalid)?)?),
+    };
     let at = clamp(ctx, at);
     if !options_win(ctx, op, c.options_device_id, c.options_seq, c.options_changed_at, at) {
         return Err(OpError::Rejected(Reason::Stale));
@@ -801,7 +807,8 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
     sqlx::query!(
         "UPDATE cascades SET segment_size = coalesce($2, segment_size), progression = coalesce($3, progression),
                              require_alphabetical = coalesce($4, require_alphabetical), options_changed_at = $5,
-                             options_seq = $6, options_device_id = $7, updated_seq = $6
+                             options_seq = $6, options_device_id = $7, updated_seq = $6,
+                             clear_threshold = coalesce($8, clear_threshold)
          WHERE id = $1",
         id,
         f.segment_size.map(|s| s as i32),
@@ -810,6 +817,7 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         at,
         ctx.seq,
         ctx.device,
+        threshold.map(|t| t as i16),
     )
     .execute(conn)
     .await?;
@@ -873,7 +881,8 @@ async fn set_preferences(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) ->
             default_segment_size = coalesce($7, default_segment_size),
             default_progression = coalesce($8, default_progression),
             default_require_alphabetical = coalesce($9, default_require_alphabetical),
-            changed_at = $10, changed_by_device_id = $11, updated_seq = $12
+            changed_at = $10, changed_by_device_id = $11, updated_seq = $12,
+            reveal_correct = coalesce($13, reveal_correct)
          WHERE user_id = $1",
         ctx.user,
         p.default_clear_threshold,
@@ -887,6 +896,7 @@ async fn set_preferences(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) ->
         at,
         ctx.device,
         ctx.seq,
+        p.reveal_correct,
     )
     .execute(conn)
     .await?;

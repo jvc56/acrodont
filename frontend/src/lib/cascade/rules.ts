@@ -179,6 +179,12 @@ export function checkSegmentSize(size: number, cap: number): number {
 	throw new Rejected('invalid');
 }
 
+/** A clear threshold is a whole percentage from 1 to 100. */
+export function checkClearThreshold(t: number): number {
+	if (Number.isInteger(t) && t >= 1 && t <= 100) return t;
+	throw new Rejected('invalid');
+}
+
 export function checkQuizOptionFields(q: QuizState, progression: boolean, segmentSize: boolean) {
 	if (q.segment_chain && (progression || segmentSize)) throw new Rejected('invalid');
 	if (q.origin === 'source' && progression) throw new Rejected('invalid');

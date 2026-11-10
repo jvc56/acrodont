@@ -677,3 +677,63 @@ async fn an_options_change_right_after_creation_from_a_slow_clock(pool: sqlx::Pg
     o["seen_seq"] = json!(0);
     assert_eq!(common::sync::one(&mut d, o).await, "applied");
 }
+
+/// "`set_cascade_options` may carry the clear threshold": 1–100, the cascade's
+/// alone (a quiz's options operation naming it is a 400), and read by every
+/// finish, so the pass in progress is judged by the new value.
+#[sqlx::test]
+async fn the_clear_threshold_changes_for_the_pass_in_progress(pool: sqlx::PgPool) {
+    let app = app(pool).await;
+    let mut d = device(&app, "alice").await;
+    let s = cascade(&app, &mut d, Setup::new(5)).await;
+    // Level 1 descends with two misses (60% < 80%).
+    let mut ops = grades(&app, &mut d, s.source_id, 0, "CCCMM").await;
+    let (f, l2) = finish_op(&app, &mut d, s.source_id, "21").await;
+    ops.push(f);
+    let r = d.sync(ops).await;
+    assert_eq!(result(&r, 5)["outcome"], "descended");
+    // Out of range or not a whole number: invalid, and nothing changes.
+    let bad: Vec<Value> = [json!(0), json!(101), json!(-1), json!(50.5), json!("50"), json!(true)]
+        .into_iter()
+        .map(|t| d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "clear_threshold": t })))
+        .collect();
+    let r = d.sync(bad).await;
+    for x in r.json()["results"].as_array().unwrap() {
+        assert_eq!(x["reason"], "invalid", "{x}");
+    }
+    // A quiz has no threshold of its own: the request is refused whole.
+    let o = d.op("set_quiz_options", json!({ "quiz_id": l2, "clear_threshold": 50 }));
+    let body = json!({ "device_id": d.id, "app_version": 1, "cursor": d.cursor, "question_rows_for": [], "ops": [o] });
+    assert_eq!(d.raw_sync(body).await.status, StatusCode::BAD_REQUEST);
+    // Level 2 half right, then the threshold lowered to 50 mid-pass: the finish clears it.
+    let mut ops = grades(&app, &mut d, l2, 0, "CM").await;
+    ops.push(d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "clear_threshold": 50 })));
+    let (f, _) = finish_op(&app, &mut d, l2, "22").await;
+    ops.push(f);
+    let r = d.sync(ops).await;
+    assert_eq!(result(&r, 2)["status"], "applied");
+    assert_eq!(result(&r, 3)["outcome"], "cleared");
+    let (thr, seg): (i16, i32) = sqlx::query_as("SELECT clear_threshold, segment_size FROM cascades WHERE id = $1")
+        .bind(s.cascade_id)
+        .fetch_one(app.db())
+        .await
+        .unwrap();
+    assert_eq!((thr, seg), (50, 0), "the threshold alone changed");
+}
+
+/// "`reveal_correct`": a flag (anything else is invalid), set like any other
+/// preference, and stored.
+#[sqlx::test]
+async fn the_reveal_grade_preference(pool: sqlx::PgPool) {
+    let app = app(pool).await;
+    let mut d = device(&app, "alice").await;
+    let o = d.op("set_preferences", json!({ "reveal_correct": "missed" }));
+    let r = d.sync(vec![o]).await;
+    assert_eq!(result(&r, 0)["reason"], "invalid");
+    let o = d.op("set_preferences", json!({ "reveal_correct": false }));
+    let r = d.sync(vec![o]).await;
+    assert_eq!(result(&r, 0)["status"], "applied");
+    let v: bool = sqlx::query_scalar("SELECT reveal_correct FROM user_preferences").fetch_one(app.db()).await.unwrap();
+    assert!(!v);
+}
+

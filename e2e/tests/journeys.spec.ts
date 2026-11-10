@@ -99,7 +99,7 @@ test('trash: export a cleared quiz’s missed words offline, see purge dates, re
 	await availableOffline(page, 'Trash journey');
 	await context.setOffline(true);
 	await page.goto('/trash');
-	await expect(page.getByText(/^purges \d/).first()).toBeVisible();
+	await expect(page.getByText(/^deleted forever on \d/).first()).toBeVisible();
 	// Export its missed words from the Trash, offline, with no fetch.
 	const requests: string[] = [];
 	page.on('request', (r) => {

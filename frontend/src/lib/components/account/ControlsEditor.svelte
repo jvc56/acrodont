@@ -25,6 +25,7 @@
 	import { DEFAULT_BINDINGS } from '$lib/local/preferences';
 	import type { Binding } from '$lib/local/rows';
 	import { afterLocalWrite } from '$lib/sync/runtime.svelte';
+	import { confirmAction } from '$lib/confirm.svelte';
 	import { bind, keyStroke, mayNotReceive, mouseStroke, unbind, wheelStroke, type Action, type Stroke } from '$lib/player/bindings';
 
 	let { db, bindings, onchange }: { db: UserDb; bindings: Binding[]; onchange: () => void } = $props();
@@ -130,6 +131,16 @@
 			</div>
 		{/if}
 		{#if notice}<p role="status">{notice}</p>{/if}
-		<Button variant="outline" onclick={() => save(DEFAULT_BINDINGS)}>Reset to defaults</Button>
+		<Button
+			variant="outline"
+			onclick={async () => {
+				const ok = await confirmAction({
+					title: 'Reset the controls to their defaults?',
+					body: 'Every binding you added or removed is replaced by the defaults, on all your devices.',
+					action: 'Reset to defaults'
+				});
+				if (ok) await save(DEFAULT_BINDINGS);
+			}}>Reset to defaults</Button
+		>
 	</Card.Content>
 </Card.Root>

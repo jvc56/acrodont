@@ -270,7 +270,7 @@ fn cell(input: &ExportInput, q: &Question, g: Option<Grade>, col: Column) -> Str
         Column::Answer => match t {
             QuizType::Anagram => words().iter().map(|w| w.word.as_str()).collect::<Vec<_>>().join(" "),
             QuizType::Definition => q.definition.clone().unwrap_or_default(),
-            QuizType::LeaveValue => leave_value_text(q.value.unwrap_or(0.0), d, false),
+            QuizType::LeaveValue => leave_value_text(q.value.unwrap_or(0.0), d),
         },
         Column::Definition => match t {
             QuizType::Anagram => words().iter().map(|w| w.definition.as_deref().unwrap_or("")).collect::<Vec<_>>().join(" | "),
@@ -341,7 +341,7 @@ pub fn format_each(input: &ExportInput, chunk: usize, sink: &mut dyn FnMut(Strin
                         }
                     }
                     QuizType::Definition => out.line(q.definition.as_deref().unwrap_or(""), "\n"),
-                    QuizType::LeaveValue => out.line(&leave_value_text(q.value.unwrap_or(0.0), ch.decimals, false), "\n"),
+                    QuizType::LeaveValue => out.line(&leave_value_text(q.value.unwrap_or(0.0), ch.decimals), "\n"),
                 }
             }
         }

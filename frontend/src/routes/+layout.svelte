@@ -9,6 +9,7 @@
 	import { applyUpdate, updates, watchUpdates } from '$lib/sw/client.svelte';
 	import Notices from '$lib/components/Notices.svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let { children } = $props();
 
@@ -80,4 +81,5 @@
 		{#if showHeader}<AppHeader />{/if}
 		{@render children()}
 	{/if}
+	<ConfirmDialog />
 </div>

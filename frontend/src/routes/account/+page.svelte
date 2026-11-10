@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { INFO } from '$lib/settings-info';
+	import { confirmAction } from '$lib/confirm.svelte';
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
@@ -102,6 +104,13 @@
 		e.preventDefault();
 		deleteErrors = [];
 		deleteError = null;
+		const ok = await confirmAction({
+			title: 'Delete your account?',
+			body: 'Your account, every cascade, your saved searches and your settings are deleted for good, on every device. This cannot be undone.',
+			action: 'Delete account',
+			destructive: true
+		});
+		if (!ok) return;
 		const id = session.userId;
 		try {
 			await authApi.deleteAccount(deletePw);
@@ -141,7 +150,7 @@
 	<Card.Root>
 		<Card.Header><Card.Title>Signed in as {session.username}</Card.Title></Card.Header>
 		<Card.Content class="grid gap-3">
-			<SettingRow label="Remove this account's data from this device" for="remove-data">
+			<SettingRow label="Remove this account's data from this device" info={INFO.remove_data} for="remove-data">
 				<Checkbox id="remove-data" bind:checked={removeData} />
 			</SettingRow>
 			<!-- Only changes that cannot sync now matter at logout. Online, a change

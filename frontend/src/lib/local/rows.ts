@@ -147,6 +147,8 @@ export interface PreferencesRow {
 	default_segment_size: number;
 	default_progression: Progression;
 	default_require_alphabetical: boolean;
+	/** Whether showing an answer marks it correct (else missed) until toggled; absent from rows pulled before it existed. */
+	reveal_correct?: boolean;
 	changed_at: string;
 	changed_by_device_id: string | null;
 	bindings_changed_at: string;

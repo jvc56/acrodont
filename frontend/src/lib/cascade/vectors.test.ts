@@ -56,6 +56,7 @@ function snapshot(c: SimCascade) {
 		});
 	return {
 		cascade: {
+			clear_threshold: c.state.clear_threshold,
 			depth: c.state.depth,
 			peak_depth: c.state.peak_depth,
 			attempts_since_completion: c.state.attempts_since_completion,
@@ -139,8 +140,7 @@ describe('shuffles, hashes and leave text', () => {
 	});
 	it('writes leave values', () => {
 		for (const c of leaves.cases) {
-			expect(leaveValueText(c.value, c.decimals, true), `${c.value} ${c.decimals}`).toBe(c.screen);
-			expect(leaveValueText(c.value, c.decimals, false)).toBe(c.export);
+			expect(leaveValueText(c.value, c.decimals), `${c.value} ${c.decimals}`).toBe(c.text);
 		}
 	});
 });

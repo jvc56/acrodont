@@ -80,7 +80,13 @@ test('over ROW_STORAGE_BUDGET: unkept first, then the automatic keeps, never the
 	await apiCascade(page, { name: 'Budget K', filters: { op: 'and', children: [{ type: 'length', negated: false, min: 3, max: 3 }] } });
 	await page.goto('/cascades');
 	await expect(entry(page, 'Budget K')).toBeVisible({ timeout: 60_000 });
-	await entry(page, 'Budget K').getByRole('checkbox').check();
+	// Keep offline is in the player's Levels dialog.
+	await entry(page, 'Budget K').getByRole('link', { name: 'Budget K' }).click();
+	await expect(page.getByText('1 / 30')).toBeVisible({ timeout: 30_000 });
+	await page.getByRole('button', { name: 'Show menu' }).click();
+	await page.getByRole('button', { name: 'Levels' }).click();
+	await page.getByRole('dialog', { name: 'Levels' }).getByLabel('Keep offline on this device').check();
+	await page.goto('/cascades');
 	await expect(entry(page, 'Budget K').getByText('Available offline')).toBeVisible({ timeout: 60_000 });
 
 	// The least recently opened unkept cascade goes before its window is out; the kept one stays.
@@ -98,7 +104,6 @@ test('over ROW_STORAGE_BUDGET: unkept first, then the automatic keeps, never the
 	await page.goto('/cascades');
 	for (const name of ['Budget A1', 'Budget A2']) {
 		await expect(entry(page, name).getByText('Not downloaded on this device, open to download')).toBeVisible({ timeout: 60_000 });
-		await expect(entry(page, name).getByText('(kept automatically once opened)')).toBeVisible();
 	}
 	await expect(entry(page, 'Budget K').getByText('Available offline')).toBeVisible();
 

@@ -6,6 +6,7 @@
 	// typed mode; the settings dialog with preferences, this device's display
 	// and this quiz's options; banners, the completion screen, and a trashed
 	// cascade's Restore.
+	import { INFO } from '$lib/settings-info';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -20,26 +21,29 @@
 	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
 	import SettingRow from '$lib/components/SettingRow.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import * as Popover from '$lib/components/ui/popover';
 	import { display, textStyle } from '$lib/player/display.svelte';
 	import { runIndicator, runIndicatorText } from '$lib/cascade/rules';
 	import { applyLocally, quizState, type NewOp } from '$lib/local/apply';
 	import { storeCreated, type Created } from '$lib/local/created';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta, recordOpen } from '$lib/local/meta';
+	import { allCascades, keepHint, type CascadeSummary } from '$lib/cascades/summary';
+	import { policy } from '$lib/sync/policy';
+	import { setKeepOffline } from '$lib/sync/keep';
 	import { userDb } from '$lib/local/open';
 	import { defaultPreferences, preferencesView } from '$lib/local/preferences';
 	import type { AttemptRow, PreferencesRow } from '$lib/local/rows';
 	import type { RwTx } from '$lib/local/view';
 	import { PLAYER_LOCK } from '$lib/sync/downloads';
-	import { afterLocalWrite, ensureCascade, fetchAhead, fetchCard, playerActs, syncState } from '$lib/sync/runtime.svelte';
+	import { afterLocalWrite, downloadManager, ensureCascade, fetchAhead, fetchCard, playerActs, syncState } from '$lib/sync/runtime.svelte';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import PanelBottomCloseIcon from '@lucide/svelte/icons/panel-bottom-close';
 	import PanelBottomOpenIcon from '@lucide/svelte/icons/panel-bottom-open';
 	import { actionFor, Debounce, inputOwns, keyStroke, mouseStroke, wheelStroke, type Action } from '$lib/player/bindings';
 	import { Player, type PlayerView } from '$lib/player/controller';
 	import { levelRows, type LevelRow } from '$lib/player/ladder';
-	import type { QuizOptions } from '$lib/options';
+	import { clampPrefill, type QuizOptions } from '$lib/options';
+	import { confirmAction, confirmState } from '$lib/confirm.svelte';
 
 	const id = $derived(page.params.id as string);
 
@@ -93,6 +97,15 @@
 	);
 	/** The menu beside the quiz: hidden whenever a cascade opens, shown for this visit by ☰. */
 	let menuOpen = $state(false);
+	/** The Levels dialog: the ladder, and what is done to the cascade as a whole. */
+	let levelsOpen = $state(false);
+	let cascadeOptions = $state<QuizOptions | null>(null);
+	let kept = $state<{ byUser: boolean; automatically: boolean }>({ byUser: false, automatically: false });
+	let atLimit = $state(false);
+	let cascadeError = $state<string | null>(null);
+	let hint = $derived(
+		keepHint({ levels: rows, keptByUser: kept.byUser, keptAutomatically: kept.automatically } as CascadeSummary, true)
+	);
 
 	async function refreshSide() {
 		if (!db) return;
@@ -159,7 +172,10 @@
 		const c = syncState.changed;
 		if (c.tick && player && c.ids.includes(id)) {
 			void refreshSide();
-			void player.load(true);
+			// As an action does, the reload holds background download writes off, so
+			// an action waiting its turn behind it is not kept waiting long.
+			const p = player;
+			void playerActs(() => p.load(true));
 		}
 	});
 
@@ -194,8 +210,10 @@
 
 
 	function onKey(e: KeyboardEvent) {
-		if (settingsOpen) {
-			if (e.key === 'Escape') settingsOpen = false;
+		// A confirmation owns the keyboard: Space or Enter there must not also act on the quiz.
+		if (confirmState.current) return;
+		if (settingsOpen || levelsOpen) {
+			if (e.key === 'Escape') settingsOpen = levelsOpen = false;
 			return;
 		}
 		if (!v || v.status !== 'ready') return;
@@ -275,11 +293,75 @@
 		settingsOpen = false;
 	}
 
+	async function readKeep() {
+		if (!db) return;
+		const keep = await getMeta(db, 'keep_offline');
+		kept = { byUser: keep.includes(id), automatically: (await policy(db)).autoKept.has(id) };
+	}
+
+	async function openLevels() {
+		const c = v?.cascade;
+		if (!db || !c) return;
+		cascadeError = null;
+		cascadeOptions = {
+			segment_size: clampPrefill(c.segment_size, maxQuiz),
+			progression: c.progression,
+			require_alphabetical: c.require_alphabetical
+		};
+		atLimit = (await allCascades(db)).length >= session.cascadeLimit;
+		await readKeep();
+		levelsOpen = true;
+	}
+
+	async function toggleKeep(on: boolean) {
+		if (!db) return;
+		// Turning it on starts the download; the dialog does not wait for it.
+		const done = setKeepOffline(db, id, on, downloadManager());
+		kept = { ...kept, byUser: on, automatically: on && kept.automatically };
+		await done.catch(() => undefined);
+		await readKeep();
+	}
+
+	/**
+	 * The cascade's clear threshold, from 1 to 100. It is the cascade's alone,
+	 * and every finish reads it, so the pass in progress is judged by it too.
+	 */
+	async function setThreshold(el: HTMLInputElement) {
+		const c = v?.cascade;
+		if (!c) return;
+		const n = Number(el.value);
+		if (!Number.isInteger(n) || n < 1 || n > 100) {
+			el.value = String(c.clear_threshold);
+			return;
+		}
+		if (n !== c.clear_threshold) await write({ type: 'set_cascade_options', cascade_id: c.id, clear_threshold: n });
+	}
+
+	async function saveCascadeOptions() {
+		const c = v?.cascade;
+		if (!c || !cascadeOptions) return;
+		const op: Record<string, unknown> = { type: 'set_cascade_options', cascade_id: c.id };
+		if (cascadeOptions.segment_size !== c.segment_size) op.segment_size = cascadeOptions.segment_size;
+		if (cascadeOptions.progression !== c.progression) op.progression = cascadeOptions.progression;
+		if (cascadeOptions.require_alphabetical !== c.require_alphabetical) op.require_alphabetical = cascadeOptions.require_alphabetical;
+		if (Object.keys(op).length > 2) await write(op as unknown as NewOp);
+		levelsOpen = false;
+	}
+
 	async function restore() {
 		await write({ type: 'restore_cascade', cascade_id: id });
 	}
 
 	async function moveToTrash() {
+		const c = v?.cascade;
+		if (!db || !c) return;
+		const days = (await getMeta(db, 'server')).trash_retention_days;
+		const ok = await confirmAction({
+			title: `Move “${c.name}” to the Trash?`,
+			body: `You can restore it from the Trash for ${days} days. After that it is deleted forever.`,
+			action: 'Move to Trash'
+		});
+		if (!ok) return;
 		await write({ type: 'trash_cascade', cascade_id: id });
 		await goto('/cascades');
 	}
@@ -288,14 +370,24 @@
 
 	async function startOver() {
 		if (!db || !session.userId) return;
+		const ok = await confirmAction({
+			title: `Start “${v?.cascade?.name ?? 'this cascade'}” over?`,
+			body: 'This makes a new cascade of the same words, with the same threshold and options, starting from Level 1. This one stays as it is, and counts toward your cascade limit until you move it to the Trash.',
+			action: 'Start over'
+		});
+		if (!ok) return;
 		const { device_id } = await getMeta(db, 'device');
 		const body = { id: crypto.randomUUID(), source_quiz_id: crypto.randomUUID(), device_id, at: new Date().toISOString() };
 		starting = { stage: 'server', progress: 0, count: null };
+		cascadeError = null;
 		try {
 			const created = await api.post<Created>(`/api/cascades/${id}/start-over`, body);
 			starting = { stage: 'device', progress: 0, count: Number(created.source_quiz.question_count) };
 			await storeCreated(db, created, new Date(), (f) => starting && (starting.progress = f));
+			levelsOpen = false;
 			await goto(`/cascades/${body.id}`);
+		} catch {
+			cascadeError = 'Start over needs a connection.';
 		} finally {
 			starting = null;
 		}
@@ -410,17 +502,7 @@
 {/snippet}
 
 {#snippet levels()}
-	<Popover.Root>
-		<Popover.Trigger class="rounded px-2 py-1 text-left hover:bg-muted">Levels</Popover.Trigger>
-		<Popover.Content side="right" align="start" class="w-[30rem] max-w-[90vw]">
-			{#if v?.cascade}
-				<p class="mb-3 text-sm text-muted-foreground">
-					A level clears when a pass ends with at least <span class="font-medium text-foreground">{v.cascade.clear_threshold}%</span> correct.
-				</p>
-			{/if}
-			<CascadeLadder {rows} onExport={(r) => goto(`/cascades/${id}/export?quiz=${r.quiz.id}`)} />
-		</Popover.Content>
-	</Popover.Root>
+	<button class="rounded px-2 py-1 text-left hover:bg-muted" onclick={openLevels}>Levels</button>
 {/snippet}
 
 {#if desktop}
@@ -464,45 +546,47 @@
 					{#if v?.status === 'ready'}{@render question()}{:else}<div class="text-center">{@render status()}</div>{/if}
 				</div>
 			</div>
-			{#if !dsp.status_bar_hidden}
-			<footer class="shrink-0 border-t text-sm">
-				<div class="h-0.5 bg-muted" aria-hidden="true"><div class="h-full bg-foreground/50" style={`width: ${progress}%`}></div></div>
+			<!-- The status bar keeps its place when hidden, with only its Show button and the
+			     sync status, so hiding it never changes the quiz area or its grade border. -->
+			<footer class="shrink-0 border-t text-sm" class:border-transparent={dsp.status_bar_hidden}>
+				<div class="h-0.5" class:bg-muted={!dsp.status_bar_hidden} aria-hidden="true">
+					{#if !dsp.status_bar_hidden}<div class="h-full bg-foreground/50" style={`width: ${progress}%`}></div>{/if}
+				</div>
 				<div class="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-1 py-2 pr-6 pl-3">
-					<button
-						class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-						onclick={() => display.set({ status_bar_hidden: true })}
-						aria-label="Hide status bar"
-						title="Hide status bar"><PanelBottomCloseIcon class="size-4" /></button
-					>
-					{#if v?.quiz && v.cascade}
-						<p class="font-medium">Level {v.quiz.level} of {v.cascade.depth}</p>
-						<p class="text-muted-foreground">Pass {v.quiz.attempt}</p>
-						<p title="The card shown, and the share of the level graded in this pass">
-							<!-- The count in its own element, apart from its percentage: it is read on its own. -->
-							<span>{(v.card?.pos ?? v.quiz.cursor) + 1} / {v.quiz.question_count}</span>
-							<span class="text-muted-foreground">({pct(gradedPct)})</span>
-						</p>
-						<p title={`Correct and missed in this pass, and the share correct: the level clears at ${v.cascade.clear_threshold}%`}>
-							<span>{v.quiz.correct_count} ✓ {v.quiz.missed_count} ✗</span>
-							{#if correctPct !== null}
-								<span class:text-green-600={onTrack} class:text-red-600={onTrack === false} data-on-track={onTrack}>({pct(correctPct)})</span>
-							{/if}
-						</p>
-						{#if run}<p class="text-muted-foreground">{run}</p>{/if}
+					{#if dsp.status_bar_hidden}
+						<button
+							class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+							onclick={() => display.set({ status_bar_hidden: false })}
+							aria-label="Show status bar"
+							title="Show status bar"><PanelBottomOpenIcon class="size-4" /></button
+						>
+					{:else}
+						<button
+							class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+							onclick={() => display.set({ status_bar_hidden: true })}
+							aria-label="Hide status bar"
+							title="Hide status bar"><PanelBottomCloseIcon class="size-4" /></button
+						>
+						{#if v?.quiz && v.cascade}
+							<p class="font-medium">Level {v.quiz.level} of {v.cascade.depth}</p>
+							<p class="text-muted-foreground">Pass {v.quiz.attempt}</p>
+							<p title="The card shown, and the share of the level graded in this pass">
+								<!-- The count in its own element, apart from its percentage: it is read on its own. -->
+								<span>{(v.card?.pos ?? v.quiz.cursor) + 1} / {v.quiz.question_count}</span>
+								<span class="text-muted-foreground">({pct(gradedPct)})</span>
+							</p>
+							<p title={`Correct and missed in this pass, and the share correct: the level clears at ${v.cascade.clear_threshold}%`}>
+								<span>{v.quiz.correct_count} ✓ {v.quiz.missed_count} ✗</span>
+								{#if correctPct !== null}
+									<span class:text-green-600={onTrack} class:text-red-600={onTrack === false} data-on-track={onTrack}>({pct(correctPct)})</span>
+								{/if}
+							</p>
+							{#if run}<p class="text-muted-foreground">{run}</p>{/if}
+						{/if}
 					{/if}
 					<div class="ml-auto"><SyncStatus /></div>
 				</div>
 			</footer>
-			{:else}
-				<!-- The status bar hidden: its Show button and the sync status keep the bottom corners, outside the quiz area. -->
-				<button
-					class="absolute bottom-2 left-3 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-					onclick={() => display.set({ status_bar_hidden: false })}
-					aria-label="Show status bar"
-					title="Show status bar"><PanelBottomOpenIcon class="size-4" /></button
-				>
-				<div class="pointer-events-none absolute right-6 bottom-2"><div class="pointer-events-auto"><SyncStatus /></div></div>
-			{/if}
 		</div>
 	</div>
 {:else}
@@ -514,7 +598,10 @@
 					L{v.quiz.level} · {(v.card?.pos ?? v.quiz.cursor) + 1}/{v.quiz.question_count} · {v.cascade.clear_threshold}%{#if run} · {run}{/if}
 				{/if}
 			</span>
-			<button onclick={openSettings} aria-label="Settings">⚙</button>
+			<span class="flex items-center gap-3">
+				{#if v?.quiz && v.cascade}<button onclick={openLevels}>Levels</button>{/if}
+				<button onclick={openSettings} aria-label="Settings">⚙</button>
+			</span>
 		</header>
 		{#if v?.status === 'ready'}
 			<div class="relative flex flex-1 select-none" class:flex-col={!landscape} style="touch-action: manipulation">
@@ -547,6 +634,63 @@
 	</div>
 {/if}
 
+{#if levelsOpen && v?.cascade}
+	<div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" role="presentation" onclick={() => (levelsOpen = false)}>
+		<div
+			class="max-h-full w-full max-w-2xl space-y-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg"
+			role="dialog"
+			aria-label="Levels"
+			tabindex="-1"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.key === 'Escape' && (levelsOpen = false)}
+		>
+			<h2 class="text-lg font-semibold">Levels</h2>
+			<p class="text-sm text-muted-foreground">
+				A level clears when a pass ends with at least <span class="font-medium text-foreground">{v.cascade.clear_threshold}%</span> correct.
+			</p>
+			<CascadeLadder {rows} onExport={(r) => goto(`/cascades/${id}/export?quiz=${r.quiz.id}`)} />
+			<h2 class="pt-4 text-lg font-semibold">This cascade</h2>
+			<SettingRow label="Clear threshold (%)" info={INFO.clear_threshold} for="cascade-threshold" hint="For every level, the pass in progress included">
+				<input
+					id="cascade-threshold"
+					class="w-24 rounded-md border bg-background px-2 py-1"
+					type="number"
+					min="1"
+					max="100"
+					step="1"
+					value={v.cascade.clear_threshold}
+					onchange={(e) => setThreshold(e.currentTarget)}
+				/>
+			</SettingRow>
+			<SettingRow label="Keep offline on this device" info={INFO.keep_offline} for="cascade-keep" {hint}>
+				<input id="cascade-keep" type="checkbox" checked={kept.byUser || kept.automatically} onchange={(e) => toggleKeep(e.currentTarget.checked)} />
+			</SettingRow>
+			{#if cascadeOptions}
+				<h3 class="pt-2 text-sm font-semibold">Options for new quizzes</h3>
+				<QuizOptionsForm
+					bind:options={cascadeOptions}
+					questionCount={v.cascade.question_count}
+					maxQuizQuestions={maxQuiz}
+					editing="cascade"
+					showAlphabetical={v.cascade.quiz_type === 'anagram'}
+				/>
+				<Button onclick={saveCascadeOptions}>Save options</Button>
+			{/if}
+			{#if cascadeError}<p class="text-sm text-destructive" role="alert">{cascadeError}</p>{/if}
+			<div class="flex flex-wrap gap-2 pt-2">
+				<Button
+					variant="outline"
+					disabled={atLimit}
+					title={atLimit ? 'Start over: at the cascade limit' : 'A new cascade of the same questions, from Level 1'}
+					onclick={startOver}>Start over</Button
+				>
+				<Button variant="outline" class="hover:text-destructive" onclick={moveToTrash}>Move to Trash</Button>
+				<Button variant="outline" class="ml-auto" onclick={() => (levelsOpen = false)}>Close</Button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 {#if settingsOpen}
 	<div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" role="presentation" onclick={() => (settingsOpen = false)}>
 		<div
@@ -558,19 +702,25 @@
 			onkeydown={(e) => e.key === 'Escape' && (settingsOpen = false)}
 		>
 			<h2 class="text-lg font-semibold">Preferences</h2>
-			<SettingRow label="Show definitions with anagrams" for="player-definitions">
+			<SettingRow label="Show definitions with anagrams" info={INFO.anagram_show_definitions} for="player-definitions">
 				<input id="player-definitions" type="checkbox" checked={prefs.anagram_show_definitions} onchange={(e) => setPref('anagram_show_definitions', e.currentTarget.checked)} />
 			</SettingRow>
-			<SettingRow label="Show hooks with anagrams" for="player-hooks">
+			<SettingRow label="Show hooks with anagrams" info={INFO.anagram_show_hooks} for="player-hooks">
 				<input id="player-hooks" type="checkbox" checked={prefs.anagram_show_hooks} onchange={(e) => setPref('anagram_show_hooks', e.currentTarget.checked)} />
 			</SettingRow>
-			<SettingRow label="Anagram answer mode" for="player-mode">
+			<SettingRow label="When an answer is revealed, mark it" info={INFO.reveal_correct} for="player-reveal">
+				<select id="player-reveal" class="rounded border bg-background px-2 py-1" value={prefs.reveal_correct === false ? 'missed' : 'correct'} onchange={(e) => setPref('reveal_correct', e.currentTarget.value === 'correct')}>
+					<option value="correct">Correct</option>
+					<option value="missed">Missed</option>
+				</select>
+			</SettingRow>
+			<SettingRow label="Anagram answer mode" info={INFO.anagram_answer_mode} for="player-mode">
 				<select id="player-mode" class="rounded border bg-background px-2 py-1" value={prefs.anagram_answer_mode} onchange={(e) => setPref('anagram_answer_mode', e.currentTarget.value)}>
 					<option value="flashcard">Flashcard</option>
 					<option value="typed">Typed</option>
 				</select>
 			</SettingRow>
-			<SettingRow label="Leave value decimal places" for="player-decimals">
+			<SettingRow label="Round leave values to (decimal places)" info={INFO.leave_value_decimals} for="player-decimals">
 				<select id="player-decimals" class="rounded border bg-background px-2 py-1" value={String(prefs.leave_value_decimals)} onchange={(e) => setPref('leave_value_decimals', Number(e.currentTarget.value))}>
 					{#each [0, 1, 2, 3] as d (d)}<option value={String(d)}>{d}</option>{/each}
 				</select>

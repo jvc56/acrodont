@@ -314,6 +314,7 @@ async fn first_syncs(pool: sqlx::PgPool) {
     assert_eq!(rows(&pages, "quiz_questions")[0]["question_idx"].as_array().unwrap().len(), 200);
     let prefs = &pages[0]["changes"]["preferences"];
     assert_eq!(prefs["default_clear_threshold"], 80);
+    assert_eq!(prefs["reveal_correct"], true, "a reveal marks a card correct by default");
     assert!(prefs["bindings"].as_array().is_some_and(|b| !b.is_empty()));
 }
 

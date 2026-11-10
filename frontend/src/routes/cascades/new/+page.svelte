@@ -1,6 +1,9 @@
 <script lang="ts">
 	// The cascade builder (PLAN.md § Creating a cascade), laid out like
 	// Zyzzyva's Search tab. Needs a connection: searching runs on the server.
+	import InfoTip from '$lib/components/InfoTip.svelte';
+	import { INFO } from '$lib/settings-info';
+	import { confirmAction } from '$lib/confirm.svelte';
 	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -208,7 +211,12 @@
 			saveOpen = false;
 		} catch (e) {
 			if (e instanceof ApiError && e.code === 'name_taken') {
-				if (confirm(`Replace your saved search "${saveName}"?`)) await save(true, id);
+				const ok = await confirmAction({
+					title: `Replace your saved search “${saveName}”?`,
+					body: 'The search saved under this name is replaced by this one.',
+					action: 'Replace'
+				});
+				if (ok) await save(true, id);
 			} else if (e instanceof ApiError && e.code === 'saved_search_limit') {
 				const b = e.body as { limit: number; count: number };
 				saveMessage = `You have ${b.count} of ${b.limit} saved searches, the most you can keep. Delete one first.`;
@@ -354,7 +362,10 @@
 	<Card.Root>
 		<Card.Content class="grid gap-4 pt-6">
 			<div class="grid max-w-xs gap-1">
-				<Label for="threshold">Clear threshold (%)</Label>
+				<div class="flex items-center gap-1.5">
+					<Label for="threshold">Clear threshold (%)</Label>
+					<InfoTip text={INFO.clear_threshold} />
+				</div>
 				<Input id="threshold" type="number" min="1" max="100" bind:value={threshold} />
 				<p class="text-xs text-muted-foreground">Score at least this much on a quiz to clear it.</p>
 			</div>

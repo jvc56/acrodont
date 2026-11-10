@@ -5,6 +5,7 @@
 	import BracketsIcon from '@lucide/svelte/icons/brackets';
 	import ListPlusIcon from '@lucide/svelte/icons/list-plus';
 	import XIcon from '@lucide/svelte/icons/x';
+	import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical';
 	import { Button } from '$lib/components/ui/button';
 	import FilterRow from './FilterRow.svelte';
 	import Self from './FilterGroup.svelte';
@@ -68,12 +69,13 @@
 	<div class="flex items-center gap-2">
 		{#if !top}
 			<span
-				class="cursor-grab select-none px-1 text-muted-foreground"
+				class="flex cursor-grab items-center rounded py-1 text-muted-foreground select-none hover:bg-muted hover:text-foreground active:cursor-grabbing"
 				draggable="true"
 				ondragstart={(e) => dragStart(e, group.key)}
 				role="button"
 				tabindex="-1"
-				aria-label="Drag group">⋮⋮</span
+				aria-label="Drag group"
+			title="Drag group"><GripVerticalIcon class="size-4" aria-hidden="true" /></span
 			>
 		{/if}
 		<div class="inline-flex overflow-hidden rounded-md border text-xs" role="radiogroup" aria-label="Group operator">

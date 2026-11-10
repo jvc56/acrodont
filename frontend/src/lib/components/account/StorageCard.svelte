@@ -6,6 +6,7 @@
 	// figures from its `accounts` row, never from opening its database — each
 	// with "Remove this account's data from this device".
 	import { goto } from '$app/navigation';
+	import { confirmAction } from '$lib/confirm.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { forgetSession, session } from '$lib/auth/session.svelte';
@@ -63,7 +64,17 @@
 	}
 
 	async function remove(a: AccountRow) {
-		if (a.user_id === session.userId) {
+		const self = a.user_id === session.userId;
+		const ok = await confirmAction({
+			title: `Remove ${self ? 'your' : `${a.username}’s`} data from this device?`,
+			body: self
+				? 'Changes not yet synced are lost, and you are logged out. Everything synced stays on the server and downloads again when you log in.'
+				: 'Changes that account has not yet synced are lost. Everything synced stays on the server.',
+			action: 'Remove data',
+			destructive: true
+		});
+		if (!ok) return;
+		if (self) {
 			// The signed-in account: clears the pointer and returns to the login page.
 			closeUserDb();
 			await removeAccountData(a.user_id);

@@ -104,6 +104,63 @@ describe('the player', () => {
 		expect([p.v.card!.pos, p.v.card!.revealed, p.v.card!.saved]).toEqual([0, true, 'correct']);
 	});
 
+	it('a reveal marks the card correct, or missed when the preference says so; Toggle flips either', async () => {
+		await cascade(5);
+		const p = new Player(db, C, { prefs: async () => ({ ...prefs, reveal_correct: false }), ensure: async () => undefined, seed: () => '777' });
+		await p.load();
+		await p.showNext();
+		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'missed']);
+		await p.toggle();
+		expect(p.v.card!.grade).toBe('correct');
+		const q = player();
+		await q.load();
+		await q.showNext();
+		expect(q.v.card!.grade).toBe('correct');
+	});
+
+	it('Show and Toggle act at once during a slow reload, which keeps them; Next waits for it', async () => {
+		await cascade(5);
+		let hold: Promise<void> | null = null;
+		const p = new Player(db, C, {
+			prefs: async () => {
+				await hold;
+				return prefs;
+			},
+			ensure: async () => undefined,
+			seed: () => '777'
+		});
+		await p.load();
+		let release!: () => void;
+		hold = new Promise((r) => (release = r));
+		// A sync's reload (just after a cascade is created, say) is slow to read.
+		const reload = p.load(true);
+		void p.showNext();
+		expect([p.v.card!.pos, p.v.card!.revealed]).toEqual([0, true]);
+		void p.toggle();
+		expect(p.v.card!.grade).toBe('missed');
+		const next = p.showNext();
+		await new Promise((r) => setTimeout(r, 20));
+		expect(p.v.card!.pos).toBe(0); // Next waits its turn behind the reload
+		release();
+		await reload;
+		await next;
+		expect(p.v.card!.pos).toBe(1);
+		expect(p.v.quiz!.missed_count).toBe(1);
+	});
+
+	it('a download landing while the answer is shown keeps it shown', async () => {
+		await cascade(5);
+		const p = player();
+		await p.load();
+		// The answer is refetched with a definition; the player reads the new row…
+		await db.put('cards', { ...(await db.get('cards', [C, p.v.card!.idx]))!, answer: [{ word: 'AB', definition: 'new' }] });
+		const refresh = p.refreshCard();
+		void p.showNext(); // …while Show reveals the card
+		await refresh;
+		expect(p.v.card!.revealed).toBe(true);
+		expect(p.v.card!.answer).toEqual([{ word: 'AB', definition: 'new' }]);
+	});
+
 	it('presses in quick succession all count, in order, and the writes follow them', async () => {
 		await cascade(5);
 		const p = player();

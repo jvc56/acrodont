@@ -10,15 +10,18 @@
 		class: className,
 		size = "default",
 		portalProps,
+		overlayClass,
 		...restProps
 	}: WithoutChild<AlertDialogPrimitive.ContentProps> & {
 		size?: "default" | "sm";
 		portalProps?: WithoutChildrenOrChild<ComponentProps<typeof AlertDialogPortal>>;
+		/** Classes for the backdrop, e.g. to lift it above another open dialog. */
+		overlayClass?: string;
 	} = $props();
 </script>
 
 <AlertDialogPortal {...portalProps}>
-	<AlertDialogOverlay />
+	<AlertDialogOverlay class={overlayClass} />
 	<AlertDialogPrimitive.Content
 		bind:ref
 		data-slot="alert-dialog-content"

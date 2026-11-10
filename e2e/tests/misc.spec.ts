@@ -2,7 +2,7 @@ import { test, expect, chromium, type Page } from '@playwright/test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { apiCascade, createCascade, idb, login, newUser, playLevel, playerPref, press } from './support';
+import { apiCascade, confirm, createCascade, idb, login, newUser, playLevel, playerPref, press } from './support';
 
 // PLAN.md § End-to-end tests: the shorter journeys.
 
@@ -12,7 +12,7 @@ async function ready(page: Page) {
 	});
 }
 
-test('leave decimals at 3 render a leave answer to three places', async ({ page }) => {
+test('leave decimals at 3 render a leave answer to three places, with no plus sign', async ({ page }) => {
 	await newUser(page, 'leave');
 	const player = await apiCascade(page, {
 		name: 'Leaves',
@@ -21,9 +21,10 @@ test('leave decimals at 3 render a leave answer to three places', async ({ page 
 	});
 	await page.goto(player);
 	await expect(page.getByText(/^1 \/ \d+$/)).toBeVisible({ timeout: 30_000 });
-	await playerPref(page, 'Leave value decimal places', '3');
+	await playerPref(page, 'Round leave values to (decimal places)', '3');
 	await press(page, 'Space');
-	await expect(page.getByText(/^\+\d+\.\d{3}$/)).toBeVisible();
+	// A positive value has no '+'.
+	await expect(page.getByText(/^\d+\.\d{3}$/)).toBeVisible();
 });
 
 test('hooks read Zyzzyva-style in lower case, and a Catalan multi-character hook reads NY', async ({ page }) => {
@@ -51,7 +52,7 @@ test('hooks read Zyzzyva-style in lower case, and a Catalan multi-character hook
 	await expect(page.getByRole('listitem').filter({ hasText: /ny/ })).toHaveCount(0);
 });
 
-test('a cascade trashed offline is listed in the Trash with "purges 30 days after this syncs"', async ({ page, context }) => {
+test('a cascade trashed offline is listed in the Trash with "deleted forever 30 days after this syncs"', async ({ page, context }) => {
 	await newUser(page, 'trashoff');
 	await createCascade(page, { name: 'Offline trash' });
 	await page.goto('/cascades');
@@ -59,13 +60,14 @@ test('a cascade trashed offline is listed in the Trash with "purges 30 days afte
 	await ready(page);
 	await context.setOffline(true);
 	await page.getByRole('button', { name: 'Move to Trash' }).click();
+	await confirm(page, 'Move to Trash');
 	await expect(page.getByText('Offline trash')).toHaveCount(0);
 	await page.goto('/trash');
 	await expect(page.getByText('Offline trash (cascade in the Trash)')).toBeVisible();
-	await expect(page.getByText('purges 30 days after this syncs')).toBeVisible();
+	await expect(page.getByText('deleted forever 30 days after this syncs')).toBeVisible();
 	await context.setOffline(false);
 	await page.goto('/trash');
-	await expect(page.getByText(/^purges \d/).first()).toBeVisible({ timeout: 30_000 });
+	await expect(page.getByText(/^deleted forever on \d/).first()).toBeVisible({ timeout: 30_000 });
 });
 
 test('Delete forever is on a trashed cascade, not on the quizzes listed under it', async ({ page }) => {
@@ -76,6 +78,7 @@ test('Delete forever is on a trashed cascade, not on the quizzes listed under it
 	expect(await playLevel(page, () => false)).toMatch(/^Level 2 cleared/);
 	await page.goto('/cascades');
 	await page.getByRole('button', { name: 'Move to Trash' }).click();
+	await confirm(page, 'Move to Trash');
 	await expect(page.getByRole('button', { name: 'Move to Trash' })).toHaveCount(0);
 	await page.goto('/trash');
 	await page.getByRole('button', { name: /Delete forever \(cascade in the Trash\)/ }).click();
@@ -163,3 +166,22 @@ test('a browser restarted with a live session syncs rather than failing CSRF', a
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test('a reveal marks the card correct by default, or missed when set; settings explain themselves', async ({ page }) => {
+	await newUser(page, 'reveal');
+	await createCascade(page, { name: 'Reveal' });
+	await expect(page.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
+	await press(page, 'Space');
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
+	await playerPref(page, 'When an answer is revealed, mark it', 'missed');
+	await press(page, 'Space');
+	await expect(page.getByText('2 / 18')).toBeVisible();
+	await press(page, 'Space');
+	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
+	// Each preference has an ⓘ that explains it on hover.
+	await page.goto('/account');
+	const row = page.getByText('Default clear threshold (%)', { exact: true }).locator('xpath=..');
+	await row.getByRole('button', { name: 'About this setting' }).hover();
+	await expect(page.getByRole('tooltip')).toContainText('The score a new cascade needs to clear a level');
+});
+

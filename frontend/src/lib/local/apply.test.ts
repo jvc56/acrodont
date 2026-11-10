@@ -178,6 +178,7 @@ async function snapshot(db: UserDb, cascadeId: string, completions: number) {
 	const cascade = c
 		? {
 				depth: c.depth,
+				clear_threshold: c.clear_threshold,
 				peak_depth: c.peak_depth,
 				attempts_since_completion: c.attempts_since_completion,
 				completions,

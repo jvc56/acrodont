@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createCascade, idb, login, newUser, outboxCount, PASSWORD, press } from './support';
+import { confirm, createCascade, idb, login, newUser, outboxCount, PASSWORD, press } from './support';
 
 // PLAN.md § End-to-end tests: switching accounts in another tab, and deleting the account.
 
@@ -95,6 +95,7 @@ test('deleting the account', async ({ browser, baseURL }) => {
 	await page.goto('/account');
 	await page.getByLabel('Password').last().fill(PASSWORD);
 	await page.getByRole('button', { name: 'Delete account' }).click();
+	await confirm(page, 'Delete account');
 	await expect(page).toHaveURL(/\/login$/, { timeout: 30_000 });
 	const dbs = await page.evaluate(async () => {
 		const open = (name: string) =>

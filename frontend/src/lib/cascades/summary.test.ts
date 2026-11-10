@@ -71,7 +71,7 @@ describe('the Cascades and Trash pages', () => {
 		const [s] = await cascadeSummaries(db, true);
 		expect(s.offline).toBe('available');
 		expect(s.keptByUser).toBe(true);
-		expect(ladderText(s.levels)).toBe('L1 · 4 (0/4 done)');
+		expect(ladderText(s.levels)).toBe('L1 · 4 (0/4 done, 0.00%)');
 	});
 
 	it('an offline clear and an offline trash read "purges … after this syncs" until the acknowledged rows replace them', async () => {

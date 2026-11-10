@@ -324,6 +324,15 @@ pub fn check_segment_size(size: i64, cap: u32) -> Result<u32, Reason> {
     }
 }
 
+/// A clear threshold is a whole percentage from 1 to 100.
+pub fn check_clear_threshold(t: i64) -> Result<u32, Reason> {
+    if (1..=100).contains(&t) {
+        Ok(t as u32)
+    } else {
+        Err(Reason::Invalid)
+    }
+}
+
 /// A chain's progression and segment size are fixed; the Source quiz has no progression.
 pub fn check_quiz_option_fields(q: &QuizState, progression: bool, segment_size: bool) -> Result<(), Reason> {
     if q.segment_chain && (progression || segment_size) {

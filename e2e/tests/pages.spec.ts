@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { confirm } from './support';
 
 // PLAN.md § Cascades page, § Trash page: a cascade is listed with its
 // options, ladder and offline badge; Move to Trash takes it to the Trash
@@ -24,7 +25,13 @@ test('the Cascades page lists a cascade, the Trash takes it and gives it back', 
 	await expect(row.getByText(/of \d+ cascades/)).toHaveCount(0);
 	await expect(page.getByText(/\d+ of 20 cascades/)).toBeVisible();
 	await expect(row.getByText('Available offline')).toBeVisible({ timeout: 30_000 });
+	// Moving to the Trash asks first: Cancel keeps it.
 	await row.getByRole('button', { name: 'Move to Trash' }).click();
+	await expect(page.getByRole('alertdialog')).toContainText(`Move “${name}” to the Trash?`);
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
+	await expect(row).toBeVisible();
+	await row.getByRole('button', { name: 'Move to Trash' }).click();
+	await confirm(page, 'Move to Trash');
 	await expect(page.getByText(name)).toHaveCount(0);
 	await page.goto('/trash');
 	await expect(page.getByText(`${name} (cascade in the Trash)`)).toBeVisible();

@@ -458,8 +458,11 @@ export class FakeServer {
 					default_segment_size: 0,
 					default_progression: 'ladder',
 					default_require_alphabetical: false,
+					reveal_correct: true,
 					...Object.fromEntries(
-						Object.entries(this.prefs).filter(([k]) => k.startsWith('default_') || k.startsWith('leave_') || k.startsWith('anagram_'))
+						Object.entries(this.prefs).filter(
+							([k]) => k.startsWith('default_') || k.startsWith('leave_') || k.startsWith('anagram_') || k === 'reveal_correct'
+						)
 					),
 					changed_at: this.prefsAt,
 					changed_by_device_id: this.prefsDevice || null,

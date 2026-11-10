@@ -7,6 +7,7 @@
 	import ListPlusIcon from '@lucide/svelte/icons/list-plus';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import XIcon from '@lucide/svelte/icons/x';
+	import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
 	import TilePalette from './TilePalette.svelte';
@@ -76,12 +77,13 @@
 >
 	<div class="flex flex-wrap items-center gap-2">
 		<span
-			class="cursor-grab select-none px-1 text-muted-foreground"
+			class="flex cursor-grab items-center rounded py-1 text-muted-foreground select-none hover:bg-muted hover:text-foreground active:cursor-grabbing"
 			draggable="true"
 			ondragstart={ondragstart}
 			role="button"
 			tabindex="-1"
-			aria-label="Drag to move">⋮⋮</span
+			aria-label="Drag to move"
+			title="Drag to move"><GripVerticalIcon class="size-4" aria-hidden="true" /></span
 		>
 		<label class="flex items-center gap-1 text-sm" title={def.negatable ? '' : `${def.label} cannot be negated`}>
 			<Checkbox bind:checked={row.negated} disabled={!def.negatable} onCheckedChange={edited} />

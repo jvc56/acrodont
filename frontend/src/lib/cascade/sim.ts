@@ -11,6 +11,7 @@ import {
 	checkSegmentEnd,
 	checkSegmentPastCursor,
 	checkSegmentSize,
+	checkClearThreshold,
 	finish,
 	finishSegment,
 	outcomeOf,
@@ -52,7 +53,14 @@ export type Op =
 	| { type: 'restore_cascade' }
 	| { type: 'purge_quiz'; quiz: string }
 	| { type: 'purge_cascade' }
-	| { type: 'set_cascade_options'; segment_size?: number; progression?: Progression; require_alphabetical?: boolean }
+	| {
+			type: 'set_cascade_options';
+			segment_size?: number;
+			progression?: Progression;
+			require_alphabetical?: boolean;
+			/** The cascade's alone: every finish reads it, the quiz in progress included. */
+			clear_threshold?: number;
+	  }
 	| {
 			type: 'set_quiz_options';
 			quiz: string;
@@ -302,6 +310,8 @@ export class SimCascade {
 				if (this.purged) throw new Rejected('not_found');
 				if (this.state.trashed) throw new Rejected('trashed');
 				const size = op.segment_size === undefined ? undefined : checkSegmentSize(op.segment_size, this.maxQuizQuestions);
+				const threshold = op.clear_threshold === undefined ? undefined : checkClearThreshold(op.clear_threshold);
+				if (threshold !== undefined) this.state.clear_threshold = threshold;
 				if (size !== undefined) this.state.opts.segment_size = size;
 				if (op.progression !== undefined) this.state.opts.progression = op.progression;
 				if (op.require_alphabetical !== undefined) this.state.opts.require_alphabetical = op.require_alphabetical;

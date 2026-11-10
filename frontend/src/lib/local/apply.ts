@@ -15,6 +15,7 @@ import {
 	checkSegmentEnd,
 	checkSegmentPastCursor,
 	checkSegmentSize,
+	checkClearThreshold,
 	finish,
 	finishSegment,
 	outcomeOf,
@@ -78,6 +79,8 @@ export type NewOp =
 			segment_size?: number;
 			progression?: Progression;
 			require_alphabetical?: boolean;
+			/** The cascade's alone: every finish reads it, the quiz in progress included. */
+			clear_threshold?: number;
 	  }
 	| {
 			type: 'set_quiz_options';
@@ -486,6 +489,7 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 			if (c.trashed_at !== null) throw new Rejected('trashed');
 			const next = { ...c, options_changed_at: at, options_device_id: ctx.device_id };
 			if (op.segment_size !== undefined) next.segment_size = checkSegmentSize(op.segment_size as number, ctx.max_quiz_questions);
+			if (op.clear_threshold !== undefined) next.clear_threshold = checkClearThreshold(op.clear_threshold as number);
 			if (op.progression !== undefined) next.progression = op.progression as Progression;
 			if (op.require_alphabetical !== undefined) next.require_alphabetical = op.require_alphabetical as boolean;
 			await putCascade(tx, next);

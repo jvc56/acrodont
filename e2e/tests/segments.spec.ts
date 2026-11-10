@@ -58,11 +58,15 @@ test('segments and progression', async ({ page }) => {
 
 	// The cascade on Drill: the quiz in progress keeps its own; the next new one takes it.
 	const player = new URL(page.url()).pathname;
+	// The menu is open already, from the settings above.
+	await page.getByRole('navigation', { name: 'Player menu' }).getByRole('button', { name: 'Levels' }).click();
+	const levels = page.getByRole('dialog', { name: 'Levels' });
+	await levels.getByLabel('When a quiz is finished below the clear threshold').selectOption('drill');
+	await levels.getByRole('button', { name: 'Save options' }).click();
+	// The dialog closes once the change is written.
+	await expect(levels).toHaveCount(0);
+	// Written once the Cascades page's options summary says so.
 	await page.goto('/cascades');
-	await page.getByRole('button', { name: 'Quiz options' }).click();
-	await page.getByRole('dialog', { name: 'Quiz options' }).getByLabel('When a quiz is finished below the clear threshold').selectOption('drill');
-	await page.getByRole('button', { name: 'Save' }).click();
-	// Written once the entry's options summary says so.
 	await expect(page.getByText(/· drill/).first()).toBeVisible();
 	await page.goto(player);
 	d = await settings(page);

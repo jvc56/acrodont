@@ -14,7 +14,7 @@ Cited algorithms:
   ascending indexes, each as a little-endian u32.
 - Leave value text (PLAN.md § Answers): n = trunc(|v| × 10^d + 0.5) in f64;
   n as an integer with '.' d digits from the right, zero-padded; '-' when
-  v < 0 and n > 0; '+' on screen when v > 0 and n > 0; never '+' in exports.
+  v < 0 and n > 0; never '+', on screen or in exports.
 - The cascade rules: PLAN.md § Cascade Rules, § Rule implementation,
   § Operations (the conditions and rejection reasons).
 """
@@ -55,7 +55,7 @@ def questions_hash(idx):
     return h
 
 
-def leave_text(v, d, screen):
+def leave_text(v, d):
     n = math.trunc(abs(v) * (10.0 ** d) + 0.5)
     digits = str(n)
     if d > 0:
@@ -63,8 +63,6 @@ def leave_text(v, d, screen):
         digits = digits[:-d] + "." + digits[-d:]
     if n > 0 and v < 0:
         return "-" + digits
-    if n > 0 and v > 0 and screen:
-        return "+" + digits
     return digits
 
 
@@ -408,6 +406,13 @@ class Cascade:
         if self.trashed:
             raise Rejected("trashed")
         self.check_option_values(op)
+        # The clear threshold is the cascade's alone, and every finish reads it,
+        # so a change applies to the quiz in progress as well as to later ones.
+        if "clear_threshold" in op:
+            t = op["clear_threshold"]
+            if isinstance(t, bool) or not isinstance(t, int) or not (1 <= t <= 100):
+                raise Rejected("invalid")
+            self.threshold = t
         for k in ("segment_size", "progression", "require_alphabetical"):
             if k in op:
                 setattr(self, k, op[k])
@@ -456,6 +461,7 @@ class Cascade:
             })
         return {
             "cascade": {
+                "clear_threshold": self.threshold,
                 "depth": self.depth,
                 "peak_depth": self.peak_depth,
                 "attempts_since_completion": self.attempts_since_completion,

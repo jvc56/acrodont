@@ -461,6 +461,27 @@ export class Player {
 		return run;
 	}
 
+	/** User actions taken by `serial` and not yet through it; loads are not counted. */
+	private actionsAhead = 0;
+
+	/** `serial` for one of the three actions. */
+	private action(fn: () => Promise<void>): Promise<void> {
+		this.actionsAhead++;
+		return this.serial(fn).finally(() => this.actionsAhead--);
+	}
+
+	/**
+	 * Whether an action that only changes the card on screen (showing its answer,
+	 * toggling its grade) can act at once: no action is waiting ahead of it, so
+	 * the card shown is the one it is meant for. A reload in progress does not
+	 * hold it up — a sync landing just after a cascade is created would otherwise
+	 * swallow the first Show until the reload finished, and the next press would
+	 * then show and move on in one frame — and the reload keeps the card's state.
+	 */
+	private canActNow(): boolean {
+		return this.actionsAhead === 0 && this.v.status === 'ready' && !this.v.storage && !this.v.fetchingCard;
+	}
+
 	private async write(op: NewOp): Promise<LocalResult | null> {
 		try {
 			const { result } = await applyLocally(this.db, op);
@@ -517,8 +538,28 @@ export class Player {
 
 	/** Show / Next. Resolves once its writes are saved; the screen changes before that. */
 	async showNext(): Promise<void> {
-		await this.serial(() => this.showNextNow());
+		const card = this.v.card;
+		if (card && !card.revealed && card.key !== null && this.v.quiz && this.canActNow()) {
+			this.v.banner = null;
+			return this.reveal(card);
+		}
+		await this.action(() => this.showNextNow());
 		await this.flush();
+	}
+
+	/** The grade a shown answer starts with: the preference's (correct unless set otherwise). */
+	private revealGrade(card: Card): Grade {
+		const base: Grade = this.prefsNow?.reveal_correct === false ? 'missed' : 'correct';
+		return card.toggled ? (base === 'correct' ? 'missed' : 'correct') : base;
+	}
+
+	private reveal(card: Card) {
+		this.v.card = {
+			...card,
+			revealed: true,
+			grade: card.typed && card.answer ? typedGrade(card.typed, this.words(card)) : this.revealGrade(card)
+		};
+		this.emit();
 	}
 
 	private async showNextNow(): Promise<void> {
@@ -532,14 +573,7 @@ export class Player {
 			else this.needsConnection(q);
 			return;
 		}
-		if (!card.revealed) {
-			this.v.card = {
-				...card,
-				revealed: true,
-				grade: card.typed && card.answer ? typedGrade(card.typed, this.words(card)) : card.toggled ? 'missed' : 'correct'
-			};
-			return this.emit();
-		}
+		if (!card.revealed) return this.reveal(card);
 		const act = async () => this.saveAndAdvance(card, q);
 		this.retry = act;
 		await act();
@@ -641,13 +675,15 @@ export class Player {
 	}
 
 	toggle(): Promise<void> {
-		return this.serial(async () => {
+		const flip = () => {
 			const card = this.v.card;
 			// Before the answer is shown there is no grade to toggle: nothing happens.
 			if (!card || card.key === null || this.v.status !== 'ready' || !card.revealed) return;
 			this.v.card = { ...card, grade: card.grade === 'correct' ? 'missed' : 'correct' };
 			this.emit();
-		});
+		};
+		if (this.canActNow()) return Promise.resolve(flip());
+		return this.action(async () => flip());
 	}
 
 	/** The quiz row as this device's queued writes will leave it. */
@@ -658,7 +694,7 @@ export class Player {
 
 	/** Previous. Resolves once its write is saved; the screen changes before that. */
 	async previous(): Promise<void> {
-		await this.serial(() => this.previousNow());
+		await this.action(() => this.previousNow());
 		await this.flush();
 	}
 
@@ -731,10 +767,13 @@ export class Player {
 		const answer = row?.answer ?? null;
 		const word = row?.word ?? null;
 		if (card.key === null && key !== null) return this.serial(() => this.loadCard(card.pos));
-		if (JSON.stringify(answer) === JSON.stringify(card.answer) && JSON.stringify(word) === JSON.stringify(card.word)) return;
+		// The card as it is now: an action while this read (shown the answer, say) is kept.
+		const now = this.v.card;
+		if (!now || now.idx !== card.idx) return;
+		if (JSON.stringify(answer) === JSON.stringify(now.answer) && JSON.stringify(word) === JSON.stringify(now.word)) return;
 		// Answers were refetched with new extras: the cards in memory are older.
 		this.cache.clear();
-		this.v.card = { ...card, answer, word };
+		this.v.card = { ...now, answer, word };
 		this.emit();
 	}
 

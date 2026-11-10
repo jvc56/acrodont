@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Catalog overview with delete actions (PLAN.md § Admin). Admins only;
 	// the API answers 404 to everyone else, and so does this page.
+	import { confirmAction } from '$lib/confirm.svelte';
 	import { onMount } from 'svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -51,7 +52,8 @@
 	onMount(load);
 
 	async function remove(kind: string, id: number, label: string) {
-		if (!confirm(`Delete ${label}? This cannot be undone.`)) return;
+		const ok = await confirmAction({ title: `Delete ${label}?`, body: 'This cannot be undone.', action: 'Delete', destructive: true });
+		if (!ok) return;
 		error = null;
 		try {
 			await api.delete(`/api/admin/${kind}/${id}`);

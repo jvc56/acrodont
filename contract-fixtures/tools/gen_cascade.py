@@ -359,6 +359,23 @@ def scenarios():
     v.op({"type": "set_quiz_options", "quiz": v.source, "progression": "drill"}, expect="invalid")
     out.append(v)
 
+    v = Vector("the clear threshold changes for the quiz in progress", [OPTS, RULES], count=10, threshold=80)
+    v.play(v.source, "CCCCCCCMMM")
+    l2, _ = v.finish(v.source)  # 70% < 80%: the misses go down
+    v.play(l2, "CCM")
+    for bad in (0, 101, -5):
+        v.op({"type": "set_cascade_options", "clear_threshold": bad}, expect="invalid")
+    v.op({"type": "set_cascade_options", "clear_threshold": 60})  # mid-attempt
+    l2b, _ = v.finish(l2)  # 66% ≥ 60%: Level 2 clears under the new threshold, its miss going down
+    v.play(l2b, "C")
+    v.finish(l2b)
+    v.play(v.source, "CCCCCCCMMM")
+    v.op({"type": "set_cascade_options", "clear_threshold": 100, "segment_size": 5})
+    v.finish(v.source)  # 70% < 100%: down again
+    v.op({"type": "trash_cascade"})
+    v.op({"type": "set_cascade_options", "clear_threshold": 50}, expect="trashed")
+    out.append(v)
+
     v = Vector("a chain stays drill through replacements", [OPTS, SEG], count=10, opts=(5, "ladder", False))
     v.play(v.source, "CMMMM")
     chain, _ = v.finish_segment(v.source, 5)
@@ -554,8 +571,12 @@ def random_sequences(n_seqs=40, n_steps=160):
                 size = [0, 5, 6, 7, 9, 13, 130000, len(q.idx), len(q.idx) + 5][pick(9)]
                 v.op({"type": "set_quiz_options", "quiz": q.id, "segment_size": size}, checkpoint=False)
             elif r < 83:
-                v.op({"type": "set_cascade_options", "segment_size": [0, 5, 8, 20][pick(4)],
-                      "progression": ["ladder", "drill"][pick(2)]}, checkpoint=False)
+                o = {"type": "set_cascade_options", "segment_size": [0, 5, 8, 20][pick(4)],
+                     "progression": ["ladder", "drill"][pick(2)]}
+                t = [None, None, 1, 50, 80, 100, 0, 101][pick(8)]
+                if t is not None:
+                    o["clear_threshold"] = t
+                v.op(o, checkpoint=False)
             elif r < 93 and cleared:
                 q = cleared[pick(len(cleared))]
                 v.op({"type": "restore_quiz", "quiz": q.id, "shuffle_seed": v.next_seed()}, checkpoint=False)
@@ -616,8 +637,7 @@ def leave_vectors():
     for v, d in [(0.15, 1), (0.25, 1), (2.5, 0), (-0.04, 1), (0.04, 1), (34.117, 1), (-8.35, 1), (28.292, 3),
                  (1000000.0, 3), (-1000000.0, 3), (1000000.0, 0), (-0.378, 2), (0.0, 1), (-0.0, 2), (0.5, 0),
                  (-0.5, 0), (1.005, 2), (12.75, 1), (-4.0, 1), (25.6, 0)]:
-        cases.append({"value": v, "decimals": d, "screen": ref.leave_text(v, d, True),
-                      "export": ref.leave_text(v, d, False)})
+        cases.append({"value": v, "decimals": d, "text": ref.leave_text(v, d)})
     return {"source": "contract-fixtures/tools/reference.py (PLAN.md § Answers rounding)", "cases": cases}
 
 

@@ -68,7 +68,12 @@ fn op_of(o: &Value) -> Op {
         "restore_cascade" => Op::RestoreCascade,
         "purge_quiz" => Op::PurgeQuiz { quiz: q() },
         "purge_cascade" => Op::PurgeCascade,
-        "set_cascade_options" => Op::SetCascadeOptions { segment_size: opt_size(), progression: opt_prog(), require_alphabetical: opt_alpha() },
+        "set_cascade_options" => Op::SetCascadeOptions {
+            segment_size: opt_size(),
+            progression: opt_prog(),
+            require_alphabetical: opt_alpha(),
+            clear_threshold: o.get("clear_threshold").map(|v| v.as_i64().unwrap()),
+        },
         "set_quiz_options" => Op::SetQuizOptions { quiz: q(), segment_size: opt_size(), progression: opt_prog(), require_alphabetical: opt_alpha() },
         t => panic!("unknown op {t}"),
     }
@@ -126,6 +131,7 @@ fn snapshot(c: &SimCascade) -> Value {
         .collect();
     json!({
         "cascade": {
+            "clear_threshold": c.state.clear_threshold,
             "depth": c.state.depth,
             "peak_depth": c.state.peak_depth,
             "attempts_since_completion": c.state.attempts_since_completion,
@@ -240,8 +246,7 @@ fn leave_text_vectors() {
     for c in f["cases"].as_array().unwrap() {
         let v = c["value"].as_f64().unwrap();
         let d = c["decimals"].as_u64().unwrap() as u32;
-        assert_eq!(leave_value_text(v, d, true), c["screen"].as_str().unwrap(), "{v} at {d}");
-        assert_eq!(leave_value_text(v, d, false), c["export"].as_str().unwrap(), "{v} at {d}");
+        assert_eq!(leave_value_text(v, d), c["text"].as_str().unwrap(), "{v} at {d}");
     }
 }
 
@@ -364,7 +369,12 @@ mod props {
                     Op::RestoreQuiz { quiz: cleared[(ch as usize / 10) % cleared.len()], shuffle_seed: seed }
                 }
                 8 => Op::TrashCascade,
-                _ => Op::SetCascadeOptions { segment_size: Some([0, 5, 9][(ch as usize / 10) % 3]), progression: None, require_alphabetical: None },
+                _ => Op::SetCascadeOptions {
+                    segment_size: Some([0, 5, 9][(ch as usize / 10) % 3]),
+                    progression: None,
+                    require_alphabetical: None,
+                    clear_threshold: [None, Some(1), Some(60), Some(100), Some(0)][(ch as usize / 30) % 5],
+                },
             };
             let _ = c.apply(&op);
             check_invariants(&c);

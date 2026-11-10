@@ -2,7 +2,7 @@
 	// The answer Show / Next reveals (PLAN.md § Taking a quiz → Answers):
 	// anagrams one per line in the card's order, hooks Zyzzyva-style and
 	// lower-cased only for single ASCII letters, definitions beneath; a
-	// definition's text; a leave value with its sign at the user's decimals.
+	// definition's text; a leave value at the user's decimals, '-' only for a negative one.
 	// Unfound words are highlighted after a typed-mode reveal. The words and a
 	// leave value are drawn in the answer font and size (lib/player/display),
 	// which match the question's by default.
@@ -60,7 +60,7 @@
 
 {#snippet hooked(w: Word, hooks: boolean, missing = false)}
 	<!-- Front hooks right-aligned, the word with its inner-hook dots, back hooks left-aligned. -->
-	<span class="justify-self-end text-[0.55em] font-normal text-muted-foreground">
+	<span class="justify-self-end text-[0.75em] font-normal text-muted-foreground">
 		{#if hooks && w.front_hooks}<TileText text={w.front_hooks} lower />{/if}
 	</span>
 	<span data-answer class="justify-self-start font-semibold whitespace-nowrap" class:text-destructive={missing}>
@@ -69,7 +69,7 @@
 			aria-hidden={!(hooks && w.back_inner)}>·</span
 		>
 	</span>
-	<span class="justify-self-start text-[0.55em] font-normal text-muted-foreground">
+	<span class="justify-self-start text-[0.75em] font-normal text-muted-foreground">
 		{#if hooks && w.back_hooks}<TileText text={w.back_hooks} lower />{/if}
 	</span>
 {/snippet}
@@ -100,5 +100,5 @@
 	{/if}
 	<p class="mx-auto max-w-2xl text-center" style={definitionStyle}>{String(answer)}</p>
 {:else}
-	<p class="text-center font-semibold" style={textStyle(font, size, spacing)}>{leaveValueText(Number(answer), prefs.leave_value_decimals, true)}</p>
+	<p class="text-center font-semibold" style={textStyle(font, size, spacing)}>{leaveValueText(Number(answer), prefs.leave_value_decimals)}</p>
 {/if}

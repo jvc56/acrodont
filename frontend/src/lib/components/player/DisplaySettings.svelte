@@ -6,6 +6,7 @@
 	// focus or on Enter, so a half-typed number is never applied; each control sits at the
 	// right of its row like every other setting. The caller loads `display` for
 	// the signed-in user first.
+	import { INFO } from '$lib/settings-info';
 	import SettingRow from '$lib/components/SettingRow.svelte';
 	import TileText from '$lib/components/TileText.svelte';
 	import { clampSetting, display, FONTS, LIMITS, textStyle, type Display, type LimitKey } from '$lib/player/display.svelte';
@@ -21,9 +22,9 @@
 	}
 </script>
 
-{#snippet number(label: string, unit: string, field: keyof Display, limit: LimitKey, hint: string | null = null)}
+{#snippet number(label: string, unit: string, field: keyof Display, limit: LimitKey, info: string, hint: string | null = null)}
 	{@const l = LIMITS[limit]}
-	<SettingRow {label} for={`display-${field}`} {hint}>
+	<SettingRow {label} for={`display-${field}`} {hint} {info}>
 		<input
 			id={`display-${field}`}
 			class={inputClass}
@@ -50,7 +51,7 @@
 		{@const spacing = d[`${part.which}_spacing`]}
 		<fieldset class="grid gap-2">
 			<legend class="mb-1 font-medium">{part.title}</legend>
-			<SettingRow label="Font" for={`display-${part.which}_font`}>
+			<SettingRow label="Font" info={INFO.font} for={`display-${part.which}_font`}>
 				<select
 					id={`display-${part.which}_font`}
 					class="w-40 rounded-md border bg-background px-2 py-1"
@@ -61,8 +62,8 @@
 				</select>
 				<span class="w-8"></span>
 			</SettingRow>
-			{@render number('Size', 'px', `${part.which}_size_px`, part.limit)}
-			{@render number('Letter spacing', 'em', `${part.which}_spacing`, 'spacing_em')}
+			{@render number('Size', 'px', `${part.which}_size_px`, part.limit, INFO.size)}
+			{@render number('Letter spacing', 'em', `${part.which}_spacing`, 'spacing_em', INFO.spacing)}
 			<p
 				class="overflow-hidden rounded-md border px-3 py-2 whitespace-nowrap"
 				class:font-semibold={part.which !== 'definition'}
@@ -75,15 +76,15 @@
 	{/each}
 	<fieldset class="grid gap-2">
 		<legend class="mb-1 font-medium">Layout</legend>
-		{@render number('Question position from the top', 'px', 'question_top_px', 'question_top_px')}
-		<SettingRow label="Green border on a correct answer" for="display-border-correct">
+		{@render number('Question position from the top', 'px', 'question_top_px', 'question_top_px', INFO.question_top)}
+		<SettingRow label="Green border on a correct answer" info={INFO.border_correct} for="display-border-correct">
 			<input id="display-border-correct" type="checkbox" checked={d.border_correct} onchange={(e) => display.set({ border_correct: e.currentTarget.checked })} />
 		</SettingRow>
-		<SettingRow label="Red border on a missed answer" for="display-border-missed">
+		<SettingRow label="Red border on a missed answer" info={INFO.border_missed} for="display-border-missed">
 			<input id="display-border-missed" type="checkbox" checked={d.border_missed} onchange={(e) => display.set({ border_missed: e.currentTarget.checked })} />
 		</SettingRow>
-		{@render number('Grade border width', 'px', 'border_px', 'border_px')}
-		<SettingRow label="Show the status bar below the quiz" for="display-status-bar">
+		{@render number('Grade border width', 'px', 'border_px', 'border_px', INFO.border_width)}
+		<SettingRow label="Show the status bar below the quiz" info={INFO.status_bar} for="display-status-bar">
 			<input id="display-status-bar" type="checkbox" checked={!d.status_bar_hidden} onchange={(e) => display.set({ status_bar_hidden: !e.currentTarget.checked })} />
 		</SettingRow>
 	</fieldset>
@@ -94,6 +95,7 @@
 			'ms',
 			'repeat_guard_ms',
 			'repeat_guard_ms',
+			INFO.repeat_guard,
 			'0, the default, counts every press. Raise it if a bouncing mouse button or an accidental double tap skips cards.'
 		)}
 	</fieldset>

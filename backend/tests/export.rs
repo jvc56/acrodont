@@ -100,7 +100,7 @@ async fn every_selection_for_all_three_types_matches_what_the_device_builds(pool
             .map(|k| match quiz_type {
                 "anagram" => k["answer"].as_array().unwrap().iter().map(|w| format!("{}\n", w["word"].as_str().unwrap())).collect(),
                 "definition" => format!("{}\n", k["answer"].as_str().unwrap()),
-                _ => format!("{}\n", leave_value_text(k["answer"].as_f64().unwrap(), 2, false)),
+                _ => format!("{}\n", leave_value_text(k["answer"].as_f64().unwrap(), 2)),
             })
             .collect();
         let r = export(&app, &mut c, &cascade, json!({ "scope": "cascade", "which": "all", "format": "txt", "lines": "answers", "order": "study", "decimals": 2 })).await;

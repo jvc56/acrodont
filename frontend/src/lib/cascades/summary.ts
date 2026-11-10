@@ -45,12 +45,14 @@ export function optionsSummary(o: { segment_size: number; progression: string; r
 	return parts.join(' · ');
 }
 
-/** `L1 · 250 (waiting, run 3 of 7) → L2 · 38 (waiting) → L3 · 9 (4/9 done)`. */
+/** `L1 · 250 (waiting, run 3 of 7) → L2 · 38 (waiting) → L3 · 9 (4/9 done, 44.44%)`. */
 export function ladderText(rows: LevelRow[]): string {
 	return rows
 		.map((r) => {
 			const done = r.quiz.correct_count + r.quiz.missed_count;
-			let state = r.current ? `${done}/${r.size} done` : 'waiting';
+			// The share done to two places, rounded, as the player's status bar shows it.
+			const pct = ((done / Math.max(1, r.size)) * 100).toFixed(2);
+			let state = r.current ? `${done}/${r.size} done, ${pct}%` : 'waiting';
 			if (r.downloading) state = 'waiting for download';
 			const run = r.run ? `, ${r.run.split(' · ')[0]}` : '';
 			return `L${r.level} · ${r.size} (${state}${run})`;
@@ -124,7 +126,7 @@ export interface TrashEntry {
 	/** The final score, and whether it cleared or was replaced. */
 	score: number | null;
 	outcome: string | null;
-	/** When it will be purged; null while the date is provisional ("purges 30 days after this syncs"). */
+	/** When it will be purged; null while the date is provisional ("deleted forever 30 days after this syncs"). */
 	purgesAt: string | null;
 	provisional: boolean;
 }

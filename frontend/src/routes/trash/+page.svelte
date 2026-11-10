@@ -3,7 +3,9 @@
 	// grouped by cascade and collapsed, each group rendering its entries in
 	// pages of 100 behind Show more, since one segmented attempt can leave tens
 	// of thousands. Entries show the final score, cleared or replaced, and the
-	// purge date, or "purges 30 days after this syncs" while it is provisional.
+	// date it will be deleted forever, or "deleted forever 30 days after this
+	// syncs" while that date is provisional. ("Purge" is the operation's name,
+	// never the page's word.)
 	import { onMount } from 'svelte';
 	import { session } from '$lib/auth/session.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -13,6 +15,7 @@
 	import { getMeta } from '$lib/local/meta';
 	import { userDb } from '$lib/local/open';
 	import { afterLocalWrite, syncState } from '$lib/sync/runtime.svelte';
+	import { confirmAction } from '$lib/confirm.svelte';
 
 	let db = $state<UserDb | null>(null);
 	let groups = $state<TrashGroup[]>([]);
@@ -53,7 +56,15 @@
 			: write({ type: 'restore_quiz', quiz_id: e.id, shuffle_seed: seed[0].toString() });
 	}
 
-	function deleteForever(e: TrashEntry) {
+	async function deleteForever(e: TrashEntry) {
+		const what = e.kind === 'cascade' ? `“${e.cascade.name}” and everything in it` : `Level ${e.quiz!.level} of “${e.cascade.name}”`;
+		const ok = await confirmAction({
+			title: `Delete ${what} forever?`,
+			body: 'It cannot be restored or exported afterwards.',
+			action: 'Delete forever',
+			destructive: true
+		});
+		if (!ok) return;
 		return e.kind === 'cascade'
 			? write({ type: 'purge_cascade', cascade_id: e.id })
 			: write({ type: 'purge_quiz', quiz_id: e.id });
@@ -76,7 +87,7 @@
 				<button class="flex w-full items-baseline justify-between text-left" onclick={() => (open[g.cascade.id] = n ? 0 : PAGE)}>
 					<span class="font-medium">{g.trashed ? `${g.cascade.name} (cascade in the Trash)` : g.cascade.name}</span>
 					<span class="text-sm text-muted-foreground">
-						{`${g.entries.length} ${g.entries.length === 1 ? 'entry' : 'entries'}${g.earliest ? ` · purges from ${date(g.earliest)}` : ''}`}
+						{`${g.entries.length} ${g.entries.length === 1 ? 'entry' : 'entries'}${g.earliest ? ` · deleted forever from ${date(g.earliest)}` : ''}`}
 					</span>
 				</button>
 				{#if n}
@@ -88,7 +99,7 @@
 								</span>
 								{#if e.score !== null}<span>{e.score}% · {e.outcome === 'replaced' ? 'replaced' : 'cleared'}</span>{/if}
 								<span class="text-muted-foreground">
-									{#if e.provisional}purges {days} days after this syncs{:else if e.purgesAt}purges {date(e.purgesAt)}{/if}
+									{#if e.provisional}deleted forever {days} days after this syncs{:else if e.purgesAt}deleted forever on {date(e.purgesAt)}{/if}
 								</span>
 								<span class="ml-auto flex gap-2">
 									<Button size="sm" variant="outline" onclick={() => restore(e)}>Restore</Button>

@@ -93,6 +93,8 @@ pub struct PreferencesRow {
     pub default_segment_size: i32,
     pub default_progression: Progression,
     pub default_require_alphabetical: bool,
+    /// Whether showing an answer marks it correct (else missed) until toggled.
+    pub reveal_correct: bool,
     pub changed_at: DateTime<Utc>,
     pub changed_by_device_id: Option<Uuid>,
     pub bindings_changed_at: DateTime<Utc>,
@@ -324,7 +326,7 @@ async fn preferences(conn: &mut PgConnection, user: Uuid, floor: i64, ceil: i64)
         r#"SELECT default_clear_threshold, leave_value_decimals, anagram_show_definitions, anagram_show_hooks,
                   anagram_answer_mode AS "anagram_answer_mode: AnswerMode", default_segment_size,
                   default_progression AS "default_progression: Progression", default_require_alphabetical,
-                  changed_at, changed_by_device_id, bindings_changed_at, bindings_device_id, updated_seq
+                  reveal_correct, changed_at, changed_by_device_id, bindings_changed_at, bindings_device_id, updated_seq
            FROM user_preferences WHERE user_id = $1 AND updated_seq > $2 AND updated_seq <= $3"#,
         user,
         floor,
@@ -351,6 +353,7 @@ async fn preferences(conn: &mut PgConnection, user: Uuid, floor: i64, ceil: i64)
         default_segment_size: p.default_segment_size,
         default_progression: p.default_progression,
         default_require_alphabetical: p.default_require_alphabetical,
+        reveal_correct: p.reveal_correct,
         changed_at: p.changed_at,
         changed_by_device_id: p.changed_by_device_id,
         bindings_changed_at: p.bindings_changed_at,
