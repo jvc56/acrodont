@@ -21,6 +21,7 @@ export const DEFAULT_BINDINGS: Binding[] = [
 	binding('show_next', 'mouse_button', 'left'),
 	binding('show_next', 'key', 'Space'),
 	binding('show_next', 'key', 'Comma'),
+	binding('show_next', 'key', 'Enter'),
 	binding('toggle_grade', 'mouse_button', 'right'),
 	binding('toggle_grade', 'key', 'KeyX'),
 	binding('toggle_grade', 'key', 'KeyM'),

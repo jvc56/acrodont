@@ -87,6 +87,9 @@
 		<SettingRow label="Show the status bar below the quiz" info={INFO.status_bar} for="display-status-bar">
 			<input id="display-status-bar" type="checkbox" checked={!d.status_bar_hidden} onchange={(e) => display.set({ status_bar_hidden: !e.currentTarget.checked })} />
 		</SettingRow>
+		<SettingRow label="Show how many anagrams are found in typed mode" info={INFO.found_count} for="display-found-count">
+			<input id="display-found-count" type="checkbox" checked={d.show_found_count} onchange={(e) => display.set({ show_found_count: e.currentTarget.checked })} />
+		</SettingRow>
 	</fieldset>
 	<fieldset class="grid gap-2">
 		<legend class="mb-1 font-medium">Repeated presses</legend>

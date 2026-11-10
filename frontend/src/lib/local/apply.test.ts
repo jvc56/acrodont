@@ -57,6 +57,7 @@ async function seed(db: UserDb, s: Setup) {
 		id: s.cascade_id,
 		name: 'test',
 		quiz_type: 'anagram',
+		answer_mode: 'flashcard',
 		lexicon: 'EN-FIX',
 		letter_distribution: 'english',
 		clear_threshold: s.threshold ?? 80,

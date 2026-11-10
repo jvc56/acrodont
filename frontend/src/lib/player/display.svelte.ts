@@ -1,7 +1,7 @@
 // How the player looks and responds on this device: the question's and the
 // answers' typefaces, sizes and letter spacing, how far down the question
 // sits, the grade border's width, whether the desktop player's menu and status
-// bar are hidden, and the repeat guard against an accidental double press.
+// bar are hidden, whether typed mode's found count shows, and the repeat guard against an accidental double press.
 // Kept in the user's `meta` store, per device and user like the other `meta`
 // values, and never synced: what suits a laptop is wrong on a phone.
 //
@@ -51,6 +51,7 @@ export function defaultDisplay(): Display {
 		border_correct: false,
 		border_missed: true,
 		status_bar_hidden: false,
+		show_found_count: false,
 		version: DISPLAY_VERSION
 	};
 }
@@ -110,6 +111,7 @@ export function normalizeDisplay(stored: Stored | undefined): Display {
 		border_correct: d.border_correct === undefined ? false : !!d.border_correct,
 		border_missed: d.border_missed === undefined ? true : !!d.border_missed,
 		status_bar_hidden: !!d.status_bar_hidden,
+		show_found_count: !!d.show_found_count,
 		version: DISPLAY_VERSION
 	};
 }

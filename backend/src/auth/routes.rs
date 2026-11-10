@@ -300,14 +300,15 @@ async fn create_user(
     )
     .execute(&mut *tx)
     .await?;
-    // Show / Next: left click, Space or comma. Toggle grade: right click, X
-    // or M. Previous: middle click, Backspace or J (PLAN.md § Preferences).
-    // Each action's three is the most it can hold.
+    // Show / Next: left click, Space, comma or Enter. Toggle grade: right
+    // click, X or M. Previous: middle click, Backspace or J (PLAN.md §
+    // Preferences). An action can hold any number more.
     sqlx::query!(
         "INSERT INTO user_input_bindings (user_id, action, slot, kind, code) VALUES
             ($1, 'show_next',    0, 'mouse_button', 'left'),
             ($1, 'show_next',    1, 'key',          'Space'),
             ($1, 'show_next',    2, 'key',          'Comma'),
+            ($1, 'show_next',    3, 'key',          'Enter'),
             ($1, 'toggle_grade', 0, 'mouse_button', 'right'),
             ($1, 'toggle_grade', 1, 'key',          'KeyX'),
             ($1, 'toggle_grade', 2, 'key',          'KeyM'),

@@ -57,6 +57,8 @@
 	let dist = $state<Distribution | null>(null);
 	let root = $state<GroupState>(newGroup('and', [newRow('length', 'anagram', null)]));
 	let threshold = $state(80);
+	/** Flashcard or typed: the cascade's own, prefilled from the account default. */
+	let answerMode = $state<'flashcard' | 'typed'>('flashcard');
 	let cascadeCount = $state(0);
 	let options = $state<QuizOptions>({ ...DEFAULT_OPTIONS });
 	let name = $state('');
@@ -102,6 +104,7 @@
 			const p = await preferencesView(db);
 			const metaCap = (await getMeta(db, 'server')).max_quiz_questions;
 			threshold = p.default_clear_threshold;
+			answerMode = p.anagram_answer_mode;
 			options = {
 				segment_size: clampPrefill(p.default_segment_size, metaCap),
 				progression: p.default_progression,
@@ -171,6 +174,7 @@
 			segment_size: options.segment_size,
 			progression: options.progression,
 			require_alphabetical: options.require_alphabetical,
+			answer_mode: answerMode,
 			filters: wire.tree
 		};
 		try {
@@ -369,6 +373,18 @@
 				<Input id="threshold" type="number" min="1" max="100" bind:value={threshold} />
 				<p class="text-xs text-muted-foreground">Score at least this much on a quiz to clear it.</p>
 			</div>
+			{#if quizType === 'anagram'}
+				<div class="grid max-w-xs gap-1">
+					<div class="flex items-center gap-1.5">
+						<Label for="answer-mode">Answer mode</Label>
+						<InfoTip text={INFO.answer_mode} />
+					</div>
+					<select id="answer-mode" class="rounded border bg-background px-2 py-1" bind:value={answerMode}>
+						<option value="flashcard">Flashcard</option>
+						<option value="typed">Typed</option>
+					</select>
+				</div>
+			{/if}
 			<QuizOptionsForm
 				bind:options
 				questionCount={preview?.count ?? null}

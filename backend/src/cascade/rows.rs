@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use super::order::from_i64;
 use crate::search::wire::QuizType;
+use crate::sync::prefs::AnswerMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
@@ -68,6 +69,8 @@ pub struct CascadeRow {
     pub segment_size: i32,
     pub progression: Progression,
     pub require_alphabetical: bool,
+    /// Flashcard or typed: an Anagram cascade's own, inert in the other types.
+    pub answer_mode: AnswerMode,
     pub options_changed_at: DateTime<Utc>,
     #[serde(with = "seq_text")]
     pub options_seq: i64,
@@ -125,7 +128,7 @@ pub struct QuizRow {
 
 pub const CASCADE_SELECT: &str = r#"
     SELECT c.id, c.name, c.quiz_type, l.name AS lexicon, d.name AS letter_distribution,
-           c.clear_threshold, c.segment_size, c.progression, c.require_alphabetical,
+           c.clear_threshold, c.segment_size, c.progression, c.require_alphabetical, c.answer_mode,
            c.options_changed_at, c.options_seq, c.options_device_id, c.question_count, c.depth,
            c.peak_depth, c.attempts_since_completion, c.created_at, c.last_activity_at,
            c.completed_at, c.trashed_at, c.updated_seq

@@ -72,7 +72,7 @@ export function mayNotReceive(s: Stroke): boolean {
 
 /**
  * Binding a stroke to an action: a stroke belongs to one action, so it moves
- * from any other (`moved` names that one); at most three per action.
+ * from any other (`moved` names that one). An action holds any number.
  */
 export function bind(bindings: Binding[], action: Action, s: Stroke): { bindings: Binding[]; moved: Action | null; refused: boolean } {
 	if (s.kind === 'key' && s.code === 'Escape') return { bindings, moved: null, refused: true };
@@ -83,7 +83,6 @@ export function bind(bindings: Binding[], action: Action, s: Stroke): { bindings
 		// Every action must keep at least one binding.
 		return { bindings, moved: null, refused: true };
 	}
-	if (rest.filter((b) => b.action === action).length >= 3) return { bindings, moved: null, refused: true };
 	return { bindings: [...rest, { action, ...s }], moved: existing ? existing.action : null, refused: false };
 }
 

@@ -19,6 +19,8 @@ export interface CascadeRow {
 	segment_size: number;
 	progression: Progression;
 	require_alphabetical: boolean;
+	/** Flashcard or typed, the cascade's own (an Anagram cascade's; inert in the others). */
+	answer_mode: AnswerMode;
 	options_changed_at: string;
 	options_seq: number;
 	options_device_id: string;
@@ -138,12 +140,15 @@ export interface Binding {
 	meta: boolean;
 }
 
+export type AnswerMode = 'flashcard' | 'typed';
+
 export interface PreferencesRow {
 	default_clear_threshold: number;
 	leave_value_decimals: number;
 	anagram_show_definitions: boolean;
 	anagram_show_hooks: boolean;
-	anagram_answer_mode: 'flashcard' | 'typed';
+	/** The answer mode new Anagram cascades start with; each cascade keeps its own. */
+	anagram_answer_mode: AnswerMode;
 	default_segment_size: number;
 	default_progression: Progression;
 	default_require_alphabetical: boolean;

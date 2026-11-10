@@ -41,6 +41,12 @@ export async function fetchCard(db: UserDb, cascadeId: string, idx: number, ahea
 	await (downloads ?? new DownloadManager(db)).fetchForPlayer(cascadeId, idx, ahead);
 }
 
+/** The cascade's tile distribution for typed mode, in whichever tab the player is (online only). */
+export async function fetchDistribution(db: UserDb, cascadeId: string) {
+	if (typeof navigator !== 'undefined' && !navigator.onLine) throw new Error('offline');
+	await (downloads ?? new DownloadManager(db)).distributionForPlayer(cascadeId);
+}
+
 /** A player action; this tab's background downloads let it go first (DownloadManager.whilePlayerActs). */
 export function playerActs<T>(fn: () => Promise<T>): Promise<T> {
 	return downloads ? downloads.whilePlayerActs(fn) : fn();

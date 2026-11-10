@@ -69,6 +69,7 @@ async fn register_creates_user_preferences_and_bindings(pool: sqlx::PgPool) {
         ("show_next", 0, "mouse_button", "left"),
         ("show_next", 1, "key", "Space"),
         ("show_next", 2, "key", "Comma"),
+        ("show_next", 3, "key", "Enter"),
         ("toggle_grade", 0, "mouse_button", "right"),
         ("toggle_grade", 1, "key", "KeyX"),
         ("toggle_grade", 2, "key", "KeyM"),

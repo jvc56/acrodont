@@ -151,7 +151,7 @@ fn cascade_body(filters: Value) -> Value {
     json!({
         "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
         "at": "2026-01-01T00:00:00Z", "name": "Scale", "lexicon": "SCALE", "quiz_type": "anagram",
-        "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false,
+        "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false, "answer_mode": "flashcard",
         "filters": filters,
     })
 }

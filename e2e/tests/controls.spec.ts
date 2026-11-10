@@ -62,9 +62,8 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await at(page, 2);
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 
-	// Rebind Toggle grade to the wheel and to Shift+T on the Account page: right
-	// click and M make way, since an action holds at most three bindings (and
-	// starts with three), and X stays bound for the typed-mode check below.
+	// Rebind Toggle grade to the wheel and to Shift+T on the Account page, in
+	// place of right click and M; X stays bound for the typed-mode check below.
 	await page.goto('/account');
 	const toggle = section(page, 'Toggle grade');
 	for (const name of [/^Right click/, /^M/]) {
@@ -80,11 +79,6 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 		await page.keyboard.press('Shift+KeyT');
 	});
 	await expect(page.getByText('Shift+T')).toBeVisible();
-	// Previous starts full (middle click, Backspace, J): J makes way, which also
-	// gives the Escape check below an Add binding button (every other action is full).
-	const previous = section(page, 'Previous');
-	await previous.getByRole('listitem').filter({ hasText: /^J/ }).getByRole('button', { name: 'Remove binding' }).click();
-	await expect(previous.getByRole('listitem').filter({ hasText: /^J/ })).toHaveCount(0);
 	// Escape cancels capture instead of being bound.
 	await page.getByRole('button', { name: 'Add binding' }).first().click();
 	await page.keyboard.press('Escape');
@@ -95,9 +89,12 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	});
 	await expect(page.getByText(/Space moved from Show \/ Next\./)).toBeVisible();
 	// A binding can't be removed from an action that has only one: Show / Next
-	// keeps left click and comma once Space has moved; comma goes first.
+	// keeps left click, comma and Enter once Space has moved; comma and Enter go first.
 	const show = section(page, 'Show / Next');
-	await show.getByRole('listitem').filter({ hasText: /^,/ }).getByRole('button', { name: 'Remove binding' }).click();
+	for (const name of [/^,/, /^Enter/]) {
+		await show.getByRole('listitem').filter({ hasText: name }).getByRole('button', { name: 'Remove binding' }).click();
+		await expect(show.getByRole('listitem').filter({ hasText: name })).toHaveCount(0);
+	}
 	await expect(show.getByRole('button', { name: 'Remove binding' })).toHaveCount(1);
 	await show.getByRole('button', { name: 'Remove binding' }).click();
 	await expect(show.getByRole('button', { name: 'Remove binding' })).toHaveCount(1);
@@ -140,7 +137,7 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await expect(section(page, 'Previous').getByRole('listitem').filter({ hasText: /^Ctrl\+Backspace/ })).toBeVisible();
 	await page.goto(player);
 	await at(page, 2);
-	await playerPref(page, 'Anagram answer mode', 'typed');
+	await playerPref(page, 'Answer mode for this cascade', 'typed');
 	const input = page.getByLabel('Type an answer');
 	await input.focus();
 	await page.keyboard.press('KeyX');

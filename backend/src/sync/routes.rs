@@ -119,8 +119,8 @@ fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Reques
             let target = if op_type == "set_cascade_options" { "cascade_id" } else { "quiz_id" };
             for k in m.keys() {
                 let allowed = ["id", "device_seq", "seen_seq", "at", "type", target, "segment_size", "progression", "require_alphabetical"];
-                // The clear threshold is the cascade's alone, never a quiz's.
-                let threshold = op_type == "set_cascade_options" && k == "clear_threshold";
+                // The clear threshold and answer mode are the cascade's alone, never a quiz's.
+                let threshold = op_type == "set_cascade_options" && (k == "clear_threshold" || k == "answer_mode");
                 if !allowed.contains(&k.as_str()) && !threshold {
                     return Err(bad(&format!("{op_type} carries only the fields that changed; {k} is not one")));
                 }

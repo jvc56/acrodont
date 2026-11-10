@@ -32,7 +32,7 @@ test('answers gone, questions kept; a download stopped part way', async ({ page,
 	const player = await createCascade(page, { name: 'Evicted' });
 	await availableOffline(page, 'Evicted');
 	await page.goto(player);
-	await playerPref(page, 'Anagram answer mode', 'typed');
+	await playerPref(page, 'Answer mode for this cascade', 'typed');
 	await evictAnswers(page);
 	await context.setOffline(true);
 	await page.goto(player);
@@ -72,7 +72,7 @@ test('answers gone, questions kept; a download stopped part way', async ({ page,
 	await page.goto(partial);
 	await expect(page.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
 	// Flashcards again: in typed mode Space would type into the answer rather than move on.
-	await playerPref(page, 'Anagram answer mode', 'flashcard');
+	await playerPref(page, 'Answer mode for this cascade', 'flashcard');
 	for (let i = 0; i < 2; i++) {
 		await press(page, 'Space');
 		await press(page, 'Space');

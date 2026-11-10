@@ -800,6 +800,11 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         None => None,
         Some(v) => Some(rules::check_clear_threshold(v.as_i64().ok_or(Reason::Invalid)?)?),
     };
+    // Flashcard or typed, the cascade's alone like the threshold.
+    let answer_mode: Option<prefs::AnswerMode> = match op.body.get("answer_mode") {
+        None => None,
+        Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| OpError::Rejected(Reason::Invalid))?),
+    };
     let at = clamp(ctx, at);
     if !options_win(ctx, op, c.options_device_id, c.options_seq, c.options_changed_at, at) {
         return Err(OpError::Rejected(Reason::Stale));
@@ -808,7 +813,8 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         "UPDATE cascades SET segment_size = coalesce($2, segment_size), progression = coalesce($3, progression),
                              require_alphabetical = coalesce($4, require_alphabetical), options_changed_at = $5,
                              options_seq = $6, options_device_id = $7, updated_seq = $6,
-                             clear_threshold = coalesce($8, clear_threshold)
+                             clear_threshold = coalesce($8, clear_threshold),
+                             answer_mode = coalesce($9, answer_mode)
          WHERE id = $1",
         id,
         f.segment_size.map(|s| s as i32),
@@ -818,6 +824,7 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         ctx.seq,
         ctx.device,
         threshold.map(|t| t as i16),
+        answer_mode as Option<prefs::AnswerMode>,
     )
     .execute(conn)
     .await?;
