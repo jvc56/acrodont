@@ -57,7 +57,7 @@ export function uploadFile(
 			resolve({
 				ok: false,
 				status: 0,
-				errors: [{ line: null, message: 'Could not reach Wordfall.' }],
+				errors: [{ line: null, message: 'Could not reach Acrodont.' }],
 				total: 1,
 				retryAfter: null
 			});

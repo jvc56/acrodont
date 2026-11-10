@@ -5,12 +5,12 @@
 // and nothing here calls indexedDB.databases(), which Safari and Firefox lack.
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from 'idb';
 
-export const UNSCOPED_DB = 'wordfall';
+export const UNSCOPED_DB = 'acrodont';
 export const POINTER_KEY = 'signed_in';
-export const SIGNED_IN_CHANNEL = 'wordfall-signed-in';
+export const SIGNED_IN_CHANNEL = 'acrodont-signed-in';
 
 export function userDbName(userId: string): string {
-	return `wordfall-user-${userId}`;
+	return `acrodont-user-${userId}`;
 }
 
 export interface AccountRow {

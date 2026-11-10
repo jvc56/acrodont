@@ -3,12 +3,12 @@
 // - JSON bodies are sent as application/json (the server answers 415 otherwise).
 // - Every cookie-authenticated write double-submits the CSRF cookie's token.
 // - Every authenticated request names the account the tab runs as in
-//   X-Wordfall-User (logout and GET /api/auth/me are exempt server-side).
+//   X-Acrodont-User (logout and GET /api/auth/me are exempt server-side).
 // - 429 and 503 carry Retry-After, which every caller honours.
 
-export const CSRF_COOKIE = 'wordfall_csrf'; // PQ-002
+export const CSRF_COOKIE = 'acrodont_csrf'; // PQ-002
 export const CSRF_HEADER = 'X-CSRF-Token'; // PQ-002
-export const USER_HEADER = 'X-Wordfall-User';
+export const USER_HEADER = 'X-Acrodont-User';
 
 export interface FieldError {
 	field: string;
@@ -45,7 +45,7 @@ export function readCookie(name: string): string | null {
 
 let boundUserId: string | null = null;
 
-/** The account this tab runs as; sent as X-Wordfall-User. */
+/** The account this tab runs as; sent as X-Acrodont-User. */
 export function bindUser(userId: string | null) {
 	boundUserId = userId;
 }
@@ -56,7 +56,7 @@ export function boundUser(): string | null {
 
 export interface RequestOptions {
 	body?: unknown;
-	/** Send X-Wordfall-User (default true when a user is bound). */
+	/** Send X-Acrodont-User (default true when a user is bound). */
 	bindUser?: boolean;
 	signal?: AbortSignal;
 	headers?: Record<string, string>;

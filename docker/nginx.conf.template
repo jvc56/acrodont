@@ -3,22 +3,22 @@
 # REAL_IP_FROM and HSTS. frontend/src/lib/nginx-config.test.ts pins the rules
 # below that production taught birdtest (BIRDTEST_LESSONS_PLAN.md EDGE-1..4).
 
-map $request_uri $wordfall_hsts { default "${HSTS}"; }
+map $request_uri $acrodont_hsts { default "${HSTS}"; }
 
 # The export token is single-use and short-lived, but it need not sit in the
 # access log either: log export requests without their query string.
-map $request_uri $wordfall_logged_uri {
+map $request_uri $acrodont_logged_uri {
     "~^(?<path>/api/cascades/[^/?]+/export)\?" "$path?…";
     default $request_uri;
 }
-log_format wordfall '$remote_addr - $remote_user [$time_local] "$request_method $wordfall_logged_uri $server_protocol" '
+log_format acrodont '$remote_addr - $remote_user [$time_local] "$request_method $acrodont_logged_uri $server_protocol" '
                     '$status $body_bytes_sent "$http_referer" "$http_user_agent"';
 
 server {
     listen 80;
     server_name _;
     root /usr/share/nginx/html;
-    access_log /var/log/nginx/access.log wordfall;
+    access_log /var/log/nginx/access.log acrodont;
 
     # Longer than the ALB's idle_timeout (infra/alb.tf: 120 s). At the image's
     # 65 s Nginx closed pooled connections the ALB still thought open, and a
@@ -47,10 +47,10 @@ server {
     gzip_vary on;
     gzip_proxied any;
 
-    include /etc/nginx/conf.d/wordfall-headers.inc;
+    include /etc/nginx/conf.d/acrodont-headers.inc;
 
     location /api/ {
-        include /etc/nginx/conf.d/wordfall-headers.inc;
+        include /etc/nginx/conf.d/acrodont-headers.inc;
         gzip off;
         proxy_pass http://${BACKEND_UPSTREAM};
         proxy_http_version 1.1;
@@ -64,18 +64,18 @@ server {
     }
 
     location = /health {
-        include /etc/nginx/conf.d/wordfall-headers.inc;
+        include /etc/nginx/conf.d/acrodont-headers.inc;
         proxy_pass http://${BACKEND_UPSTREAM};
     }
 
     # New app versions must be picked up.
     location = /service-worker.js {
-        include /etc/nginx/conf.d/wordfall-headers.inc;
+        include /etc/nginx/conf.d/acrodont-headers.inc;
         add_header Cache-Control "no-cache" always;
     }
 
     location = /index.html {
-        include /etc/nginx/conf.d/wordfall-headers.inc;
+        include /etc/nginx/conf.d/acrodont-headers.inc;
         add_header Cache-Control "no-cache" always;
     }
 
@@ -84,13 +84,13 @@ server {
     # Not `always`: that put a year's `immutable` on the 404 too, and a browser
     # kept a missing chunk missing through a rollback.
     location /_app/immutable/ {
-        include /etc/nginx/conf.d/wordfall-headers.inc;
+        include /etc/nginx/conf.d/acrodont-headers.inc;
         try_files $uri =404;
         add_header Cache-Control "public, max-age=31536000, immutable";
     }
 
     location / {
-        include /etc/nginx/conf.d/wordfall-headers.inc;
+        include /etc/nginx/conf.d/acrodont-headers.inc;
         add_header Cache-Control "no-cache" always;
         try_files $uri $uri/ /index.html;
     }

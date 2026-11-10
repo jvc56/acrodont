@@ -1,4 +1,4 @@
-# Lessons from birdtest: a plan for wordfall
+# Lessons from birdtest: a plan for acrodont
 
 **Date:** 2026-11-08
 **Status:** implemented on 2026-11-09, apart from the steps that need an AWS
@@ -15,7 +15,7 @@ these extra cost savings on top of section 2:
 | Change | Why it is safe at this scale | Saves |
 |---|---|---|
 | App task 0.5 vCPU / 2 GiB (not 1 vCPU / 4 GB) | With 50 accounts the server is idle; `EXPORT_CONCURRENCY=1` bounds memory to the catalog plus one export; `SEARCH_TIMEOUT_MS` raised to 4 s for the half core | ~$21 → see next row |
-| **Fargate Spot** for the app task (`use_fargate_spot`, default true) | Wordfall is local-first: studying never needs the server and sync retries, so a Spot interruption's minute or two without the API goes unnoticed. Birdtest rejected Spot only because its API is its product | ~$21 → ~$7 |
+| **Fargate Spot** for the app task (`use_fargate_spot`, default true) | Acrodont is local-first: studying never needs the server and sync retries, so a Spot interruption's minute or two without the API goes unnoticed. Birdtest rejected Spot only because its API is its product | ~$21 → ~$7 |
 | `MAX_ACCOUNTS=50` closes registration | Bounds database growth and the SES bounce rate a visitor could drive | — |
 | `db.t4g.micro`, 20 GiB, 7-day PITR | As COST-3 | ~$53 → ~$14 |
 
@@ -67,14 +67,14 @@ deploy, backup and ops tooling. It was not done; it is the owner's call.
 against a Postgres 16 with a non-superuser master), and SES. The operator
 scripts are exercised end to end against fakes in `make ops-check`.
 **Sources:**
-- birdtest at `58762a0`. It has been live since 2026-10-05/06, on the same stack as wordfall: Rust/Axum, a SvelteKit SPA behind Nginx, Postgres 16 on RDS, ECS Fargate, an ALB, SES, Terraform and Playwright.
+- birdtest at `58762a0`. It has been live since 2026-10-05/06, on the same stack as acrodont: Rust/Axum, a SvelteKit SPA behind Nginx, Postgres 16 on RDS, ECS Fargate, an ALB, SES, Terraform and Playwright.
 - birdtest's `scripts/`, `infra/`, `COST_REDUCTION_PLAN.md`, `LAUNCH_PLAN.md`, the `UPDATES_PLAN_*.md` files, `RUNBOOK.md`, `TESTING.md`, the `KL-*` known limits in `PLAN.md`, and its 434 commits.
-- wordfall at `0c1c6a3`: Phase 8 is prepared, and no AWS account has been applied yet.
+- acrodont at `0c1c6a3`: Phase 8 is prepared, and no AWS account has been applied yet.
 
 ## How to read this
 
 Each item has four parts:
-- **Problem:** what is wrong or missing in wordfall today, and what birdtest learned about it.
+- **Problem:** what is wrong or missing in acrodont today, and what birdtest learned about it.
 - **Options:** the possible solutions.
 - **Recommendation:** the one to pick.
 - **Effort:** S (an hour or two), M (a day), or L (several days).
@@ -87,9 +87,9 @@ Priorities:
 | **P1** | Do before real users arrive. |
 | **P2** | Do after launch, or when convenient. |
 
-Birdtest found most of its infrastructure bugs in two ways: 33 automated audit passes before launch, and its first real applies and deploys. The bugs below that wordfall shares are the cheapest to fix before wordfall's first apply.
+Birdtest found most of its infrastructure bugs in two ways: 33 automated audit passes before launch, and its first real applies and deploys. The bugs below that acrodont shares are the cheapest to fix before acrodont's first apply.
 
-Section 13 lists the things that look like they should come over from birdtest but should not. Section 14 lists what wordfall already does right, so you can see it was checked.
+Section 13 lists the things that look like they should come over from birdtest but should not. Section 14 lists what acrodont already does right, so you can see it was checked.
 
 ---
 
@@ -149,11 +149,11 @@ Section 13 lists the things that look like they should come over from birdtest b
 
 **Problem.**
 
-Wordfall already has a `scripts/dev.py` (95 lines), a thin layer over `scripts/stack.py`. It runs `compose up -d --build`, registers and promotes a `dev` user, uploads the fixture catalog, opens the browser and exits.
+Acrodont already has a `scripts/dev.py` (95 lines), a thin layer over `scripts/stack.py`. It runs `compose up -d --build`, registers and promotes a `dev` user, uploads the fixture catalog, opens the browser and exits.
 
-Birdtest's `scripts/dev.py` (1,031 lines) is what made birdtest pleasant to develop. The features wordfall's lacks are these:
+Birdtest's `scripts/dev.py` (1,031 lines) is what made birdtest pleasant to develop. The features acrodont's lacks are these:
 
-| Birdtest dev.py does | Wordfall dev.py today |
+| Birdtest dev.py does | Acrodont dev.py today |
 |---|---|
 | Runs in the foreground: Ctrl-C stops everything, unless `--keep-up` | Detaches and exits; the stack runs until `--down` |
 | Opens the site **already signed in** (`/api/dev/login`, `--login-as USER`, `--no-login`) | Opens the site signed out and prints a password |
@@ -165,13 +165,13 @@ Birdtest's `scripts/dev.py` (1,031 lines) is what made birdtest pleasant to deve
 | Reads `.env`, so a port set there applies to both compose and the script (939c439) | Ignores `.env` |
 | Holds a lock so a second run cannot drop the database under the first (acb79dc) | No lock |
 | `--rebuild` is opt-in | Always builds. With cache mounts this is mostly incremental, but every restart pays for it |
-| Keeps running the background work production's scheduler would do | Not needed: wordfall's purge runs in-process |
+| Keeps running the background work production's scheduler would do | Not needed: acrodont's purge runs in-process |
 | Shares `scripts/seed.py` with the tests, so dev cannot drift from what the tests exercise | Already true: `stack.py` is shared, and it is the right design |
 
 **Options.**
 1. Leave dev.py as it is and document workflows in the README.
-2. Port birdtest's dev.py wholesale. Most of it is worker and MAGPIE plumbing that wordfall does not have (section 13).
-3. Grow wordfall's dev.py into a supervisor with wordfall-shaped features. Keep `stack.py` as the one definition of "a working Wordfall", and add the new capabilities to `stack.py` as entry points, so the e2e and scale suites can use them too.
+2. Port birdtest's dev.py wholesale. Most of it is worker and MAGPIE plumbing that acrodont does not have (section 13).
+3. Grow acrodont's dev.py into a supervisor with acrodont-shaped features. Keep `stack.py` as the one definition of "a working Acrodont", and add the new capabilities to `stack.py` as entry points, so the e2e and scale suites can use them too.
 
 **Recommendation: option 3.**
 
@@ -187,7 +187,7 @@ Proposed command line. Existing flags stay; new ones are marked ★.
   --fresh ★                              a new deployment: --reset, then no user, no catalog; prints the
                                          first-admin steps for local and for production (OPS-1's prod-sql.sh)
   --real-catalog [DIR] ★                 also upload licensed files listed in DIR/manifest.json
-                                         (default $WORDFALL_CATALOG_DIR); never committed
+                                         (default $ACRODONT_CATALOG_DIR); never committed
   --scenario NAME ★ (repeatable)         seed a study state through the real API (see below)
   --users N ★                            N extra confirmed users (dev2, dev3, …) for multi-account work
   --login-as USER ★ / --no-login ★       which account the browser opens signed in as
@@ -199,7 +199,7 @@ Proposed command line. Existing flags stay; new ones are marked ★.
   --hot-reload, --project, --port, --env KEY=VALUE, --no-browser, --quiet, --down [--volumes]
 ```
 
-**Scenarios.** These are the wordfall equivalent of birdtest's job flags. Each one creates a state you would otherwise click your way into.
+**Scenarios.** These are the acrodont equivalent of birdtest's job flags. Each one creates a state you would otherwise click your way into.
 
 | Scenario | What it seeds |
 |---|---|
@@ -223,13 +223,13 @@ Proposed command line. Existing flags stay; new ones are marked ★.
 - **The foreground log watcher.** Stream the backend's JSON log, filtered:
   - errors and warnings;
   - `sync operation rejected` lines (the PLAN's divergence signal);
-  - for each console mail, a ready-to-click confirm or reset link built from `PUBLIC_URL` and the code. Birdtest prints a `grep` command for this; wordfall can print the link itself.
+  - for each console mail, a ready-to-click confirm or reset link built from `PUBLIC_URL` and the code. Birdtest prints a `grep` command for this; acrodont can print the link itself.
   - Show the "mail is in the log" hint only when `MAIL_BACKEND=console` (0cbbe1b).
 - **One lock per `--project`**, taken before any reset.
-- **Read `.env`** for `WORDFALL_PORT` and similar; a variable already set in the environment wins.
+- **Read `.env`** for `ACRODONT_PORT` and similar; a variable already set in the environment wins.
 - **After `--reset`**, keep today's reminder to clear the browser's site data. With `--two-devices`, delete the two profiles' directories for the user.
 
-**Dev sign-in needs more than birdtest's version.** Birdtest's `/api/dev/login` only sets a cookie, and that works because birdtest's SPA asks `/api/me` on load. Wordfall's SPA signs in from its own IndexedDB pointer (`frontend/src/lib/auth/session.svelte.ts`, `initSession`): a cookie it did not create through `login()` is ignored, and a cookie for a different user sets `needsLogin`. So the plan is:
+**Dev sign-in needs more than birdtest's version.** Birdtest's `/api/dev/login` only sets a cookie, and that works because birdtest's SPA asks `/api/me` on load. Acrodont's SPA signs in from its own IndexedDB pointer (`frontend/src/lib/auth/session.svelte.ts`, `initSession`): a cookie it did not create through `login()` is ignored, and a cookie for a different user sets `needsLogin`. So the plan is:
 - **Backend:** add `DEV_LOGIN` (accepts only `true` or `false`, default `false`). Startup **refuses** `DEV_LOGIN=true` together with `SECURE_COOKIES=true`, exactly as birdtest's `config.rs` does, so a misconfigured deployment cannot start. The route exists only when the flag is on, so production answers 404. Unit tests pin both rules.
 - **Endpoint:** `POST /api/dev/login {username}` answers with the same body as `/api/auth/login` and sets the same cookies.
 - **SPA:** a `/dev-login?username=…&next=…` page posts to it, then runs the same bookkeeping as `login()`. Refactor that into an `adoptSession(me)` helper so the two paths cannot drift. In production the POST gets 404 and the page says so.
@@ -238,7 +238,7 @@ Proposed command line. Existing flags stay; new ones are marked ★.
 
 **Real catalog files.** Your licensed files in `~/Dropbox/WordGameMisc` mostly need no changes, with one exception:
 - `CSW24.csv` (914,624 leaves, `leave,value`) already matches the leave values file format.
-- `csw24.tsv` has two columns (`word⇥definition`), and wordfall requires three (`word⇥playability⇥definition`, PLAN.md § Lexicon file). Either produce a three-column file once, or let the local manifest name a playability file that dev.py joins in. Keep the converter, the manifest and the files out of the repository.
+- `csw24.tsv` has two columns (`word⇥definition`), and acrodont requires three (`word⇥playability⇥definition`, PLAN.md § Lexicon file). Either produce a three-column file once, or let the local manifest name a playability file that dev.py joins in. Keep the converter, the manifest and the files out of the repository.
 
 **Implementation phases.** Each phase leaves dev.py working:
 
@@ -271,15 +271,15 @@ Its fixes:
 
 ### DEV-3. Compose publishes ports on every interface
 
-**Problem.** `docker-compose.yml` publishes `"${WORDFALL_PORT:-5173}:80"` and the Vite port without a host address, so they bind to `0.0.0.0`. Docker's published ports bypass the host firewall. Birdtest found its stack, with fixed credentials and a restored dump, open to the LAN (audit pass 23).
+**Problem.** `docker-compose.yml` publishes `"${ACRODONT_PORT:-5173}:80"` and the Vite port without a host address, so they bind to `0.0.0.0`. Docker's published ports bypass the host firewall. Birdtest found its stack, with fixed credentials and a restored dump, open to the LAN (audit pass 23).
 
 **Options.** Bind `127.0.0.1` only, or add a `BIND_HOST` variable that defaults to `127.0.0.1`.
 
-**Recommendation:** `"${BIND_HOST:-127.0.0.1}:${WORDFALL_PORT:-5173}:80"`, and the same for Vite. Set `BIND_HOST=0.0.0.0` when you deliberately want to test from a phone on the LAN.
+**Recommendation:** `"${BIND_HOST:-127.0.0.1}:${ACRODONT_PORT:-5173}:80"`, and the same for Vite. Set `BIND_HOST=0.0.0.0` when you deliberately want to test from a phone on the LAN.
 
 ### DEV-4. Cap build parallelism
 
-**Problem.** Birdtest's uncapped `cargo` and Docker Rust builds froze this same 16 GB machine (load 70+, a power cycle). The AWS SDK's release build alone needs several GB. Wordfall's Dockerfile and Makefile run cargo uncapped, and wordfall links the same AWS SDK.
+**Problem.** Birdtest's uncapped `cargo` and Docker Rust builds froze this same 16 GB machine (load 70+, a power cycle). The AWS SDK's release build alone needs several GB. Acrodont's Dockerfile and Makefile run cargo uncapped, and acrodont links the same AWS SDK.
 
 **Options.** Cap with build args, or rely on remembering to.
 
@@ -306,7 +306,7 @@ It added a third mail backend, `file`, which writes one file per message, named 
 
 ### DEV-6. `JOURNEYS.md`, a manual launch checklist
 
-**Problem.** Wordfall's Playwright journeys are thorough, but nothing walks a person through the whole site before launch.
+**Problem.** Acrodont's Playwright journeys are thorough, but nothing walks a person through the whole site before launch.
 
 Birdtest's `JOURNEYS.md` (1,337 lines) is a checkbox list run against a local `dev.py` instance:
 - Format: `- [ ] **Do** … **Expect** …`, with quoted UI text, refusals included, and one pass at 390 px phone width.
@@ -335,9 +335,9 @@ Birdtest's main cost lesson: **"Birdtest pays for always-on infrastructure, not 
 - Its 1 vCPU task ran at 1% CPU or less on 20,000–66,000 requests a day, with a lifetime peak of 45.5% and memory at 10.9%.
 - Its bill came in at about $148 a month against an estimate of $110–130, and was cut to about $94 without removing a feature.
 
-Wordfall's current Terraform defaults are much larger than birdtest's:
+Acrodont's current Terraform defaults are much larger than birdtest's:
 
-| Item | Wordfall today | Approx./month | Proposed | Approx./month |
+| Item | Acrodont today | Approx./month | Proposed | Approx./month |
 |---|---|---|---|---|
 | ECS tasks | 2 × (2 vCPU, 8 GB) | ~$170 | 1 × (1 vCPU, 4 GB): measure first (COST-1) | ~$43 |
 | NAT gateway, its EIP, data processing | yes | ~$37+ | none (COST-2) | $0 |
@@ -353,7 +353,7 @@ The figures are approximations at us-east-1 on-demand rates, using the per-unit 
 
 **Problem.**
 - `infra/variables.tf` sets 2 vCPU and 8 GB per task, and `desired_count = 2`. The 8 GB comes from "the catalog must fit", but the real catalog has never been loaded and measured.
-- Wordfall is local-first: the player reads only IndexedDB, so the server does even less per user than birdtest's. Its heavy moments are search (bounded by `SEARCH_CONCURRENCY`), cascade creation, exports, and catalog uploads.
+- Acrodont is local-first: the player reads only IndexedDB, so the server does even less per user than birdtest's. Its heavy moments are search (bounded by `SEARCH_CONCURRENCY`), cascade creation, exports, and catalog uploads.
 - The scale suite measured **ten concurrent exports with definitions at a peak of 2.4 GiB resident**. Memory needs are set by concurrent exports, and nothing limits them across users: `EXPORT_RATE_PER_MINUTE` is per user.
 - Two tasks also double every in-memory rate limit (the runbook notes the login limit becomes twenty failures a minute per username).
 
@@ -366,7 +366,7 @@ The figures are approximations at us-east-1 on-demand rates, using the per-unit 
 1. Run `dev.py --real-catalog --stats` (DEV-1) with the catalog you will launch with, for example CSW24 with leaves plus NWL. Record each index's `approx_bytes` and the backend's resident memory.
 2. Add a **global export semaphore** (`EXPORT_CONCURRENCY`, default 2) beside `search_permits` in `backend/src/app.rs`. Peak memory is then the catalog plus two exports, whatever the number of users. A waiting request gets `503` with `Retry-After`, as search does. This mirrors birdtest's KL-44 rule: bound heavy work with a semaphore.
 3. Set `task_memory` to (catalog + two exports) × 1.5, rounded up to a Fargate size: 3, 4, 5 or 6 GB at 1 vCPU. Set `task_cpu = 1024` and `search_concurrency = 1`.
-4. Set `desired_count = 1`. Wordfall can run two tasks during a deploy, so a single task still deploys with no gap (DEP-3). One task also makes the rate limits exact.
+4. Set `desired_count = 1`. Acrodont can run two tasks during a deploy, so a single task still deploys with no gap (DEP-3). One task also makes the rate limits exact.
 5. Add the CPU and **memory** alarms in MON-2, so the measurement is watched from then on.
 
 Losing AZ redundancy for the web tier is acceptable: RDS is single-AZ anyway, and Fargate replaces a failed task in a minute or two. Raise `desired_count` back to 2 only after a shared rate limiter exists.
@@ -416,7 +416,7 @@ Losing AZ redundancy for the web tier is acceptable: RDS is single-AZ anyway, an
 
 ### COST-5. Budget and anomaly alerts
 
-**Problem.** Wordfall has none.
+**Problem.** Acrodont has none.
 - Birdtest set its budget in the console and later changed it by CLI, so its settings now live only in a plan document.
 - It also found that AWS's default anomaly subscription ("$100 and 40%") would rarely fire on a $100 bill.
 
@@ -458,7 +458,7 @@ Prompts read from `/dev/tty`, so nothing piped in can answer them.
 3. Adopt birdtest's laptop `deploy.sh` with Terraform as the only deployer. Delete `deploy.yml` and the OIDC deploy role, or keep the role only for pushing images.
 
 **Recommendation: option 3.**
-- You already operate birdtest this way, and its `scripts/lib/ops.sh` (plan gate, tfvars handling, `/dev/tty` prompts, rollout wait) ports almost unchanged. Wordfall's version is simpler: one service, two containers, so always build both images.
+- You already operate birdtest this way, and its `scripts/lib/ops.sh` (plan gate, tfvars handling, `/dev/tty` prompts, rollout wait) ports almost unchanged. Acrodont's version is simpler: one service, two containers, so always build both images.
 - Keep `prod.tfvars` out of git and its authoritative copy in the state bucket, with birdtest's fetch-and-compare. That guard costs about 20 lines and protects against a second deployer, or yourself on a second machine.
 - Keep `APP_BUILD` monotonic. Today it is `github.run_number`; use `git rev-list --count HEAD`, which `stack.py`'s `app_build()` already uses locally. `MIN_APP_VERSION` compares against it, so it must never go backwards.
 
@@ -479,13 +479,13 @@ Prompts read from `/dev/tty`, so nothing piped in can answer them.
 
 ### DEP-3. ECS and target-group settings
 
-**Problem.** These are wordfall's current values next to what birdtest learned on real deploys:
+**Problem.** These are acrodont's current values next to what birdtest learned on real deploys:
 
-| Setting | Wordfall | Birdtest's lesson |
+| Setting | Acrodont | Birdtest's lesson |
 |---|---|---|
-| `deployment_minimum_healthy_percent` / `maximum_percent` | 50 / 100 with 2 tasks | With 1 task (COST-1) this would stop the only task first. Use **100 / 200**, so the new task serves before the old one drains. Wordfall can run two at once; birdtest cannot (section 13). |
+| `deployment_minimum_healthy_percent` / `maximum_percent` | 50 / 100 with 2 tasks | With 1 task (COST-1) this would stop the only task first. Use **100 / 200**, so the new task serves before the old one drains. Acrodont can run two at once; birdtest cannot (section 13). |
 | `deregistration_delay` | 30 | The 300 s default happens *before* SIGTERM, so a deploy stays slow long after the new task is healthy. Birdtest uses 10 (f2fda4c). 30 is fine for a rolling deploy; 10–15 makes deploys faster. |
-| Container `stopTimeout` | unset (30 s) | The 30 s default SIGKILLs graceful shutdown's in-flight work. Birdtest sets 120, Fargate's maximum. Wordfall's equivalents are a streaming export and a 300,000-row sync batch. |
+| Container `stopTimeout` | unset (30 s) | The 30 s default SIGKILLs graceful shutdown's in-flight work. Birdtest sets 120, Fargate's maximum. Acrodont's equivalents are a streaming export and a 300,000-row sync batch. |
 | `health_check_grace_period_seconds` | 300 | Without one, ECS killed tasks mid-migration. 300 is fine, but see MIG-4 for the real catalog's load time. |
 
 **Recommendation:**
@@ -496,8 +496,8 @@ Prompts read from `/dev/tty`, so nothing piped in can answer them.
 
 ### DEP-4. Rolling back
 
-**Problem.** Wordfall has no rollback procedure. A rollback has three requirements:
-1. The previous image must start on the **newer** schema. SQLx's migrator refuses by default: "migration N was previously applied but is missing in the resolved migrations". Birdtest's rollback crash-looped until it set `set_ignore_missing(true)` (`backend/src/db.rs:75`). Wordfall's `MIGRATOR.run(&db)` in `backend/src/app.rs:93` does not set it.
+**Problem.** Acrodont has no rollback procedure. A rollback has three requirements:
+1. The previous image must start on the **newer** schema. SQLx's migrator refuses by default: "migration N was previously applied but is missing in the resolved migrations". Birdtest's rollback crash-looped until it set `set_ignore_missing(true)` (`backend/src/db.rs:75`). Acrodont's `MIGRATOR.run(&db)` in `backend/src/app.rs:93` does not set it.
 2. Migrations must be additive, so old code can run against them (MIG-3).
 3. Terraform has to agree with whatever ECS is running after the rollback.
 
@@ -520,7 +520,7 @@ Prompts read from `/dev/tty`, so nothing piped in can answer them.
 
 **Problem.** `location /_app/immutable/` sends `Cache-Control "public, max-age=31536000, immutable" always`. With `always`, a **404** for a chunk is also cached as immutable for a year. A browser that asks for a chunk the current image does not have, during a deploy or a rollback, then keeps it missing even after the chunk comes back. Birdtest hit this (d73e67f) and removed `always` from that header.
 
-Wordfall's service worker precaches the build, which reduces the exposure, but its install fetches go through the same cache rules.
+Acrodont's service worker precaches the build, which reduces the exposure, but its install fetches go through the same cache rules.
 
 **Recommendation:**
 - Use `add_header Cache-Control "public, max-age=31536000, immutable";` without `always`.
@@ -547,7 +547,7 @@ Birdtest's `frontend/src/lib/nginxConfig.test.ts` (F-NGINX-1..3) parses the temp
 - the security headers.
 
 **Recommendation:**
-- Add `absolute_redirect off; server_tokens off;` and `Referrer-Policy: same-origin` to `wordfall-headers.inc`.
+- Add `absolute_redirect off; server_tokens off;` and `Referrer-Policy: same-origin` to `acrodont-headers.inc`.
 - Port the Vitest test. It should also read `idle_timeout` from `infra/alb.tf` and check that `client_max_body_size` covers `ADMIN_UPLOAD_MAX_BYTES`.
 
 ---
@@ -556,7 +556,7 @@ Birdtest's `frontend/src/lib/nginxConfig.test.ts` (F-NGINX-1..3) parses the temp
 
 ### MIG-1. A new migration can ship without being compiled in
 
-**Problem.** `sqlx::migrate!` embeds migration files at compile time. A new file under `backend/migrations/` with no Rust change leaves the crate "fresh" to cargo, so the binary ships without it. Birdtest shipped this (audit pass 15) and added `backend/build.rs` with `cargo:rerun-if-changed=migrations`, the build script SQLx's documentation recommends. Wordfall has no `build.rs`.
+**Problem.** `sqlx::migrate!` embeds migration files at compile time. A new file under `backend/migrations/` with no Rust change leaves the crate "fresh" to cargo, so the binary ships without it. Birdtest shipped this (audit pass 15) and added `backend/build.rs` with `cargo:rerun-if-changed=migrations`, the build script SQLx's documentation recommends. Acrodont has no `build.rs`.
 
 **Recommendation:** add the three-line `build.rs`.
 
@@ -579,7 +579,7 @@ A week after launch it stopped ("changing the DB is now more costly", 102fbdc) a
 - **A new enum or CHECK value is not additive**: ship the code that reads it one release before the code that writes it.
 - Prefer designs that need no schema change.
 
-Wordfall has an extra constraint birdtest does not: devices stay offline with an old app for up to `SYNC_RETENTION_DAYS` (90). Server-side schema changes must keep the sync API compatible for that long (PLAN.md § Deployment and Operations).
+Acrodont has an extra constraint birdtest does not: devices stay offline with an old app for up to `SYNC_RETENTION_DAYS` (90). Server-side schema changes must keep the sync API compatible for that long (PLAN.md § Deployment and Operations).
 
 **Options.**
 1. Follow PLAN.md exactly: append-only from the first `terraform apply`.
@@ -622,7 +622,7 @@ Before the first apply, take one last look at `0001` for anything you would late
 
 ### MON-2. Missing alarms
 
-**Problem.** Wordfall has four alarms:
+**Problem.** Acrodont has four alarms:
 - the dump is stale;
 - the dump shrank;
 - RDS free storage;
@@ -634,28 +634,28 @@ It has none of the ones birdtest needed once it was live. One of the existing fo
 
 | Alarm | Watches | Threshold | Notes |
 |---|---|---|---|
-| `wordfall-down` | ALB `HealthyHostCount`, Maximum | < 1 for 10 × 1 min | missing data is breaching. 10 minutes so a deploy never pages; send OK too |
-| `wordfall-api-5xx` | ALB `HTTPCode_ELB_5XX_Count` | ≥ 5 per 5 min, 3 periods | missing data not breaching. Would have caught EDGE-1 |
-| `wordfall-backend-cpu-high` | ECS service `CPUUtilization` | ≥ 85% for 15 min | |
-| `wordfall-backend-memory-high` ★ | ECS service `MemoryUtilization` | ≥ 85% for 10 min | **specific to wordfall**: the catalog lives in memory, so an OOM restart means a full reload |
-| `wordfall-db-cpu-high` | RDS `CPUUtilization` | ≥ 80% for 15 min | a burstable class in unlimited mode is billed for surplus rather than throttled, so the credit balance says little |
-| RDS event subscription | `low storage`, `failure`, `notification` | | replaces `wordfall-db-free-storage`; `notification` includes the allocation reaching 80% of the autoscaling ceiling |
-| `wordfall-deploy-failed` | EventBridge `SERVICE_DEPLOYMENT_FAILED` | | DEP-2 |
-| `wordfall-backup-failed` | EventBridge: backup task STOPPED with exit code ≠ 0 | | BAK-2 |
+| `acrodont-down` | ALB `HealthyHostCount`, Maximum | < 1 for 10 × 1 min | missing data is breaching. 10 minutes so a deploy never pages; send OK too |
+| `acrodont-api-5xx` | ALB `HTTPCode_ELB_5XX_Count` | ≥ 5 per 5 min, 3 periods | missing data not breaching. Would have caught EDGE-1 |
+| `acrodont-backend-cpu-high` | ECS service `CPUUtilization` | ≥ 85% for 15 min | |
+| `acrodont-backend-memory-high` ★ | ECS service `MemoryUtilization` | ≥ 85% for 10 min | **specific to acrodont**: the catalog lives in memory, so an OOM restart means a full reload |
+| `acrodont-db-cpu-high` | RDS `CPUUtilization` | ≥ 80% for 15 min | a burstable class in unlimited mode is billed for surplus rather than throttled, so the credit balance says little |
+| RDS event subscription | `low storage`, `failure`, `notification` | | replaces `acrodont-db-free-storage`; `notification` includes the allocation reaching 80% of the autoscaling ceiling |
+| `acrodont-deploy-failed` | EventBridge `SERVICE_DEPLOYMENT_FAILED` | | DEP-2 |
+| `acrodont-backup-failed` | EventBridge: backup task STOPPED with exit code ≠ 0 | | BAK-2 |
 | SES bounce / complaint, `mail-failed` | | | MAIL-2 |
 
-Keep the sync-rejection dashboard and its `error` alarm. Birdtest has nothing like them, and they are the right tool for wordfall's two-implementation design.
+Keep the sync-rejection dashboard and its `error` alarm. Birdtest has nothing like them, and they are the right tool for acrodont's two-implementation design.
 
 Optional (birdtest KL-90): log refused logins at `info` with a hashed username, so you can see whether the limiter is turning away guessers.
 
 ### MON-3. Nightly failures nobody sees
 
-**Problem.** Birdtest's nightly failed for **weeks** without anyone noticing: first a vanished `minio/mc` image, later seven nights or more in one tier. Its deploys did not gate on it. Wordfall's nightly `make test-scale` is the same shape.
+**Problem.** Birdtest's nightly failed for **weeks** without anyone noticing: first a vanished `minio/mc` image, later seven nights or more in one tier. Its deploys did not gate on it. Acrodont's nightly `make test-scale` is the same shape.
 
 **Recommendation:**
 - Add a final step to the scheduled job that opens or updates a GitHub issue on failure (`gh issue create`, or comment on an existing open one).
 - Have `deploy.sh` warn when the last nightly on `main` failed. A warning, not a refusal.
-- Pin base images by digest, or at least by full version. The vanished MinIO images show why `:latest` is a liability, and wordfall's `postgres:16` and `nginx:1.27-alpine` are moving tags.
+- Pin base images by digest, or at least by full version. The vanished MinIO images show why `:latest` is a liability, and acrodont's `postgres:16` and `nginx:1.27-alpine` are moving tags.
 
 ---
 
@@ -663,9 +663,9 @@ Optional (birdtest KL-90): log refused logins at `info` with a hashed username, 
 
 ### MAIL-1. A burst of registrations exceeds SES's send rate
 
-**Problem.** Wordfall sends each email in a task spawned after the response, with no limit on how fast. SES allows 1 message a second in the sandbox and typically 14 once production access is granted. Birdtest: "sent at once, a burst of registrations exceeded the rate and SES refused them". It added a bounded in-process queue drained at `MAIL_MAX_PER_SECOND`, a 30-second send timeout, and dropping of reset mails whose link would have expired before they went out.
+**Problem.** Acrodont sends each email in a task spawned after the response, with no limit on how fast. SES allows 1 message a second in the sandbox and typically 14 once production access is granted. Birdtest: "sent at once, a burst of registrations exceeded the rate and SES refused them". It added a bounded in-process queue drained at `MAIL_MAX_PER_SECOND`, a 30-second send timeout, and dropping of reset mails whose link would have expired before they went out.
 
-Wordfall's own design expects bursts. PLAN.md sizes `CATALOG_RATE_PER_MINUTE` for "a club or tournament room behind one address", and a room registering together is the same burst.
+Acrodont's own design expects bursts. PLAN.md sizes `CATALOG_RATE_PER_MINUTE` for "a club or tournament room behind one address", and a room registering together is the same burst.
 
 **Recommendation:**
 - Add a `MAIL_MAX_PER_SECOND` setting (Terraform variable, default 1; raise it to the account's rate after production access).
@@ -684,7 +684,7 @@ Wordfall's own design expects bursts. PLAN.md sizes `CATALOG_RATE_PER_MINUTE` fo
 
 ### MAIL-3. SES setup that Terraform does not cover
 
-**Problem.** Wordfall declares only the domain identity. Birdtest's launch steps also needed:
+**Problem.** Acrodont declares only the domain identity. Birdtest's launch steps also needed:
 - a custom MAIL FROM subdomain (`aws_sesv2_email_identity_mail_from_attributes`, with its MX and SPF records);
 - a `_dmarc` record;
 - production access, which took about a day and asks how bounces and complaints are handled. MAIL-2 is the answer.
@@ -713,7 +713,7 @@ Birdtest's launch-day rule: **do not announce before production access**, becaus
 **Options.** (a) Accept it and lock down the state bucket. (b) Reference the parameters by an ARN built from their names, and create them out of band.
 
 **Recommendation: (b), before the first apply.** That way there is no old state file holding the values to rotate. Concretely:
-- Build `arn:${partition}:ssm:${region}:${account}:parameter/wordfall/production/<NAME>` in a `locals` block.
+- Build `arn:${partition}:ssm:${region}:${account}:parameter/acrodont/production/<NAME>` in a `locals` block.
 - Use it in the execution role's policy and the task's `secrets`.
 - Have the runbook's one-time setup create the parameters with `aws ssm put-parameter --type SecureString`.
 
@@ -722,7 +722,7 @@ Birdtest's launch-day rule: **do not announce before production access**, becaus
 **Problem.**
 - **The runbook's command is broken.** It grants admin with `aws ecs execute-command … --command "psql \"$DATABASE_URL\""`. The double quotes expand `$DATABASE_URL` on the **operator's laptop**, where it is empty, and ECS Exec's `--command` is not run through a shell anyway.
 - **The session is not set to stay out of the logs.** The cluster has no `execute_command_configuration`, so sessions log through the container's awslogs driver, and a transcript would include anything echoed, `DATABASE_URL` among it. Birdtest set `logging = "NONE"`.
-- **It execs into the task serving users.** Wordfall needs Exec permissions on that task to do it.
+- **It execs into the task serving users.** Acrodont needs Exec permissions on that task to do it.
 
 **Recommendation:**
 - Set `execute_command_configuration { logging = "NONE" }` on the cluster.
@@ -742,7 +742,7 @@ Birdtest's launch-day rule: **do not announce before production access**, becaus
 
 Each now has a `validation` block. `infra/tests/variables.tftest.hcl` runs `terraform test` against a **mock provider with no credentials**: 6 plans that must pass and 44 that must be refused, in CI.
 
-Wordfall's `backup_region` description says "must differ from region", but no validation enforces it.
+Acrodont's `backup_region` description says "must differ from region", but no validation enforces it.
 
 **Recommendation.** Add validations for:
 - `backup_region != region`;
@@ -756,9 +756,9 @@ Add a small `variables.tftest.hcl` and run it in CI (CI-2).
 
 ### SEC-4. The hardening checklist birdtest wrote too late
 
-**Problem.** Birdtest's KL-63 and KL-64 list hardening it never got to. Wordfall can do it before launch, at almost no cost. Items marked ✓ are already true in wordfall.
+**Problem.** Birdtest's KL-63 and KL-64 list hardening it never got to. Acrodont can do it before launch, at almost no cost. Items marked ✓ are already true in acrodont.
 
-| Item | Wordfall |
+| Item | Acrodont |
 |---|---|
 | ALB `drop_invalid_header_fields = true` | missing |
 | Backups bucket policy denies `aws:SecureTransport = false` | missing |
@@ -777,7 +777,7 @@ Add a small `variables.tftest.hcl` and run it in CI (CI-2).
 
 ### OPS-1. Running SQL in production
 
-**Problem.** Wordfall's only way to run SQL in production is ECS Exec into a serving task, and the runbook's command for it is broken (SEC-2). The one-time setup also needs the **master** password to create roles, which RDS keeps in Secrets Manager. The task cannot read it, and the runbook does not say how to get it.
+**Problem.** Acrodont's only way to run SQL in production is ECS Exec into a serving task, and the runbook's command for it is broken (SEC-2). The one-time setup also needs the **master** password to create roles, which RDS keeps in Secrets Manager. The task cannot read it, and the runbook does not say how to get it.
 
 Birdtest has no bastion and no public RDS. It has an **ops task definition** (`infra/ops.tf`):
 - the `postgres:16` image, so `psql` and `pg_restore` match the server;
@@ -815,7 +815,7 @@ Also port `rotate-db-password.sh` (it writes SSM **first**, has `--resume`, and 
 
 **Problem.** Birdtest's launch plan collected the gotchas of a first apply:
 - **The RDS class** may not be orderable.
-- **The ACM certificate** must be *Issued* before the apply. Wordfall's Terraform creates and waits on it, so the apply blocks until the DNS records exist.
+- **The ACM certificate** must be *Issued* before the apply. Acrodont's Terraform creates and waits on it, so the apply blocks until the DNS records exist.
 - **Secrets** go in between two applies: first `desired_count = 0`, then the SSM values, then the real count.
 - **Terraform:** install from the release zip, since HashiCorp's apt repository fails on Ubuntu 20.04 with `NO_PUBKEY`. Pin one version for everyone. Keep state in a versioned bucket in a **different region** with `use_lockfile = true`, which needs 1.11+ and makes a DynamoDB table unnecessary. Run `terraform providers lock -platform=linux_amd64` so CI and the laptop agree.
 - **Zones:** pin the AZs the first apply chose into tfvars.
@@ -839,7 +839,7 @@ Also port `rotate-db-password.sh` (it writes SSM **first**, has `--resume`, and 
 
 ### BAK-2. A failed backup only alarms 36 hours later
 
-**Problem.** If `backup.py` exits non-zero, the only signal is `wordfall-no-dump-36h`, a day and a half later.
+**Problem.** If `backup.py` exits non-zero, the only signal is `acrodont-no-dump-36h`, a day and a half later.
 - Birdtest adds an EventBridge rule: backup task STOPPED with exit code ≠ 0 → SNS, so a failure is reported within minutes.
 - It also separates roles: the backup role can write but not read, and the drill role can read but not write, so no single compromised role can both read and replace backups.
 - Its KL-80: a script running as PID 1 in a container ignores SIGTERM unless it installs a handler, so ECS's StopTask SIGKILLs it without cleanup.
@@ -855,7 +855,7 @@ Also port `rotate-db-password.sh` (it writes SSM **first**, has `--resume`, and 
 
 ### CI-1. One serial CI job
 
-**Problem.** Wordfall's `ci.yml` runs `make test` in one job with a 120-minute timeout: unit, integration, six end-to-end stacks, and a seeding rerun, all serially. There is no `cargo clippy`.
+**Problem.** Acrodont's `ci.yml` runs `make test` in one job with a 120-minute timeout: unit, integration, six end-to-end stacks, and a seeding rerun, all serially. There is no `cargo clippy`.
 
 Birdtest's CI takes about 11.5 minutes:
 - separate lint, build, test, frontend, images, e2e, terraform and scripts jobs;
@@ -895,13 +895,13 @@ One note from its cost plan: run `fmt -check` on `git ls-files 'infra/*.tf'`, no
 - the lowest test tier that proves each phase;
 - a "Not in this plan" section.
 
-**Recommendation:** use the same template once wordfall is live. The Deploy column matters more for wordfall than for birdtest, because a sync API change also has to stay compatible with devices up to 90 days old.
+**Recommendation:** use the same template once acrodont is live. The Deploy column matters more for acrodont than for birdtest, because a sync API change also has to stay compatible with devices up to 90 days old.
 
 ### PROC-2. UX lessons from birdtest's first week
 
-These changes came from the owner and users once birdtest was live. They are cheap to check in wordfall now:
-- **Phone layout.** A three-row header became two rows. Tables wider than the screen became stacked blocks. Long names got `min-w-0 truncate` with a `title`. An e2e test at 393 px asserts nothing overflows. Wordfall's `touch.spec.ts` covers the player; add a no-overflow check for `/cascades`, `/trash`, `/account`, `/admin` and the builder.
-- **Plain wording.** The owner rewrote the site's text in their own words. User-facing names changed ("player", not "config") while URLs and API fields kept their old names. Plan one wording pass over wordfall's pages before launch.
+These changes came from the owner and users once birdtest was live. They are cheap to check in acrodont now:
+- **Phone layout.** A three-row header became two rows. Tables wider than the screen became stacked blocks. Long names got `min-w-0 truncate` with a `title`. An e2e test at 393 px asserts nothing overflows. Acrodont's `touch.spec.ts` covers the player; add a no-overflow check for `/cascades`, `/trash`, `/account`, `/admin` and the builder.
+- **Plain wording.** The owner rewrote the site's text in their own words. User-facing names changed ("player", not "config") while URLs and API fields kept their old names. Plan one wording pass over acrodont's pages before launch.
 - **Dates show the year.** Status uses an icon as well as a colour. Field errors appear in red under the field. Form validation matches the server's exactly.
 - **One control for one state.** Birdtest removed a separate "Activate" button once allocation became the only switch.
 - **Decide early who each page is for.** Birdtest made saved positions public a week after launch.
@@ -910,27 +910,27 @@ These changes came from the owner and users once birdtest was live. They are che
 
 ## 13. Looks applicable, but should not come over
 
-| Birdtest practice | Why it seems relevant | Why not for wordfall |
+| Birdtest practice | Why it seems relevant | Why not for acrodont |
 |---|---|---|
-| **A single backend task with stop-first deploys** (`minimum_healthy_percent = 0`, `desired_count` validated to 0..1) | Same stack, and wordfall is moving to one task (COST-1) | Birdtest holds correctness-critical state in process: dispatch holds, the scheduler, SSE subscribers, imports. Two instances would be wrong, so it accepts a 2–8 minute API gap per deploy. Wordfall was designed for several instances: advisory-locked purge, `LISTEN/NOTIFY` catalog reload, no SSE. So it should **roll** (100/200, DEP-3), with no gap. Copying birdtest's settings would add an outage to every deploy. |
-| **Splitting the frontend into its own ECS service** (8e7618a) | Birdtest says it made page deploys gapless | Birdtest split it *because* its backend deploys are stop-first. Wordfall's two-container task already rolls without a gap, so the split would add ~$9/month, a second target group and a second deploy unit for nothing. A frontend-only change will also restart the backend and reload the catalog, which is acceptable for a rolling deploy as long as MIG-4's startup budget holds. |
-| **ALB routes `/api/*` straight to the backend; compression moved into Axum** | Birdtest's gzip-in-Nginx didn't help production | That was a consequence of the split above. Wordfall's Nginx proxies `/api`, and the API already compresses in Axum, which is right. Take only EDGE-3 (static gzip, `/api` gzip off). |
-| **`/api/*` over HTTP answers 426 instead of redirecting** (KL-84) | It looks like general hygiene | It protects worker clients that send API keys in headers. Wordfall's only client is its own SPA, served over HTTPS with HSTS and Secure cookies, so a plain-HTTP API request carries no credential. The redirect is fine. |
-| **RDS master password set by hand, because managed rotation locked the service out** | Wordfall uses `manage_master_user_password = true` | Birdtest's service connects **as the master user**, so the 7-day rotation broke its fixed `DATABASE_URL`. Wordfall's app and dump use their own roles (`wordfall_app`, `wordfall_backup`), so rotating the master password is harmless and a security gain. Keep it. Just give OPS-1 a way to read the master secret for one-time setup. |
-| **The frequent scheduled builder, and the hourly-build cost fix** | The largest single saving in birdtest's cost plan | Wordfall has no scheduled compute besides the nightly dump, since the purge runs inside the backend. The only general lesson is that **Fargate bills at least a minute per task start**, so don't schedule small, frequent tasks. |
-| **Post-launch database resets** (`reset-prod-db.sh`, `--reset-db` in deploy, deleting dumps under Object Lock) | Birdtest needed them | Needed only because birdtest kept editing `0001` after going live. Under MIG-3 wordfall never resets production. Don't build the tooling, and don't give any role `s3:BypassGovernanceRetention`. |
-| **The `prod.tfvars` race check, a release log of tag pairs, `ops_path_components`** | They are part of `deploy.sh` | Partly. Keep the tfvars fetch-and-compare (DEP-1). Skip the per-service tag pairs and path-to-service mapping, since wordfall has one task definition, so a release is one tag. |
-| **Region-loss rebuild** (`name_suffix`, a `dr` workspace, a twice-yearly scratch-account drill) | Birdtest's DR is thorough | Far heavier than wordfall needs at launch. Keep only the cheap part, which wordfall already has: dumps in a second region. A region loss means a manual rebuild from the dumps. |
-| **Fake workers, MAGPIE pins, version floors, derived files, the GitHub data stand-in, worker windows, contributor identities** | They are most of birdtest's dev.py | Specific to birdtest's domain. Wordfall's equivalent of "seed a job" is "seed a cascade state" (DEV-1 scenarios). |
-| **MinIO and the S3 artifact bucket in the local stack** | Part of birdtest's compose | Wordfall stores nothing as files in v1: catalog uploads become rows. Take only the lesson about vanished images (MON-3). |
-| **Moving `sqlx::query!` to runtime queries plus tier-2 SQL tests** | Birdtest has no `.sqlx` offline data | Birdtest never used compile-checked queries, and two SQL bugs shipped because of it. Wordfall's compile-checked queries are better; don't copy birdtest here. |
-| **ARM (Graviton) rejected for floating-point reasons** | Looks like a rule to copy | Birdtest's reason (MAGPIE's float results must hash identically) doesn't apply to wordfall: its shuffles are integer SplitMix64, and leave values are rounded decimals. ARM Fargate would save ~20% of the task line. It is a reasonable later option, but it needs ARM builds in the deploy, so it isn't recommended now. |
-| **Its audit loop** (33 automated passes, `AUDIT_FINDINGS_N.md`) | It found most of birdtest's infra bugs | Worth one targeted pass on wordfall's `infra/`, `docker/` and `scripts/` after this plan lands, not a 33-pass loop. Most of what birdtest's audits found is already in this document. |
+| **A single backend task with stop-first deploys** (`minimum_healthy_percent = 0`, `desired_count` validated to 0..1) | Same stack, and acrodont is moving to one task (COST-1) | Birdtest holds correctness-critical state in process: dispatch holds, the scheduler, SSE subscribers, imports. Two instances would be wrong, so it accepts a 2–8 minute API gap per deploy. Acrodont was designed for several instances: advisory-locked purge, `LISTEN/NOTIFY` catalog reload, no SSE. So it should **roll** (100/200, DEP-3), with no gap. Copying birdtest's settings would add an outage to every deploy. |
+| **Splitting the frontend into its own ECS service** (8e7618a) | Birdtest says it made page deploys gapless | Birdtest split it *because* its backend deploys are stop-first. Acrodont's two-container task already rolls without a gap, so the split would add ~$9/month, a second target group and a second deploy unit for nothing. A frontend-only change will also restart the backend and reload the catalog, which is acceptable for a rolling deploy as long as MIG-4's startup budget holds. |
+| **ALB routes `/api/*` straight to the backend; compression moved into Axum** | Birdtest's gzip-in-Nginx didn't help production | That was a consequence of the split above. Acrodont's Nginx proxies `/api`, and the API already compresses in Axum, which is right. Take only EDGE-3 (static gzip, `/api` gzip off). |
+| **`/api/*` over HTTP answers 426 instead of redirecting** (KL-84) | It looks like general hygiene | It protects worker clients that send API keys in headers. Acrodont's only client is its own SPA, served over HTTPS with HSTS and Secure cookies, so a plain-HTTP API request carries no credential. The redirect is fine. |
+| **RDS master password set by hand, because managed rotation locked the service out** | Acrodont uses `manage_master_user_password = true` | Birdtest's service connects **as the master user**, so the 7-day rotation broke its fixed `DATABASE_URL`. Acrodont's app and dump use their own roles (`acrodont_app`, `acrodont_backup`), so rotating the master password is harmless and a security gain. Keep it. Just give OPS-1 a way to read the master secret for one-time setup. |
+| **The frequent scheduled builder, and the hourly-build cost fix** | The largest single saving in birdtest's cost plan | Acrodont has no scheduled compute besides the nightly dump, since the purge runs inside the backend. The only general lesson is that **Fargate bills at least a minute per task start**, so don't schedule small, frequent tasks. |
+| **Post-launch database resets** (`reset-prod-db.sh`, `--reset-db` in deploy, deleting dumps under Object Lock) | Birdtest needed them | Needed only because birdtest kept editing `0001` after going live. Under MIG-3 acrodont never resets production. Don't build the tooling, and don't give any role `s3:BypassGovernanceRetention`. |
+| **The `prod.tfvars` race check, a release log of tag pairs, `ops_path_components`** | They are part of `deploy.sh` | Partly. Keep the tfvars fetch-and-compare (DEP-1). Skip the per-service tag pairs and path-to-service mapping, since acrodont has one task definition, so a release is one tag. |
+| **Region-loss rebuild** (`name_suffix`, a `dr` workspace, a twice-yearly scratch-account drill) | Birdtest's DR is thorough | Far heavier than acrodont needs at launch. Keep only the cheap part, which acrodont already has: dumps in a second region. A region loss means a manual rebuild from the dumps. |
+| **Fake workers, MAGPIE pins, version floors, derived files, the GitHub data stand-in, worker windows, contributor identities** | They are most of birdtest's dev.py | Specific to birdtest's domain. Acrodont's equivalent of "seed a job" is "seed a cascade state" (DEV-1 scenarios). |
+| **MinIO and the S3 artifact bucket in the local stack** | Part of birdtest's compose | Acrodont stores nothing as files in v1: catalog uploads become rows. Take only the lesson about vanished images (MON-3). |
+| **Moving `sqlx::query!` to runtime queries plus tier-2 SQL tests** | Birdtest has no `.sqlx` offline data | Birdtest never used compile-checked queries, and two SQL bugs shipped because of it. Acrodont's compile-checked queries are better; don't copy birdtest here. |
+| **ARM (Graviton) rejected for floating-point reasons** | Looks like a rule to copy | Birdtest's reason (MAGPIE's float results must hash identically) doesn't apply to acrodont: its shuffles are integer SplitMix64, and leave values are rounded decimals. ARM Fargate would save ~20% of the task line. It is a reasonable later option, but it needs ARM builds in the deploy, so it isn't recommended now. |
+| **Its audit loop** (33 automated passes, `AUDIT_FINDINGS_N.md`) | It found most of birdtest's infra bugs | Worth one targeted pass on acrodont's `infra/`, `docker/` and `scripts/` after this plan lands, not a 33-pass loop. Most of what birdtest's audits found is already in this document. |
 | **Birdtest's long code comments explaining each past incident** | They taught a lot | Useful history, but a style rather than a practice. The lessons are captured here and in tests (EDGE-4, SEC-3). |
 
-## 14. Already right in wordfall (checked, no action)
+## 14. Already right in acrodont (checked, no action)
 
-| Birdtest lesson | Wordfall |
+| Birdtest lesson | Acrodont |
 |---|---|
 | Logout must clear the session cookie with `Path=/` (764abe0) | `backend/src/auth/session.rs` sets `/` on both set and removal |
 | Sign out only on 401, not on a 503 during a deploy (deaacd8) | `initSession` sets `needsLogin` only on 401, and the app is local-first anyway |
@@ -939,9 +939,9 @@ These changes came from the owner and users once birdtest was live. They are che
 | Immutable ECR tags | `image_tag_mutability = "IMMUTABLE"` |
 | `ubuntu-24.04` pinned for Playwright (c5013d8) | Both CI jobs pin `ubuntu-24.04` |
 | Backups in a second region, versioned, Object Lock in GOVERNANCE mode | `infra/backups.tf` |
-| Backup staleness alarm with missing data as breaching | `wordfall-no-dump-36h` |
+| Backup staleness alarm with missing data as breaching | `acrodont-no-dump-36h` |
 | Log metric filters on JSON fields, not phrases (visitor-controlled Nginx lines) | The sync filters match `$.fields.*` |
-| API compression in the backend, never for streams | `CompressionLayer` in `app.rs`; wordfall has no SSE |
+| API compression in the backend, never for streams | `CompressionLayer` in `app.rs`; acrodont has no SSE |
 | Graceful shutdown on SIGTERM | `with_graceful_shutdown(shutdown_signal())`; add DEP-3's `stopTimeout` |
 | The dev environment and the tests share one stack definition | `scripts/stack.py` is used by dev.py, e2e, scale and CI |
 | `TRUSTED_PROXY_HOPS = 1` behind the ALB | Set in `infra/ecs.tf` |
@@ -968,4 +968,4 @@ These changes came from the owner and users once birdtest was live. They are che
 | D3 | Tasks in public subnets with no NAT? (COST-2) | Yes |
 | D4 | RDS `micro` or `small`, and a 7-day PITR window? (COST-3) | `micro` if the constrained scale test passes; 7 days |
 | D5 | Append-only migrations from the first apply, with no "until real launch" exception? (MIG-3) | Yes |
-| D6 | Where real catalog files live for `dev.py --real-catalog`, and who makes the three-column CSW24 file? (DEV-1) | `$WORDFALL_CATALOG_DIR` pointing at `~/Dropbox/WordGameMisc`, with a local `manifest.json` outside the repo |
+| D6 | Where real catalog files live for `dev.py --real-catalog`, and who makes the three-column CSW24 file? (DEV-1) | `$ACRODONT_CATALOG_DIR` pointing at `~/Dropbox/WordGameMisc`, with a local `manifest.json` outside the repo |

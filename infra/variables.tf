@@ -30,7 +30,7 @@ variable "environment" {
 }
 
 variable "domain_name" {
-  description = "The site's bare domain, e.g. wordfall.example.org. Used for ACM, SES and PUBLIC_URL."
+  description = "The site's bare domain, e.g. acrodont.example.org. Used for ACM, SES and PUBLIC_URL."
   type        = string
   validation {
     condition     = can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.domain_name)) && !endswith(var.domain_name, ".example") && !endswith(var.domain_name, ".local")
@@ -109,7 +109,7 @@ variable "task_memory" {
 }
 
 variable "use_fargate_spot" {
-  description = "Run the app task on Fargate Spot (~70% off). Wordfall is local-first: studying never needs the server, and sync retries, so an interruption's minute or two without the API goes unnoticed. Set false if Spot capacity ever fails to place the task."
+  description = "Run the app task on Fargate Spot (~70% off). Acrodont is local-first: studying never needs the server, and sync retries, so an interruption's minute or two without the API goes unnoticed. Set false if Spot capacity ever fails to place the task."
   type        = bool
   default     = true
 }
@@ -217,7 +217,7 @@ variable "monthly_budget_usd" {
 }
 
 variable "cost_scope" {
-  description = "\"account\": the budget covers the whole account (a dedicated account). \"tag\": only resources tagged Project=wordfall, for an account shared with other projects; activate the Project cost allocation tag in Billing first."
+  description = "\"account\": the budget covers the whole account (a dedicated account). \"tag\": only resources tagged Project=acrodont, for an account shared with other projects; activate the Project cost allocation tag in Billing first."
   type        = string
   default     = "account"
   validation {

@@ -109,7 +109,7 @@ test('@env @limits /trash with 5,000 cleared chain quizzes: one collapsed group,
 	const player = await createCascade(page, { name: 'Many chains' });
 	const cascade = player.split('/').pop()!;
 	// The chain quizzes as a segmented attempt leaves them, written to the database.
-	execFileSync('docker', ['compose', '-p', PROJECT, 'exec', '-T', 'postgres', 'psql', '-U', 'wordfall', '-d', 'wordfall', '-v', 'ON_ERROR_STOP=1', '-c', `
+	execFileSync('docker', ['compose', '-p', PROJECT, 'exec', '-T', 'postgres', 'psql', '-U', 'acrodont', '-d', 'acrodont', '-v', 'ON_ERROR_STOP=1', '-c', `
 		WITH u AS (UPDATE users SET sync_seq = sync_seq + 1 WHERE username = '${username}' RETURNING id, sync_seq),
 		     src AS (SELECT q.id, q.cascade_id FROM quizzes q WHERE q.cascade_id = '${cascade}' AND q.origin = 'source'),
 		     ins AS (

@@ -1,4 +1,4 @@
-# Wordfall runbook
+# Acrodont runbook
 
 For whoever operates the production instance. It follows PLAN.md § Deployment
 and Operations and § Backups. Where this page and the plan disagree, the plan
@@ -45,19 +45,19 @@ DNS and the GitHub repository.
 
    ```bash
    export AWS_PAGER=""
-   aws s3api create-bucket --bucket wordfall-tfstate-ACCOUNT --region us-east-2 \
+   aws s3api create-bucket --bucket acrodont-tfstate-ACCOUNT --region us-east-2 \
      --create-bucket-configuration LocationConstraint=us-east-2
-   aws s3api put-bucket-versioning --bucket wordfall-tfstate-ACCOUNT \
+   aws s3api put-bucket-versioning --bucket acrodont-tfstate-ACCOUNT \
      --versioning-configuration Status=Enabled
    ```
 
 3. **The first `prod.tfvars`.** Write `infra/prod.tfvars` and upload it to
-   `s3://wordfall-tfstate-ACCOUNT/wordfall/prod.tfvars`. Use `image_tag =
+   `s3://acrodont-tfstate-ACCOUNT/acrodont/prod.tfvars`. Use `image_tag =
    "bootstrap"`, a placeholder `deploy.sh` replaces, and `desired_count = 0`, so
    no task starts before its secrets exist:
 
    ```text
-   domain_name   = "wordfall.example.org"
+   domain_name   = "acrodont.example.org"
    alarm_email   = "you@example.org"
    image_tag     = "bootstrap"
    desired_count = 0
@@ -74,7 +74,7 @@ DNS and the GitHub repository.
 
    If it prints `null`, set `db_instance_class = "db.t3.micro"`.
 
-4. **Onboard.** Run `scripts/onboard-deployer.sh`. It writes `~/.wordfall-env`,
+4. **Onboard.** Run `scripts/onboard-deployer.sh`. It writes `~/.acrodont-env`,
    initialises Terraform against the state bucket and fetches `prod.tfvars`.
    On the very first setup its closing plan reports changes, because nothing
    exists yet. That is expected; carry on.
@@ -104,12 +104,12 @@ DNS and the GitHub repository.
 
    If the account is shared with other projects, set `cost_scope = "tag"`. First
    activate the `Project` cost allocation tag in Billing, so the budget and the
-   monitor count only wordfall's resources.
+   monitor count only acrodont's resources.
 
 9. **Database roles and secrets.** Run `scripts/init-db-roles.sh`. It creates
    the three SSM parameters if they don't exist yet (it never overwrites one).
-   Then, as the RDS master user, it creates the `wordfall_app` and
-   `wordfall_backup` roles from those values. Terraform never sees a secret.
+   Then, as the RDS master user, it creates the `acrodont_app` and
+   `acrodont_backup` roles from those values. Terraform never sees a secret.
 
 10. **The first release.** Run `scripts/deploy.sh`. It builds and pushes the
     backend, ops and frontend images, sets `image_tag` and applies. Then start
@@ -148,7 +148,7 @@ DNS and the GitHub repository.
     Upload the licensed catalog at `/admin` from your own files:
     distributions, then lexicons, then leave values. They are stored only as
     rows. Then compare the index sizes `/admin` shows with `task_memory` (2 GiB
-    by default). The `wordfall-backend-memory-high` alarm watches this from now
+    by default). The `acrodont-backend-memory-high` alarm watches this from now
     on.
 
 ## Deploying
@@ -168,7 +168,7 @@ refuses otherwise; `--skip-ci-check` exists for emergencies. In order, it:
 3. builds and pushes only the images ECR lacks, tagged with the commit;
 4. sets `image_tag`, then runs the **plan gate**: the plan must not delete or
    replace the database, a bucket, the network, a KMS key or an ECR repository.
-   The override is `WORDFALL_ALLOW_DESTRUCTIVE_PLAN=yes` plus typing `destroy`;
+   The override is `ACRODONT_ALLOW_DESTRUCTIVE_PLAN=yes` plus typing `destroy`;
 5. applies the saved plan;
 6. waits for the rollout. The running task must have the new image **and** the
    applied CPU and memory, because a circuit-breaker rollback of a CPU change
@@ -213,7 +213,7 @@ there. It refuses a target whose migrations were edited, and asks before
 running an older image on a schema with newer (additive) migrations. Then it
 ships through the same plan gate.
 
-**A `wordfall deploy FAILED` mail** means ECS's circuit breaker rolled a
+**A `acrodont deploy FAILED` mail** means ECS's circuit breaker rolled a
 release back. Terraform's state still names the failed release, so run
 `scripts/rollback.sh` before any other apply. The stopped tasks and the log
 group say why the release failed.
@@ -257,26 +257,26 @@ scripts/rotate-db-password.sh
 
 ## Alarms
 
-All alarms go to the `wordfall-alarms` SNS topic and on to `alarm_email`.
+All alarms go to the `acrodont-alarms` SNS topic and on to `alarm_email`.
 
 | Alarm | Means | First step |
 |---|---|---|
-| `wordfall-down` | No healthy target for 10 minutes | The service's events and the newest stopped task's reason. A Spot interruption replaces the task within minutes; if Spot capacity cannot place one, `scripts/set-setting.sh use_fargate_spot=false` |
-| `wordfall-api-5xx` | The load balancer answered 5xx for 15 minutes | The log group, `level = ERROR` |
-| `wordfall-backend-cpu-high` | Over 85% CPU for 15 minutes | Searches or exports? Consider `task_cpu=1024` (and `search_concurrency`) |
-| `wordfall-backend-memory-high` | Over 85% memory for 10 minutes | The index sizes in `/admin` against `task_memory`; raise it |
-| `wordfall-db-cpu-high` | Database over 80% CPU for 15 minutes | Raise `db_instance_class`; the change applies at once with a short restart |
-| `wordfall-db-events` (RDS events) | Low storage, failure, or allocation near the autoscaling ceiling | Raise `db_allocated_storage` |
-| `wordfall-no-dump-36h` | No successful dump in 36 hours | The last `backup` log stream; the `wordfall-backup-failed` mail says why |
-| `wordfall-dump-shrank` | A dump at least 30% smaller than the one before | Check the database size first. A truncated run leaves a small object |
-| `wordfall-backup-failed`, `wordfall-drill-failed` | The task exited non-zero | Its log stream, named in the mail |
-| `wordfall-deploy-failed` | ECS rolled a release back | `scripts/rollback.sh` (above) |
-| `wordfall-sync-error-rejection` | A sync operation rejected as `error`: a database error the rules did not expect | Find `sync operation failed with a database error` in the logs |
-| `wordfall-ses-bounce-rate`, `-complaint-rate` | Nearing the rate at which SES pauses sending | Who is registering with bad addresses? Bounced addresses are suppressed automatically |
-| `wordfall-mail-failed` | An account mail failed to send | The log line has SES's reason |
+| `acrodont-down` | No healthy target for 10 minutes | The service's events and the newest stopped task's reason. A Spot interruption replaces the task within minutes; if Spot capacity cannot place one, `scripts/set-setting.sh use_fargate_spot=false` |
+| `acrodont-api-5xx` | The load balancer answered 5xx for 15 minutes | The log group, `level = ERROR` |
+| `acrodont-backend-cpu-high` | Over 85% CPU for 15 minutes | Searches or exports? Consider `task_cpu=1024` (and `search_concurrency`) |
+| `acrodont-backend-memory-high` | Over 85% memory for 10 minutes | The index sizes in `/admin` against `task_memory`; raise it |
+| `acrodont-db-cpu-high` | Database over 80% CPU for 15 minutes | Raise `db_instance_class`; the change applies at once with a short restart |
+| `acrodont-db-events` (RDS events) | Low storage, failure, or allocation near the autoscaling ceiling | Raise `db_allocated_storage` |
+| `acrodont-no-dump-36h` | No successful dump in 36 hours | The last `backup` log stream; the `acrodont-backup-failed` mail says why |
+| `acrodont-dump-shrank` | A dump at least 30% smaller than the one before | Check the database size first. A truncated run leaves a small object |
+| `acrodont-backup-failed`, `acrodont-drill-failed` | The task exited non-zero | Its log stream, named in the mail |
+| `acrodont-deploy-failed` | ECS rolled a release back | `scripts/rollback.sh` (above) |
+| `acrodont-sync-error-rejection` | A sync operation rejected as `error`: a database error the rules did not expect | Find `sync operation failed with a database error` in the logs |
+| `acrodont-ses-bounce-rate`, `-complaint-rate` | Nearing the rate at which SES pauses sending | Who is registering with bad addresses? Bounced addresses are suppressed automatically |
+| `acrodont-mail-failed` | An account mail failed to send | The log line has SES's reason |
 | Budget, cost anomaly | Spending above 85% of `monthly_budget_usd`, or an anomaly of `anomaly_threshold_usd` or more | Cost Explorer, by service |
 
-The `wordfall-sync` dashboard graphs sync rejections by type and reason. Some
+The `acrodont-sync` dashboard graphs sync rejections by type and reason. Some
 reasons are what ordinary two-device use produces:
 - `stale_attempt`, `stale`, `not_active` and `not_deepest`;
 - `not_found`, when it follows one of those in the same batch.
@@ -305,12 +305,12 @@ The domain's registration is extra. `monthly_budget_usd` defaults to 70.
 | What | Where | Kept |
 |---|---|---|
 | RDS automated backups, point in time | RDS, same region | 7 days (`db_backup_retention_days`) |
-| Nightly `pg_dump --format=custom` and `--schema-only` | `s3://wordfall-production-backups-<account>/daily/YYYY-MM-DD.*`, second region, versioned, object-locked | 90 days |
+| Nightly `pg_dump --format=custom` and `--schema-only` | `s3://acrodont-production-backups-<account>/daily/YYYY-MM-DD.*`, second region, versioned, object-locked | 90 days |
 | The first-of-month dump | `…/monthly/YYYY-MM.*` | a year |
 
-The dump runs at 03:15 UTC as the `wordfall-backup` task: `scripts/backup.py`
-on the ops image, with the read-only `wordfall_backup` role. It reports
-`Wordfall/Backups` metrics `DumpSucceeded`, `DumpBytes` and `DumpSizeRatio`.
+The dump runs at 03:15 UTC as the `acrodont-backup` task: `scripts/backup.py`
+on the ops image, with the read-only `acrodont_backup` role. It reports
+`Acrodont/Backups` metrics `DumpSucceeded`, `DumpBytes` and `DumpSizeRatio`.
 The backup role can write dumps but read only the daily dump it copies to
 `monthly/`. The drill role can only read. No role may bypass the object lock.
 
@@ -319,8 +319,8 @@ The backup role can write dumps but read only the daily dump it copies to
 1. **Restore into a new database, never over the live one.** There are two
    routes:
    - **From a nightly dump:** in `scripts/prod-shell.sh`, create an empty
-     database with `wordfall-master-psql -c 'CREATE DATABASE wordfall_restored'`,
-     then run `python3 /opt/wordfall/scripts/restore.py s3://BUCKET/daily/DAY.dump`
+     database with `acrodont-master-psql -c 'CREATE DATABASE acrodont_restored'`,
+     then run `python3 /opt/acrodont/scripts/restore.py s3://BUCKET/daily/DAY.dump`
      with `--s3-region`, `--database-url` set to the new database, and
      `?sslmode=require`.
    - **From point-in-time recovery:** restore the RDS instance to a new
@@ -345,7 +345,7 @@ The backup role can write dumps but read only the daily dump it copies to
 
 ## The drill
 
-**Monthly, automatically.** On the 1st at 05:00 UTC, the `wordfall-drill` task
+**Monthly, automatically.** On the 1st at 05:00 UTC, the `acrodont-drill` task
 (`scripts/drill.py`) restores the newest nightly dump into a Postgres started
 inside its own task, never on production. It then checks:
 - every table the schema-only dump names is present;
@@ -354,7 +354,7 @@ inside its own task, never on production. It then checks:
 - the sequence bump forces a resync.
 
 It reports `DrillSucceeded` and `DrillSeconds`. A failure mails
-`wordfall-drill-failed`.
+`acrodont-drill-failed`.
 
 **Quarterly, by hand**, the part a machine cannot do:
 

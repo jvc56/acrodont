@@ -1,6 +1,6 @@
 //! Exports (PLAN.md § Exporting words, § API → `POST /api/cascades/:id/export-token`
 //! and `GET /api/cascades/:id/export`). The token request checks the session,
-//! `X-Wordfall-User`, the cascade and quiz and `EXPORT_RATE_PER_MINUTE`, and
+//! `X-Acrodont-User`, the cascade and quiz and `EXPORT_RATE_PER_MINUTE`, and
 //! answers a single-use URL valid for 60 seconds: a PASETO under the export
 //! key bound to the user and a hash of the choices. The download needs no
 //! header — the token is its proof of account — and answers `204` for an

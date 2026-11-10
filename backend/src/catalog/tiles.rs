@@ -37,7 +37,7 @@ pub enum NotationError {
     /// A multi-character tile written without brackets cannot occur (it reads
     /// as its characters), so this is only for bracket contents.
     UnknownTile(String),
-    /// A tile's `blank_letter`: a blank standing for a tile, which Wordfall never stores.
+    /// A tile's `blank_letter`: a blank standing for a tile, which Acrodont never stores.
     BlankLetter(String),
     /// `?` where no blank is allowed.
     Blank,

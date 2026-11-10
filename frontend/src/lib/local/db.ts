@@ -107,7 +107,7 @@ export const USER_DB_VERSION = MIGRATIONS.length;
 /**
  * Opens the signed-in account's database. `onVersionChange` runs when a newer
  * build in another tab needs the database: the connection is already closed
- * by then, and the caller shows "Wordfall was updated in another tab — reload
+ * by then, and the caller shows "Acrodont was updated in another tab — reload
  * to continue".
  */
 export async function openUserDb(userId: string, onVersionChange?: () => void): Promise<UserDb> {

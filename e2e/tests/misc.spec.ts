@@ -145,7 +145,7 @@ test('keys before answers: three cascades, offline before their answers arrive, 
 
 test('a browser restarted with a live session syncs rather than failing CSRF', async ({ baseURL }) => {
 	test.setTimeout(120_000);
-	const dir = mkdtempSync(path.join(tmpdir(), 'wordfall-restart-'));
+	const dir = mkdtempSync(path.join(tmpdir(), 'acrodont-restart-'));
 	try {
 		let ctx = await chromium.launchPersistentContext(dir, { baseURL });
 		let page = ctx.pages()[0] ?? (await ctx.newPage());

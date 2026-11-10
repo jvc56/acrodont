@@ -2,11 +2,11 @@
 # its own by hand and by CLI). BIRDTEST_LESSONS_PLAN.md COST-5.
 
 locals {
-  cost_tag = "user:Project$wordfall"
+  cost_tag = "user:Project$acrodont"
 }
 
 resource "aws_budgets_budget" "monthly" {
-  name         = "wordfall-monthly"
+  name         = "acrodont-monthly"
   budget_type  = "COST"
   limit_amount = tostring(var.monthly_budget_usd)
   limit_unit   = "USD"
@@ -46,20 +46,20 @@ resource "aws_budgets_budget" "monthly" {
 # AWS allows one services monitor per account, and new accounts often have
 # one already: anomaly_monitor_arn names it. With cost_scope = tag, a custom
 # monitor on the Project tag instead.
-resource "aws_ce_anomaly_monitor" "wordfall" {
+resource "aws_ce_anomaly_monitor" "acrodont" {
   count             = var.anomaly_monitor_arn == "" ? 1 : 0
-  name              = "wordfall"
+  name              = "acrodont"
   monitor_type      = var.cost_scope == "tag" ? "CUSTOM" : "DIMENSIONAL"
   monitor_dimension = var.cost_scope == "tag" ? null : "SERVICE"
   monitor_specification = var.cost_scope == "tag" ? jsonencode({
-    Tags = { Key = "Project", Values = ["wordfall"], MatchOptions = ["EQUALS"] }
+    Tags = { Key = "Project", Values = ["acrodont"], MatchOptions = ["EQUALS"] }
   }) : null
 }
 
-resource "aws_ce_anomaly_subscription" "wordfall" {
-  name             = "wordfall"
+resource "aws_ce_anomaly_subscription" "acrodont" {
+  name             = "acrodont"
   frequency        = "IMMEDIATE"
-  monitor_arn_list = [var.anomaly_monitor_arn != "" ? var.anomaly_monitor_arn : aws_ce_anomaly_monitor.wordfall[0].arn]
+  monitor_arn_list = [var.anomaly_monitor_arn != "" ? var.anomaly_monitor_arn : aws_ce_anomaly_monitor.acrodont[0].arn]
   subscriber {
     type    = "SNS"
     address = aws_sns_topic.alarms.arn

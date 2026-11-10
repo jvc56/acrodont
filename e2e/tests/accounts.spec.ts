@@ -49,7 +49,7 @@ test('logging out, online and offline, and a second account on the same browser'
 	const loggedOut = page.waitForResponse((r) => r.url().endsWith('/api/auth/logout'));
 	await context.setOffline(false);
 	expect((await loggedOut).status()).toBeLessThan(300);
-	expect((await context.cookies()).find((c) => c.name === 'wordfall_session')).toBeUndefined();
+	expect((await context.cookies()).find((c) => c.name === 'acrodont_session')).toBeUndefined();
 
 	// Unsent work: the dialog names the count.
 	await login(page, alice.username);

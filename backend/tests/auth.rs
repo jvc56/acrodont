@@ -12,7 +12,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use common::{Client, PASSWORD, TestApp};
 use serde_json::json;
-use wordfall::auth::mail::MailKind;
+use acrodont::auth::mail::MailKind;
 
 fn reg(username: &str, email: &str) -> serde_json::Value {
     json!({ "username": username, "email": email, "password": PASSWORD })
@@ -440,8 +440,8 @@ async fn login_sets_session_and_csrf_cookies_with_one_ttl(pool: sqlx::PgPool) {
     assert_eq!(body["trash_retention_days"], 30);
     assert_eq!(body["max_quiz_questions"], 130000);
     assert_eq!(body["max_cascades_per_user"], 20);
-    let session = r.set_cookie("wordfall_session").unwrap();
-    let csrf = r.set_cookie("wordfall_csrf").unwrap();
+    let session = r.set_cookie("acrodont_session").unwrap();
+    let csrf = r.set_cookie("acrodont_csrf").unwrap();
     assert!(session.contains("HttpOnly"));
     assert!(session.contains("SameSite=Lax"));
     assert!(
@@ -453,7 +453,7 @@ async fn login_sets_session_and_csrf_cookies_with_one_ttl(pool: sqlx::PgPool) {
         csrf.contains("Max-Age=2592000"),
         "same TTL as the session cookie"
     );
-    assert!(session.contains("wordfall_session=v4.local."));
+    assert!(session.contains("acrodont_session=v4.local."));
 }
 
 #[sqlx::test]
@@ -471,8 +471,8 @@ async fn secure_cookies_in_tls_deployments(pool: sqlx::PgPool) {
             json!({"username": "joe", "password": PASSWORD}),
         )
         .await;
-    assert!(r.set_cookie("wordfall_session").unwrap().contains("Secure"));
-    assert!(r.set_cookie("wordfall_csrf").unwrap().contains("Secure"));
+    assert!(r.set_cookie("acrodont_session").unwrap().contains("Secure"));
+    assert!(r.set_cookie("acrodont_csrf").unwrap().contains("Secure"));
 }
 
 /// "the CSRF cookie carrying the session cookie's TTL and being re-set by
@@ -482,11 +482,11 @@ async fn secure_cookies_in_tls_deployments(pool: sqlx::PgPool) {
 async fn me_re_sets_the_csrf_cookie(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
     let mut c = app.signed_in("kim").await;
-    c.cookies.remove("wordfall_csrf");
+    c.cookies.remove("acrodont_csrf");
     let r = c.get("/api/auth/me").await;
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.json()["username"], "kim");
-    let csrf = r.set_cookie("wordfall_csrf").expect("fresh CSRF cookie");
+    let csrf = r.set_cookie("acrodont_csrf").expect("fresh CSRF cookie");
     assert!(csrf.contains("Max-Age="));
     // The recovered token works for a write.
     let r = c
@@ -507,7 +507,7 @@ async fn me_is_exempt_from_the_account_binding(pool: sqlx::PgPool) {
     let r = bob.get("/api/auth/me").await;
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.json()["username"], "bob", "the cookie's user");
-    assert!(r.set_cookie("wordfall_csrf").is_some());
+    assert!(r.set_cookie("acrodont_csrf").is_some());
     let mut anon = app.client();
     assert_eq!(
         anon.get("/api/auth/me").await.status,
@@ -529,15 +529,15 @@ async fn logout_rules(pool: sqlx::PgPool) {
     c.send_csrf = false;
     let r = c.post_empty("/api/auth/logout").await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
-    assert!(c.cookies.contains_key("wordfall_session"));
+    assert!(c.cookies.contains_key("acrodont_session"));
 
-    // The session cookie and a matching token, no X-Wordfall-User: the queued
+    // The session cookie and a matching token, no X-Acrodont-User: the queued
     // logout. Both cookies cleared.
     c.send_csrf = true;
     c.send_user_header = false;
     let r = c.post_empty("/api/auth/logout").await;
     assert!(r.status.is_success());
-    for name in ["wordfall_session", "wordfall_csrf"] {
+    for name in ["acrodont_session", "acrodont_csrf"] {
         let sc = r.set_cookie(name).unwrap();
         assert!(sc.contains("Max-Age=0"), "{sc}");
     }
@@ -550,8 +550,8 @@ async fn logout_rules(pool: sqlx::PgPool) {
             json!({"username": "lee", "password": PASSWORD}),
         )
         .await;
-    assert!(r.set_cookie("wordfall_session").is_some());
-    assert!(r.set_cookie("wordfall_csrf").is_some());
+    assert!(r.set_cookie("acrodont_session").is_some());
+    assert!(r.set_cookie("acrodont_csrf").is_some());
 }
 
 /// "a `POST /api/auth/login` or `/api/auth/register` sent as `text/plain`
@@ -586,7 +586,7 @@ async fn json_endpoints_refuse_other_content_types(pool: sqlx::PgPool) {
 // Account binding (PLAN.md § Authentication → Security generally)
 // ---------------------------------------------------------------------------
 
-/// Bob's cookie with `X-Wordfall-User` naming Alice, or no header, is `401`
+/// Bob's cookie with `X-Acrodont-User` naming Alice, or no header, is `401`
 /// with nothing applied. (Sync, card pages, cascade creation and export
 /// tokens get the same check in their phases; here the account endpoints.)
 #[sqlx::test]
@@ -669,8 +669,8 @@ async fn sign_out_everywhere(pool: sqlx::PgPool) {
         )
         .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
-    assert!(r.set_cookie("wordfall_session").is_some());
-    assert!(r.set_cookie("wordfall_csrf").is_some());
+    assert!(r.set_cookie("acrodont_session").is_some());
+    assert!(r.set_cookie("acrodont_csrf").is_some());
     assert_ne!(here.csrf().cloned(), old_csrf, "a fresh CSRF token");
     assert_eq!(
         there.get("/api/auth/me").await.status,
@@ -752,7 +752,7 @@ async fn delete_account_cascades_and_clears_cookies(pool: sqlx::PgPool) {
         .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
     assert!(
-        r.set_cookie("wordfall_session")
+        r.set_cookie("acrodont_session")
             .unwrap()
             .contains("Max-Age=0")
     );
@@ -1072,7 +1072,7 @@ async fn purge_deletes_stale_unconfirmed_accounts(pool: sqlx::PgPool) {
     .execute(app.db())
     .await
     .unwrap();
-    assert!(wordfall::purge::run_once(&app.state).await.unwrap());
+    assert!(acrodont::purge::run_once(&app.state).await.unwrap());
     let names: Vec<String> = sqlx::query_scalar("SELECT username::text FROM users ORDER BY 1")
         .fetch_all(app.db())
         .await

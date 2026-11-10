@@ -32,7 +32,7 @@ mock_provider "aws" {
 }
 
 variables {
-  domain_name = "wordfall.example.org"
+  domain_name = "acrodont.example.org"
   alarm_email = "ops@example.org"
   image_tag   = "0123456789ab"
 }
@@ -85,7 +85,7 @@ run "larger_task_and_tag_scoped_costs" {
     cost_scope  = "tag"
   }
   assert {
-    condition     = aws_ce_anomaly_monitor.wordfall[0].monitor_type == "CUSTOM"
+    condition     = aws_ce_anomaly_monitor.acrodont[0].monitor_type == "CUSTOM"
     error_message = "tag-scoped costs need a custom monitor"
   }
 }
@@ -96,7 +96,7 @@ run "existing_anomaly_monitor" {
     anomaly_monitor_arn = "arn:aws:ce::123456789012:anomalymonitor/abc"
   }
   assert {
-    condition     = length(aws_ce_anomaly_monitor.wordfall) == 0
+    condition     = length(aws_ce_anomaly_monitor.acrodont) == 0
     error_message = "an existing monitor must not be duplicated (one services monitor per account)"
   }
 }
@@ -161,7 +161,7 @@ run "refuses_bad_alarm_email" {
 run "refuses_placeholder_domain" {
   command = plan
   variables {
-    domain_name = "wordfall.example"
+    domain_name = "acrodont.example"
   }
   expect_failures = [var.domain_name]
 }
@@ -169,7 +169,7 @@ run "refuses_placeholder_domain" {
 run "refuses_url_as_domain" {
   command = plan
   variables {
-    domain_name = "https://wordfall.example.org"
+    domain_name = "https://acrodont.example.org"
   }
   expect_failures = [var.domain_name]
 }

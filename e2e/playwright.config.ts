@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// PLAN.md § End-to-end tests. globalSetup brings a Wordfall up through the same
-// scripts/stack.py entry points ./scripts/dev.py uses, as project wordfall-e2e
+// PLAN.md § End-to-end tests. globalSetup brings a Acrodont up through the same
+// scripts/stack.py entry points ./scripts/dev.py uses, as project acrodont-e2e
 // on a port from the environment, unless BASE_URL names an existing instance.
 const port = Number(process.env.E2E_PORT ?? 5180);
 

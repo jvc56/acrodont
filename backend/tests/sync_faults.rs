@@ -116,7 +116,7 @@ async fn purge_against_a_concurrent_sync(pool: sqlx::PgPool) {
         ops.push(d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 5 + round })));
         let state = app.state.clone();
         let (purged, r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
-            tokio::join!(wordfall::purge::run_once(&state), d.sync(ops))
+            tokio::join!(acrodont::purge::run_once(&state), d.sync(ops))
         })
         .await
         .expect("no hang");
@@ -153,11 +153,11 @@ async fn a_sync_slides_the_session(pool: sqlx::PgPool) {
     let app = TestApp::with(pool, &[("SYNC_RATE_PER_MINUTE", "100000")]).await;
     let mut d = Device::new(app.signed_in("alice").await);
     let r = d.sync(vec![]).await;
-    assert!(r.set_cookie("wordfall_session").is_none());
+    assert!(r.set_cookie("acrodont_session").is_none());
     app.state.clock.advance(Duration::days(24));
-    assert!(d.client.get("/api/auth/me").await.set_cookie("wordfall_session").is_none());
+    assert!(d.client.get("/api/auth/me").await.set_cookie("acrodont_session").is_none());
     let r = d.sync(vec![]).await;
-    let cookie = r.set_cookie("wordfall_session").expect("renewed");
+    let cookie = r.set_cookie("acrodont_session").expect("renewed");
     assert!(cookie.contains("Max-Age=2592000"), "{cookie}");
     d.client.absorb(&r);
     // Still signed in past the original expiry.

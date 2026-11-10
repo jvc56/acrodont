@@ -1,5 +1,5 @@
 //! PASETO v4.local tokens: the session cookie and, under a key derived with
-//! HKDF (label `wordfall export token`), the export download token. Neither
+//! HKDF (label `acrodont export token`), the export download token. Neither
 //! decrypts under the other's key (PLAN.md § Configuration).
 
 use chrono::{DateTime, TimeZone, Utc};
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::Sha256;
 use uuid::Uuid;
 
-pub const EXPORT_KEY_LABEL: &[u8] = b"wordfall export token";
+pub const EXPORT_KEY_LABEL: &[u8] = b"acrodont export token";
 
 #[derive(Clone)]
 pub struct Keys {

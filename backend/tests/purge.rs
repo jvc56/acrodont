@@ -73,14 +73,14 @@ async fn the_per_user_cap_and_trashed_cascades_whole(pool: sqlx::PgPool) {
         .await
         .unwrap();
     // Run 1: the three oldest; the cap is reached, so no cascade starts.
-    assert!(wordfall::purge::run_once(&app.state).await.unwrap());
+    assert!(acrodont::purge::run_once(&app.state).await.unwrap());
     for (i, q) in order.iter().enumerate() {
         assert_eq!(exists(&app, *q).await, i >= 3, "{i}");
     }
     let trashed_left: i64 = sqlx::query_scalar("SELECT count(*) FROM cascades WHERE id = $1").bind(t.cascade_id).fetch_one(app.db()).await.unwrap();
     assert_eq!(trashed_left, 1);
     // Run 2: the last two, then the trashed cascade whole (all 11 quizzes).
-    assert!(wordfall::purge::run_once(&app.state).await.unwrap());
+    assert!(acrodont::purge::run_once(&app.state).await.unwrap());
     let left: i64 = sqlx::query_scalar("SELECT count(*) FROM quizzes").fetch_one(app.db()).await.unwrap();
     assert_eq!(left, 1, "only the live Source quiz");
     let tombs: i64 = sqlx::query_scalar("SELECT count(*) FROM sync_tombstones").fetch_one(app.db()).await.unwrap();
@@ -101,7 +101,7 @@ async fn a_trashed_cascades_quizzes_wait_for_the_cascade(pool: sqlx::PgPool) {
     let t = d.op("trash_cascade", json!({ "cascade_id": s.cascade_id }));
     one(&mut d, t).await;
     age_cleared(&app, 40).await;
-    wordfall::purge::run_once(&app.state).await.unwrap();
+    acrodont::purge::run_once(&app.state).await.unwrap();
     assert!(exists(&app, l2).await);
     // purge_quiz on a quiz of a trashed cascade is `trashed`.
     let p = d.op("purge_quiz", json!({ "quiz_id": l2 }));
@@ -124,12 +124,12 @@ async fn two_instances_purge_concurrently(pool: sqlx::PgPool) {
     let s = Setup::new(5);
     let d = setup(&app, &s).await;
     insert_cleared_chains(&app, d.client.user_id.unwrap(), &s, 200, 40).await;
-    let (x, y) = tokio::join!(wordfall::purge::run_once(&app.state), wordfall::purge::run_once(&other.state));
+    let (x, y) = tokio::join!(acrodont::purge::run_once(&app.state), acrodont::purge::run_once(&other.state));
     let (x, y) = (x.unwrap(), y.unwrap());
     assert!(x || y);
     if !(x && y) {
         // One was turned away; a later run finds nothing left either way.
-        assert!(wordfall::purge::run_once(&other.state).await.unwrap());
+        assert!(acrodont::purge::run_once(&other.state).await.unwrap());
     }
     let left: i64 = sqlx::query_scalar("SELECT count(*) FROM quizzes WHERE status = 'cleared'").fetch_one(app.db()).await.unwrap();
     assert_eq!(left, 0);
@@ -158,7 +158,7 @@ async fn counters_survive_the_purge(pool: sqlx::PgPool) {
     assert_eq!(before, (2, 15));
     age_cleared(&app, 40).await;
     let attempts_before: i64 = sqlx::query_scalar("SELECT count(*) FROM quiz_attempts").fetch_one(app.db()).await.unwrap();
-    wordfall::purge::run_once(&app.state).await.unwrap();
+    acrodont::purge::run_once(&app.state).await.unwrap();
     let cleared: i64 = sqlx::query_scalar("SELECT count(*) FROM quizzes WHERE status = 'cleared'").fetch_one(app.db()).await.unwrap();
     assert_eq!(cleared, 0);
     let attempts_after: i64 = sqlx::query_scalar("SELECT count(*) FROM quiz_attempts").fetch_one(app.db()).await.unwrap();
@@ -196,7 +196,7 @@ async fn restores_restart_the_retention_clock(pool: sqlx::PgPool) {
     let r = d.op("restore_cascade", json!({ "cascade_id": s.cascade_id }));
     one(&mut d, r).await;
     assert!(Utc::now() - cleared_at(&app, cleared[1]).await < Duration::minutes(1));
-    wordfall::purge::run_once(&app.state).await.unwrap();
+    acrodont::purge::run_once(&app.state).await.unwrap();
     assert!(exists(&app, cleared[1]).await && exists(&app, cleared[2]).await);
     // Restoring one of a trashed cascade's quizzes restarts its siblings too.
     let t = d.op("trash_cascade", json!({ "cascade_id": s.cascade_id }));
@@ -238,7 +238,7 @@ async fn old_and_future_timestamps(pool: sqlx::PgPool) {
     assert!((c - forty).num_minutes().abs() < 2, "the cascade's last_activity_at is 40 days old");
     assert!((q - forty).num_minutes().abs() < 2);
     assert!(Utc::now() - cleared_at(&app, l2).await < Duration::minutes(1), "cleared_at is the server's now()");
-    wordfall::purge::run_once(&app.state).await.unwrap();
+    acrodont::purge::run_once(&app.state).await.unwrap();
     assert!(exists(&app, l2).await);
     // An older at never lowers them.
     d.skew = -Duration::days(45);

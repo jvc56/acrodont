@@ -1,6 +1,6 @@
 """Study states for `./scripts/dev.py --scenario NAME` (PLAN.md § Development).
 
-Wordfall's equivalent of birdtest's job flags: each scenario creates a state
+Acrodont's equivalent of birdtest's job flags: each scenario creates a state
 you would otherwise click your way into. Every write goes through the real
 API (POST /api/cascades, POST /api/sync, POST /api/searches), so seeding stays
 a smoke test and the server's rules check every operation as they would a

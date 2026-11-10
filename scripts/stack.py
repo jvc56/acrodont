@@ -1,4 +1,4 @@
-"""The one way to bring a Wordfall up (PLAN.md § Development → How it is put together).
+"""The one way to bring a Acrodont up (PLAN.md § Development → How it is put together).
 
 Four entry points, each usable on its own:
 
@@ -9,7 +9,7 @@ Four entry points, each usable on its own:
 - ``reset(project)``: drop and recreate the public schema, restart the backend.
 - ``down(project, volumes)``: stop the stack.
 
-Everything that needs a running Wordfall goes through these: ``dev.py``, the
+Everything that needs a running Acrodont goes through these: ``dev.py``, the
 end-to-end tests, the scale tests and CI.
 """
 
@@ -32,7 +32,7 @@ from typing import Dict, List, Optional
 ROOT = Path(__file__).resolve().parent.parent
 STACK_DIR = ROOT / ".stack"
 FIXTURE_CATALOG = ROOT / "fixtures" / "catalog"
-DEFAULT_PROJECT = "wordfall"
+DEFAULT_PROJECT = "acrodont"
 DEFAULT_PORT = 5173
 HEALTH_DEADLINE_SECONDS = 900
 
@@ -40,7 +40,7 @@ HEALTH_DEADLINE_SECONDS = 900
 @dataclass
 class User:
     username: str = "dev"
-    email: str = "dev@wordfall.local"
+    email: str = "dev@acrodont.local"
     password: str = "correct-tile-rack-bingo"
 
 
@@ -67,7 +67,7 @@ def _compose(project: str, *args: str, env: Optional[Dict[str, str]] = None,
              capture: bool = False, check: bool = True) -> subprocess.CompletedProcess:
     cmd = ["docker", "compose", "-p", project, "-f", str(ROOT / "docker-compose.yml"), *args]
     full_env = dict(os.environ)
-    full_env["WORDFALL_ENV_FILE"] = str(_env_file(project))
+    full_env["ACRODONT_ENV_FILE"] = str(_env_file(project))
     if env:
         full_env.update(env)
     return subprocess.run(cmd, cwd=ROOT, env=full_env, check=check, text=True,
@@ -138,8 +138,8 @@ def up(project: str = DEFAULT_PROJECT, port: int = DEFAULT_PORT,
        profiles: Optional[List[str]] = None) -> str:
     """Compose up, then wait for ``/health``. Returns the base URL."""
     _write_env(project, port, env or {})
-    compose_env = {"WORDFALL_PORT": str(port), "WORDFALL_APP_BUILD": app_build(),
-                   "WORDFALL_OUTBOX_DIR": str(outbox_dir(project))}
+    compose_env = {"ACRODONT_PORT": str(port), "ACRODONT_APP_BUILD": app_build(),
+                   "ACRODONT_OUTBOX_DIR": str(outbox_dir(project))}
     args = []
     for p in profiles or []:
         args += ["--profile", p]
@@ -201,7 +201,7 @@ def down(project: str = DEFAULT_PROJECT, volumes: bool = False) -> None:
 
 def psql(project: str, sql: str) -> str:
     out = _compose(project, "exec", "-T", "postgres", "psql", "-v", "ON_ERROR_STOP=1",
-                   "-U", "wordfall", "-d", "wordfall", "-At", "-c", sql, capture=True)
+                   "-U", "acrodont", "-d", "acrodont", "-At", "-c", sql, capture=True)
     return out.stdout
 
 
@@ -228,11 +228,11 @@ class Http:
         h = {}
         if self.cookies:
             h["Cookie"] = "; ".join(f"{k}={v}" for k, v in self.cookies.items())
-        csrf = self.cookies.get("wordfall_csrf")
+        csrf = self.cookies.get("acrodont_csrf")
         if csrf:
             h["X-CSRF-Token"] = csrf
         if self.user_id:
-            h["X-Wordfall-User"] = self.user_id
+            h["X-Acrodont-User"] = self.user_id
         h.update(extra or {})
         return h
 

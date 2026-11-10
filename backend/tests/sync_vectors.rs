@@ -12,7 +12,7 @@ use common::sync::{insert_cascade, Device, Setup};
 use common::TestApp;
 use serde_json::{json, Value};
 use uuid::Uuid;
-use wordfall::cascade::order::shuffle;
+use acrodont::cascade::order::shuffle;
 
 fn fixture() -> Value {
     let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract-fixtures/cascade/rules.json");

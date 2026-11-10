@@ -8,5 +8,5 @@ export function describe(e: unknown): string {
 		if (e.status >= 500) return 'Something went wrong on the server. Try again shortly.';
 		return 'That did not work. Check the details and try again.';
 	}
-	return 'Could not reach Wordfall. Check your connection.';
+	return 'Could not reach Acrodont. Check your connection.';
 }

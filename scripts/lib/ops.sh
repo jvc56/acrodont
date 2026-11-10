@@ -4,7 +4,7 @@
 # prod-sql.sh, ...). Sourced, never run: the caller sets `set -euo pipefail`
 # and calls ops_init first.
 #
-#   - settings: ~/.wordfall-env (WORDFALL_ENV), written by onboard-deployer.sh;
+#   - settings: ~/.acrodont-env (ACRODONT_ENV), written by onboard-deployer.sh;
 #     variables already set in the environment win over the file;
 #   - login: `aws sts get-caller-identity`, checked against ACCOUNT;
 #   - the stack: Terraform outputs of infra/, AWS_REGION exported from them;
@@ -20,13 +20,13 @@ OPS_LIB_LOADED=1
 
 OPS_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 OPS_INFRA=${INFRA_DIR:-$OPS_ROOT/infra}
-OPS_ENV_FILE=${WORDFALL_ENV:-$HOME/.wordfall-env}
+OPS_ENV_FILE=${ACRODONT_ENV:-$HOME/.acrodont-env}
 OPS_ENV_VARS="AWS_PROFILE SITE STATE_BUCKET STATE_REGION ACCOUNT"
 OPS_TFVARS=$OPS_INFRA/prod.tfvars
-OPS_TFVARS_KEY=wordfall/prod.tfvars
+OPS_TFVARS_KEY=acrodont/prod.tfvars
 OPS_NAME=$(basename "$0")
-OPS_APP_FAMILY=wordfall
-OPS_SSM_PREFIX=/wordfall/production
+OPS_APP_FAMILY=acrodont
+OPS_SSM_PREFIX=/acrodont/production
 # Resource types whose loss is data loss or an outage.
 OPS_DANGEROUS_TYPES='^(aws_db_instance|aws_db_subnet_group|aws_s3_bucket.*|aws_vpc|aws_subnet|aws_kms_key|aws_ecr_repository)$'
 # Paths whose change means the app images must be rebuilt.
@@ -38,7 +38,7 @@ ops_say() { printf '%s: %s\n' "$OPS_NAME" "$*" >&2; }
 ops_die() { printf '%s: %s\n' "$OPS_NAME" "$*" >&2; exit 1; }
 
 ops_init() {
-  OPS_TMP=$(mktemp -d "${TMPDIR:-/tmp}/wordfall-ops.XXXXXX")
+  OPS_TMP=$(mktemp -d "${TMPDIR:-/tmp}/acrodont-ops.XXXXXX")
   chmod 700 "$OPS_TMP"
   trap 'rm -rf "$OPS_TMP"' EXIT
 }
@@ -278,8 +278,8 @@ ops_confirm_typed() {
 # Plans to OPS_PLAN and asks before anything is applied. Sets OPS_PLAN_EMPTY
 # when there is nothing to apply, and OPS_PLAN_JSON to the plan as JSON.
 ops_plan_gate() {
-  OPS_PLAN=$OPS_TMP/wordfall.tfplan
-  OPS_PLAN_JSON=$OPS_TMP/wordfall.tfplan.json
+  OPS_PLAN=$OPS_TMP/acrodont.tfplan
+  OPS_PLAN_JSON=$OPS_TMP/acrodont.tfplan.json
   OPS_PLAN_EMPTY=""
   local rc=0
   terraform -chdir="$OPS_INFRA" plan -input=false -detailed-exitcode "${OPS_VARFILES[@]}" \
@@ -301,8 +301,8 @@ ops_plan_gate() {
   if [[ -n "$dangerous" ]]; then
     ops_say "the plan destroys, replaces or forgets:"
     printf '%s\n' "$dangerous" >&2
-    if [[ "${WORDFALL_ALLOW_DESTRUCTIVE_PLAN:-}" != yes ]]; then
-      ops_die "refused: nothing was applied. Find out why before going on; once understood, WORDFALL_ALLOW_DESTRUCTIVE_PLAN=yes lets it through with a typed confirmation."
+    if [[ "${ACRODONT_ALLOW_DESTRUCTIVE_PLAN:-}" != yes ]]; then
+      ops_die "refused: nothing was applied. Find out why before going on; once understood, ACRODONT_ALLOW_DESTRUCTIVE_PLAN=yes lets it through with a typed confirmation."
     fi
     ops_confirm_typed destroy "apply it anyway"
   fi
@@ -521,7 +521,7 @@ ops_path_components() {
 }
 
 # ---------------------------------------------------------------------------
-# Ops tasks (the wordfall-ops family: psql, python3, wordfall-master-psql)
+# Ops tasks (the acrodont-ops family: psql, python3, acrodont-master-psql)
 # ---------------------------------------------------------------------------
 
 ops_network() {

@@ -3,8 +3,8 @@
 #
 #   scripts/rotate-db-password.sh [--backup] [--signing-key] [--resume]
 #
-# With no option: the app role wordfall_app (DATABASE_URL). --backup: the
-# backup role wordfall_backup (BACKUP_DATABASE_URL) instead; --signing-key:
+# With no option: the app role acrodont_app (DATABASE_URL). --backup: the
+# backup role acrodont_backup (BACKUP_DATABASE_URL) instead; --signing-key:
 # SESSION_SIGNING_KEY instead (signs everyone out). Options combine.
 #
 # A password is written to SSM FIRST, then set on the role by a master ops
@@ -42,8 +42,8 @@ ops_login
 ops_stack
 
 roles=()
-((app == 0)) || roles+=("DATABASE_URL wordfall_app")
-((backup == 0)) || roles+=("BACKUP_DATABASE_URL wordfall_backup")
+((app == 0)) || roles+=("DATABASE_URL acrodont_app")
+((backup == 0)) || roles+=("BACKUP_DATABASE_URL acrodont_backup")
 
 get_param() {
   aws ssm get-parameter --name "$OPS_SSM_PREFIX/$1" --with-decryption --query Parameter.Value --output text
@@ -95,7 +95,7 @@ print(p._replace(netloc=userinfo.split(":", 1)[0] + ":" + secrets.token_hex(24) 
 $(ops_url_parts_snippet "$var")
 [ \"\$WF_U\" = $role ] || { echo \"$var's user is \$WF_U, not $role\" >&2; exit 4; }
 [ -n \"\$WF_P\" ] || { echo \"$var has no password\" >&2; exit 4; }
-wordfall-master-psql -X -q -v ON_ERROR_STOP=1 <<'SQL'
+acrodont-master-psql -X -q -v ON_ERROR_STOP=1 <<'SQL'
 \\set VERBOSITY terse
 \\set SHOW_CONTEXT never
 \\getenv u WF_U

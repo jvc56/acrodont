@@ -38,7 +38,7 @@ test('switching accounts in another tab', async ({ context }) => {
 	await a.waitForTimeout(3000);
 	const inAlice = await a.evaluate(async (uid) => {
 		const db = await new Promise<IDBDatabase>((res) => {
-			const r = indexedDB.open(`wordfall-user-${uid}`);
+			const r = indexedDB.open(`acrodont-user-${uid}`);
 			r.onsuccess = () => res(r.result);
 		});
 		const get = <T>(store: string) =>
@@ -103,7 +103,7 @@ test('deleting the account', async ({ browser, baseURL }) => {
 				const r = indexedDB.open(name);
 				r.onsuccess = () => res(r.result);
 			});
-		const u = await open('wordfall');
+		const u = await open('acrodont');
 		const rows = await new Promise<{ username: string }[]>((res) => {
 			const r = u.transaction('accounts').objectStore('accounts').getAll();
 			r.onsuccess = () => res(r.result);

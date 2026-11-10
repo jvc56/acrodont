@@ -20,7 +20,7 @@ A one-off ops task (no --enable-execute-command) really runs its command,
 here, with the environment ECS would give it: the overrides, and
 DATABASE_URL / BACKUP_DATABASE_URL from the fake SSM (a missing parameter
 stops the task before its container starts, as ECS does). `psql` and
-`wordfall-master-psql` inside it are stubs that record what they get.
+`acrodont-master-psql` inside it are stubs that record what they get.
 
 Switches, from the environment: FAKE_STS_FAIL, FAKE_ACCOUNT, FAKE_PLAN_RC (2),
 FAKE_APPLY_RC (0), FAKE_APPLY_TOUCH_S3 (another deployer uploads prod.tfvars
@@ -44,16 +44,16 @@ D = os.environ["FAKE_DIR"]
 ACCOUNT = os.environ.get("FAKE_ACCOUNT", "123456789012")
 REGISTRY = "123456789012.dkr.ecr.us-east-1.amazonaws.com"
 OUTPUTS = {
-    "region": "us-east-1", "cluster_name": "wordfall", "service_name": "wordfall",
-    "task_security_group": "sg-task", "ops_task_family": "wordfall-ops",
-    "log_group": "/ecs/wordfall",
-    "target_group_arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/wordfall/abc",
-    "ecr_backend": REGISTRY + "/wordfall-backend", "ecr_frontend": REGISTRY + "/wordfall-frontend",
-    "alarm_topic_arn": "arn:aws:sns:us-east-1:123456789012:wordfall-alarms",
-    "db_identifier": "wordfall", "site_host": "wordfall.test",
+    "region": "us-east-1", "cluster_name": "acrodont", "service_name": "acrodont",
+    "task_security_group": "sg-task", "ops_task_family": "acrodont-ops",
+    "log_group": "/ecs/acrodont",
+    "target_group_arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/acrodont/abc",
+    "ecr_backend": REGISTRY + "/acrodont-backend", "ecr_frontend": REGISTRY + "/acrodont-frontend",
+    "alarm_topic_arn": "arn:aws:sns:us-east-1:123456789012:acrodont-alarms",
+    "db_identifier": "acrodont", "site_host": "acrodont.test",
 }
 JSON_OUTPUTS = {"task_subnets": ["subnet-1", "subnet-2"]}
-TD_ARN = "arn:aws:ecs:us-east-1:123456789012:task-definition/wordfall:7"
+TD_ARN = "arn:aws:ecs:us-east-1:123456789012:task-definition/acrodont:7"
 FLAGS = {
     "--interactive", "--only-show-errors", "--with-decryption", "--overwrite",
     "--enable-execute-command", "--force-new-deployment", "--start-from-head", "--no-paginate",
@@ -146,7 +146,7 @@ def sts(op, pos, opt, q):
 
 
 def configure(op, pos, opt, q):
-    out("wordfall")
+    out("acrodont")
 
 
 def s3(op, pos, opt, q):
@@ -195,15 +195,15 @@ def ecs(op, pos, opt, q):
         out(json.dumps({"services": [{
             "serviceName": opt["--services"], "desiredCount": desired, "runningCount": desired,
             "deployments": deps,
-            "events": [{"createdAt": "2026-10-06T00:00:00Z", "message": "(service wordfall) has reached a steady state."}],
+            "events": [{"createdAt": "2026-10-06T00:00:00Z", "message": "(service acrodont) has reached a steady state."}],
         }], "failures": []}))
     elif op == "describe-task-definition":
         r = running()
         out(json.dumps({"taskDefinition": {
-            "family": "wordfall", "cpu": r["cpu"], "memory": r["memory"],
+            "family": "acrodont", "cpu": r["cpu"], "memory": r["memory"],
             "containerDefinitions": [
-                {"name": "backend", "image": "%s/wordfall-backend:%s" % (REGISTRY, r["tag"])},
-                {"name": "nginx", "image": "%s/wordfall-frontend:%s" % (REGISTRY, r["tag"])}]}}))
+                {"name": "backend", "image": "%s/acrodont-backend:%s" % (REGISTRY, r["tag"])},
+                {"name": "nginx", "image": "%s/acrodont-frontend:%s" % (REGISTRY, r["tag"])}]}}))
     elif op == "update-service":
         if "--desired-count" in opt:
             write(path("ecs", "desired"), opt["--desired-count"])
@@ -248,7 +248,7 @@ echo "psql printed this"
 exit "${FAKE_PSQL_EXIT:-0}"
 ''',
 }
-TASKBIN["wordfall-master-psql"] = TASKBIN["psql"]
+TASKBIN["acrodont-master-psql"] = TASKBIN["psql"]
 
 
 def run_task(opt):
@@ -260,7 +260,7 @@ def run_task(opt):
     write(path("runtask", "%d.json" % n), json.dumps({
         "overrides": overrides, "exec": exec_, "network": opt.get("--network-configuration"),
         "taskDefinition": opt.get("--task-definition"), "launchType": opt.get("--launch-type")}))
-    arn = "arn:aws:ecs:us-east-1:123456789012:task/wordfall/task%d" % n
+    arn = "arn:aws:ecs:us-east-1:123456789012:task/acrodont/task%d" % n
     task = {"status": "RUNNING", "exec": exec_, "exit": None, "output": []}
     if not exec_:
         task.update(execute(c.get("command") or [], env))
@@ -274,10 +274,10 @@ def execute(command, env):
                 "FAKE_DIR": D, "HOME": path("taskhome"), "LANG": "C.UTF-8",
                 "MASTER_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-1"}
     for var in ("DATABASE_URL", "BACKUP_DATABASE_URL"):
-        v = read(path("ssm", "wordfall_production_" + var))
+        v = read(path("ssm", "acrodont_production_" + var))
         if v is None:
             return {"status": "STOPPED", "exit": None,
-                    "reason": "ResourceInitializationError: unable to pull secrets: /wordfall/production/" + var}
+                    "reason": "ResourceInitializationError: unable to pull secrets: /acrodont/production/" + var}
         task_env[var] = v
     if "FAKE_PSQL_EXIT" in os.environ:
         task_env["FAKE_PSQL_EXIT"] = os.environ["FAKE_PSQL_EXIT"]
@@ -355,7 +355,7 @@ def sns(op, pos, opt, q):
 def cloudwatch(op, pos, opt, q):
     if op == "describe-alarms":
         name = opt["--alarm-names"]
-        out(read(path("alarm", name), "ALARM") if name == "wordfall-no-dump-36h" else "None")
+        out(read(path("alarm", name), "ALARM") if name == "acrodont-no-dump-36h" else "None")
     elif op == "set-alarm-state":
         write(path("alarm", opt["--alarm-name"]), opt["--state-value"])
 
@@ -367,10 +367,10 @@ def task_pattern(family):
 
 
 RULES = {
-    "wordfall-deploy-failed": {"source": ["aws.ecs"], "detail-type": ["ECS Deployment State Change"],
+    "acrodont-deploy-failed": {"source": ["aws.ecs"], "detail-type": ["ECS Deployment State Change"],
                                "detail": {"eventName": ["SERVICE_DEPLOYMENT_FAILED"]}},
-    "wordfall-backup-failed": task_pattern("wordfall-backup"),
-    "wordfall-drill-failed": task_pattern("wordfall-drill"),
+    "acrodont-backup-failed": task_pattern("acrodont-backup"),
+    "acrodont-drill-failed": task_pattern("acrodont-drill"),
 }
 
 
@@ -451,9 +451,9 @@ def terraform(args):
         cpu, mem = tfvar(tfvars, "task_cpu", "1024"), tfvar(tfvars, "task_memory", "2048")
         plan["planned_values"] = {"root_module": {"resources": [], "child_modules": [{"resources": [
             {"address": "module.app.aws_ecs_task_definition.app", "type": "aws_ecs_task_definition",
-             "values": {"family": "wordfall", "cpu": cpu, "memory": mem}},
+             "values": {"family": "acrodont", "cpu": cpu, "memory": mem}},
             {"address": "module.app.aws_ecs_task_definition.ops", "type": "aws_ecs_task_definition",
-             "values": {"family": "wordfall-ops", "cpu": "256", "memory": "512"}}]}]}}
+             "values": {"family": "acrodont-ops", "cpu": "256", "memory": "512"}}]}]}}
         out(json.dumps(plan))
     elif cmd == "apply":
         rc = int(os.environ.get("FAKE_APPLY_RC", "0"))
@@ -464,7 +464,7 @@ def terraform(args):
                 "tag": tfvar(tfvars, "image_tag"), "cpu": tfvar(tfvars, "task_cpu", "1024"),
                 "memory": tfvar(tfvars, "task_memory", "2048")}))
         if os.environ.get("FAKE_APPLY_TOUCH_S3"):
-            p = path("s3", "state-bucket", "wordfall", "prod.tfvars")
+            p = path("s3", "state-bucket", "acrodont", "prod.tfvars")
             write(p, read(p) + "# someone else\n")
         out("Apply complete!")
     elif cmd == "version":

@@ -15,7 +15,7 @@ terraform {
 provider "aws" {
   region = var.region
   default_tags {
-    tags = { Project = "wordfall", Environment = var.environment }
+    tags = { Project = "acrodont", Environment = var.environment }
   }
 }
 

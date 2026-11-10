@@ -3,7 +3,7 @@
 # About a dozen alarms: the first ten are free, each further one ~$0.10/month.
 
 resource "aws_sns_topic" "alarms" {
-  name = "wordfall-alarms"
+  name = "acrodont-alarms"
 }
 
 resource "aws_sns_topic_subscription" "alarm_email" {
@@ -56,8 +56,8 @@ locals {
 # or a Spot interruption's replacement, never pages; OK is mailed too.
 resource "aws_cloudwatch_metric_alarm" "down" {
   count               = local.service_alarms
-  alarm_name          = "wordfall-down"
-  alarm_description   = "wordfall has had no healthy target for ten minutes"
+  alarm_name          = "acrodont-down"
+  alarm_description   = "acrodont has had no healthy target for ten minutes"
   namespace           = "AWS/ApplicationELB"
   metric_name         = "HealthyHostCount"
   dimensions          = { TargetGroup = aws_lb_target_group.web.arn_suffix, LoadBalancer = aws_lb.main.arn_suffix }
@@ -75,8 +75,8 @@ resource "aws_cloudwatch_metric_alarm" "down" {
 # Nginx keepalive 502s, EDGE-1). No errors means no datapoints: healthy.
 resource "aws_cloudwatch_metric_alarm" "api_5xx" {
   count               = local.service_alarms
-  alarm_name          = "wordfall-api-5xx"
-  alarm_description   = "wordfall's load balancer has answered 5xx for fifteen minutes"
+  alarm_name          = "acrodont-api-5xx"
+  alarm_description   = "acrodont's load balancer has answered 5xx for fifteen minutes"
   namespace           = "AWS/ApplicationELB"
   metric_name         = "HTTPCode_ELB_5XX_Count"
   dimensions          = { LoadBalancer = aws_lb.main.arn_suffix }
@@ -92,8 +92,8 @@ resource "aws_cloudwatch_metric_alarm" "api_5xx" {
 
 resource "aws_cloudwatch_metric_alarm" "backend_cpu_high" {
   count               = local.service_alarms
-  alarm_name          = "wordfall-backend-cpu-high"
-  alarm_description   = "wordfall's task has been over 85% CPU for fifteen minutes: look at task_cpu"
+  alarm_name          = "acrodont-backend-cpu-high"
+  alarm_description   = "acrodont's task has been over 85% CPU for fifteen minutes: look at task_cpu"
   namespace           = "AWS/ECS"
   metric_name         = "CPUUtilization"
   dimensions          = { ClusterName = aws_ecs_cluster.main.name, ServiceName = aws_ecs_service.app.name }
@@ -106,12 +106,12 @@ resource "aws_cloudwatch_metric_alarm" "backend_cpu_high" {
   ok_actions          = [aws_sns_topic.alarms.arn]
 }
 
-# Specific to wordfall: the catalog lives in memory, so running out restarts
+# Specific to acrodont: the catalog lives in memory, so running out restarts
 # the task and reloads every index.
 resource "aws_cloudwatch_metric_alarm" "backend_memory_high" {
   count               = local.service_alarms
-  alarm_name          = "wordfall-backend-memory-high"
-  alarm_description   = "wordfall's task has been over 85% memory for ten minutes: look at task_memory and the index sizes in /admin"
+  alarm_name          = "acrodont-backend-memory-high"
+  alarm_description   = "acrodont's task has been over 85% memory for ten minutes: look at task_memory and the index sizes in /admin"
   namespace           = "AWS/ECS"
   metric_name         = "MemoryUtilization"
   dimensions          = { ClusterName = aws_ecs_cluster.main.name, ServiceName = aws_ecs_service.app.name }
@@ -127,8 +127,8 @@ resource "aws_cloudwatch_metric_alarm" "backend_memory_high" {
 # A burstable class in unlimited mode is billed for surplus rather than
 # throttled, so its credit balance says little; sustained load is the signal.
 resource "aws_cloudwatch_metric_alarm" "db_cpu_high" {
-  alarm_name          = "wordfall-db-cpu-high"
-  alarm_description   = "wordfall's database has been over 80% CPU for fifteen minutes"
+  alarm_name          = "acrodont-db-cpu-high"
+  alarm_description   = "acrodont's database has been over 80% CPU for fifteen minutes"
   namespace           = "AWS/RDS"
   metric_name         = "CPUUtilization"
   dimensions          = { DBInstanceIdentifier = aws_db_instance.main.identifier }
@@ -144,9 +144,9 @@ resource "aws_cloudwatch_metric_alarm" "db_cpu_high" {
 # No successful dump in 36 hours: six six-hour periods with no success,
 # missing data counting as a miss. scripts/backup.py reports DumpSucceeded.
 resource "aws_cloudwatch_metric_alarm" "backup_missing" {
-  alarm_name          = "wordfall-no-dump-36h"
+  alarm_name          = "acrodont-no-dump-36h"
   alarm_description   = "No successful nightly dump in 36 hours (PLAN.md § Backups)."
-  namespace           = "Wordfall/Backups"
+  namespace           = "Acrodont/Backups"
   metric_name         = "DumpSucceeded"
   statistic           = "Sum"
   period              = 21600
@@ -162,9 +162,9 @@ resource "aws_cloudwatch_metric_alarm" "backup_missing" {
 # A dump more than 30% smaller than the previous one: scripts/backup.py
 # reports DumpSizeRatio, this dump's bytes over the previous dump's.
 resource "aws_cloudwatch_metric_alarm" "backup_shrank" {
-  alarm_name          = "wordfall-dump-shrank"
+  alarm_name          = "acrodont-dump-shrank"
   alarm_description   = "A dump more than 30% smaller than the previous one: a truncated or partial run?"
-  namespace           = "Wordfall/Backups"
+  namespace           = "Acrodont/Backups"
   metric_name         = "DumpSizeRatio"
   statistic           = "Minimum"
   period              = 86400
@@ -179,11 +179,11 @@ resource "aws_cloudwatch_metric_alarm" "backup_shrank" {
 # line "sync operation rejected", and graphed. Any `error` rejection alarms:
 # a database error the rules did not expect.
 resource "aws_cloudwatch_log_metric_filter" "sync_rejections" {
-  name           = "wordfall-sync-rejections"
+  name           = "acrodont-sync-rejections"
   log_group_name = aws_cloudwatch_log_group.app.name
   pattern        = "{ $.fields.message = \"sync operation rejected\" }"
   metric_transformation {
-    namespace = "Wordfall/Sync"
+    namespace = "Acrodont/Sync"
     name      = "Rejections"
     value     = "1"
     dimensions = {
@@ -194,11 +194,11 @@ resource "aws_cloudwatch_log_metric_filter" "sync_rejections" {
 }
 
 resource "aws_cloudwatch_log_metric_filter" "sync_error_rejections" {
-  name           = "wordfall-sync-error-rejections"
+  name           = "acrodont-sync-error-rejections"
   log_group_name = aws_cloudwatch_log_group.app.name
   pattern        = "{ ($.fields.message = \"sync operation rejected\") && ($.fields.reason = \"error\") }"
   metric_transformation {
-    namespace     = "Wordfall/Sync"
+    namespace     = "Acrodont/Sync"
     name          = "ErrorRejections"
     value         = "1"
     default_value = "0"
@@ -206,9 +206,9 @@ resource "aws_cloudwatch_log_metric_filter" "sync_error_rejections" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "sync_error_rejections" {
-  alarm_name          = "wordfall-sync-error-rejection"
+  alarm_name          = "acrodont-sync-error-rejection"
   alarm_description   = "A sync operation was rejected as `error`: a database error the rules did not expect."
-  namespace           = "Wordfall/Sync"
+  namespace           = "Acrodont/Sync"
   metric_name         = "ErrorRejections"
   statistic           = "Sum"
   period              = 300
@@ -223,7 +223,7 @@ resource "aws_cloudwatch_metric_alarm" "sync_error_rejections" {
 # the not_found that can follow them) are ordinary two-device use; a rise in
 # any other reason points to a divergence between the Rust and TypeScript rules.
 resource "aws_cloudwatch_dashboard" "sync" {
-  dashboard_name = "wordfall-sync"
+  dashboard_name = "acrodont-sync"
   dashboard_body = jsonencode({
     widgets = [
       {
@@ -237,7 +237,7 @@ resource "aws_cloudwatch_dashboard" "sync" {
           region  = var.region
           stat    = "Sum"
           period  = 300
-          metrics = [[{ expression = "SEARCH('{Wordfall/Sync,Type,Reason} MetricName=\"Rejections\"', 'Sum', 300)", id = "r" }]]
+          metrics = [[{ expression = "SEARCH('{Acrodont/Sync,Type,Reason} MetricName=\"Rejections\"', 'Sum', 300)", id = "r" }]]
         }
       },
     ]

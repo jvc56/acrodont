@@ -10,7 +10,7 @@
 #
 # One batch, psql -X -v ON_ERROR_STOP=1 --single-transaction: anything that
 # fails rolls the whole batch back. As the app role (DATABASE_URL), or with
-# --as-master as the RDS master user (wordfall-master-psql), for role and
+# --as-master as the RDS master user (acrodont-master-psql), for role and
 # grant changes. The task is polled with no time limit, its log printed, and
 # this exits with the container's exit code (psql: 3 for a failed statement).
 # For anything interactive, scripts/prod-shell.sh.
@@ -47,12 +47,12 @@ ops_stack
 
 if ((master)); then
   # shellcheck disable=SC2016
-  script='printf "%s" "$WORDFALL_SQL" | wordfall-master-psql -X -v ON_ERROR_STOP=1 --single-transaction -f -'
+  script='printf "%s" "$ACRODONT_SQL" | acrodont-master-psql -X -v ON_ERROR_STOP=1 --single-transaction -f -'
 else
   # shellcheck disable=SC2016
-  script='printf "%s" "$WORDFALL_SQL" | psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f -'
+  script='printf "%s" "$ACRODONT_SQL" | psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f -'
 fi
-env=$(jq -cn --arg sql "$sql" '[{name: "WORDFALL_SQL", value: $sql}]')
+env=$(jq -cn --arg sql "$sql" '[{name: "ACRODONT_SQL", value: $sql}]')
 rc=0
 ops_run_ops_script "$script" "$env" || rc=$?
 exit "$rc"

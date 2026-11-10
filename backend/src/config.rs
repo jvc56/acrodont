@@ -121,7 +121,7 @@ impl Config {
             session_ttl_seconds: r.parse("SESSION_TTL_SECONDS", 2_592_000)?,
             secure_cookies,
             mail_backend,
-            mail_from: r.string("MAIL_FROM", "no-reply@wordfall.local"),
+            mail_from: r.string("MAIL_FROM", "no-reply@acrodont.local"),
             mail_outbox_dir,
             mail_max_per_second: r.parse_rate("MAIL_MAX_PER_SECOND", 1)?,
             public_url: r.string("PUBLIC_URL", "http://localhost:5173"),

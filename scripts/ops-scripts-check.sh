@@ -12,7 +12,7 @@ set -Eeuo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/wordfall-ops-check.XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/acrodont-ops-check.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 fail() { echo "FAIL: $*" >&2; [[ -s "$WORK/out" ]] && sed 's/^/  | /' "$WORK/out" >&2; exit 1; }
 pass() { echo "ok: $*"; }
@@ -30,7 +30,7 @@ pass "every script parses (bash -n), and ops_fakes.py"
 # ---------------------------------------------------------------------------
 # The stand-ins, the settings, and a repository with history.
 # ---------------------------------------------------------------------------
-unset AWS_PROFILE SITE STATE_BUCKET STATE_REGION ACCOUNT INFRA_DIR WORDFALL_ALLOW_DESTRUCTIVE_PLAN \
+unset AWS_PROFILE SITE STATE_BUCKET STATE_REGION ACCOUNT INFRA_DIR ACRODONT_ALLOW_DESTRUCTIVE_PLAN \
   AWS_REGION AWS_DEFAULT_REGION SHELL_HOURS CARGO_BUILD_JOBS
 export REAL_PATH=$PATH
 export FAKE_DIR="$WORK/fake"
@@ -42,14 +42,14 @@ printf '#!/bin/sh\nexit 0\n' > "$WORK/bin/sleep"
 chmod +x "$WORK/bin/sleep"
 export PATH="$WORK/bin:$PATH"
 export HOME="$WORK/home"
-export WORDFALL_ENV="$WORK/home/.wordfall-env"
+export ACRODONT_ENV="$WORK/home/.acrodont-env"
 export OPS_TTY="$WORK/answers"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.org GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.org
 REGISTRY=123456789012.dkr.ecr.us-east-1.amazonaws.com
 write_env() {
-  cat > "$WORDFALL_ENV" <<'EOF'
-export AWS_PROFILE=wordfall
-export SITE=wordfall.test
+  cat > "$ACRODONT_ENV" <<'EOF'
+export AWS_PROFILE=acrodont
+export SITE=acrodont.test
 export STATE_BUCKET=state-bucket
 export STATE_REGION=us-east-2
 export ACCOUNT=123456789012
@@ -69,7 +69,7 @@ for v in image_tag desired_count task_cpu task_memory domain_name alarm_email ma
 done > "$R/infra/variables.tf"
 printf 'CREATE TABLE users (id int);\n' > "$R/backend/migrations/0001_initial.sql"
 printf 'fn main() {}\n' > "$R/backend/src/main.rs"
-printf '<p>wordfall</p>\n' > "$R/frontend/index.html"
+printf '<p>acrodont</p>\n' > "$R/frontend/index.html"
 printf 'FROM scratch AS backend\nFROM scratch AS ops\n' > "$R/docker/backend.Dockerfile"
 printf 'FROM scratch\n' > "$R/docker/frontend.Dockerfile"
 printf 'readme\n' > "$R/README.md"
@@ -102,20 +102,20 @@ PLAN_DB_REPLACE='{"resource_changes": [
   {"address": "aws_db_instance.main", "type": "aws_db_instance", "change": {"actions": ["delete", "create"]}}]}'
 PLAN_SNS_ONLY='{"resource_changes": [
   {"address": "aws_sns_topic.alarms", "type": "aws_sns_topic", "change": {"actions": ["update"]}}]}'
-S3_TFVARS="$FAKE_DIR/s3/state-bucket/wordfall/prod.tfvars"
-APP_URL='postgres://wordfall_app:oldpw@wordfall.abc.us-east-1.rds.amazonaws.com:5432/wordfall?sslmode=require'
-BACKUP_URL='postgres://wordfall_backup:oldbk@wordfall.abc.us-east-1.rds.amazonaws.com:5432/wordfall?sslmode=require'
+S3_TFVARS="$FAKE_DIR/s3/state-bucket/acrodont/prod.tfvars"
+APP_URL='postgres://acrodont_app:oldpw@acrodont.abc.us-east-1.rds.amazonaws.com:5432/acrodont?sslmode=require'
+BACKUP_URL='postgres://acrodont_backup:oldbk@acrodont.abc.us-east-1.rds.amazonaws.com:5432/acrodont?sslmode=require'
 
 tfvars_with() {  # image tag
   cat <<EOF
 image_tag     = "$1"
-domain_name   = "wordfall.test"
+domain_name   = "acrodont.test"
 alarm_email   = "ops@example.org"
 desired_count = 1
 EOF
 }
-ssm_put() { mkdir -p "$FAKE_DIR/ssm"; printf '%s' "$2" > "$FAKE_DIR/ssm/wordfall_production_$1"; }
-ssm_get() { cat "$FAKE_DIR/ssm/wordfall_production_$1"; }
+ssm_put() { mkdir -p "$FAKE_DIR/ssm"; printf '%s' "$2" > "$FAKE_DIR/ssm/acrodont_production_$1"; }
+ssm_get() { cat "$FAKE_DIR/ssm/acrodont_production_$1"; }
 # A fresh world: prod.tfvars naming LIVE, the service running LIVE, ECR
 # holding all three images of each further tag (pushed in that order), the
 # database parameters in SSM, no local prod.tfvars, no calls yet.
@@ -127,7 +127,7 @@ fresh() {
   tfvars_with "$live" > "$S3_TFVARS"
   for t in "$@"; do
     i=$((i + 1))
-    for r in "wordfall-backend/$t" "wordfall-backend/$t-ops" "wordfall-frontend/$t"; do
+    for r in "acrodont-backend/$t" "acrodont-backend/$t-ops" "acrodont-frontend/$t"; do
       mkdir -p "$FAKE_DIR/ecr/${r%/*}"
       printf '2026-10-%02dT00:00:00+00:00' "$i" > "$FAKE_DIR/ecr/$r"
     done
@@ -188,26 +188,26 @@ pass "path mapping: app paths rebuild images, infra/ plans, the rest deploys not
 git -C "$R" checkout -q "$B"
 fresh "$A" "$A"
 # The ops image is already there: only the other two are built.
-mkdir -p "$FAKE_DIR/ecr/wordfall-backend" && printf '2026-10-05T00:00:00+00:00' > "$FAKE_DIR/ecr/wordfall-backend/$B-ops"
+mkdir -p "$FAKE_DIR/ecr/acrodont-backend" && printf '2026-10-05T00:00:00+00:00' > "$FAKE_DIR/ecr/acrodont-backend/$B-ops"
 answers y
 run deploy.sh || fail "deploy.sh failed on the happy path"
-in_order "aws ecr describe-images --repository-name wordfall-backend --image-ids imageTag=$B" \
+in_order "aws ecr describe-images --repository-name acrodont-backend --image-ids imageTag=$B" \
          "docker build" "docker push" \
          "$TF plan -input=false -detailed-exitcode -var-file=prod.tfvars -out=" \
          "$TF show -json" \
          "$TF apply -input=false" \
-         "aws s3 cp $R/infra/prod.tfvars s3://state-bucket/wordfall/prod.tfvars" \
-         "aws ecs describe-services --cluster wordfall --services wordfall" \
+         "aws s3 cp $R/infra/prod.tfvars s3://state-bucket/acrodont/prod.tfvars" \
+         "aws ecs describe-services --cluster acrodont --services acrodont" \
          "aws ecs describe-task-definition" \
-         "aws elbv2 wait target-in-service --target-group-arn arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/wordfall/abc" \
-         "curl -fsS --max-time 20 https://wordfall.test/health"
-called "docker build --pull --platform linux/amd64 --build-arg CARGO_BUILD_JOBS=2 -f docker/backend.Dockerfile --target backend -t $REGISTRY/wordfall-backend:$B ." \
+         "aws elbv2 wait target-in-service --target-group-arn arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/acrodont/abc" \
+         "curl -fsS --max-time 20 https://acrodont.test/health"
+called "docker build --pull --platform linux/amd64 --build-arg CARGO_BUILD_JOBS=2 -f docker/backend.Dockerfile --target backend -t $REGISTRY/acrodont-backend:$B ." \
   || fail "the backend image was not built as specified"
-called "docker build --pull --platform linux/amd64 --build-arg CARGO_BUILD_JOBS=2 --build-arg APP_BUILD=$(git -C "$R" rev-list --count HEAD) --build-arg APP_COMMIT=$(git -C "$R" rev-parse HEAD) -f docker/frontend.Dockerfile -t $REGISTRY/wordfall-frontend:$B ." \
+called "docker build --pull --platform linux/amd64 --build-arg CARGO_BUILD_JOBS=2 --build-arg APP_BUILD=$(git -C "$R" rev-list --count HEAD) --build-arg APP_COMMIT=$(git -C "$R" rev-parse HEAD) -f docker/frontend.Dockerfile -t $REGISTRY/acrodont-frontend:$B ." \
   || fail "the frontend image was not built with APP_BUILD and APP_COMMIT"
 ! called "--target ops" || fail "the ops image ECR already held was built again"
-{ called "docker push $REGISTRY/wordfall-backend:$B" && called "docker push $REGISTRY/wordfall-frontend:$B" \
-  && ! called "docker push $REGISTRY/wordfall-backend:$B-ops"; } || fail "the wrong images were pushed"
+{ called "docker push $REGISTRY/acrodont-backend:$B" && called "docker push $REGISTRY/acrodont-frontend:$B" \
+  && ! called "docker push $REGISTRY/acrodont-backend:$B-ops"; } || fail "the wrong images were pushed"
 [[ "$(s3_tag)" == "$B" ]] || fail "the uploaded prod.tfvars does not name $B"
 [[ "$(running_field tag)" == "$B" ]] || fail "the service does not run $B"
 said "0002_games.sql" || fail "the added migration was not mentioned"
@@ -219,7 +219,7 @@ printf '{"tag": "bootstrap", "cpu": "1024", "memory": "2048"}' > "$FAKE_DIR/ecs/
 answers y
 run deploy.sh || fail "deploy.sh failed on the first deploy"
 said "first deploy" || fail "the first deploy was not recognised"
-for r in "wordfall-backend:$B" "wordfall-backend:$B-ops" "wordfall-frontend:$B"; do
+for r in "acrodont-backend:$B" "acrodont-backend:$B-ops" "acrodont-frontend:$B"; do
   called "docker push $REGISTRY/$r" || fail "the first deploy did not push $r"
 done
 pass "deploy.sh: the first deploy (a placeholder tag never pushed) builds everything"
@@ -232,7 +232,7 @@ said "nothing deployable changed" || fail "a docs-only commit was not said to de
 fresh "$B" "$B"
 answers y
 run deploy.sh --all || fail "deploy.sh --all failed"
-for r in "wordfall-backend:$C" "wordfall-backend:$C-ops" "wordfall-frontend:$C"; do
+for r in "acrodont-backend:$C" "acrodont-backend:$C-ops" "acrodont-frontend:$C"; do
   called "docker push $REGISTRY/$r" || fail "--all did not push $r"
 done
 [[ "$(s3_tag)" == "$C" ]] || fail "--all did not set image_tag"
@@ -267,12 +267,12 @@ cmp -s <(tfvars_with "$A") "$S3_TFVARS" || fail "a refused plan still uploaded p
 fresh "$A" "$A" "$B"
 printf '%s' "$PLAN_DB_REPLACE" > "$FAKE_DIR/plan.json"
 answers destroy y
-WORDFALL_ALLOW_DESTRUCTIVE_PLAN=yes run deploy.sh || fail "the gate refused a plan it was told to let through"
+ACRODONT_ALLOW_DESTRUCTIVE_PLAN=yes run deploy.sh || fail "the gate refused a plan it was told to let through"
 called "$TF apply" || fail "the allowed plan was not applied"
 fresh "$A" "$A" "$B"
 printf '%s' "$PLAN_DB_REPLACE" > "$FAKE_DIR/plan.json"
 answers nope y
-if WORDFALL_ALLOW_DESTRUCTIVE_PLAN=yes run deploy.sh; then fail "a mistyped confirmation applied a destructive plan"; fi
+if ACRODONT_ALLOW_DESTRUCTIVE_PLAN=yes run deploy.sh; then fail "a mistyped confirmation applied a destructive plan"; fi
 ! called "$TF apply" || fail "a mistyped confirmation applied"
 pass "the plan gate refuses a database replacement (nothing applied); passes it only when allowed and typed"
 
@@ -331,7 +331,7 @@ if FAKE_ACCOUNT=999999999999 run deploy.sh; then fail "deploy.sh ran in the wron
 said "ACCOUNT=123456789012" || fail "the account refusal does not say why"
 fresh "$A" "$A" "$B"
 if FAKE_STS_FAIL=1 run deploy.sh; then fail "deploy.sh ran with an expired login"; fi
-said "aws sso login --profile wordfall" || fail "an expired login does not say how to log in"
+said "aws sso login --profile acrodont" || fail "an expired login does not say how to log in"
 fresh "$A" "$A" "$B"
 if run deploy.sh --set image_tag=x; then fail "deploy.sh took --set image_tag"; fi
 fresh "$A" "$A"
@@ -348,9 +348,9 @@ pass "deploy.sh refuses red or missing CI (with --skip-ci-check), warns on a red
 # ---------------------------------------------------------------------------
 fresh "$B" "$B"
 answers y
-run set-setting.sh mail_max_per_second=14 domain_name=wordfall.test use_fargate_spot=true || fail "set-setting.sh failed"
+run set-setting.sh mail_max_per_second=14 domain_name=acrodont.test use_fargate_spot=true || fail "set-setting.sh failed"
 grep -qx 'mail_max_per_second = 14' "$S3_TFVARS" || fail "the setting was not uploaded"
-grep -qx 'domain_name = "wordfall.test"' "$S3_TFVARS" || fail "a string was not quoted"
+grep -qx 'domain_name = "acrodont.test"' "$S3_TFVARS" || fail "a string was not quoted"
 grep -qx 'use_fargate_spot = true' "$S3_TFVARS" || fail "a boolean was quoted"
 in_order "$TF plan" "$TF apply" "aws s3 cp $R/infra/prod.tfvars" "aws elbv2 wait"
 fresh "$B" "$B"
@@ -386,8 +386,8 @@ pass "a circuit-breaker rollback of a cpu change (same image) is caught by compa
 # Settings from the environment win over the file.
 fresh "$B" "$B"
 if SITE=other.test run set-setting.sh mail_max_per_second=14; then fail "a SITE from the environment was ignored"; fi
-said "SITE=other.test, but the stack's site_host is wordfall.test" || fail "the environment's SITE did not win"
-pass "variables already set in the environment win over ~/.wordfall-env"
+said "SITE=other.test, but the stack's site_host is acrodont.test" || fail "the environment's SITE did not win"
+pass "variables already set in the environment win over ~/.acrodont-env"
 
 # ---------------------------------------------------------------------------
 # rollback.sh
@@ -399,7 +399,7 @@ run rollback.sh || fail "rollback.sh failed"
 said "1) $A" || fail "the previous release was not offered first"
 said "0002_games.sql" || fail "the added migration was not warned about"
 ! called "docker" || fail "rollback.sh built something"
-for r in "wordfall-backend --image-ids imageTag=$A" "wordfall-backend --image-ids imageTag=$A-ops" "wordfall-frontend --image-ids imageTag=$A"; do
+for r in "acrodont-backend --image-ids imageTag=$A" "acrodont-backend --image-ids imageTag=$A-ops" "acrodont-frontend --image-ids imageTag=$A"; do
   called "aws ecr describe-images --repository-name $r" || fail "rollback.sh did not check $r"
 done
 [[ "$(s3_tag)" == "$A" ]] || fail "the rollback did not upload image_tag $A"
@@ -422,9 +422,9 @@ if run rollback.sh --to "$B"; then fail "rollback.sh crossed an edited migration
 said "0001_initial.sql" || fail "the refusal does not name the migration"
 ! called "$TF plan" || fail "a refused rollback planned"
 fresh "$B" "$B"
-mkdir -p "$FAKE_DIR/ecr/wordfall-backend" && printf '2026-09-01T00:00:00+00:00' > "$FAKE_DIR/ecr/wordfall-backend/$A"
+mkdir -p "$FAKE_DIR/ecr/acrodont-backend" && printf '2026-09-01T00:00:00+00:00' > "$FAKE_DIR/ecr/acrodont-backend/$A"
 if run rollback.sh --to "$A"; then fail "rollback.sh went to a tag whose images are not all in ECR"; fi
-said "wordfall-backend:$A-ops is not in ECR" || fail "the missing image is not named"
+said "acrodont-backend:$A-ops is not in ECR" || fail "the missing image is not named"
 pass "rollback.sh follows a circuit-breaker rollback, refuses edited migrations and missing images"
 
 # ---------------------------------------------------------------------------
@@ -436,7 +436,7 @@ odd=$'SELECT \'it\'\'s\', "q", $$dollar$$, `tick`, \\back, $1, :x; -- ;\n\tSELEC
 fresh "$B"
 run prod-sql.sh "$odd" || fail "prod-sql.sh failed"
 printf '%s' "$odd" > "$WORK/want.sql"
-jq -j '.overrides.containerOverrides[0].environment[] | select(.name == "WORDFALL_SQL") | .value' \
+jq -j '.overrides.containerOverrides[0].environment[] | select(.name == "ACRODONT_SQL") | .value' \
   "$FAKE_DIR/runtask/1.json" > "$WORK/got.sql"
 cmp -s "$WORK/want.sql" "$WORK/got.sql" || fail "the SQL in the override is not the SQL given"
 cmp -s "$WORK/want.sql" "$FAKE_DIR/psql/1.stdin" || fail "psql inside the task did not read the SQL byte for byte"
@@ -448,9 +448,9 @@ ON_ERROR_STOP=1
 --single-transaction
 -f
 -" ]] || fail "psql was not run as specified: $(cat "$FAKE_DIR/psql/1.args")"
-called "aws ecs run-task --cluster wordfall --task-definition wordfall-ops --launch-type FARGATE --network-configuration awsvpcConfiguration={subnets=[subnet-1,subnet-2],securityGroups=[sg-task],assignPublicIp=ENABLED}" \
+called "aws ecs run-task --cluster acrodont --task-definition acrodont-ops --launch-type FARGATE --network-configuration awsvpcConfiguration={subnets=[subnet-1,subnet-2],securityGroups=[sg-task],assignPublicIp=ENABLED}" \
   || fail "the ops task was not started in the task network"
-called "aws logs get-log-events --log-group-name /ecs/wordfall --log-stream-name ops/ops/task1" || fail "the log stream was not read"
+called "aws logs get-log-events --log-group-name /ecs/acrodont --log-stream-name ops/ops/task1" || fail "the log stream was not read"
 said "psql printed this" || fail "the task's output was not printed"
 fresh "$B"
 printf '%s' "$odd" | "$R/scripts/prod-sql.sh" > "$WORK/out" 2>&1 || fail "prod-sql.sh failed with SQL on stdin"
@@ -460,13 +460,13 @@ rc=0; FAKE_PSQL_EXIT=3 run prod-sql.sh "SELECT 1/0" || rc=$?
 [[ "$rc" == 3 ]] || fail "prod-sql.sh exited $rc for psql exiting 3"
 fresh "$B"
 run prod-sql.sh --as-master "ALTER ROLE x NOLOGIN" || fail "prod-sql.sh --as-master failed"
-[[ "$(head -1 "$FAKE_DIR/psql/1.args")" == wordfall-master-psql ]] || fail "--as-master did not use wordfall-master-psql"
+[[ "$(head -1 "$FAKE_DIR/psql/1.args")" == acrodont-master-psql ]] || fail "--as-master did not use acrodont-master-psql"
 ! grep -qF "$APP_URL" "$FAKE_DIR/psql/1.args" || fail "--as-master passed the app URL"
 fresh "$B"
 if run prod-sql.sh "$(head -c 8000 /dev/zero | tr '\0' x)"; then fail "8000 bytes of SQL were sent"; fi
 ! called "run-task" || fail "oversized SQL started a task"
 fresh "$B"
-rm "$FAKE_DIR/ssm/wordfall_production_DATABASE_URL"
+rm "$FAKE_DIR/ssm/acrodont_production_DATABASE_URL"
 rc=0; run prod-sql.sh "SELECT 1" || rc=$?
 ((rc != 0)) || fail "a task that never started its container counted as success"
 said "unable to pull secrets" || fail "the stopped reason is not shown"
@@ -508,13 +508,13 @@ new=$(ssm_get DATABASE_URL)
 newpw=$(python3 -c 'import sys, urllib.parse as u; print(u.urlsplit(sys.argv[1]).password)' "$new")
 [[ "$newpw" =~ ^[0-9a-f]{48}$ ]] || fail "the new password is not 48 hex characters"
 [[ "${new/$newpw/oldpw}" == "$APP_URL" ]] || fail "the URL changed beyond its password: $new"
-in_order "aws ssm put-parameter --name /wordfall/production/DATABASE_URL --type SecureString --overwrite --value file://" \
+in_order "aws ssm put-parameter --name /acrodont/production/DATABASE_URL --type SecureString --overwrite --value file://" \
          "aws ecs run-task" \
-         "aws ecs update-service --cluster wordfall --service wordfall --force-new-deployment" \
+         "aws ecs update-service --cluster acrodont --service acrodont --force-new-deployment" \
          "aws elbv2 wait"
-[[ "$(head -1 "$FAKE_DIR/psql/1.args")" == wordfall-master-psql ]] || fail "the password was not set as master"
+[[ "$(head -1 "$FAKE_DIR/psql/1.args")" == acrodont-master-psql ]] || fail "the password was not set as master"
 grep -qx "WF_P=$newpw" "$FAKE_DIR/psql/1.env" || fail "the task did not take the password from its own DATABASE_URL"
-grep -qx "WF_U=wordfall_app" "$FAKE_DIR/psql/1.env" || fail "the task did not take the user from its own DATABASE_URL"
+grep -qx "WF_U=acrodont_app" "$FAKE_DIR/psql/1.env" || fail "the task did not take the user from its own DATABASE_URL"
 grep -qF "ALTER ROLE :\"u\" PASSWORD :'p';" "$FAKE_DIR/psql/1.stdin" || fail "the SQL is not ALTER ROLE from psql variables"
 ! grep -rqF "$newpw" "$FAKE_DIR/calls.log" "$FAKE_DIR/runtask" "$WORK/out" || fail "the new password travelled in a call, an override or the output"
 fresh "$B"
@@ -534,7 +534,7 @@ answers y
 run rotate-db-password.sh --backup || fail "rotate-db-password.sh --backup failed"
 [[ "$(ssm_get BACKUP_DATABASE_URL)" != "$BACKUP_URL" && "$(ssm_get DATABASE_URL)" == "$APP_URL" ]] \
   || fail "--backup did not rotate the backup URL alone"
-grep -qx "WF_U=wordfall_backup" "$FAKE_DIR/psql/1.env" || fail "--backup did not set wordfall_backup's password"
+grep -qx "WF_U=acrodont_backup" "$FAKE_DIR/psql/1.env" || fail "--backup did not set acrodont_backup's password"
 ! called "update-service" || fail "--backup restarted the service"
 fresh "$B"
 answers y
@@ -543,7 +543,7 @@ run rotate-db-password.sh --signing-key || fail "rotate-db-password.sh --signing
 said "EVERYONE IS SIGNED OUT" || fail "--signing-key did not warn"
 { ! called "run-task" && called "update-service"; } || fail "--signing-key should restart and touch no role"
 fresh "$B"
-ssm_put DATABASE_URL 'postgres://postgres:pw@h:5432/wordfall'
+ssm_put DATABASE_URL 'postgres://postgres:pw@h:5432/acrodont'
 answers y
 if run rotate-db-password.sh; then fail "a DATABASE_URL for another role was rotated"; fi
 ! called "put-parameter" || fail "a wrong-role URL was overwritten"
@@ -554,14 +554,14 @@ rm -f "$FAKE_DIR"/ssm/*
 ssm_put SESSION_SIGNING_KEY keep
 run init-db-roles.sh || fail "init-db-roles.sh failed"
 [[ "$(ssm_get SESSION_SIGNING_KEY)" == keep ]] || fail "an existing parameter was overwritten"
-[[ "$(ssm_get DATABASE_URL)" =~ ^postgres://wordfall_app:[0-9a-f]{48}@wordfall\.abc\.us-east-1\.rds\.amazonaws\.com:5432/wordfall\?sslmode=require$ ]] \
+[[ "$(ssm_get DATABASE_URL)" =~ ^postgres://acrodont_app:[0-9a-f]{48}@acrodont\.abc\.us-east-1\.rds\.amazonaws\.com:5432/acrodont\?sslmode=require$ ]] \
   || fail "DATABASE_URL is not as specified: $(ssm_get DATABASE_URL)"
-[[ "$(ssm_get BACKUP_DATABASE_URL)" =~ ^postgres://wordfall_backup:[0-9a-f]{48}@.*:5432/wordfall\?sslmode=require$ ]] \
+[[ "$(ssm_get BACKUP_DATABASE_URL)" =~ ^postgres://acrodont_backup:[0-9a-f]{48}@.*:5432/acrodont\?sslmode=require$ ]] \
   || fail "BACKUP_DATABASE_URL is not as specified"
-! called "put-parameter --name /wordfall/production/SESSION_SIGNING_KEY" || fail "the existing key was put"
+! called "put-parameter --name /acrodont/production/SESSION_SIGNING_KEY" || fail "the existing key was put"
 ! called "--overwrite" || fail "init-db-roles.sh overwrote a parameter"
-in_order "put-parameter --name /wordfall/production/DATABASE_URL" "put-parameter --name /wordfall/production/BACKUP_DATABASE_URL" "aws ecs run-task"
-grep -qx "APP_U=wordfall_app" "$FAKE_DIR/psql/1.env" && grep -qx "BK_U=wordfall_backup" "$FAKE_DIR/psql/1.env" \
+in_order "put-parameter --name /acrodont/production/DATABASE_URL" "put-parameter --name /acrodont/production/BACKUP_DATABASE_URL" "aws ecs run-task"
+grep -qx "APP_U=acrodont_app" "$FAKE_DIR/psql/1.env" && grep -qx "BK_U=acrodont_backup" "$FAKE_DIR/psql/1.env" \
   || fail "the roles were not read from the task's own URLs"
 for want in "CREATE ROLE %I WITH LOGIN PASSWORD %L" "ALTER SCHEMA public OWNER TO" "GRANT pg_read_all_data TO" "GRANT ALL ON DATABASE"; do
   grep -qF "$want" "$FAKE_DIR/psql/1.stdin" || fail "the roles SQL lacks: $want"
@@ -578,17 +578,17 @@ pass "init-db-roles.sh: missing parameters created (never overwritten), roles ma
 # ---------------------------------------------------------------------------
 fresh "$B"
 run check-alerts.sh || fail "check-alerts.sh failed"
-in_order "set-alarm-state --alarm-name wordfall-no-dump-36h --state-value OK" \
-         "set-alarm-state --alarm-name wordfall-no-dump-36h --state-value ALARM" \
-         "set-alarm-state --alarm-name wordfall-no-dump-36h --state-value OK"
+in_order "set-alarm-state --alarm-name acrodont-no-dump-36h --state-value OK" \
+         "set-alarm-state --alarm-name acrodont-no-dump-36h --state-value ALARM" \
+         "set-alarm-state --alarm-name acrodont-no-dump-36h --state-value OK"
 [[ "$(grep -c "test-event-pattern" "$FAKE_DIR/calls.log")" == 8 ]] || fail "not every pattern case was tested"
-called "aws rds describe-event-subscriptions --subscription-name wordfall-db-events" || fail "the RDS subscription was not checked"
+called "aws rds describe-event-subscriptions --subscription-name acrodont-db-events" || fail "the RDS subscription was not checked"
 fresh "$B"
 if FAKE_SNS_PENDING=1 run check-alerts.sh; then fail "an unconfirmed subscription passed"; fi
 said "no confirmed subscription" || fail "the unconfirmed subscription is not reported"
 fresh "$B"
-if FAKE_RULE_BROKEN=wordfall-backup-failed run check-alerts.sh; then fail "a rule matching successes passed"; fi
-said "wordfall-backup-failed: a backup task exiting 0 -> True, expected False" || fail "the broken rule is not reported"
+if FAKE_RULE_BROKEN=acrodont-backup-failed run check-alerts.sh; then fail "a rule matching successes passed"; fi
+said "acrodont-backup-failed: a backup task exiting 0 -> True, expected False" || fail "the broken rule is not reported"
 fresh "$B"
 if FAKE_RDS_SUB_STATUS=creating run check-alerts.sh; then fail "an inactive RDS subscription passed"; fi
 pass "check-alerts.sh: subscription confirmed, alarm forced ALARM then OK, patterns positive and negative, RDS subscription"
@@ -597,30 +597,30 @@ fresh "$B"
 run prod-shell.sh || fail "prod-shell.sh failed"
 jq -e '.exec == true and .overrides.containerOverrides[0].command == ["bash", "-c", "sleep 14400"]' "$FAKE_DIR/runtask/1.json" >/dev/null \
   || fail "the shell task was not started with ECS Exec and a 4-hour sleep"
-called "aws ecs execute-command --cluster wordfall --task arn:aws:ecs:us-east-1:123456789012:task/wordfall/task1 --container ops --interactive --command /bin/bash" \
+called "aws ecs execute-command --cluster acrodont --task arn:aws:ecs:us-east-1:123456789012:task/acrodont/task1 --container ops --interactive --command /bin/bash" \
   || fail "no interactive shell was opened"
 ! called "stop-task" || fail "leaving the shell stopped the task"
-said "aws ecs stop-task --cluster wordfall --task" || fail "how to stop the task is not said"
+said "aws ecs stop-task --cluster acrodont --task" || fail "how to stop the task is not said"
 fresh "$B"
 SHELL_HOURS=1 run prod-shell.sh || fail "prod-shell.sh with SHELL_HOURS failed"
 jq -e '.overrides.containerOverrides[0].command[2] == "sleep 3600"' "$FAKE_DIR/runtask/1.json" >/dev/null || fail "SHELL_HOURS was ignored"
 fresh "$B"
-run prod-shell.sh --attach arn:aws:ecs:us-east-1:123456789012:task/wordfall/task9 || fail "--attach failed"
-{ called "execute-command --cluster wordfall --task arn:aws:ecs:us-east-1:123456789012:task/wordfall/task9" && ! called "run-task"; } \
+run prod-shell.sh --attach arn:aws:ecs:us-east-1:123456789012:task/acrodont/task9 || fail "--attach failed"
+{ called "execute-command --cluster acrodont --task arn:aws:ecs:us-east-1:123456789012:task/acrodont/task9" && ! called "run-task"; } \
   || fail "--attach did not just attach"
 pass "prod-shell.sh: an ECS Exec task sleeping SHELL_HOURS, an interactive shell, left running; --attach"
 
 fresh "$B"
-rm -f "$WORDFALL_ENV"
-answers wordfall wordfall.test state-bucket us-east-2 123456789012
+rm -f "$ACRODONT_ENV"
+answers acrodont acrodont.test state-bucket us-east-2 123456789012
 FAKE_PLAN_RC=0 run onboard-deployer.sh || fail "onboard-deployer.sh failed"
-for want in "export AWS_PROFILE=wordfall" "export SITE=wordfall.test" "export STATE_BUCKET=state-bucket" \
+for want in "export AWS_PROFILE=acrodont" "export SITE=acrodont.test" "export STATE_BUCKET=state-bucket" \
             "export STATE_REGION=us-east-2" "export ACCOUNT=123456789012"; do
-  grep -qxF "$want" "$WORDFALL_ENV" || fail "the settings file lacks: $want"
+  grep -qxF "$want" "$ACRODONT_ENV" || fail "the settings file lacks: $want"
 done
-called "$TF init -input=false -backend-config=bucket=state-bucket -backend-config=key=wordfall/production.tfstate -backend-config=region=us-east-2 -backend-config=use_lockfile=true" \
+called "$TF init -input=false -backend-config=bucket=state-bucket -backend-config=key=acrodont/production.tfstate -backend-config=region=us-east-2 -backend-config=use_lockfile=true" \
   || fail "terraform init was not pointed at the shared state"
-in_order "aws sts get-caller-identity" "$TF init" "aws s3 cp s3://state-bucket/wordfall/prod.tfvars" "$TF plan -input=false -detailed-exitcode -lock=false -var-file=prod.tfvars"
+in_order "aws sts get-caller-identity" "$TF init" "aws s3 cp s3://state-bucket/acrodont/prod.tfvars" "$TF plan -input=false -detailed-exitcode -lock=false -var-file=prod.tfvars"
 ! called "apply" || fail "onboarding applied something"
 fresh "$B"
 if FAKE_PLAN_RC=2 run onboard-deployer.sh; then fail "onboarding passed with a plan that shows changes"; fi
@@ -640,7 +640,7 @@ cat > "$good" <<'EOF'
 
 ```bash
 export AWS_PAGER=""
-aws ecs describe-services --cluster wordfall --services wordfall \
+aws ecs describe-services --cluster acrodont --services acrodont \
   --query 'services[0].deployments'
 ```
 

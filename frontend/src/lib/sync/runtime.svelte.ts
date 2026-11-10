@@ -84,7 +84,7 @@ export function startSync(userId: string): () => void {
 	syncState.pending = null;
 	void refreshPending();
 	if (typeof BroadcastChannel !== 'undefined') {
-		channel = new BroadcastChannel(`wordfall-sync-${userId}`);
+		channel = new BroadcastChannel(`acrodont-sync-${userId}`);
 		channel.onmessage = (ev) => {
 			const m = ev.data as Message;
 			if (m.kind === 'kick') engine?.schedule();

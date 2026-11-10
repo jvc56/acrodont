@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(process.cwd(), '..');
 const conf = readFileSync(resolve(root, 'docker/nginx.conf.template'), 'utf8');
-const headers = readFileSync(resolve(root, 'docker/wordfall-headers.inc'), 'utf8');
+const headers = readFileSync(resolve(root, 'docker/acrodont-headers.inc'), 'utf8');
 const alb = readFileSync(resolve(root, 'infra/alb.tf'), 'utf8');
 const config = readFileSync(resolve(root, 'backend/src/config.rs'), 'utf8');
 
@@ -57,7 +57,7 @@ describe('docker/nginx.conf.template', () => {
 
 	it('sends the security headers from every location that sets its own', () => {
 		for (const spec of ['/api/', '= /health', '= /service-worker.js', '= /index.html', '/_app/immutable/', '/']) {
-			expect(location(spec), spec).toContain('include /etc/nginx/conf.d/wordfall-headers.inc;');
+			expect(location(spec), spec).toContain('include /etc/nginx/conf.d/acrodont-headers.inc;');
 		}
 		for (const h of ['Content-Security-Policy', 'X-Content-Type-Options', 'Referrer-Policy', 'Strict-Transport-Security']) {
 			expect(headers).toContain(h);

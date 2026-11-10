@@ -4,7 +4,8 @@
 // the wrong tile count is left in the input ("type one word at a time"), and
 // anything else is wrong. With alphabetical order on, an answer that sorts
 // before the furthest answer entered so far is still found but marked out of
-// order and counted as a wrong entry.
+// order, which misses the card at once. Finding every answer does not end the
+// card: Enter on an empty input does.
 import { compareTiles, type Distribution } from '$lib/tiles';
 
 export interface TypedState {

@@ -9,13 +9,13 @@ provider "aws" {
   alias  = "backup"
   region = var.backup_region
   default_tags {
-    tags = { Project = "wordfall", Environment = var.environment }
+    tags = { Project = "acrodont", Environment = var.environment }
   }
 }
 
 resource "aws_s3_bucket" "backups" {
   provider            = aws.backup
-  bucket              = "wordfall-${var.environment}-backups-${data.aws_caller_identity.current.account_id}"
+  bucket              = "acrodont-${var.environment}-backups-${data.aws_caller_identity.current.account_id}"
   object_lock_enabled = true
 }
 
@@ -121,7 +121,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
 # and the drill role only reads, so neither can both read the archive and
 # replace it.
 resource "aws_iam_role" "backup_task" {
-  name               = "wordfall-backup-task"
+  name               = "acrodont-backup-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
 }
 
@@ -146,7 +146,7 @@ data "aws_iam_policy_document" "backup_task" {
     condition {
       test     = "StringEquals"
       variable = "cloudwatch:namespace"
-      values   = ["Wordfall/Backups"]
+      values   = ["Acrodont/Backups"]
     }
   }
 }
@@ -158,7 +158,7 @@ resource "aws_iam_role_policy" "backup_task" {
 }
 
 resource "aws_iam_role" "drill_task" {
-  name               = "wordfall-drill-task"
+  name               = "acrodont-drill-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
 }
 
@@ -177,7 +177,7 @@ data "aws_iam_policy_document" "drill_task" {
     condition {
       test     = "StringEquals"
       variable = "cloudwatch:namespace"
-      values   = ["Wordfall/Backups"]
+      values   = ["Acrodont/Backups"]
     }
   }
 }
@@ -189,7 +189,7 @@ resource "aws_iam_role_policy" "drill_task" {
 }
 
 resource "aws_ecs_task_definition" "backup" {
-  family                   = "wordfall-backup"
+  family                   = "acrodont-backup"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = 512
@@ -202,7 +202,7 @@ resource "aws_ecs_task_definition" "backup" {
       name       = "backup"
       image      = local.ops_image
       essential  = true
-      entryPoint = ["python3", "/opt/wordfall/scripts/backup.py"]
+      entryPoint = ["python3", "/opt/acrodont/scripts/backup.py"]
       command = [
         "--s3-bucket", aws_s3_bucket.backups.bucket,
         "--s3-region", var.backup_region,
@@ -216,7 +216,7 @@ resource "aws_ecs_task_definition" "backup" {
 
 # Postgres runs inside this task, so it needs room for a dump and its restore.
 resource "aws_ecs_task_definition" "drill" {
-  family                   = "wordfall-drill"
+  family                   = "acrodont-drill"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = 1024
@@ -232,7 +232,7 @@ resource "aws_ecs_task_definition" "drill" {
       name       = "drill"
       image      = local.ops_image
       essential  = true
-      entryPoint = ["python3", "/opt/wordfall/scripts/drill.py"]
+      entryPoint = ["python3", "/opt/acrodont/scripts/drill.py"]
       command = [
         "--s3-bucket", aws_s3_bucket.backups.bucket,
         "--s3-region", var.backup_region,
@@ -244,7 +244,7 @@ resource "aws_ecs_task_definition" "drill" {
 }
 
 resource "aws_iam_role" "scheduler" {
-  name               = "wordfall-scheduler"
+  name               = "acrodont-scheduler"
   assume_role_policy = data.aws_iam_policy_document.scheduler_assume.json
 }
 
@@ -279,7 +279,7 @@ locals {
 
 resource "aws_scheduler_schedule" "tasks" {
   for_each                     = local.schedules
-  name                         = "wordfall-${each.key}"
+  name                         = "acrodont-${each.key}"
   schedule_expression          = each.value.expression
   schedule_expression_timezone = "UTC"
   flexible_time_window {
@@ -307,8 +307,8 @@ resource "aws_scheduler_schedule" "tasks" {
 # A backup or drill task that exits non-zero mails within minutes, rather than
 # leaving it to the 36-hour staleness alarm (BAK-2).
 resource "aws_cloudwatch_event_rule" "task_failed" {
-  for_each    = { backup = "wordfall-backup", drill = "wordfall-drill" }
-  name        = "wordfall-${each.key}-failed"
+  for_each    = { backup = "acrodont-backup", drill = "acrodont-drill" }
+  name        = "acrodont-${each.key}-failed"
   description = "The ${each.key} task stopped with a non-zero exit code"
   event_pattern = jsonencode({
     source      = ["aws.ecs"]
@@ -329,6 +329,6 @@ resource "aws_cloudwatch_event_target" "task_failed" {
   arn       = aws_sns_topic.alarms.arn
   input_transformer {
     input_paths    = { task = "$.detail.taskArn", reason = "$.detail.stoppedReason" }
-    input_template = "\"wordfall ${each.key} task FAILED (<task>): <reason>. Its log stream is ${each.key}/${each.key}/<task id> in ${aws_cloudwatch_log_group.app.name}.\""
+    input_template = "\"acrodont ${each.key} task FAILED (<task>): <reason>. Its log stream is ${each.key}/${each.key}/<task id> in ${aws_cloudwatch_log_group.app.name}.\""
   }
 }

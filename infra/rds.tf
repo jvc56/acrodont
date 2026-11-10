@@ -1,12 +1,12 @@
 # RDS Postgres 16, single-AZ, with storage autoscaling and a short
 # point-in-time window; the nightly dumps (backups.tf) cover anything older.
 resource "aws_db_subnet_group" "main" {
-  name       = "wordfall"
+  name       = "acrodont"
   subnet_ids = aws_subnet.private[*].id
 }
 
 resource "aws_db_instance" "main" {
-  identifier            = "wordfall"
+  identifier            = "acrodont"
   engine                = "postgres"
   engine_version        = "16"
   instance_class        = var.db_instance_class
@@ -14,10 +14,10 @@ resource "aws_db_instance" "main" {
   max_allocated_storage = var.db_allocated_storage * 5
   storage_type          = "gp3"
   storage_encrypted     = true
-  db_name               = "wordfall"
-  username              = "wordfall"
-  # The app and the dump connect as their own roles (wordfall_app,
-  # wordfall_backup), so RDS rotating the master password every 7 days breaks
+  db_name               = "acrodont"
+  username              = "acrodont"
+  # The app and the dump connect as their own roles (acrodont_app,
+  # acrodont_backup), so RDS rotating the master password every 7 days breaks
   # nothing. Ops tasks read the secret for role setup and rotation.
   manage_master_user_password = true
   db_subnet_group_name        = aws_db_subnet_group.main.name
@@ -30,7 +30,7 @@ resource "aws_db_instance" "main" {
   copy_tags_to_snapshot       = true
   deletion_protection         = true
   skip_final_snapshot         = false
-  final_snapshot_identifier   = "wordfall-final"
+  final_snapshot_identifier   = "acrodont-final"
   auto_minor_version_upgrade  = true
 }
 
@@ -39,7 +39,7 @@ resource "aws_db_instance" "main" {
 # fires after the first growth or never (birdtest). "notification" includes the
 # allocation passing 80% of the autoscaling ceiling.
 resource "aws_db_event_subscription" "db" {
-  name             = "wordfall-db-events"
+  name             = "acrodont-db-events"
   sns_topic        = aws_sns_topic.alarms.arn
   source_type      = "db-instance"
   source_ids       = [aws_db_instance.main.identifier]

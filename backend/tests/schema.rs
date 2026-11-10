@@ -5,8 +5,8 @@ mod common;
 use common::TestApp;
 use serde_json::{json, Value};
 use uuid::Uuid;
-use wordfall::search::store::{insert_spec, load_spec, SpecKind};
-use wordfall::search::wire::{parse_tree, tree_to_json, QuizType};
+use acrodont::search::store::{insert_spec, load_spec, SpecKind};
+use acrodont::search::wire::{parse_tree, tree_to_json, QuizType};
 
 fn contract_conditions() -> Vec<Value> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract-fixtures/filters/conditions.json");
@@ -300,6 +300,6 @@ async fn an_older_image_starts_on_a_newer_schema(pool: sqlx::PgPool) {
     .execute(&pool)
     .await
     .unwrap();
-    assert!(wordfall::app::MIGRATOR.run(&pool).await.is_err(), "SQLx's default refuses");
-    wordfall::app::migrator().run(&pool).await.expect("the server's migrator starts");
+    assert!(acrodont::app::MIGRATOR.run(&pool).await.is_err(), "SQLx's default refuses");
+    acrodont::app::migrator().run(&pool).await.expect("the server's migrator starts");
 }

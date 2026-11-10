@@ -395,7 +395,7 @@ fn dummy_hash() -> &'static str {
     H.get_or_init(|| {
         use argon2::password_hash::PasswordHasher;
         argon2::Argon2::default()
-            .hash_password(b"wordfall-dummy-password")
+            .hash_password(b"acrodont-dummy-password")
             .expect("hash")
             .to_string()
     })

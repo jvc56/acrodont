@@ -269,7 +269,7 @@ export function electLeader(userId: string, lead: () => () => void): () => void 
 	if (!locks) return lead();
 	let release: (() => void) | null = null;
 	let stopLeading: (() => void) | null = null;
-	void locks.request(`wordfall-sync-${userId}`, () => {
+	void locks.request(`acrodont-sync-${userId}`, () => {
 		stopLeading = lead();
 		return new Promise<void>((r) => (release = r));
 	});

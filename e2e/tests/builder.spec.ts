@@ -40,9 +40,9 @@ test('the builder previews and creates a cascade', async ({ page }) => {
 							const r = db.transaction(store).objectStore(store).index(index).count(key);
 							r.onsuccess = () => res(r.result);
 						});
-					const unscoped = await open('wordfall');
+					const unscoped = await open('acrodont');
 					const pointer = await get<{ user_id: string }>(unscoped, 'pointer', 'signed_in');
-					const db = await open(`wordfall-user-${pointer.user_id}`);
+					const db = await open(`acrodont-user-${pointer.user_id}`);
 					const sync = await get<{ cursor: number | null }>(db, 'meta', 'sync');
 					const rows = await count(db, 'quiz_questions', 'cascade_id', cascadeId);
 					return { synced: sync?.cursor != null, rows };

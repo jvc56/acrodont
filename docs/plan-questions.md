@@ -18,13 +18,13 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
 ## PQ-002 — Auth wire details the plan leaves unnamed (open)
 
 - **Plan:** Authentication (3871–4056), API → Auth and account (4084–4100).
-- **Issue:** The plan names the session cookie (`wordfall_session`) and the
+- **Issue:** The plan names the session cookie (`acrodont_session`) and the
   endpoints but not: the CSRF cookie and header names; the shape of the
   register `400` ("every field error at once"); the success statuses and
   bodies of register, confirm, reset and the account endpoints; the request
   field names of confirm, reset-confirm, change password and delete; the
   password length bounds ("strength with zxcvbn (score ≥ 3) and length").
-- **Provisional choices:** CSRF cookie `wordfall_csrf`, header
+- **Provisional choices:** CSRF cookie `acrodont_csrf`, header
   `X-CSRF-Token`; field errors `400 { errors: [{ field, message }] }` (the
   search endpoints' `{ path, field, message }` minus `path`); register and
   reset-password `202 {}`; confirm, reset-confirm, sign-out-everywhere,

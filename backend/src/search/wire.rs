@@ -40,7 +40,7 @@ pub enum GroupOp {
 }
 
 /// The 23 condition types, in the order of Zyzzyva's dropdown and then the
-/// three Wordfall-only filters (PLAN.md § Filter reference).
+/// three Acrodont-only filters (PLAN.md § Filter reference).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "condition_type", rename_all = "snake_case")]

@@ -16,7 +16,7 @@ resource "aws_acm_certificate_validation" "site" {
 }
 
 resource "aws_lb" "main" {
-  name                       = "wordfall"
+  name                       = "acrodont"
   load_balancer_type         = "application"
   security_groups            = [aws_security_group.alb.id]
   subnets                    = aws_subnet.public[*].id
@@ -25,7 +25,7 @@ resource "aws_lb" "main" {
 }
 
 resource "aws_lb_target_group" "web" {
-  name        = "wordfall-web"
+  name        = "acrodont-web"
   port        = 80
   protocol    = "HTTP"
   target_type = "ip"

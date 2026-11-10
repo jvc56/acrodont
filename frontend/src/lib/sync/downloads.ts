@@ -699,4 +699,4 @@ export async function openPlayers(): Promise<Set<string> | null> {
 }
 
 /** Each player tab holds a Web Lock named for its cascade (§ On the device → Local size). */
-export const PLAYER_LOCK = 'wordfall-player-';
+export const PLAYER_LOCK = 'acrodont-player-';

@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Dump a Wordfall database (PLAN.md § Backups).
+"""Dump a Acrodont database (PLAN.md § Backups).
 
 A `pg_dump --format=custom` of the whole database, and a `--schema-only`
 dump beside it. The same code runs nightly in production, as a scheduled
 Fargate task on the backend image, and locally before a risky migration edit.
 
   ./scripts/backup.py                          # the dev stack, into ./backups/
-  ./scripts/backup.py --project wordfall-e2e   # another local stack
+  ./scripts/backup.py --project acrodont-e2e   # another local stack
   ./scripts/backup.py --database-url URL --out DIR
   backup.py --s3-bucket B --s3-region R --metrics-region R2   # production
 
 With --s3-bucket the dump streams to `daily/YYYY-MM-DD.dump` (and
 `.schema.sql`), named for the day so a bad run cannot overwrite a good one;
 on the first of the month it is also written to `monthly/YYYY-MM.dump`, kept a
-year. With --metrics-region it reports `Wordfall/Backups` DumpSucceeded,
+year. With --metrics-region it reports `Acrodont/Backups` DumpSucceeded,
 DumpBytes and DumpSizeRatio (this dump over the previous one), which the
 alarms in infra/alarms.tf watch. The database URL comes from --database-url
 or DATABASE_URL; production gives it a read-only role.
@@ -38,7 +38,7 @@ def dump_command(args: argparse.Namespace, schema_only: bool) -> List[str]:
     if args.project:
         # The stack's own pg_dump, so its version matches the server's.
         return ["docker", "compose", "-p", args.project, "-f", str(ROOT / "docker-compose.yml"),
-                "exec", "-T", "postgres", "pg_dump", "-U", "wordfall", "-d", "wordfall", *flags]
+                "exec", "-T", "postgres", "pg_dump", "-U", "acrodont", "-d", "acrodont", *flags]
     url = args.database_url or os.environ.get("DATABASE_URL")
     if not url:
         sys.exit("backup: no database: pass --database-url, set DATABASE_URL, or name a --project")
@@ -74,7 +74,7 @@ def run_dump(args: argparse.Namespace, schema_only: bool, sink) -> int:
 def to_directory(args: argparse.Namespace, day: dt.date) -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    stem = out / f"wordfall-{day.isoformat()}"
+    stem = out / f"acrodont-{day.isoformat()}"
 
     def writer(path: Path):
         def sink(stream):
@@ -136,7 +136,7 @@ def to_s3(args: argparse.Namespace, day: dt.date) -> int:
         ]
         if before:
             data.append({"MetricName": "DumpSizeRatio", "Value": size / before, "Unit": "None"})
-        cw.put_metric_data(Namespace="Wordfall/Backups", MetricData=data)
+        cw.put_metric_data(Namespace="Acrodont/Backups", MetricData=data)
     return size
 
 
@@ -154,14 +154,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     src = p.add_mutually_exclusive_group()
     src.add_argument("--database-url", help="the database to dump (default: DATABASE_URL)")
-    src.add_argument("--project", help="a local compose stack to dump (default: wordfall, the dev stack)")
+    src.add_argument("--project", help="a local compose stack to dump (default: acrodont, the dev stack)")
     p.add_argument("--out", default=str(ROOT / "backups"), help="directory for the files (default: ./backups)")
     p.add_argument("--s3-bucket", help="write to this bucket instead of a directory")
     p.add_argument("--s3-region")
-    p.add_argument("--metrics-region", help="report Wordfall/Backups metrics to CloudWatch in this region")
+    p.add_argument("--metrics-region", help="report Acrodont/Backups metrics to CloudWatch in this region")
     args = p.parse_args(argv)
     if not args.database_url and not args.project and not os.environ.get("DATABASE_URL"):
-        args.project = "wordfall"
+        args.project = "acrodont"
     day = dt.datetime.now(dt.timezone.utc).date()
     if args.s3_bucket:
         to_s3(args, day)

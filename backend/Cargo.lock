@@ -3,6 +3,42 @@
 version = 4
 
 [[package]]
+name = "acrodont"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "aws-config",
+ "aws-sdk-sesv2",
+ "axum",
+ "axum-extra",
+ "base64 0.23.1",
+ "bytes",
+ "chrono",
+ "cookie",
+ "governor",
+ "hex",
+ "hkdf",
+ "http-body-util",
+ "pasetors",
+ "proptest",
+ "rand 0.10.3",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "zxcvbn",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3883,42 +3919,6 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
-
-[[package]]
-name = "wordfall"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "argon2",
- "aws-config",
- "aws-sdk-sesv2",
- "axum",
- "axum-extra",
- "base64 0.23.1",
- "bytes",
- "chrono",
- "cookie",
- "governor",
- "hex",
- "hkdf",
- "http-body-util",
- "pasetors",
- "proptest",
- "rand 0.10.3",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "sqlx",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "zxcvbn",
-]
 
 [[package]]
 name = "writeable"

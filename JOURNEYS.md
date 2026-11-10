@@ -1,8 +1,8 @@
-# Wordfall journeys
+# Acrodont journeys
 
 A tester's checklist: every journey on the site, walked by hand against a
 local `./scripts/dev.py` instance. Working through it should leave you
-confident Wordfall can go live. The Playwright journeys (`e2e/`) cover the
+confident Acrodont can go live. The Playwright journeys (`e2e/`) cover the
 same ground automatically. This list is for what a person notices that an
 assertion does not: wording, layout, feel, and the phone.
 
@@ -45,13 +45,13 @@ as a link (`[mail] confirm …`).
 ## Part 1: visitors
 
 - [ ] **V-1** **Do** open `/` signed out (`./scripts/dev.py --no-login`). **Expect** the log-in page, with Create an account; there is no landing page.
-- [ ] **V-9** **Do** log in. **Expect** the Cascades page. The header shows Cascades, New cascade, Trash, Admin (admins only), the sync status and your name; Wordfall leads back to Cascades.
+- [ ] **V-9** **Do** log in. **Expect** the Cascades page. The header shows Cascades, New cascade, Trash, Admin (admins only), the sync status and your name; Acrodont leads back to Cascades.
 - [ ] **V-2** **Do** register a new account. **Expect** "check your email"; dev.py prints a `[mail] confirm` link; following it confirms the account, and you can log in.
 - [ ] **V-3** **Do** register with a taken username. **Expect** "That username is taken." under the field, and no mail.
 - [ ] **V-4** **Do** register with an address that already has an account. **Expect** the same "check your email" page; dev.py prints a mail saying the address already has an account.
 - [ ] **V-5** **Do** log in with a wrong password ten times. **Expect** "Wrong username or password." each time, then a wait before further attempts.
 - [ ] **V-6** **Do** reset a password from "Forgot password?". **Expect** a `[mail] reset` link; the new password works, and the old one no longer does.
-- [ ] **V-7** **Do** start with `--env MAX_ACCOUNTS=3` and register until three accounts exist. **Expect** the next registration says "Wordfall is not taking new accounts at the moment.", for a new address and a known one alike.
+- [ ] **V-7** **Do** start with `--env MAX_ACCOUNTS=3` and register until three accounts exist. **Expect** the next registration says "Acrodont is not taking new accounts at the moment.", for a new address and a known one alike.
 - [ ] **V-8** **Do** open `/dev-login?username=dev` on the real site, once deployed. **Expect** "Dev sign-in is only available on a local stack…"; nothing signs in.
 
 ## Part 2: studying

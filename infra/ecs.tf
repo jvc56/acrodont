@@ -2,7 +2,7 @@
 # only deployer: scripts/deploy.sh sets image_tag and applies, so the state
 # always says what is running (BIRDTEST_LESSONS_PLAN.md DEP-1).
 resource "aws_ecs_cluster" "main" {
-  name = "wordfall"
+  name = "acrodont"
   # Container Insights bills custom metrics; the service-level CPU and memory
   # metrics the alarms use are free without it.
   setting {
@@ -49,7 +49,7 @@ locals {
     options = {
       awslogs-group         = aws_cloudwatch_log_group.app.name
       awslogs-region        = var.region
-      awslogs-stream-prefix = "wordfall"
+      awslogs-stream-prefix = "acrodont"
     }
   }
   task_network = {
@@ -60,7 +60,7 @@ locals {
 }
 
 resource "aws_ecs_task_definition" "app" {
-  family                   = "wordfall"
+  family                   = "acrodont"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = var.task_cpu
@@ -106,12 +106,12 @@ resource "aws_ecs_task_definition" "app" {
 }
 
 resource "aws_ecs_service" "app" {
-  name                              = "wordfall"
+  name                              = "acrodont"
   cluster                           = aws_ecs_cluster.main.id
   task_definition                   = aws_ecs_task_definition.app.arn
   desired_count                     = var.desired_count
   health_check_grace_period_seconds = 300
-  # Rolls: the new task serves before the old one drains. Wordfall runs safely
+  # Rolls: the new task serves before the old one drains. Acrodont runs safely
   # as two instances for that minute (advisory-locked purge, NOTIFY catalog
   # reload, no SSE), unlike birdtest's stop-first single task.
   deployment_minimum_healthy_percent = 100
@@ -148,8 +148,8 @@ resource "aws_ecs_service" "app" {
 # A deployment the circuit breaker rolled back. Terraform's state still names
 # the failed release, so the next apply would deploy it again: the mail says so.
 resource "aws_cloudwatch_event_rule" "deploy_failed" {
-  name        = "wordfall-deploy-failed"
-  description = "A wordfall deployment failed and ECS rolled it back"
+  name        = "acrodont-deploy-failed"
+  description = "A acrodont deployment failed and ECS rolled it back"
   event_pattern = jsonencode({
     source      = ["aws.ecs"]
     detail-type = ["ECS Deployment State Change"]
@@ -167,6 +167,6 @@ resource "aws_cloudwatch_event_target" "deploy_failed" {
       reason     = "$.detail.reason"
       deployment = "$.detail.deploymentId"
     }
-    input_template = "\"wordfall deploy FAILED and ECS rolled back to the previous release: <reason> (<deployment>). Terraform's state still names the failed release, so run scripts/rollback.sh before any other apply (docs/runbook.md, Rolling back). The stopped tasks and the log group ${aws_cloudwatch_log_group.app.name} say what failed.\""
+    input_template = "\"acrodont deploy FAILED and ECS rolled back to the previous release: <reason> (<deployment>). Terraform's state still names the failed release, so run scripts/rollback.sh before any other apply (docs/runbook.md, Rolling back). The stopped tasks and the log group ${aws_cloudwatch_log_group.app.name} say what failed.\""
   }
 }

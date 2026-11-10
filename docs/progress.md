@@ -15,13 +15,13 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
   `export PATH=$HOME/.local/n/bin:$PATH`.
 - Rust stable 1.98 is pinned in `backend/rust-toolchain.toml`.
 - Compile-checked SQLx queries: `make sqlx-db` starts a Postgres container
-  `wordfall-sqlx` on 127.0.0.1:55432 with the schema; `backend/.env`
+  `acrodont-sqlx` on 127.0.0.1:55432 with the schema; `backend/.env`
   (gitignored) points `DATABASE_URL` at it. After adding or changing a query,
   run `make sqlx-prepare` and commit `backend/.sqlx/`. Builds and all test
   targets use `SQLX_OFFLINE=true`. After editing the migration, rerun
   `make sqlx-db`.
 - Port 5432 on this host is taken by another project's Postgres; nothing here
-  publishes Postgres except `wordfall-sqlx` (55432) and the throwaway test DB
+  publishes Postgres except `acrodont-sqlx` (55432) and the throwaway test DB
   (random port).
 - Playwright has no Ubuntu 20.04 build; the Makefile sets
   `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu22.04-x64` on 20.04 hosts, and that
@@ -32,7 +32,7 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
 ## Done
 
 ### Phase 1 — Skeleton ✅
-- `backend/`: Axum + SQLx crate `wordfall`; config from env with every
+- `backend/`: Axum + SQLx crate `acrodont`; config from env with every
   variable of PLAN.md § Configuration (malformed values fail startup);
   migration run at startup via `sqlx::migrate!`; JSON tracing; `/health`
   (DB + catalog-ready flag, 503 until ready).
@@ -42,16 +42,16 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
   `npm run build` ends with `scripts/check-csp.js` over `build/index.html`.
   Asset inlining is off (data: URIs would violate `default-src 'self'`).
 - `docker/`: backend Dockerfile, frontend (Nginx) Dockerfile,
-  `nginx.conf.template` + `wordfall-headers.inc` (frame-ancestors 'self',
+  `nginx.conf.template` + `acrodont-headers.inc` (frame-ancestors 'self',
   nosniff, HSTS via env, no-cache on index.html/service-worker.js, immutable
   hashed assets, SPA fallback, real-IP so backend reads 1 hop).
 - `docker-compose.yml`: postgres:16, backend, frontend on :5173 (port via
-  `WORDFALL_PORT`), `hot-reload` profile with Vite on :5174. Backend env =
+  `ACRODONT_PORT`), `hot-reload` profile with Vite on :5174. Backend env =
   `docker/backend.defaults.env` + `.stack/<project>.env` (written by stack.py
   per `up`: per-project signing key, PUBLIC_URL, `--env` overrides).
 - `scripts/stack.py` (up/seed/reset/down + CLI), `scripts/dev.py` (all flags
   from PLAN.md § Development). `seed` is written against assumed auth/admin
-  contracts (cookie `wordfall_csrf`, header `X-CSRF-Token`, confirm body
+  contracts (cookie `acrodont_csrf`, header `X-CSRF-Token`, confirm body
   `{code}`, console mail log line with `mail_to` and `confirmation_code`
   JSON fields, `/api/admin/catalog` keys) — **align these with PLAN.md
   § Authentication in Phase 2 and § Admin in Phase 3.**
@@ -88,7 +88,7 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
   delete, expiry, reset flow, login-failure limits before Argon2, per-IP auth
   bucket, purge of stale unconfirmed).
 - Frontend: shadcn-svelte (vega style, zinc/neutral) + components in
-  `src/lib/components/ui`; `lib/api.ts` (CSRF, X-Wordfall-User, withRetry);
+  `src/lib/components/ui`; `lib/api.ts` (CSRF, X-Acrodont-User, withRetry);
   `lib/local/accounts.ts` = the **unscoped IndexedDB database** (accounts
   table + signed_in pointer, queued logout rules) with 14 Vitest cases;
   `lib/auth/session.svelte.ts` (startup reads pointer, /me comparison,
@@ -280,8 +280,8 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
   in meta, resync → full pull, Web Locks leader, triggers),
   `runtime.svelte.ts` (leader tab runs it; BroadcastChannel status/kick),
   `lib/local/created.ts` (a created cascade into the base at once).
-- `__APP_BUILD__`/`__APP_COMMIT__` via Vite define from WORDFALL_BUILD /
-  WORDFALL_COMMIT (Docker build args APP_BUILD/APP_COMMIT).
+- `__APP_BUILD__`/`__APP_COMMIT__` via Vite define from ACRODONT_BUILD /
+  ACRODONT_COMMIT (Docker build args APP_BUILD/APP_COMMIT).
 - Tests: `lib/sync/engine.test.ts` (33) against `testing/fake-server.ts`
   (rules via SimCascade, per-row sequences, paging); e2e builder journey now
   asserts the new cascade's 18 rows are in IndexedDB and the cursor advanced
@@ -291,7 +291,7 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
 - `lib/sync/downloads.ts`: after every pull (and on first open / Keep
   offline / restore via `ensureCascade`): drop pass (window, then
   ROW_STORAGE_BUDGET in two tiers with the budget-dropped mark; skips pending
-  ops, open players via Web Locks `wordfall-player-<id>` or this tab's own
+  ops, open players via Web Locks `acrodont-player-<id>` or this tab's own
   open cascade), distributions into the `distributions` store, index lists
   deepest level first, pending quizzes' grades (sync first; attempt/seed
   mismatch → discard and sync again; completeness vs counters; positions;
@@ -331,7 +331,7 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
   (layout-wide). Route `/cascades/[id]`: desktop rails / touch zones,
   mouse/wheel/key bindings, typed input with the three-button row, settings
   (preferences + quiz options), completion screen (Keep studying, Start over,
-  Move to Trash), trashed → Restore, Web Lock `wordfall-player-<id>`.
+  Move to Trash), trashed → Restore, Web Lock `acrodont-player-<id>`.
 - Runtime: `changed` signal (step 5 refresh), `progress`, `fetchCard`,
   `ensureCascade` in any tab. Vitest: jsdom + @testing-library/svelte
   (`resolve.conditions: ['browser']` under VITEST).
@@ -382,7 +382,7 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
   admin, tabs, journeys, misc, builder-lists, update, shell), plus the
   configured passes, each on its own stack through `E2E_PROJECT`/`E2E_PORT`:
   `@ttl` (PQ-016), `@purge`, `@limits`, and `@answers` / `@budget` on a
-  frontend built with lowered storage limits (`WORDFALL_TEST_LIMITS` →
+  frontend built with lowered storage limits (`ACRODONT_TEST_LIMITS` →
   `__TEST_LIMITS__` in `lib/sync/config.ts`; a release build never sets it).
   `make test-e2e` runs them all.
 - Server scale suite `backend/tests/scale.rs` (`#[ignore]`d; `make test-scale`
@@ -476,7 +476,7 @@ accounts, 20 cascades and 130,000 questions per quiz.
 - **Docker:**
   - One backend Dockerfile with two targets: `backend` (the server alone) and
     `ops` (Postgres 16, python3, backup.py, restore.py, drill.py and
-    `wordfall-master-psql`).
+    `acrodont-master-psql`).
   - Files are touched before the cached cargo build, cargo jobs are capped,
     and base images are pinned by digest.
   - Compose binds to loopback.

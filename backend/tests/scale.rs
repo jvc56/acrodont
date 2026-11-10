@@ -600,7 +600,7 @@ async fn purging_a_130000_question_cascade(pool: sqlx::PgPool) {
     let mut d = Device::new(c);
     assert_eq!(d.sync(vec![]).await.status, StatusCode::OK);
     let t = Instant::now();
-    let (purged, synced) = tokio::join!(wordfall::purge::purge_trash(&app.state), async {
+    let (purged, synced) = tokio::join!(acrodont::purge::purge_trash(&app.state), async {
         tokio::time::sleep(Duration::from_millis(50)).await;
         d.sync(vec![]).await
     });
@@ -645,7 +645,7 @@ async fn purging_60000_chain_quizzes_in_capped_runs(pool: sqlx::PgPool) {
     let runs = CHAINS / PURGE_CAP;
     for run in 1..=runs {
         let t = Instant::now();
-        let (purged, synced) = tokio::join!(wordfall::purge::purge_trash(&app.state), async {
+        let (purged, synced) = tokio::join!(acrodont::purge::purge_trash(&app.state), async {
             tokio::time::sleep(Duration::from_millis(20)).await;
             d.sync(vec![]).await
         });
@@ -696,9 +696,9 @@ async fn an_incremental_pull_beside_60000_chain_quizzes(pool: sqlx::PgPool) {
     // Nothing changed: each query scans its user_seq index and touches a
     // handful of pages, whatever the user's quiz count.
     for (sql, index, attempts) in [
-        (wordfall::sync::pull::cascades_sql(), "cascades_user_seq", false),
-        (wordfall::sync::pull::quizzes_sql(), "quizzes_user_seq", false),
-        (wordfall::sync::pull::ATTEMPTS_SQL.to_owned(), "quiz_attempts_user_seq", true),
+        (acrodont::sync::pull::cascades_sql(), "cascades_user_seq", false),
+        (acrodont::sync::pull::quizzes_sql(), "quizzes_user_seq", false),
+        (acrodont::sync::pull::ATTEMPTS_SQL.to_owned(), "quiz_attempts_user_seq", true),
     ] {
         let plan = explain(&app, &sql, |q| {
             let q = q.bind(user).bind(cursor).bind(cursor).bind(Uuid::nil());
@@ -727,7 +727,7 @@ async fn an_incremental_pull_beside_60000_chain_quizzes(pool: sqlx::PgPool) {
     let op = other.op("move_cursor", json!({ "quiz_id": s.source_id, "attempt": q.attempt, "attempt_seed": q.seed, "position": 1 }));
     let r = other.sync(vec![op]).await;
     assert_eq!(r.json()["results"][0]["status"], "applied", "{:?}", r.json());
-    let plan = explain(&app, &wordfall::sync::pull::quizzes_sql(), |q| {
+    let plan = explain(&app, &acrodont::sync::pull::quizzes_sql(), |q| {
         q.bind(user).bind(before).bind(i64::MAX).bind(Uuid::nil()).bind(50_001_i64)
     })
     .await;

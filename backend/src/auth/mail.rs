@@ -301,9 +301,9 @@ pub fn confirmation_email(public_url: &str, to: &str, code: &str) -> Email {
     );
     Email {
         to: to.into(),
-        subject: "Confirm your Wordfall account".into(),
+        subject: "Confirm your Acrodont account".into(),
         body: format!(
-            "Welcome to Wordfall.\n\nConfirm your email address within 24 hours:\n{link}\n"
+            "Welcome to Acrodont.\n\nConfirm your email address within 24 hours:\n{link}\n"
         ),
         kind: MailKind::Confirmation { code: code.into() },
     }
@@ -313,9 +313,9 @@ pub fn account_exists_email(public_url: &str, to: &str) -> Email {
     let base = public_url.trim_end_matches('/');
     Email {
         to: to.into(),
-        subject: "Your Wordfall account".into(),
+        subject: "Your Acrodont account".into(),
         body: format!(
-            "Someone tried to register a Wordfall account with this address, which already \
+            "Someone tried to register a Acrodont account with this address, which already \
              has one. If it was you, log in at {base}/login, or reset your password at \
              {base}/reset-password. Otherwise you can ignore this email.\n"
         ),
@@ -331,7 +331,7 @@ pub fn reset_email(public_url: &str, to: &str, token: &str) -> Email {
     );
     Email {
         to: to.into(),
-        subject: "Reset your Wordfall password".into(),
+        subject: "Reset your Acrodont password".into(),
         body: format!(
             "Set a new password within 30 minutes:\n{link}\n\nIf you did not ask for this, \
              you can ignore this email.\n"
@@ -398,7 +398,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_file_backend_writes_one_message_per_file() {
-        let dir = std::env::temp_dir().join(format!("wordfall-outbox-{}", uuid::Uuid::new_v4().simple()));
+        let dir = std::env::temp_dir().join(format!("acrodont-outbox-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&dir).unwrap();
         FileMailer::new(&dir).send(confirmation("Bob+x@Example.org")).await.unwrap();
         let files: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();

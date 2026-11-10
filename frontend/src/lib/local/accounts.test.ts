@@ -83,7 +83,7 @@ describe('unscoped database', () => {
 		const open = vi.spyOn(globalThis.indexedDB, 'open');
 		const line = await storageLine();
 		const opened = open.mock.calls.map((c) => c[0]);
-		expect(opened.every((n) => n === 'wordfall')).toBe(true);
+		expect(opened.every((n) => n === 'acrodont')).toBe(true);
 		expect(line.find((r) => r.user_id === 'a')).toMatchObject({ rows: 10, keys: 20, answer_bytes: 30 });
 		open.mockRestore();
 	});

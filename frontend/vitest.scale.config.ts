@@ -25,7 +25,7 @@ const config = mergeConfig(
 				// A persistent profile: a fresh context is incognito, whose small
 				// in-memory storage quota a 130,000-question cascade exceeds.
 				provider: playwright({
-					persistentContext: 'node_modules/.cache/wordfall-scale-profile',
+					persistentContext: 'node_modules/.cache/acrodont-scale-profile',
 					launchOptions: { args: ['--js-flags=--max-old-space-size=8192'] }
 				}),
 				instances: [{ browser: 'chromium' }]

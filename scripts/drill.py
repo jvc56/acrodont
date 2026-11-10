@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The monthly restore drill (PLAN.md § Backups → The drill; BIRDTEST_LESSONS_PLAN.md BAK-1).
 
-Runs as the scheduled `wordfall-drill` task on the ops image. It restores the
+Runs as the scheduled `acrodont-drill` task on the ops image. It restores the
 newest nightly dump into a Postgres it starts inside its own task, never on the
 production instance (birdtest's drill once filled production's storage and
 pushed its autoscaling up for good), then checks what a restore must deliver:
@@ -13,13 +13,13 @@ pushed its autoscaling up for good), then checks what a restore must deliver:
   4. restore.py's sequence bump runs, and leaves every user's sync_floor_seq
      equal to sync_seq and above 2^32, which is what forces devices to resync.
 
-It reports Wordfall/Backups DrillSucceeded and DrillSeconds, and exits
-non-zero on any failure, which the wordfall-drill-failed rule mails. The part a
+It reports Acrodont/Backups DrillSucceeded and DrillSeconds, and exits
+non-zero on any failure, which the acrodont-drill-failed rule mails. The part a
 machine cannot do (a second browser profile resyncing after the bump) stays in
 the quarterly manual drill in docs/runbook.md.
 
 Locally, against any dump file and a throwaway Postgres in this process:
-    python3 scripts/drill.py --dump backups/wordfall-2026-11-08.dump
+    python3 scripts/drill.py --dump backups/acrodont-2026-11-08.dump
 (needs initdb, pg_ctl and pg_restore 16 on PATH, and must not run as root
 unless the postgres user exists.)
 """
@@ -70,7 +70,7 @@ def run(cmd: List[str], **kw) -> subprocess.CompletedProcess:
 
 
 def psql(sql: str) -> str:
-    out = run(as_postgres(["psql", "-h", "127.0.0.1", "-p", str(PORT), "-d", "wordfall", "-v",
+    out = run(as_postgres(["psql", "-h", "127.0.0.1", "-p", str(PORT), "-d", "acrodont", "-v",
                            "ON_ERROR_STOP=1", "-At", "-c", sql]), stdout=subprocess.PIPE)
     return out.stdout.strip()
 
@@ -86,7 +86,7 @@ def start_postgres(work: Path) -> Path:
                      "-o", f"-p {PORT} -c listen_addresses=127.0.0.1 -k {work}", "start"]),
         stdout=subprocess.DEVNULL)
     os.environ["PGUSER"] = "postgres"
-    run(as_postgres(["createdb", "-h", "127.0.0.1", "-p", str(PORT), "wordfall"]))
+    run(as_postgres(["createdb", "-h", "127.0.0.1", "-p", str(PORT), "acrodont"]))
     return data
 
 
@@ -132,7 +132,7 @@ def report(region: Optional[str], ok: bool, seconds: float) -> None:
     import boto3
 
     boto3.client("cloudwatch", region_name=region).put_metric_data(
-        Namespace="Wordfall/Backups",
+        Namespace="Acrodont/Backups",
         MetricData=[
             {"MetricName": "DrillSucceeded", "Value": 1 if ok else 0, "Unit": "Count"},
             {"MetricName": "DrillSeconds", "Value": seconds, "Unit": "Seconds"},
@@ -145,14 +145,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--s3-bucket", help="the backups bucket (the newest daily dump is used)")
     p.add_argument("--s3-region")
-    p.add_argument("--metrics-region", help="report Wordfall/Backups drill metrics here")
+    p.add_argument("--metrics-region", help="report Acrodont/Backups drill metrics here")
     p.add_argument("--dump", help="a local dump file instead of the bucket's newest")
     args = p.parse_args(argv)
     if not args.dump and not args.s3_bucket:
         p.error("--s3-bucket or --dump is required")
 
     started = time.monotonic()
-    work = Path(tempfile.mkdtemp(prefix="wordfall-drill-"))
+    work = Path(tempfile.mkdtemp(prefix="acrodont-drill-"))
     data: Optional[Path] = None
     ok = False
     try:
@@ -181,7 +181,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if os.geteuid() == 0:
             shutil.chown(str(dump), "postgres")
         data = start_postgres(work)
-        run(as_postgres(["pg_restore", "-h", "127.0.0.1", "-p", str(PORT), "-d", "wordfall",
+        run(as_postgres(["pg_restore", "-h", "127.0.0.1", "-p", str(PORT), "-d", "acrodont",
                          "--no-owner", "--no-privileges", "--exit-on-error", str(dump)]))
         for line in check(dump, schema):
             print(f"drill: {line}")

@@ -1,9 +1,9 @@
-# Wordfall — Project Plan
+# Acrodont — Project Plan
 
 ## Overview
 
-Wordfall is a word study website for crossword game players. A logged-in user
-describes the words they want with filters, and Wordfall turns the matches into
+Acrodont is a word study website for crossword game players. A logged-in user
+describes the words they want with filters, and Acrodont turns the matches into
 a **cascade** of flashcard quizzes. Getting a quiz at least X% right **clears**
 it and removes it from the cascade. Missing too many sends the missed questions
 one **level** down. The **Source quiz** at Level 1 is the exception: it is never
@@ -21,7 +21,7 @@ There are three quiz types:
 
 Twenty of the filters match search conditions in Zyzzyva
 (<https://github.com/scrabblewords/collins-zyzzyva>), so experienced players can
-describe a word list the way they already know how. Three are Wordfall-only:
+describe a word list the way they already know how. Three are Acrodont-only:
 **Front Inner Hook** and **Back Inner Hook**, which Zyzzyva shows in its word
 display but has no search condition for, and **Leave Value**, for Leave Value
 quizzes. Filters combine with AND and OR in nested groups whose precedence the
@@ -50,7 +50,7 @@ just what was answered correctly or missed. See
 
 A cascade's Source quiz can hold up to **130,000 questions**.
 
-**Scale assumptions (2026-11).** Wordfall is sized for its owner alone at
+**Scale assumptions (2026-11).** Acrodont is sized for its owner alone at
 first, perhaps ten more people within months, and **at most about 50
 accounts** (`MAX_ACCOUNTS`, after which registration closes), each with at most
 **20 cascades** of at most **130,000 questions**. The production stack is
@@ -642,7 +642,7 @@ device's **primary pointer**:
 
 ```
 ┌────────────┬──────────────────────────────────────────────────────────────┐
-│ Wordfall « │┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓│
+│ Acrodont « │┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓│
 │            │┃                         AEINRST                            ┃│
 │ Cascades   │┃                         ANESTRI                            ┃│
 │ New cascade│┃                         ANTSIER                            ┃│
@@ -825,7 +825,7 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
     letter**: that is what makes the English display the one Zyzzyva users know,
     while a multi-character or non-ASCII tile keeps its own form, since its
     lower-case form is its `blank_letter` — `ny`, `l·l` — which means "a blank
-    playing that tile" everywhere else in Wordfall and is an error in an upload
+    playing that tile" everywhere else in Acrodont and is an error in an upload
     file. So a Catalan front hook reads `NY`, never `ny`.
   - With *show definitions* on (the default), each word's definition appears
     beneath it, in the definitions' own typeface and size.
@@ -846,23 +846,35 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
 
 #### Typed mode (Anagram quizzes only)
 
-- The question shows `0 of 9 found` with a focused text input.
+- Only Anagram quizzes can be typed: the player's settings offer the answer
+  mode only on an Anagram cascade, and a Definition or Leave Value card is
+  always a flashcard.
+- The text input sits **at the bottom of the page**, in a bar under the quiz
+  area (above the on-screen keyboard on a phone), with `0 of 9 found` over it
+  and "Enter on an empty box when you are finished" under it.
 - The user types a word and presses **Enter**. Input is upper-cased, trimmed,
   and converted to tiles (see [Tiles](#tiles)).
   - A word that is **one of the answers and not yet entered** joins the found
-    list, shown in alphabetical order, and the counter goes up.
+    list, and the counter goes up. Found words show **in the answer space**,
+    in the answer font and size and in the answer's order — the word alone,
+    with **no hooks, inner hooks or definitions** until the reveal, since those
+    would hint at the words still to find.
   - A word **already entered** is ignored, with a brief "already entered" note.
   - An entry whose **tile count differs from the question's** is not counted:
     it cannot be an answer, and it is almost always two words typed together
     (`RETAINS NASTIER`, which the space-separates-tiles rule reads as one
     14-tile entry). It is left in the input with "type one word at a time",
     and neither joins the wrong list nor affects the grade.
-  - Any other word is **wrong**. It is listed in red under the input, and the
-    question will be graded missed.
-- The answer is shown when **every anagram has been found**, or on **Show /
-  Next**, which here means giving up. **Enter on an empty input** is always Show /
-  Next as well. Showing the answer displays the full list, formatted by the hook
-  and definition preferences, with the words the user did not find highlighted.
+  - Any other word is **wrong**. It is listed in red, struck through, under the
+    answer space (and stays there after the reveal), and the question will be
+    graded missed.
+- **The card ends only when the user says so**: on **Enter on an empty input**,
+  or on **Show / Next**, which before every anagram is found means giving up.
+  Finding every anagram does not reveal the answer by itself, because the user
+  may still mean to try a word that is not one — and that word should count
+  against them. Showing the answer displays the full list, formatted by the
+  hook and definition preferences, with the words the user did not find
+  highlighted.
 - The grade is set automatically: **correct** only if every anagram was found
   with no wrong entries, otherwise **missed**. Toggle grade flips it, and Show /
   Next (or Enter) saves it and moves on.
@@ -877,12 +889,10 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   [option](#quiz-options) on, each answer has to be entered at or after the
   answers already given, in tile order (see [Tiles](#tiles)). An entry that is a
   valid, not-yet-entered answer but sorts before the furthest answer entered so
-  far is still added to the found list, marked **out of order**, and counted as a
-  wrong entry, so the card grades missed. Accepting it anyway means the user can
-  finish finding the rest instead of being stuck, and comparing against the
-  furthest answer so far — not the previous one — means one slip doesn't make
-  every later answer wrong too. The input shows a hint of what is expected next
-  ("after `RETSINA`"). The option does nothing in flashcard mode, and nothing at
+  far is **out of order**, and the card is **missed at once**: the answer is
+  revealed with the grade Missed and "Out of order: `ANTSIER`" under it, with
+  no Enter needed, since nothing typed after it could save the card. The
+  input shows a hint of what is expected next ("after `RETSINA`"). The option does nothing in flashcard mode, and nothing at
   all in Definition and Leave Value cascades, but it is stored for every cascade
   so that switching answer modes later keeps it.
 - **Protecting typing.** While the input has focus, every stroke that **types,
@@ -927,8 +937,12 @@ added get them with **Reset to defaults** on the Account page.
   area. Key bindings act anywhere on the player page except text fields outside
   the quiz area, such as the preferences menu. **A wheel binding takes the
   wheel** inside the quiz area: a bound direction acts and does not scroll, and
-  an unbound direction scrolls as usual. An answer that overflows the panel — a
-  long definition, an anagram list with definitions — therefore always shows a
+  an unbound direction scrolls as usual. **An answer is fitted to the panel**:
+  when the answer — an anagram list with definitions, a long definition —
+  would make the quiz area scroll, its words and definitions are scaled down
+  together until it fits, before the browser paints it, and back up when there
+  is room again (a resize, a hidden menu). The question keeps its size. The
+  scale stops at 30%; an answer too long even then overflows the panel, shows a
   scrollbar, and scrolls with it or with any arrow or Page key that is not
   itself bound, so a user who
   binds the wheel can still read the end of it; the capture box says so when a
@@ -1008,13 +1022,16 @@ Details:
 
 - **Labels.** Each zone shows a faint icon and label, with subtle dividers
   between zones.
-- **Taps and drags.** A tap acts, and a drag scrolls. Long answer lists and
-  definitions therefore scroll inside the Show / Next zone without advancing.
+- **Taps and drags.** A tap acts, and a drag scrolls. Answers are fitted to the
+  Show / Next zone as on a desktop; one too long even at the smallest scale
+  scrolls inside the zone without advancing.
 - **Responsiveness.** `touch-action: manipulation` removes the double-tap-zoom
   delay. Toggle gives a short vibration where the device supports it.
-- **Typed mode.** The on-screen keyboard covers the zones, so while it is open a
-  row of three buttons sits just above it: Previous, Show / Next, Toggle, in the
-  same left-to-right order as landscape.
+- **Typed mode.** The input bar is at the bottom of the page, and the page
+  shrinks to the space above the on-screen keyboard (`interactive-widget=resizes-content`),
+  so the bar sits just above the keyboard. The keyboard covers the zones, so while
+  it is open the bar also holds a row of three buttons: Previous, Show / Next,
+  Toggle, in the same left-to-right order as landscape.
 - **Customization.** The zones are fixed; only mouse and keyboard controls can
   be customized.
 
@@ -1142,7 +1159,7 @@ export that needs something the device doesn't have falls back to
 the server, in two steps. A page cannot see the status of a navigation, and a
 navigation that lands on an error body can replace the app, so the dialog first
 `fetch`es `POST /api/cascades/:id/export-token` with the export's choices and
-`X-Wordfall-User`: that request is the one that sees `401`, `404` and `429`, and
+`X-Acrodont-User`: that request is the one that sees `401`, `404` and `429`, and
 the dialog reacts to them as below and as every client of a limited endpoint
 does. Its answer is a short-lived, single-use URL for
 `GET /api/cascades/:id/export`, bound to the user and the choices, and the dialog
@@ -1153,7 +1170,7 @@ intervening second, a `500`, or the ALB's own `502`/`503` page while a task is
 replaced during a deploy) renders invisibly in the frame and is discarded
 instead of replacing the app. The token is the proof of account, so the
 download carries no header. It is a PASETO v4.local under an **export key
-derived from `SESSION_SIGNING_KEY` with HKDF** (label `wordfall export token`),
+derived from `SESSION_SIGNING_KEY` with HKDF** (label `acrodont export token`),
 never the session key itself, so an export token can never decrypt as a session
 cookie or a session token as an export token, whatever claims either parser
 checks. It carries the user id, a hash of the choices, an expiry 60 seconds out
@@ -1237,7 +1254,7 @@ comma-separated file with one line per tile and **5 or 7 fields** per line:
 | `count` | Non-negative integer: how many of this tile are in the bag. |
 | `value` | Non-negative integer: points. |
 | `is_vowel` | `1` or `0`. |
-| `fullwidth_letter`, `fullwidth_blank_letter` | Optional; give both or neither. These are the fullwidth forms MAGPIE uses to align text output. They are stored for fidelity but not used by the Wordfall UI. |
+| `fullwidth_letter`, `fullwidth_blank_letter` | Optional; give both or neither. These are the fullwidth forms MAGPIE uses to align text output. They are stored for fidelity but not used by the Acrodont UI. |
 
 - **The first line is the blank** and must be `?,?,<count>,0,0`. MAGPIE treats
   the first tile as the blank. A count of `0` means a bag with no blanks.
@@ -1391,7 +1408,7 @@ distributions.
   keys and the API. Single-character tiles are written as they are, and
   multi-character tiles in square brackets: `A[NY]S`, `?A[L·L]`. The notation is
   unambiguous. In MAGPIE, lower-case tiles (a tile's `blank_letter`) mean a blank
-  standing for that tile. Wordfall never stores them.
+  standing for that tile. Acrodont never stores them.
 - **Display** shows each tile's `letter` without brackets. A multi-character
   tile is drawn as one joined tile, so `ANYS` visibly reads as three tiles.
 - **Typed text** in filter inputs, In Word List entries and typed-mode answers
@@ -1433,7 +1450,7 @@ Words and leaves both use the **lexicon's** letter distribution.
 ## Filters
 
 There are 23 filters: 20 of Zyzzyva's condition types, in the order of its
-search dropdown, plus three Wordfall-only filters at the end: **Front Inner
+search dropdown, plus three Acrodont-only filters at the end: **Front Inner
 Hook**, **Back Inner Hook** and **Leave Value**. Zyzzyva's Belongs to Group
 condition is deliberately left out; the other filters are enough to build any
 study list, and its "Inner Hooks" group is what the two inner hook filters
@@ -1442,7 +1459,7 @@ replace. A filter has a type, a Not flag, and parameters, and it is either a
 
 - A **predicate** tests one candidate on its own. Zyzzyva checks predicates in
   three phases for speed: a word graph walk, then SQL, then post-processing. That
-  split is an optimization, not part of their meaning. Wordfall evaluates every
+  split is an optimization, not part of their meaning. Acrodont evaluates every
   predicate in memory (see [Search Engine](#search-engine)).
 - A **limit** (Limit by Probability Order, Limit by Playability Order) ranks
   the candidates that passed every predicate and keeps a range of that ranking.
@@ -1520,7 +1537,7 @@ plus:
 | `[ABC]` | Exactly one tile from the set |
 | `?` | The blank tile itself (Leave Value quizzes only), exactly as it is written in leave files and leaves |
 
-`.` is the only single-tile wildcard. Zyzzyva uses `?` for it; Wordfall does
+`.` is the only single-tile wildcard. Zyzzyva uses `?` for it; Acrodont does
 not, because `?` is how the blank is written everywhere else, and a leave
 pattern needs both.
 
@@ -1562,9 +1579,9 @@ tiles.
 | 18 | **Definition** | text | ✓ | The definition contains the text as a literal, case-insensitive substring. No wildcards. |
 | 19 | **Consists of** | tiles, min %, max % | — | `floor(100 × (tiles of the word that are in the set) / length)` is within min–max. Example: `AEIOU`, 70–100 finds words that are at least 70% vowels. |
 | 20 | **Number of Anagrams** | min, max | — | The number of valid words with this word's alphagram (including itself) is within min–max. |
-| 21 | **Front Inner Hook** *(Wordfall only)* | — | ✓ | The word with its first tile removed is also a valid word: SPORT, because PORT is a word. A one-tile word never has one. Zyzzyva has no condition for this; it is the front half of its "Inner Hooks" group. |
-| 22 | **Back Inner Hook** *(Wordfall only)* | — | ✓ | The word with its last tile removed is also a valid word: SPORTS, because SPORT is a word. |
-| 23 | **Leave Value** *(Wordfall only)* | min, max (decimals; either may be blank) | — | *Leave Value quizzes only.* The leave's stored value is between min and max, inclusive. A blank bound is open, so `min 10, max blank` means "worth at least 10". At least one bound is required, and min ≤ max when both are given. The comparison uses the full stored value, not the rounded display value. |
+| 21 | **Front Inner Hook** *(Acrodont only)* | — | ✓ | The word with its first tile removed is also a valid word: SPORT, because PORT is a word. A one-tile word never has one. Zyzzyva has no condition for this; it is the front half of its "Inner Hooks" group. |
+| 22 | **Back Inner Hook** *(Acrodont only)* | — | ✓ | The word with its last tile removed is also a valid word: SPORTS, because SPORT is a word. |
+| 23 | **Leave Value** *(Acrodont only)* | min, max (decimals; either may be blank) | — | *Leave Value quizzes only.* The leave's stored value is between min and max, inclusive. A blank bound is open, so `min 10, max blank` means "worth at least 10". At least one bound is required, and min ≤ max when both are given. The comparison uses the full stored value, not the rounded display value. |
 
 Details that are easy to get wrong:
 
@@ -1638,7 +1655,7 @@ Details that are easy to get wrong:
 Following Zyzzyva's `LetterBag::getNumCombinations`, a word's **combinations**
 is the number of distinct draws from the bag that spell the word, allowing up to
 two of the bag's blanks to stand in. Zyzzyva lets the user choose 0, 1 or 2
-blanks; Wordfall always uses 2, Zyzzyva's default, since that is what players
+blanks; Acrodont always uses 2, Zyzzyva's default, since that is what players
 mean by probability. It is the sum of three terms:
 
 - **no blank**: the product over each distinct tile of `C(count in bag, count
@@ -1719,7 +1736,7 @@ Browser
 ├── IndexedDB             (cascades, quizzes, grades, question keys, answers, outbox of operations)
 └── Sync engine ──HTTPS──▶ ALB ──▶ ECS Fargate task
                                    ├── nginx      (SvelteKit static build; proxies /api)
-                                   └── wordfall   (Axum; in-memory catalog indexes;
+                                   └── acrodont   (Axum; in-memory catalog indexes;
                                          │  ▲      cascade rules; sync; purge task)
                                          ▼  │ LISTEN catalog_changed
                                     RDS Postgres  (users, preferences, catalog, saved searches,
@@ -1777,7 +1794,7 @@ straight into Postgres; the original files are not kept.
 | `e2e/` | Playwright configuration, `globalSetup` and the [journeys](#the-journeys). |
 | `docker/` | Backend Dockerfile (a Rust build, then two targets: `backend`, the server alone, and `ops`, the tools for the backup, drill and ops tasks), the frontend's, and the Nginx configuration. Base images pinned by digest. |
 | `infra/` | Terraform. |
-| `scripts/` | `stack.py` (the one way to bring a Wordfall up: compose, health, seed, reset, down), `dev.py` (its command line), `scenarios.py` (study states through the API), `scrub.sql` (a production copy made safe locally), `backup.py`, `restore.py` and `drill.py`; the operator scripts (`deploy.sh`, `rollback.sh`, `set-setting.sh`, `prod-sql.sh`, `prod-shell.sh`, `confirm-user.sh`, `init-db-roles.sh`, `rotate-db-password.sh`, `onboard-deployer.sh`, `check-alerts.sh`) over `lib/ops.sh`, and their checks (`ops-scripts-check.sh` against stand-ins in `lib/ops_fakes.py`, `runbook-check.sh`). |
+| `scripts/` | `stack.py` (the one way to bring a Acrodont up: compose, health, seed, reset, down), `dev.py` (its command line), `scenarios.py` (study states through the API), `scrub.sql` (a production copy made safe locally), `backup.py`, `restore.py` and `drill.py`; the operator scripts (`deploy.sh`, `rollback.sh`, `set-setting.sh`, `prod-sql.sh`, `prod-shell.sh`, `confirm-user.sh`, `init-db-roles.sh`, `rotate-db-password.sh`, `onboard-deployer.sh`, `check-alerts.sh`) over `lib/ops.sh`, and their checks (`ops-scripts-check.sh` against stand-ins in `lib/ops_fakes.py`, `runbook-check.sh`). |
 | `Makefile` | The [test targets](#running-the-tests), each runnable with no arguments. |
 | `docker-compose.yml` | Local stack. |
 
@@ -2159,7 +2176,7 @@ tab that posted it sets a flag first and reloads on `controllerchange` only when
 that flag is set, which is the one reload the user asked for: the event fires in
 **every** tab the new worker takes over, and the usual handler that reloads on
 it would reload the others on their own initiative, losing a revealed card. Each
-other tab shows "Wordfall was updated in another tab — reload to continue" and
+other tab shows "Acrodont was updated in another tab — reload to continue" and
 keeps running. So that it can, the new worker's `activate` deletes the previous
 build's cache only once `clients.matchAll()` finds no page still on that build,
 checking again whenever an old tab reports that it is closing, so a tab left on
@@ -2168,7 +2185,7 @@ app never reloads on its own initiative, so a card in progress is never
 interrupted by an update, and a user who never accepts keeps the old version
 until the `426` line. IndexedDB schema upgrades run from versioned migrations,
 and every tab listens for `versionchange` on its connections: the tab still
-running the old build closes them and shows "Wordfall was updated in another tab
+running the old build closes them and shows "Acrodont was updated in another tab
 — reload to continue", so the new build's upgrade is never **blocked** by an
 old tab holding the previous version open.
 
@@ -3063,7 +3080,7 @@ of divergence (see [Monitoring](#deployment-and-operations)).
   where every operation is rejected `not_found` and dropped for good, and pull
   Bob's rows into Alice's database, a full pull deleting her base on the way.
   So every authenticated request the app sends carries the user id the tab runs
-  as, in an `X-Wordfall-User` header read from `meta`, and the server refuses a
+  as, in an `X-Acrodont-User` header read from `meta`, and the server refuses a
   request whose header differs from the session's user with `401` **before
   anything is applied or read** (see [Security](#authentication)). The ordinary
   `401` rule then does the right thing: the tab keeps its data and its outbox and
@@ -3186,7 +3203,7 @@ full schema:
 
 ```sql
 -- =========================================================================
--- Wordfall schema
+-- Acrodont schema
 -- =========================================================================
 
 CREATE EXTENSION IF NOT EXISTS citext;
@@ -4066,7 +4083,7 @@ The flows are the conventional ones, built directly on Axum:
   valid. At the limit every registration gets `403 registration_closed` and
   sends nothing, a new address and a known one alike; the check runs before
   the address is looked up, so a closed site reveals nothing about which
-  addresses have accounts. The register page says Wordfall is not taking new
+  addresses have accounts. The register page says Acrodont is not taking new
   accounts.
   The password is hashed on every path, whether or not the hash is stored, so
   the response takes the same time whichever branch runs.
@@ -4116,7 +4133,7 @@ The flows are the conventional ones, built directly on Axum:
   is logout, whose queued retry already honours `429`. On success the server sets:
   - a PASETO **v4.local** session token (32-byte key from
     `SESSION_SIGNING_KEY`) in an `httpOnly`, `SameSite=Lax` cookie named
-    `wordfall_session`, `Secure` in production, with a 30-day TTL. `Lax`
+    `acrodont_session`, `Secure` in production, with a 30-day TTL. `Lax`
     rather than `Strict` so that a cascade link opened from an email or a chat
     arrives signed in instead of triggering a spurious "Log in to sync"; CSRF
     protection comes from the double-submit token, not from SameSite
@@ -4230,7 +4247,7 @@ Security generally:
 - `TRUSTED_PROXY_HOPS` controls which `X-Forwarded-For` entry per-IP limits key
   on (1 behind the ALB and behind the compose Nginx).
 - **Every authenticated request names its account.** The app sends the user
-  id it is running as in `X-Wordfall-User`, and the server answers `401` without
+  id it is running as in `X-Acrodont-User`, and the server answers `401` without
   applying or reading anything when that id differs from the session's user or
   is missing, so a cookie replaced by a login in another tab, or planted by a
   login CSRF, can never make one account's device act on another's data (see
@@ -4250,7 +4267,7 @@ JSON endpoint refuses a request whose `Content-Type` is not `application/json`
 with `415`, which is what keeps a cross-site form, which cannot send that type
 without a preflight, from posting to login or registration, the two writes the
 CSRF token does not cover. Every request that needs a session also carries
-`X-Wordfall-User`, the account the calling tab runs as, and a mismatch with the
+`X-Acrodont-User`, the account the calling tab runs as, and a mismatch with the
 session is a `401` (see [Security](#authentication)). Three requests are handled
 differently. The export download, a navigation that cannot set a header, is
 authorised by the single-use token the header-checked
@@ -4277,10 +4294,10 @@ enough for a filter tree holding a 300,000-entry In Word List; Axum's default of
 | `POST` | `/api/auth/register` | Create an account; sends the confirmation email |
 | `POST` | `/api/auth/confirm-email` | Confirm with the emailed code |
 | `POST` | `/api/auth/login` | Start a session |
-| `POST` | `/api/auth/logout` | Clear the session cookie **and the CSRF cookie**, so no token outlives the session it was issued with; login re-sets both. The token is stateless, so a copy of it stays valid until its TTL; a user who suspects a copy uses **Sign out everywhere**. This is the one endpoint that needs **neither a session nor a CSRF token** *when no session cookie arrives with it*: there is then nothing to clear and nothing to forge, and it answers `2xx`, so a device offline past both cookies' TTL is not left retrying forever. With a session cookie it is CSRF-checked like any other write, which is the ordinary state of the [queued logout](#authentication-while-offline). It is **exempt from the account-binding `X-Wordfall-User` check**: the queued logout is sent while no account is signed in, so it could never satisfy it, and a `401` would clear its flag with the cookie still alive. The queued logout runs when no account is **signed in**, not when no cookie is held, and the `httpOnly` session cookie it exists to clear is still in the browser, so the app sends the double-submit token with it. Either way the answer is a `2xx`, never a `401`-or-`403` guess |
+| `POST` | `/api/auth/logout` | Clear the session cookie **and the CSRF cookie**, so no token outlives the session it was issued with; login re-sets both. The token is stateless, so a copy of it stays valid until its TTL; a user who suspects a copy uses **Sign out everywhere**. This is the one endpoint that needs **neither a session nor a CSRF token** *when no session cookie arrives with it*: there is then nothing to clear and nothing to forge, and it answers `2xx`, so a device offline past both cookies' TTL is not left retrying forever. With a session cookie it is CSRF-checked like any other write, which is the ordinary state of the [queued logout](#authentication-while-offline). It is **exempt from the account-binding `X-Acrodont-User` check**: the queued logout is sent while no account is signed in, so it could never satisfy it, and a `401` would clear its flag with the cookie still alive. The queued logout runs when no account is **signed in**, not when no cookie is held, and the `httpOnly` session cookie it exists to clear is still in the browser, so the app sends the double-submit token with it. Either way the answer is a `2xx`, never a `401`-or-`403` guess |
 | `POST` | `/api/auth/reset-password` | Request a reset email |
 | `POST` | `/api/auth/reset-password/confirm` | Set a new password with a reset token |
-| `GET` | `/api/auth/me` | `{ user_id, username, is_admin, trash_retention_days, max_quiz_questions }` or `401`. Exempt from the account-binding `X-Wordfall-User` check, since it only reports whose session cookie the browser holds, which the startup comparison reads. The retention period and the cap go into the `meta` store, so the Trash page can show purge dates offline and the option forms validate segment size against the server's cap |
+| `GET` | `/api/auth/me` | `{ user_id, username, is_admin, trash_retention_days, max_quiz_questions }` or `401`. Exempt from the account-binding `X-Acrodont-User` check, since it only reports whose session cookie the browser holds, which the startup comparison reads. The retention period and the cap go into the `meta` store, so the Trash page can show purge dates offline and the option forms validate segment size against the server's cap |
 | `POST` | `/api/account/sign-out-everywhere` | Body `{ password }`. Bump `session_generation` and re-issue this device's session and CSRF cookies, as a password change does, so every other session is refused from its next request while this one keeps working |
 | `POST` | `/api/account/password` | Change the password (current and new); bumps `session_generation` and re-issues this session |
 | `DELETE` | `/api/account` | Delete the account (requires password). On a `2xx` the device removes its own local copy of that account, as [Authentication](#authentication) describes |
@@ -4361,7 +4378,7 @@ person to write it copies names rather than choosing them.
 | `GET` | `/api/cascades/:id/cards?from=<idx>&limit=<n>&hooks=<0\|1>&definitions=<0\|1>&keys=<0\|1>`, or `?idx=<i,j,…>&hooks=…&definitions=…` | Answer cards `[{ idx, key, answer }]` for question indexes `from`…`from+limit−1` (`limit` ≤ 10,000), or for the comma-separated indexes in `idx` (at most 1,000, returned in idx order; never with `from`, `limit` or `keys`, else `400 invalid_idx`) — the player's read-ahead, which asks for the next cards in its quiz's own order. With `hooks=1`, an Anagram answer's words carry `front_hooks`, `back_hooks` and the booleans `front_inner` and `back_inner` (the word less its first, or last, tile is a word), and a Definition card carries `word`: `{ word, front_hooks, back_hooks, front_inner, back_inner }` beside its answer. The device splits each row between its `questions` store (the `key`) and its `cards` store (the rest), so eviction can take the answer and leave the question (see [On the device](#on-the-device)). With `keys=1` the response is `{ from, keys: [...] }` — the keys alone, in idx order, since the range makes every index implied — and **`limit` ≤ 100,000**, which at about 10 bytes a key is roughly the size of one 10,000-card page: a 300,000-question cascade's keys are three requests where its answers are thirty, a tenth of the cost in the shared rate bucket, and about a quarter of the bytes of cards without definitions (see [Downloads](#on-the-device)). It is what the download manager fetches first, so a cascade becomes playable and self-gradable before its answers arrive; `hooks` and `definitions` are then a `400`. A Leave Value `answer` is a JSON number written as the shortest text that round-trips the stored `f64`, which `JSON.parse` reads back exactly. Card pages are served `Cache-Control: private, no-store`, because the device keeps every byte it fetches in IndexedDB and a second copy in the browser's HTTP cache would sit outside every budget the plan states; only the questions endpoint, whose index lists are small and refetched by the pending path, keeps immutable caching. Responses are compressed. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/questions?from=<n>&limit=<n>` | The quiz's question indexes `[idx…]` in idx order, `limit` ≤ 50,000. A quiz's question set never changes, so it is served with the same immutable caching. Fetched when the device materialises a quiz; never part of a pull. `404` for another user's, a purged, or a Source quiz, whose indexes are implied. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/grades?from=<idx>&limit=<n>` | The quiz's graded rows for the attempt its row names, which for a cleared quiz is the attempt it finished on, as the parallel arrays a pull uses, in idx order, with the quiz row's `attempt` and `shuffle_seed` so the device can tell whether they belong to the order it holds. `from` is an **index, not an offset**, as on the card pages: the response holds the graded rows whose `question_idx` is in `from … from+limit−1`, `limit` ≤ 50,000, so the device pages the index space by `from += limit` until `from` reaches the cascade's `question_count` and a sparse page — most of a quiz's questions may be ungraded — means nothing is left behind. The questions endpoint below reads `from` the other way, as an offset into a dense list, which is why the two are written `<idx>` and `<n>`. There is no `min_updated_seq` here, which only a pull's fast path needs; the device stamps these rows with the sequence of the sync it made before the fetch. Not cacheable. Fetched when the device materialises a quiz whose rows it dropped on leaving the download window; never part of a pull. If the device's quiz row names a different attempt or seed, the device discards the response, syncs and fetches again. `404` for another user's or a purged quiz. |
-| `POST` | `/api/cascades/:id/export-token` | Body: the export's choices, as the query of the export row below. Checks the session, `X-Wordfall-User`, the cascade and quiz, and `EXPORT_RATE_PER_MINUTE`, answering `401`, `404` and `429` with `Retry-After` exactly as any other request does, which a navigation could not show the page; on success returns `{ url }`, the export URL with a token valid for **60 seconds and one use**, bound to this user and these choices: a PASETO under the HKDF-derived export key, which any task can verify and no session validator can decrypt, its use recorded in `export_tokens_spent` (see [Exporting words](#exporting-words)). The dialog navigates a hidden `<iframe>` to it at once, and mints a new one for any retry |
+| `POST` | `/api/cascades/:id/export-token` | Body: the export's choices, as the query of the export row below. Checks the session, `X-Acrodont-User`, the cascade and quiz, and `EXPORT_RATE_PER_MINUTE`, answering `401`, `404` and `429` with `Retry-After` exactly as any other request does, which a navigation could not show the page; on success returns `{ url }`, the export URL with a token valid for **60 seconds and one use**, bound to this user and these choices: a PASETO under the HKDF-derived export key, which any task can verify and no session validator can decrypt, its use recorded in `export_tokens_spent` (see [Exporting words](#exporting-words)). The dialog navigates a hidden `<iframe>` to it at once, and mints a new one for any retry |
 | `GET` | `/api/cascades/:id/export?scope=<cascade\|quiz>&quiz_id=<uuid>&which=<all\|correct\|missed\|ungraded>&format=<txt\|csv>&lines=<answers\|questions>&columns=<list>&order=<study\|alphabetical>&definitions=<0\|1>&hooks=<0\|1>&decimals=<0-3>&token=<token>` | The same file the device builds locally (see [Exporting words](#exporting-words)), streamed as `text/plain` or `text/csv` with a `Content-Disposition` filename. Used when the device doesn't have what the export needs. `token` is the single-use, 60-second token the row above issued for exactly these choices; it is the request's proof of account, since a download navigation cannot send a header, and an expired, reused or mismatched token answers `204 No Content`, which the dialog's hidden frame discards. `404` for another user's or a purged cascade, and for a `quiz_id` that is not this cascade's, has been purged, or is unknown. |
 | `POST` | `/api/sync` | Body `{ device_id, app_version, cursor, page_token?, question_rows_for[], ops[] }`, where `app_version` is the frontend build's **monotonic integer build number**, injected into the SPA at build time and compared numerically against `MIN_APP_VERSION` (see [Configuration](#configuration)) — never a hash or a semver string, so "too old to sync" is one comparison and raising the floor is one number in the task definition; the build's git hash is logged beside it for support but decides nothing. `question_rows_for` lists every cascade whose question rows this device holds or wants: in its window and not [budget-dropped](#on-the-device), kept offline, **or whose base already holds question rows** (at most the cascade limit). The third case is what keeps a cascade the drop pass spared for its pending operations from going stale: the device holds its rows, so it must keep receiving their changes. A cascade the device holds no rows for and will not open is left out, and stays pending on the device. It is expected on every non-paged request, an omitted field means an empty list, ids that belong to another user or no longer exist are ignored, and the server omits `quiz_questions` rows for every other cascade. `cursor` is `null` for a full pull (a first sync or a resync), whose operations are pushed like any other's → `{ results: [{ op_id, status, reason?, outcome?, new_quiz_question_count?, new_quiz_questions_hash? }], changes: { cascades[], quizzes[], quiz_questions[], quiz_attempts[], preferences?, tombstones[] }, sync_seq, next_page_token?, resync_required? }`. `outcome` is set on an applied `finish` (a `finish_outcome`) or `finish_segment` (`drilled` or `continued`), and `new_quiz_question_count` and `new_quiz_questions_hash` whenever a quiz was created, reset or restored: the created quiz's when one was created, otherwise the reset or restored quiz's own; a repeated operation returns the recorded fields unchanged; pulled `quizzes[]` rows carry `questions_hash`; `preferences` includes `bindings[]`. |
 
@@ -4463,7 +4480,7 @@ SvelteKit static SPA. The routes:
 
 | Route | Page |
 |---|---|
-| `/` | No page of its own: there is no landing or home page. It goes to the Cascades page when logged in, where logging in lands too, and to the log-in page (with Create an account) when logged out. A deleted account ends on the log-in page. With no lexicon yet, the empty Cascades page says so (and, to an admin, where to upload one). The site header is how to reach every page. Every logged-in page but the player shows the site header: Wordfall (home), Cascades, New cascade, Trash, Admin for admins, the sync status and the account |
+| `/` | No page of its own: there is no landing or home page. It goes to the Cascades page when logged in, where logging in lands too, and to the log-in page (with Create an account) when logged out. A deleted account ends on the log-in page. With no lexicon yet, the empty Cascades page says so (and, to an admin, where to upload one). The site header is how to reach every page. Every logged-in page but the player shows the site header: Acrodont (home), Cascades, New cascade, Trash, Admin for admins, the sync status and the account |
 | `/register`, `/register/check-email`, `/confirm-email`, `/login`, `/reset-password`, `/reset-password/confirm` | Auth |
 | `/cascades` | Cascades page: one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done, 31.58%)`), its download status and Move to Trash; the rest is in the player's Levels dialog |
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, threshold, preview) |
@@ -4611,14 +4628,14 @@ startup rather than falling back to a default.
 | Variable | Default | Notes |
 |---|---|---|
 | `DATABASE_URL` | — | Required |
-| `SESSION_SIGNING_KEY` | — | Required; 32 bytes as hex. The PASETO v4.local key for session cookies; the export-token key is derived from it with HKDF (label `wordfall export token`), so there is still one secret to manage and no token of one kind decrypts as the other |
+| `SESSION_SIGNING_KEY` | — | Required; 32 bytes as hex. The PASETO v4.local key for session cookies; the export-token key is derived from it with HKDF (label `acrodont export token`), so there is still one secret to manage and no token of one kind decrypts as the other |
 | `BIND_ADDR` | `0.0.0.0:8080` | |
 | `SESSION_TTL_SECONDS` | `2592000` (30 days) | |
 | `SECURE_COOKIES` | `false` | `true` in any TLS deployment |
 | `MAIL_BACKEND` | `console` | `console`, `ses` or `file`. `file` is the console backend plus one JSON file per message in `MAIL_OUTBOX_DIR`, named for its recipient, which `scripts/stack.py` and the end-to-end tests read instead of the log; every local stack uses it |
 | `MAIL_OUTBOX_DIR` | — | Required with `MAIL_BACKEND=file` |
 | `MAIL_MAX_PER_SECOND` | `1` | With `ses`: messages wait in a bounded queue (an hour's worth) drained at this rate, the SES account's maximum send rate (1 in the sandbox, usually 14 after), since SES refuses a faster burst. Each send times out at 30 s; a message whose link expired while queued is dropped; every failure is logged with `alarm = "mail_failed"` |
-| `MAIL_FROM` | `no-reply@wordfall.local` | |
+| `MAIL_FROM` | `no-reply@acrodont.local` | |
 | `PUBLIC_URL` | `http://localhost:5173` | Base URL for email links |
 | `MAX_QUIZ_QUESTIONS` | `130000` | May be lowered; a value above 130,000 fails startup. Lowering it bounds **new** values only: cascades, quizzes and preferences already holding a larger segment size keep working and are never rewritten, and the forms clamp what they prefill (see [Quiz options](#quiz-options)) |
 | `MAX_CASCADES_PER_USER` | `20` | Counts cascades in the Trash; reported by `/api/auth/me` |
@@ -4665,7 +4682,7 @@ constants in `lib/sync/config.ts`.
 ```
 
 That is the whole setup. With no arguments it builds and starts a complete
-Wordfall on <http://localhost:5173>, seeded with the licensed catalog in
+Acrodont on <http://localhost:5173>, seeded with the licensed catalog in
 `fixtures/licensed/` (English, CSW24 with its definitions, and CSW24's leave
 values) and a confirmed admin account `dev`. The
 [fixture catalog](#the-fixture-catalog) (EN-FIX, EN-FIX-OLD, CA-FIX) is for the
@@ -4687,7 +4704,7 @@ What it does, in order:
      (a two-column lexicon fails here, not as an upload error minutes later).
 
    It takes a lock per `--project`, so a second run cannot reset or stop the
-   stack under the first, and it reads `.env` for `WORDFALL_PORT` and
+   stack under the first, and it reads `.env` for `ACRODONT_PORT` and
    `BIND_HOST`.
 2. **Builds** the backend and frontend images (unless `--no-build`). The
    frontend is the production-style build, because the Vite dev server does not
@@ -4724,7 +4741,7 @@ Useful flags:
 | Flag | Effect |
 |---|---|
 | `--scenario NAME` | Seed a study state through the real API; repeatable. `studying` (Level 1 finished with misses, Level 2 half graded), `finished` (the completion screen), `segments` (runs of five, one finished with a miss), `typed` (typed answers on), `trash`, `limits` (cascades up to the limit warning), `big` (one cascade near `MAX_QUIZ_QUESTIONS` from the real catalog), `saved-searches`. Operations go through `POST /api/sync`, so the server's rules check them; the quiz state they need is read with SQL, as the integration tests do |
-| `--real-catalog [DIR]`, `--no-real-catalog` | Upload the licensed files `DIR/manifest.json` lists, in the fixture manifest's form. Done by default from `$WORDFALL_CATALOG_DIR`, else from `fixtures/licensed/` when it has a `manifest.json`; `--no-real-catalog` leaves it out, and the fixture catalog stands in. The licensed files never enter the repository (`fixtures/licensed/` is gitignored). `scripts/build-licensed-catalog.py` makes the folder: it joins a word⇥definition file and a playability file into the upload's three-column lexicon, copies the leave values and the distribution, and writes the manifest. The current CSW24 takes its playability from CSW19's values; the 1,814 words added since get 0 |
+| `--real-catalog [DIR]`, `--no-real-catalog` | Upload the licensed files `DIR/manifest.json` lists, in the fixture manifest's form. Done by default from `$ACRODONT_CATALOG_DIR`, else from `fixtures/licensed/` when it has a `manifest.json`; `--no-real-catalog` leaves it out, and the fixture catalog stands in. The licensed files never enter the repository (`fixtures/licensed/` is gitignored). `scripts/build-licensed-catalog.py` makes the folder: it joins a word⇥definition file and a playability file into the upload's three-column lexicon, copies the leave values and the distribution, and writes the manifest. The current CSW24 takes its playability from CSW19's values; the 1,814 words added since get 0 |
 | `--stats` | Print each catalog index's size, its build time, the catalog load time and the backend's memory: what the production task's memory is sized from |
 | `--users N` | N more confirmed users (`dev2`, `dev3`, …) for multi-account work |
 | `--login-as USER`, `--no-login` | Which account the browser opens signed in as, or none |
@@ -4745,7 +4762,7 @@ Useful flags:
 ### How it is put together
 
 `dev.py` is a command line over `scripts/stack.py`, which is the only place
-that knows how to bring a Wordfall up, and `scripts/scenarios.py`, which seeds
+that knows how to bring a Acrodont up, and `scripts/scenarios.py`, which seeds
 study states. `stack.py`'s entry points:
 
 | Entry point | What it does |
@@ -4756,7 +4773,7 @@ study states. `stack.py`'s entry points:
 | `stack.reset(project)` | `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` and restart the backend |
 | `stack.down(project, volumes)` | Stop the stack, optionally discarding its volumes |
 
-Everything that needs a running Wordfall goes through these — `dev.py`, the
+Everything that needs a running Acrodont goes through these — `dev.py`, the
 [end-to-end tests](#end-to-end-tests), the [scale tests](#scale-tests) and CI —
 so there is one definition of "a working instance". A change to the stack
 cannot fix the tests while breaking local development, or the other way round.
@@ -4806,14 +4823,14 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
   - ECS cluster (Container Insights off; ECS Exec sessions never logged), one
     service of **one task** with backend and Nginx containers, at **0.5 vCPU
     and 2 GiB**, on **Fargate Spot** by default (`use_fargate_spot`).
-    - **Spot:** Wordfall is local-first. Studying never needs the server and
+    - **Spot:** Acrodont is local-first. Studying never needs the server and
       sync retries, so a Spot interruption's minute or two without the API goes
       unnoticed.
     - **Sizing:** `SEARCH_CONCURRENCY` is 1, `SEARCH_TIMEOUT_MS` 4,000 and
       `EXPORT_CONCURRENCY` 1, so the catalog plus one export bounds memory.
     - **One task:** this makes the in-memory rate limits exact. Deploys still
       roll with no gap: minimum healthy 100%, maximum 200%. The new task serves
-      before the old one drains, which is safe because Wordfall runs correctly
+      before the old one drains, which is safe because Acrodont runs correctly
       as two instances.
     - **Startup and shutdown:** a circuit breaker rolls back a release whose
       task cannot start, and an EventBridge rule mails why. `stopTimeout` is
@@ -4821,7 +4838,7 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
       health check's `startPeriod` (240 s) must stay at least twice the measured
       catalog load, which the backend logs as `load_ms`.
   - An **ops task definition** on the ops image (Postgres 16 client and
-    server, python3, `restore.py`, `wordfall-master-psql`). Every SQL step of
+    server, python3, `restore.py`, `acrodont-master-psql`). Every SQL step of
     the runbook runs from it, by `scripts/prod-sql.sh` and
     `scripts/prod-shell.sh`. There is no bastion, and RDS is never public.
   - RDS Postgres `db.t4g.micro`, 20 GiB gp3 with storage autoscaling,
@@ -4967,7 +4984,7 @@ so a corrupted dump cannot overwrite a good one, and the bucket's versioning and
 object lock mean neither can a mistake or a compromised task role.
 
 Uploaded catalog files are **not** backed up. They are licensed data that
-Wordfall never stores as files, only as rows, and those rows are in the dump.
+Acrodont never stores as files, only as rows, and those rows are in the dump.
 
 ### Alarms
 
@@ -4983,7 +5000,7 @@ Wordfall never stores as files, only as rows, and those rows are in the dump.
 
 ### Restoring
 
-The runbook has the full procedure; the parts specific to Wordfall are:
+The runbook has the full procedure; the parts specific to Acrodont are:
 
 1. **Restore into a new instance**, never over the live one, and point a staging
    backend at it to check `/health` and a few cascades before any cutover.
@@ -5012,7 +5029,7 @@ The runbook has the full procedure; the parts specific to Wordfall are:
 
 ### The drill
 
-**Monthly, automatically.** The `wordfall-drill` task (`scripts/drill.py`)
+**Monthly, automatically.** The `acrodont-drill` task (`scripts/drill.py`)
 restores the newest nightly dump into a Postgres started inside its own task,
 never on the production instance. Birdtest's drill once ran against production
 and could fill its storage. It then checks:
@@ -5185,7 +5202,7 @@ Pure functions and in-memory structures, no database and no network.
     `AT..`, `.W*M.S`, `LX[AU]`, the Includes-Letters Q-not-U case, a two-tile
     `Not Includes AB` row matching words that lack either tile,
     `Consists of AEIOU 70–100`, and the lax tie cases. Zyzzyva writes its
-    single-tile wildcard as `?`; Wordfall writes it as `.`, so the examples are
+    single-tile wildcard as `?`; Acrodont writes it as `.`, so the examples are
     translated.
   - Front Inner Hook and Back Inner Hook against a fixture holding SPORT, PORT
     and SPORTS, including a one-tile word and the negated forms.
@@ -5902,15 +5919,15 @@ they run in parallel and leave nothing behind.
   - admin authorization: non-admins get `404` on every admin route, and
     revoking `is_admin` takes effect on the next request
   - **Account binding**: a sync, a card page, a cascade creation and an export
-    token request sent with Bob's session cookie but `X-Wordfall-User` naming Alice — or with
+    token request sent with Bob's session cookie but `X-Acrodont-User` naming Alice — or with
     no header at all — each answered `401` with nothing applied, recorded,
     pulled or streamed, and the same requests with Bob's id succeeding; and a
     `POST /api/auth/login` or `/api/auth/register` sent as `text/plain` with a
     JSON-shaped body answered `415` with no cookie set; `GET /api/auth/me` with
-    `X-Wordfall-User` naming another account answered with the **cookie's**
+    `X-Acrodont-User` naming another account answered with the **cookie's**
     `user_id` and a fresh CSRF cookie rather than `401`; and
     `POST /api/auth/logout` with a session cookie, a
-    matching CSRF token and **no** `X-Wordfall-User` answered `2xx` with both
+    matching CSRF token and **no** `X-Acrodont-User` answered `2xx` with both
     cookies cleared, as the queued logout sends it
   - **Sign out everywhere** with two sessions for one user: a wrong password
     refused and nothing changed; with the right one, the other session's next
@@ -5941,14 +5958,14 @@ they run in parallel and leave nothing behind.
   - every export endpoint selection, for all three quiz types, including an
     export of a quiz in the Trash and a `404` for another user's cascade, each
     through a token from `POST /api/cascades/:id/export-token`; the token
-    request answering `401` for a mismatched `X-Wordfall-User`, `404` for a
+    request answering `401` for a mismatched `X-Acrodont-User`, `404` for a
     purged quiz and `429` with `Retry-After` past `EXPORT_RATE_PER_MINUTE`; and
     the download answering `204` for a token used twice, a token 61 seconds old,
     and a token presented with choices other than those it was issued for; and a
     token issued by one of two in-process instances redeemed on the other, then
     refused on a second redemption on either, since its use is recorded in
     `export_tokens_spent` and not in either process; and an export token
-    presented as the `wordfall_session` cookie, and a session token presented
+    presented as the `acrodont_session` cookie, and a session token presented
     as an export token, each refused, since the export key is derived from the
     session key and neither decrypts under the other
   - the purge task, including two instances running it at the same time
@@ -5964,13 +5981,13 @@ session live.
 
 #### What the tests reuse
 
-Playwright's `globalSetup` does not know how to start a Wordfall. It calls the
+Playwright's `globalSetup` does not know how to start a Acrodont. It calls the
 same `scripts/stack.py` entry points that
 [`./scripts/dev.py`](#how-it-is-put-together) calls, in the same order:
 
 | Reused | How the suite uses it differently |
 |---|---|
-| `stack.up` | Project `wordfall-e2e` and a port from the environment, so a suite can run beside a development stack without disturbing it |
+| `stack.up` | Project `acrodont-e2e` and a port from the environment, so a suite can run beside a development stack without disturbing it |
 | The production-style frontend build | Not differently at all — the offline journeys need the real service worker, which is exactly why `dev.py` serves that build too |
 | `stack.seed`, through the admin API | Seeds only [the fixture catalog](#the-fixture-catalog); licensed files are never available to CI. Every run therefore registers and confirms the `dev` account through the real endpoints, so a passphrase the strength check refused, or a registration side effect seeding skipped, fails the suite at its first step; and CI runs it once more with `ADMIN_UPLOAD_RATE_PER_MINUTE=2`, where seeding must wait out `429`s and still finish |
 | `stack.reset` | Called between suites rather than by hand. Most specs don't need it, because each one registers its own user |
@@ -6066,9 +6083,10 @@ environment. That is how a deployment is smoke-tested and how the
   account's cascades. On a second browser context still signed in as that
   account, the next sync answers `401`, it shows **Log in to sync** with its
   cascades still readable, and its Account page still offers to remove them.
-- Switch to typed mode: a wrong entry grades missed, finding every anagram
-  grades correct, Enter on an empty input reveals the answer, a repeated entry
-  is ignored, a right click before the reveal still toggles the grade while a
+- Switch to typed mode: the input sits at the bottom of the page, a found word
+  shows in the answer space with no hooks or definitions, a wrong entry grades
+  missed, finding every anagram reveals nothing until Enter on an empty input,
+  which then grades correct, a repeated entry is ignored, a right click before the reveal still toggles the grade while a
   left click only focuses the input, and switching modes mid-card clears the
   entries. Two answers typed on one line (`RETAINS NASTIER`) stay in the input
   with "type one word at a time" and the card, with every anagram then found,
@@ -6077,10 +6095,11 @@ environment. That is how a deployment is smoke-tested and how the
   reveals the answer; with **`Shift+T` bound to Toggle grade**, typing a `T`
   with Shift held puts `T` in the input; and both bindings act as bound once
   the input loses focus and in flashcard mode.
-- With **alphabetical order** on, entering answers in order grades correct, an
-  out-of-order answer is marked out of order, joins the found list and grades
-  the card missed, and a later in-order answer after it is accepted normally.
+- With **alphabetical order** on, entering answers in order grades correct, and
+  an out-of-order answer reveals the card at once, missed, with "Out of order".
   With the option off, the same sequence grades correct.
+- On a 1000 × 500 window, the nine AEINRST anagrams with definitions are shrunk
+  to fit the quiz area, which does not scroll.
 - **Segments and progression:** create a cascade with a segment of 5 and finish
   the first run with misses, see the drill level, clear it down to nothing,
   come back to run 2 at the right question, see Previous refuse to go back into
@@ -6302,7 +6321,7 @@ run at production's `EXPORT_CONCURRENCY` of one, against the production task's
   checked-in list of saved searches against a real CSW24 upload and compares
   the word lists with exports from Zyzzyva for the same searches. Zyzzyva has
   no OR, so the parity searches are single AND groups, and the script writes
-  Wordfall's `.` wildcard as Zyzzyva's `?`. The list includes a two-tile
+  Acrodont's `.` wildcard as Zyzzyva's `?`. The list includes a two-tile
   `Not Includes` row and a mixed-length limit (`Length 7–8`, `Limit by
   Probability Order 1–100`), so the negation's meaning and the limit's ranking
   value are checked against Zyzzyva itself. Differences are either fixed or recorded here as intended deviations.

@@ -26,7 +26,7 @@ resource "aws_cloudwatch_metric_alarm" "ses_reputation" {
     bounce    = { metric = "Reputation.BounceRate", threshold = 0.04 }
     complaint = { metric = "Reputation.ComplaintRate", threshold = 0.0008 }
   }
-  alarm_name          = "wordfall-ses-${each.key}-rate"
+  alarm_name          = "acrodont-ses-${each.key}-rate"
   alarm_description   = "SES ${each.key} rate is nearing the rate at which SES pauses sending"
   namespace           = "AWS/SES"
   metric_name         = each.value.metric
@@ -45,21 +45,21 @@ resource "aws_cloudwatch_metric_alarm" "ses_reputation" {
 # (backend/src/auth/mail.rs). A field, not a phrase: Nginx logs to this group
 # too, with visitor-controlled User-Agents.
 resource "aws_cloudwatch_log_metric_filter" "mail_failed" {
-  name           = "wordfall-mail-failed"
+  name           = "acrodont-mail-failed"
   log_group_name = aws_cloudwatch_log_group.app.name
   pattern        = "{ $.fields.alarm = \"mail_failed\" }"
   metric_transformation {
     name          = "MailFailed"
-    namespace     = "Wordfall/Mail"
+    namespace     = "Acrodont/Mail"
     value         = "1"
     default_value = "0"
   }
 }
 
 resource "aws_cloudwatch_metric_alarm" "mail_failed" {
-  alarm_name          = "wordfall-mail-failed"
+  alarm_name          = "acrodont-mail-failed"
   alarm_description   = "An account mail failed to send; the backend's log says why"
-  namespace           = "Wordfall/Mail"
+  namespace           = "Acrodont/Mail"
   metric_name         = "MailFailed"
   statistic           = "Sum"
   period              = 300

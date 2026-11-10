@@ -69,7 +69,7 @@ async fn pages_hold_at_most_50000_rows(pool: sqlx::PgPool) {
     assert_eq!(rows(&pages, "quiz_questions").iter().map(|g| g["question_idx"].as_array().unwrap().len()).sum::<usize>(), 2);
     // Past the retention period, the purge task tombstones them all.
     sqlx::query("UPDATE quizzes SET cleared_at = now() - interval '31 days' WHERE status = 'cleared'").execute(app.db()).await.unwrap();
-    assert!(wordfall::purge::run_once(&app.state).await.unwrap());
+    assert!(acrodont::purge::run_once(&app.state).await.unwrap());
     let (_, pages) = d.sync_all(vec![]).await;
     assert!(pages.len() >= 2);
     let mut ids = HashSet::new();
@@ -246,7 +246,7 @@ async fn resync_required_cases(pool: sqlx::PgPool) {
         .execute(app.db())
         .await
         .unwrap();
-    wordfall::purge::prune_sync_records(&app.state).await.unwrap();
+    acrodont::purge::prune_sync_records(&app.state).await.unwrap();
     let floor: i64 = sqlx::query_scalar("SELECT sync_floor_seq FROM users WHERE id = $1").bind(user).fetch_one(app.db()).await.unwrap();
     assert!(floor > start);
     // Below the floor: resync_required, carrying the push's results and no changes.

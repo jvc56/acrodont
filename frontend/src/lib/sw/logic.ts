@@ -13,7 +13,7 @@ export function route(url: URL, mode: RequestMode, origin: string, precached: Se
 	return precached.has(url.pathname) ? 'precached' : 'network';
 }
 
-export const CACHE_PREFIX = 'wordfall-';
+export const CACHE_PREFIX = 'acrodont-';
 
 export function cacheName(version: string): string {
 	return `${CACHE_PREFIX}${version}`;

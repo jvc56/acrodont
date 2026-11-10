@@ -477,7 +477,7 @@ async fn the_reconcile_fallback_catches_a_missed_notification(pool: sqlx::PgPool
     let one = TestApp::new(pool.clone()).await;
     // A second instance whose LISTEN never runs: only reconcile can load it.
     let two = TestApp::new_unready(pool).await;
-    wordfall::catalog::reconcile(&two.state).await.unwrap();
+    acrodont::catalog::reconcile(&two.state).await.unwrap();
     two.state
         .catalog_ready
         .store(true, std::sync::atomic::Ordering::Release);
@@ -489,7 +489,7 @@ async fn the_reconcile_fallback_catches_a_missed_notification(pool: sqlx::PgPool
             .lexicon_by_name("EN-FIX")
             .is_none()
     );
-    wordfall::catalog::reconcile(&two.state).await.unwrap();
+    acrodont::catalog::reconcile(&two.state).await.unwrap();
     assert!(
         two.state
             .catalog
@@ -504,8 +504,8 @@ async fn the_reconcile_fallback_catches_a_missed_notification(pool: sqlx::PgPool
 #[sqlx::test(migrations = false)]
 async fn two_instances_start_together_on_an_empty_database(pool: sqlx::PgPool) {
     let (a, b) = tokio::join!(
-        wordfall::app::MIGRATOR.run(&pool),
-        wordfall::app::MIGRATOR.run(&pool)
+        acrodont::app::MIGRATOR.run(&pool),
+        acrodont::app::MIGRATOR.run(&pool)
     );
     a.unwrap();
     b.unwrap();
@@ -513,7 +513,7 @@ async fn two_instances_start_together_on_an_empty_database(pool: sqlx::PgPool) {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(rows, wordfall::app::MIGRATOR.iter().count() as i64);
+    assert_eq!(rows, acrodont::app::MIGRATOR.iter().count() as i64);
     let (one, two) = tokio::join!(TestApp::new(pool.clone()), TestApp::new(pool.clone()));
     assert_eq!(one.get("/health").await.status, StatusCode::OK);
     assert_eq!(two.get("/health").await.status, StatusCode::OK);
@@ -530,7 +530,7 @@ async fn health_waits_for_the_startup_load(pool: sqlx::PgPool) {
         two.get("/health").await.status,
         StatusCode::SERVICE_UNAVAILABLE
     );
-    wordfall::catalog::startup(&two.state).await.unwrap();
+    acrodont::catalog::startup(&two.state).await.unwrap();
     assert_eq!(two.get("/health").await.status, StatusCode::OK);
     assert_eq!(two.state.catalog.snapshot().lexicons.len(), 3);
 }
@@ -594,7 +594,7 @@ async fn lexicons_lists_only_items_every_live_instance_loaded(pool: sqlx::PgPool
     .unwrap();
     assert_eq!(listed(&one).await.len(), 3);
     // The purge task prunes the stale rows and leaves the live ones.
-    assert!(wordfall::purge::run_once(&one.state).await.unwrap());
+    assert!(acrodont::purge::run_once(&one.state).await.unwrap());
     let stale_rows: i64 =
         sqlx::query_scalar("SELECT count(*) FROM catalog_instance_status WHERE instance_id = $1")
             .bind(stale)
@@ -616,7 +616,7 @@ async fn a_new_instance_lists_items_once_it_turns_ready(pool: sqlx::PgPool) {
     // A second instance that is live (it has a row) but has not yet loaded
     // CA-FIX, the state an item is in while it is still being built there.
     let two = TestApp::new_unready(pool).await;
-    wordfall::catalog::startup(&two.state).await.unwrap();
+    acrodont::catalog::startup(&two.state).await.unwrap();
     let ca: i32 = sqlx::query_scalar("SELECT id::int FROM lexicons WHERE name = 'CA-FIX'")
         .fetch_one(one.db())
         .await

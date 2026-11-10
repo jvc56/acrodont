@@ -1,13 +1,13 @@
 //! PLAN.md § Integration tests: "every export endpoint selection, for all three
 //! quiz types, including an export of a quiz in the Trash and a 404 for another
 //! user's cascade, each through a token from POST /api/cascades/:id/export-token;
-//! the token request answering 401 for a mismatched X-Wordfall-User, 404 for a
+//! the token request answering 401 for a mismatched X-Acrodont-User, 404 for a
 //! purged quiz and 429 with Retry-After past EXPORT_RATE_PER_MINUTE; and the
 //! download answering 204 for a token used twice, a token 61 seconds old, and a
 //! token presented with choices other than those it was issued for; and a token
 //! issued by one of two in-process instances redeemed on the other, then refused
 //! on a second redemption on either …; and an export token presented as the
-//! wordfall_session cookie, and a session token presented as an export token,
+//! acrodont_session cookie, and a session token presented as an export token,
 //! each refused"; and § Unit tests: the export endpoint returns the same bytes
 //! the device would build from its own cards and grades.
 
@@ -19,7 +19,7 @@ use common::sync::{play_and_finish, Device};
 use common::{Client, TestApp, TestResponse};
 use serde_json::{json, Value};
 use uuid::Uuid;
-use wordfall::leave::leave_value_text;
+use acrodont::leave::leave_value_text;
 
 fn sevens() -> Value {
     json!({ "op": "and", "children": [{ "type": "length", "negated": false, "min": 7, "max": 7 }] })
@@ -153,7 +153,7 @@ async fn the_token_request_answers_401_404_and_429(pool: sqlx::PgPool) {
     // Another user's cascade: 404.
     let mut bob = app.signed_in("bob").await;
     assert_eq!(token(&mut bob, &cascade, choices.clone()).await.status, StatusCode::NOT_FOUND);
-    // A mismatched X-Wordfall-User: 401.
+    // A mismatched X-Acrodont-User: 401.
     let me = c.user_id;
     c.user_id = bob.user_id;
     assert_eq!(token(&mut c, &cascade, choices.clone()).await.status, StatusCode::UNAUTHORIZED);
@@ -224,11 +224,11 @@ async fn export_and_session_tokens_never_stand_in_for_each_other(pool: sqlx::PgP
     let export_token = export_token.replace("%2E", ".").replace("%3A", ":");
     // An export token as the session cookie.
     let mut forged = Client::new(&app, "10.0.0.9");
-    forged.cookies.insert("wordfall_session".into(), export_token);
+    forged.cookies.insert("acrodont_session".into(), export_token);
     forged.user_id = c.user_id;
     assert_eq!(forged.get("/api/auth/me").await.status, StatusCode::UNAUTHORIZED);
     // A session token as the export token.
-    let session = c.cookies.get("wordfall_session").unwrap().clone();
+    let session = c.cookies.get("acrodont_session").unwrap().clone();
     let swapped = format!("{}token={session}", url.split("token=").next().unwrap());
     assert_eq!(app.get(&swapped).await.status, StatusCode::NO_CONTENT);
 }

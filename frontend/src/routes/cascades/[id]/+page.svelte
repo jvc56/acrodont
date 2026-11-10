@@ -58,6 +58,9 @@
 	let typedText = $state('');
 	let typedInput = $state<HTMLInputElement | null>(null);
 	let typedFocused = $state(false);
+	/** The scrolling quiz area, and the answer inside it that shrinks to fit it. */
+	let fitArea = $state<HTMLElement | null>(null);
+	let answerBox = $state<HTMLElement | null>(null);
 	let quizOptions = $state<QuizOptions | null>(null);
 	let maxQuiz = $state(130_000);
 
@@ -246,6 +249,50 @@
 		if (wheel.pass(s.code, performance.now())) void act(a);
 	}
 
+	/**
+	 * Fits the answer, definitions included, on the screen: when the quiz area
+	 * would scroll, its sizes are scaled down (the --fit factor AnswerView reads)
+	 * as far as needed, to a floor of FIT_MIN. Runs before the browser paints,
+	 * so the answer never shows at a size that scrolls.
+	 */
+	const FIT_MIN = 0.3;
+	function fit() {
+		const area = fitArea;
+		const box = answerBox;
+		if (!area || !box) return;
+		const fits = () => area.scrollHeight <= area.clientHeight + 1;
+		box.style.setProperty('--fit', '1');
+		if (fits()) return;
+		let lo = FIT_MIN;
+		let hi = 1;
+		for (let i = 0; i < 8; i++) {
+			const mid = (lo + hi) / 2;
+			box.style.setProperty('--fit', String(mid));
+			if (fits()) lo = mid;
+			else hi = mid;
+		}
+		box.style.setProperty('--fit', String(lo));
+	}
+
+	// Refit when the area changes size or anything in it changes: a reveal, a
+	// typed word, definitions arriving, a display setting. The fit's own change
+	// to the answer's style is not a reason to refit.
+	$effect(() => {
+		const area = fitArea;
+		if (!area) return;
+		const resize = new ResizeObserver(() => fit());
+		resize.observe(area);
+		const changes = new MutationObserver((records) => {
+			if (records.some((r) => !(r.target === answerBox && r.attributeName === 'style'))) fit();
+		});
+		changes.observe(area, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['style', 'class'] });
+		fit();
+		return () => {
+			resize.disconnect();
+			changes.disconnect();
+		};
+	});
+
 	async function onTypedKey(e: KeyboardEvent) {
 		if (e.key !== 'Enter' || !player) return;
 		e.preventDefault();
@@ -417,53 +464,49 @@
 			<p class="text-center text-muted-foreground">This question needs a connection.</p>
 		{:else}
 			<div class="text-center font-semibold" style={textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing)} data-question><TileText text={card.key} /></div>
-			{#if card.typed && !card.revealed}
-				<div class="mx-auto mt-6 max-w-sm space-y-2">
-					<p class="text-center text-sm text-muted-foreground">
-						{card.typed.found.length} of {player?.words(card).length ?? 0} found
-					</p>
-					<input
-						bind:this={typedInput}
-						bind:value={typedText}
-						onkeydown={onTypedKey}
-						onfocus={() => (typedFocused = true)}
-						onblur={() => (typedFocused = false)}
-						class="w-full rounded-md border px-3 py-2 text-center uppercase"
-						aria-label="Type an answer"
-						autocomplete="off"
-						autocapitalize="characters"
-						spellcheck="false"
-					/>
-					{#if card.note}<p class="text-center text-sm text-muted-foreground">{card.note}</p>{/if}
-					{#if v.quiz?.require_alphabetical && card.typed.found.length}
-						<p class="text-center text-xs text-muted-foreground">after {card.typed.found.at(-1)}</p>
-					{/if}
-					<ul class="flex flex-wrap justify-center gap-2 text-sm">
-						{#each card.typed.found as w (w)}<li><TileText text={w} /></li>{/each}
-					</ul>
-					<ul class="flex flex-wrap justify-center gap-2 text-sm text-destructive">
-						{#each card.typed.wrong as w, i (i)}<li>{w}</li>{/each}
-					</ul>
-				</div>
-			{/if}
-			{#if card.revealed}
-				<div class="mt-6">
+			<!-- The answer space: typed words as they are found, bare, then the whole answer on the reveal. -->
+			<div class="mt-6" bind:this={answerBox}>
+				{#if card.revealed}
 					{#if card.answer === null}
 						<p class="text-center text-muted-foreground">Answer needs a connection.</p>
 					{:else}
 						<AnswerView
-								quizType={v.cascade!.quiz_type}
-								answer={card.answer}
-								{prefs}
-								found={card.typed?.found ?? null}
-								font={dsp.answer_font}
-								size={dsp.answer_size_px}
-								spacing={dsp.answer_spacing}
-								definition={{ font: dsp.definition_font, size: dsp.definition_size_px, spacing: dsp.definition_spacing }}
-								word={card.word}
-							/>
+							quizType={v.cascade!.quiz_type}
+							answer={card.answer}
+							{prefs}
+							found={card.typed?.found ?? null}
+							font={dsp.answer_font}
+							size={dsp.answer_size_px}
+							spacing={dsp.answer_spacing}
+							definition={{ font: dsp.definition_font, size: dsp.definition_size_px, spacing: dsp.definition_spacing }}
+							word={card.word}
+						/>
 					{/if}
-				</div>
+				{:else if card.typed}
+					<AnswerView
+						quizType={v.cascade!.quiz_type}
+						answer={card.answer}
+						{prefs}
+						typing={card.typed.found}
+						font={dsp.answer_font}
+						size={dsp.answer_size_px}
+						spacing={dsp.answer_spacing}
+					/>
+				{/if}
+				{#if card.typed && (card.typed.outOfOrder.length || card.typed.wrong.length)}
+					<div class="mt-4 space-y-1 text-center text-sm text-destructive">
+						{#if card.typed.outOfOrder.length}
+							<p>Out of order: {#each card.typed.outOfOrder as w, i (w)}{#if i}, {/if}<TileText text={w} />{/each}</p>
+						{/if}
+						{#if card.typed.wrong.length}
+							<ul class="flex flex-wrap justify-center gap-x-3" aria-label="Not answers">
+								{#each card.typed.wrong as w, i (i)}<li class="line-through">{w}</li>{/each}
+							</ul>
+						{/if}
+					</div>
+				{/if}
+			</div>
+			{#if card.revealed}
 				<!-- The grade is the quiz area's border colour; this says it for screen readers. -->
 				<p class="sr-only" role="status">{card.grade === 'correct' ? 'Correct' : 'Missed'}</p>
 			{/if}
@@ -501,6 +544,47 @@
 	{/if}
 {/snippet}
 
+{#snippet typedBar(mobile: boolean)}
+	<!-- Typed mode's input, at the bottom of the page until the reveal. -->
+	{#if v?.status === 'ready' && v.card?.typed && !v.card.revealed && v.card.key !== null}
+		{@const card = v.card}
+		{@const typed = v.card.typed}
+		<div class="shrink-0 border-t bg-background px-4 py-3">
+			{#if mobile && typedFocused}
+				<!-- The on-screen keyboard covers the zones: three buttons sit above it. -->
+				<div class="mb-2 flex justify-around">
+					<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('previous')}>Previous</Button>
+					<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('show_next')}>Show / Next</Button>
+					<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('toggle_grade')}>Toggle</Button>
+				</div>
+			{/if}
+			<div class="mx-auto max-w-sm space-y-1">
+				<div class="flex items-baseline justify-between gap-3 text-sm text-muted-foreground">
+					<span>{typed.found.length} of {player?.words(card).length ?? 0} found</span>
+					{#if v.quiz?.require_alphabetical && typed.found.length}
+						<span class="text-xs">after <TileText text={typed.found.at(-1) ?? ''} /></span>
+					{/if}
+				</div>
+				<input
+					bind:this={typedInput}
+					bind:value={typedText}
+					onkeydown={onTypedKey}
+					onfocus={() => (typedFocused = true)}
+					onblur={() => (typedFocused = false)}
+					class="w-full rounded-md border bg-background px-3 py-2 text-center uppercase"
+					aria-label="Type an answer"
+					autocomplete="off"
+					autocapitalize="characters"
+					spellcheck="false"
+				/>
+				<p class="text-center text-xs text-muted-foreground" role="status">
+					{card.note ?? 'Enter on an empty box when you are finished.'}
+				</p>
+			</div>
+		</div>
+	{/if}
+{/snippet}
+
 {#snippet levels()}
 	<button class="rounded px-2 py-1 text-left hover:bg-muted" onclick={openLevels}>Levels</button>
 {/snippet}
@@ -510,7 +594,7 @@
 		{#if menuOpen}
 			<nav class="flex w-48 shrink-0 flex-col gap-1 border-r p-4 text-sm" aria-label="Player menu">
 				<div class="mb-2 flex items-center justify-between">
-					<a href="/cascades" class="font-semibold">Wordfall</a>
+					<a href="/cascades" class="font-semibold">Acrodont</a>
 					<button class="rounded px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => (menuOpen = false)} aria-label="Hide menu" title="Hide menu">«</button>
 				</div>
 				<a class="rounded px-2 py-1 hover:bg-muted" href="/cascades">Cascades</a>
@@ -528,8 +612,8 @@
 			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 			<div
 				role="application"
-				class="relative flex flex-1 flex-col items-center overflow-y-auto px-8 pb-8 select-none {gradeBorder}"
-				style={`padding-top: ${dsp.question_top_px}px; border-width: ${dsp.border_px}px; border-style: solid;`}
+				class="relative flex min-h-0 flex-1 flex-col select-none {gradeBorder}"
+				style={`border-width: ${dsp.border_px}px; border-style: solid;`}
 				data-grade={gradeState ?? undefined}
 				aria-label="Quiz area"
 				onmousedown={(e) => e.button === 1 && e.preventDefault()}
@@ -539,12 +623,17 @@
 				onwheel={onWheel}
 			>
 				{#if !menuOpen}
-					<button class="absolute top-3 left-3 rounded px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => (menuOpen = true)} aria-label="Show menu" title="Show menu">☰</button>
+					<button class="absolute top-3 left-3 z-10 rounded px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => (menuOpen = true)} aria-label="Show menu" title="Show menu">☰</button>
 				{/if}
-				{#if v?.banner}<p class="absolute bottom-4 max-w-[70%] rounded-md bg-muted px-4 py-2 text-center text-sm" role="status">{v.banner}</p>{/if}
-				<div class="w-full max-w-4xl">
-					{#if v?.status === 'ready'}{@render question()}{:else}<div class="text-center">{@render status()}</div>{/if}
+				<div class="relative flex min-h-0 flex-1 flex-col items-center">
+					<div bind:this={fitArea} data-fit-area class="flex flex-1 flex-col items-center self-stretch overflow-y-auto px-8 pb-8" style={`padding-top: ${dsp.question_top_px}px;`}>
+						<div class="w-full max-w-4xl">
+							{#if v?.status === 'ready'}{@render question()}{:else}<div class="text-center">{@render status()}</div>{/if}
+						</div>
+					</div>
+					{#if v?.banner}<p class="absolute bottom-4 max-w-[70%] rounded-md bg-muted px-4 py-2 text-center text-sm" role="status">{v.banner}</p>{/if}
 				</div>
+				{@render typedBar(false)}
 			</div>
 			<!-- The status bar keeps its place when hidden, with only its Show button and the
 			     sync status, so hiding it never changes the quiz area or its grade border. -->
@@ -590,7 +679,7 @@
 		</div>
 	</div>
 {:else}
-	<div class="flex h-screen flex-col">
+	<div class="flex h-dvh flex-col">
 		<header class="flex items-center justify-between border-b px-3 py-2 text-sm">
 			<a href="/cascades" aria-label="Menu">☰</a>
 			<span>
@@ -604,10 +693,12 @@
 			</span>
 		</header>
 		{#if v?.status === 'ready'}
-			<div class="relative flex flex-1 select-none" class:flex-col={!landscape} style="touch-action: manipulation">
+			<div class="relative flex min-h-0 flex-1 select-none" class:flex-col={!landscape} style="touch-action: manipulation">
 				{#if v.banner}<p class="absolute top-2 left-2 right-2 z-10 rounded-md bg-muted px-3 py-2 text-sm" role="status">{v.banner}</p>{/if}
 				<button class="text-muted-foreground" style={landscape ? 'width:20%' : 'height:15%'} onclick={() => act('previous')}>↶ Previous</button>
 				<div
+					bind:this={fitArea}
+					data-fit-area
 					class="overflow-y-auto p-4 {gradeBorder}"
 					style={`${landscape ? 'width:55%' : 'height:60%'}; border-width: ${dsp.border_px}px; border-style: solid;`}
 					data-grade={gradeState ?? undefined}
@@ -619,15 +710,8 @@
 					{@render question()}
 				</div>
 				<button class="text-muted-foreground" style={landscape ? 'width:25%' : 'height:25%'} onclick={() => act('toggle_grade')}>✓ ⇄ ✗ Toggle</button>
-				{#if typedFocused}
-					<!-- The on-screen keyboard covers the zones: three buttons sit above it. -->
-					<div class="fixed right-0 bottom-0 left-0 flex justify-around border-t bg-background p-2">
-						<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('previous')}>Previous</Button>
-						<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('show_next')}>Show / Next</Button>
-						<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('toggle_grade')}>Toggle</Button>
-					</div>
-				{/if}
 			</div>
+			{@render typedBar(true)}
 		{:else}
 			<div class="p-6">{@render status()}</div>
 		{/if}
@@ -714,12 +798,15 @@
 					<option value="missed">Missed</option>
 				</select>
 			</SettingRow>
-			<SettingRow label="Anagram answer mode" info={INFO.anagram_answer_mode} for="player-mode">
-				<select id="player-mode" class="rounded border bg-background px-2 py-1" value={prefs.anagram_answer_mode} onchange={(e) => setPref('anagram_answer_mode', e.currentTarget.value)}>
-					<option value="flashcard">Flashcard</option>
-					<option value="typed">Typed</option>
-				</select>
-			</SettingRow>
+			{#if v?.cascade?.quiz_type === 'anagram'}
+				<!-- Typing answers is for anagram quizzes only. -->
+				<SettingRow label="Anagram answer mode" info={INFO.anagram_answer_mode} for="player-mode">
+					<select id="player-mode" class="rounded border bg-background px-2 py-1" value={prefs.anagram_answer_mode} onchange={(e) => setPref('anagram_answer_mode', e.currentTarget.value)}>
+						<option value="flashcard">Flashcard</option>
+						<option value="typed">Typed</option>
+					</select>
+				</SettingRow>
+			{/if}
 			<SettingRow label="Round leave values to (decimal places)" info={INFO.leave_value_decimals} for="player-decimals">
 				<select id="player-decimals" class="rounded border bg-background px-2 py-1" value={String(prefs.leave_value_decimals)} onchange={(e) => setPref('leave_value_decimals', Number(e.currentTarget.value))}>
 					{#each [0, 1, 2, 3] as d (d)}<option value={String(d)}>{d}</option>{/each}

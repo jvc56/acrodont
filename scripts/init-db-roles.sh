@@ -5,14 +5,14 @@
 #   scripts/init-db-roles.sh
 #
 #   1. puts the SSM parameters that do not exist yet -- never overwrites one:
-#        /wordfall/production/DATABASE_URL         wordfall_app, new password
-#        /wordfall/production/BACKUP_DATABASE_URL  wordfall_backup, new password
-#        /wordfall/production/SESSION_SIGNING_KEY  64 hex characters
+#        /acrodont/production/DATABASE_URL         acrodont_app, new password
+#        /acrodont/production/BACKUP_DATABASE_URL  acrodont_backup, new password
+#        /acrodont/production/SESSION_SIGNING_KEY  64 hex characters
 #      (the database host from the RDS instance named by db_identifier);
 #   2. runs a master ops task that creates the roles, or sets their passwords
 #      if they exist, from the task's own injected URLs (no password travels
-#      in an override or a log): wordfall_app (LOGIN, owner of schema public,
-#      ALL on the database) and wordfall_backup (LOGIN, pg_read_all_data).
+#      in an override or a log): acrodont_app (LOGIN, owner of schema public,
+#      ALL on the database) and acrodont_backup (LOGIN, pg_read_all_data).
 # Safe to run again.
 set -euo pipefail
 # shellcheck source=scripts/lib/ops.sh
@@ -58,8 +58,8 @@ for var in DATABASE_URL BACKUP_DATABASE_URL SESSION_SIGNING_KEY; do
     continue
   fi
   case $var in
-    DATABASE_URL) put_new "$var" "postgres://wordfall_app:$(hex 24)@$endpoint/wordfall?sslmode=require" ;;
-    BACKUP_DATABASE_URL) put_new "$var" "postgres://wordfall_backup:$(hex 24)@$endpoint/wordfall?sslmode=require" ;;
+    DATABASE_URL) put_new "$var" "postgres://acrodont_app:$(hex 24)@$endpoint/acrodont?sslmode=require" ;;
+    BACKUP_DATABASE_URL) put_new "$var" "postgres://acrodont_backup:$(hex 24)@$endpoint/acrodont?sslmode=require" ;;
     SESSION_SIGNING_KEY) put_new "$var" "$(hex 32)" ;;
   esac
 done
@@ -70,10 +70,10 @@ export APP_U=\$WF_U APP_P=\$WF_P APP_DB=\$WF_DB
 $(ops_url_parts_snippet BACKUP_DATABASE_URL)
 export BK_U=\$WF_U BK_P=\$WF_P
 unset WF_P
-[ \"\$APP_U\" = wordfall_app ] || { echo \"DATABASE_URL's user is \$APP_U, not wordfall_app\" >&2; exit 4; }
-[ \"\$BK_U\" = wordfall_backup ] || { echo \"BACKUP_DATABASE_URL's user is \$BK_U, not wordfall_backup\" >&2; exit 4; }
+[ \"\$APP_U\" = acrodont_app ] || { echo \"DATABASE_URL's user is \$APP_U, not acrodont_app\" >&2; exit 4; }
+[ \"\$BK_U\" = acrodont_backup ] || { echo \"BACKUP_DATABASE_URL's user is \$BK_U, not acrodont_backup\" >&2; exit 4; }
 [ -n \"\$APP_P\" ] && [ -n \"\$BK_P\" ] || { echo 'a URL has no password' >&2; exit 4; }
-wordfall-master-psql -X -q -v ON_ERROR_STOP=1 --single-transaction -f - <<'SQL'
+acrodont-master-psql -X -q -v ON_ERROR_STOP=1 --single-transaction -f - <<'SQL'
 \\set VERBOSITY terse
 \\set SHOW_CONTEXT never
 \\getenv app_u APP_U

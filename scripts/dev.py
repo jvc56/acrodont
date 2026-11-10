@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""./scripts/dev.py: a complete Wordfall on http://localhost:5173 in one command.
+"""./scripts/dev.py: a complete Acrodont on http://localhost:5173 in one command.
 
 With no arguments it builds and starts the stack, seeds the licensed catalog
 in fixtures/licensed/ (English, CSW24 with definitions, and its leave values:
@@ -62,7 +62,7 @@ def _pair(value: str, sep: str, flag: str):
 
 
 def load_env_file() -> None:
-    """The repository's `.env`, as docker compose reads it: a WORDFALL_PORT or
+    """The repository's `.env`, as docker compose reads it: a ACRODONT_PORT or
     BIND_HOST set there applies to this script too. The environment wins."""
     path = ROOT / ".env"
     if not path.is_file():
@@ -130,9 +130,9 @@ def preflight(args) -> None:
         return
     if port_in_use(args.port) and not compose_project_running(args.project, "frontend"):
         fail(f"port {args.port} is already in use by something else; pass --port N, "
-             "or set WORDFALL_PORT in .env")
+             "or set ACRODONT_PORT in .env")
     if args.hot_reload and port_in_use(5174) and not compose_project_running(args.project, "vite"):
-        fail("port 5174 (--hot-reload) is already in use; set WORDFALL_VITE_PORT in .env")
+        fail("port 5174 (--hot-reload) is already in use; set ACRODONT_VITE_PORT in .env")
 
 
 class ProjectLock:
@@ -162,7 +162,7 @@ def explain(err: "stack.StackFailed", args) -> None:
             "goes; --snapshot NAME first keeps a copy).")
     elif err.reason == "compose":
         log(f"docker compose could not start the stack: its error is above. A host port in use? "
-            f"--port moves the site (now {args.port}); BIND_HOST and WORDFALL_VITE_PORT live in .env.")
+            f"--port moves the site (now {args.port}); BIND_HOST and ACRODONT_VITE_PORT live in .env.")
     else:
         log(f"the stack did not become healthy: {err}")
         if err.logs.strip():
@@ -193,9 +193,9 @@ LICENSED = ROOT / "fixtures" / "licensed"
 
 
 def default_catalog_dir() -> Optional[str]:
-    """$WORDFALL_CATALOG_DIR, else fixtures/licensed/ when it has a manifest."""
-    if os.environ.get("WORDFALL_CATALOG_DIR"):
-        return os.environ["WORDFALL_CATALOG_DIR"]
+    """$ACRODONT_CATALOG_DIR, else fixtures/licensed/ when it has a manifest."""
+    if os.environ.get("ACRODONT_CATALOG_DIR"):
+        return os.environ["ACRODONT_CATALOG_DIR"]
     return str(LICENSED) if (LICENSED / "manifest.json").is_file() else None
 
 
@@ -316,11 +316,11 @@ def restore_into_stack(args) -> None:
     dump, own = find_dump(args.restore)
     scrub = not own
     stamp = time.strftime("%Y%m%d%H%M%S")
-    staging, old = f"wordfall_restore_{stamp}", f"wordfall_old_{stamp}"
+    staging, old = f"acrodont_restore_{stamp}", f"acrodont_old_{stamp}"
 
     def psql(db: str, *extra: str, stdin=None, sql: Optional[str] = None):
         cmd = ["docker", "compose", "-p", args.project, "exec", "-T", "postgres", "psql", "-v", "ON_ERROR_STOP=1",
-               "-q", "-U", "wordfall", "-d", db, *extra]
+               "-q", "-U", "acrodont", "-d", db, *extra]
         if sql is not None:
             cmd += ["-c", sql]
         return subprocess.run(cmd, cwd=ROOT, stdin=stdin, check=True)
@@ -330,7 +330,7 @@ def restore_into_stack(args) -> None:
     try:
         with dump.open("rb") as f:
             subprocess.run(["docker", "compose", "-p", args.project, "exec", "-T", "postgres", "pg_restore", "-U",
-                            "wordfall", "-d", staging, "--no-owner", "--no-privileges", "--exit-on-error"],
+                            "acrodont", "-d", staging, "--no-owner", "--no-privileges", "--exit-on-error"],
                            cwd=ROOT, stdin=f, check=True)
         if scrub:
             with (ROOT / "scripts" / "scrub.sql").open("rb") as f:
@@ -343,14 +343,14 @@ def restore_into_stack(args) -> None:
         fail("the restore failed; the stack's database is untouched")
     subprocess.run(["docker", "compose", "-p", args.project, "stop", "backend"], cwd=ROOT, check=True)
     psql("postgres", sql=(
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'wordfall' AND pid <> pg_backend_pid();"))
-    psql("postgres", "-1", sql=f"ALTER DATABASE wordfall RENAME TO {old}; ALTER DATABASE {staging} RENAME TO wordfall;")
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'acrodont' AND pid <> pg_backend_pid();"))
+    psql("postgres", "-1", sql=f"ALTER DATABASE acrodont RENAME TO {old}; ALTER DATABASE {staging} RENAME TO acrodont;")
     psql("postgres", sql=f"DROP DATABASE {old}")
     subprocess.run(["docker", "compose", "-p", args.project, "start", "backend"], cwd=ROOT, check=True)
     log("restored. Clear this site's data in the browser (DevTools → Application → Storage → Clear "
         "site data): devices resync after the sequence bump, but old profiles hold other accounts.")
     if scrub:
-        log(f"every account's password is now {stack.User().password}; addresses are user-<id>@wordfall.invalid")
+        log(f"every account's password is now {stack.User().password}; addresses are user-<id>@acrodont.invalid")
 
 
 # --- the browser ----------------------------------------------------------------
@@ -386,13 +386,13 @@ def open_two_devices(args, url: str) -> None:
 def first_admin_steps(base: str, project: str) -> str:
     return f"""
 ============================================================================
-A fresh Wordfall has no accounts and no catalog. To make yourself its first admin:
+A fresh Acrodont has no accounts and no catalog. To make yourself its first admin:
 
  1. Register at {base}/register (any username; the address can be made up).
  2. Confirm it: the link is printed below as [mail] when it is sent.
  3. In a NEW terminal, in {ROOT}:
 
-      docker compose -p {project} exec postgres psql -U wordfall -d wordfall -c "UPDATE users SET is_admin = true WHERE username = 'YOUR_NAME'"
+      docker compose -p {project} exec postgres psql -U acrodont -d acrodont -c "UPDATE users SET is_admin = true WHERE username = 'YOUR_NAME'"
 
     It prints UPDATE 1. Reload: an Admin link appears; upload the catalog there.
 
@@ -477,7 +477,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--hot-reload", action="store_true",
                      help="also run the Vite dev server on :5174 (no service worker there)")
     run.add_argument("--project", default=stack.DEFAULT_PROJECT, help="an isolated second stack's name")
-    run.add_argument("--port", type=int, default=int(os.environ.get("WORDFALL_PORT", stack.DEFAULT_PORT)))
+    run.add_argument("--port", type=int, default=int(os.environ.get("ACRODONT_PORT", stack.DEFAULT_PORT)))
     run.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
                      help="override any configuration variable (PLAN.md § Configuration); repeatable")
     run.add_argument("--down", action="store_true", help="stop the stack")
@@ -491,7 +491,7 @@ def build_parser() -> argparse.ArgumentParser:
                       help="a new deployment: --reset, then no user and no catalog; prints the first-admin steps")
     data.add_argument("--real-catalog", nargs="?", const="", default=None, metavar="DIR",
                       help="upload the licensed files DIR/manifest.json lists. Done by default from "
-                           "$WORDFALL_CATALOG_DIR, else fixtures/licensed/ when it has a manifest.json "
+                           "$ACRODONT_CATALOG_DIR, else fixtures/licensed/ when it has a manifest.json "
                            "(scripts/build-licensed-catalog.py makes one)")
     data.add_argument("--no-real-catalog", action="store_true",
                       help="skip the licensed catalog: the small fixture catalog only")
@@ -535,7 +535,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.real_catalog == "":
         args.real_catalog = default_catalog_dir()
         if args.real_catalog is None:
-            parser.error("--real-catalog needs a directory, WORDFALL_CATALOG_DIR set, or fixtures/licensed/manifest.json")
+            parser.error("--real-catalog needs a directory, ACRODONT_CATALOG_DIR set, or fixtures/licensed/manifest.json")
     elif args.real_catalog is None and not (args.no_real_catalog or args.fresh):
         args.real_catalog = default_catalog_dir()
         if args.real_catalog is None and not args.quiet:
@@ -579,7 +579,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     elif not args.fresh:
         http = stack.seed(base_url, catalog, user, project=args.project)
         for n in range(2, 2 + args.users):
-            stack.ensure_user(base_url, stack.User(username=f"dev{n}", email=f"dev{n}@wordfall.local"), args.project)
+            stack.ensure_user(base_url, stack.User(username=f"dev{n}", email=f"dev{n}@acrodont.local"), args.project)
             log(f"user dev{n} ready")
         if args.scenario:
             scenarios.seed(http, args.project, args.scenario, first_real_lexicon(catalog))
@@ -595,7 +595,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             webbrowser.open(url)
     if not args.quiet:
-        log(f"Wordfall is up at {base_url}")
+        log(f"Acrodont is up at {base_url}")
         if not args.fresh:
             log(f"accounts: {user.username} (admin)"
                 + "".join(f", dev{n}" for n in range(2, 2 + args.users))

@@ -2,7 +2,7 @@
 
 /**
  * Storage limits lowered for a test build: the end-to-end budget journeys'
- * stack builds its frontend with WORDFALL_TEST_LIMITS (PLAN.md § End-to-end
+ * stack builds its frontend with ACRODONT_TEST_LIMITS (PLAN.md § End-to-end
  * tests: "Over ROW_STORAGE_BUDGET, lowered with a test constant"). A release
  * build never sets it, and these are the plan's values.
  */

@@ -10,7 +10,7 @@ import { createCascade, login, newUser, playLevel, press } from './support';
 // a fresh browser.
 test('the plane', async ({ baseURL }) => {
 	test.setTimeout(300_000);
-	const dir = mkdtempSync(path.join(tmpdir(), 'wordfall-plane-'));
+	const dir = mkdtempSync(path.join(tmpdir(), 'acrodont-plane-'));
 	try {
 		let context = await chromium.launchPersistentContext(dir, { baseURL });
 		let page = context.pages()[0] ?? (await context.newPage());

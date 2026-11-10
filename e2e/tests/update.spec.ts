@@ -43,7 +43,7 @@ test('updating the app', async ({ context }) => {
 		// Deploy a second build.
 		execFileSync('docker', ['compose', '-p', PROJECT, 'up', '-d', '--build', '--no-deps', 'frontend'], {
 			cwd: root,
-			env: { ...process.env, WORDFALL_APP_BUILD: String(old + 1), WORDFALL_PORT: String(PORT) },
+			env: { ...process.env, ACRODONT_APP_BUILD: String(old + 1), ACRODONT_PORT: String(PORT) },
 			stdio: 'inherit'
 		});
 		// The new container takes a moment to answer: look for the new worker until it does.
@@ -69,7 +69,7 @@ test('updating the app', async ({ context }) => {
 		await expect(a.getByText('Synced')).toBeVisible({ timeout: 60_000 });
 		// The other tab did not reload: it keeps its revealed card, says the app was
 		// updated in another tab, and finishes that card from the old build.
-		await expect(b.getByText('Wordfall was updated in another tab — reload to continue')).toBeVisible({ timeout: 30_000 });
+		await expect(b.getByText('Acrodont was updated in another tab — reload to continue')).toBeVisible({ timeout: 30_000 });
 		await expect(b.locator('[data-grade="correct"]')).toBeVisible();
 		expect(await build(b)).toBe(old);
 		await press(b, 'Space');

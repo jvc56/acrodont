@@ -98,12 +98,12 @@ jobs:
       # ADMIN_UPLOAD_RATE_PER_MINUTE=2, where seeding must wait out 429s and still finish".
       - name: Seeding under a two-a-minute upload limit
         run: |
-          python3 scripts/stack.py up --project wordfall-ci-seed --port 5190 --env ADMIN_UPLOAD_RATE_PER_MINUTE=2
-          python3 scripts/stack.py seed --project wordfall-ci-seed --port 5190
+          python3 scripts/stack.py up --project acrodont-ci-seed --port 5190 --env ADMIN_UPLOAD_RATE_PER_MINUTE=2
+          python3 scripts/stack.py seed --project acrodont-ci-seed --port 5190
       - name: Stacks down, volumes and all
         if: always()
         run: |
-          for p in wordfall-e2e wordfall-e2e-ttl wordfall-e2e-purge wordfall-e2e-limits wordfall-e2e-answers wordfall-e2e-budget wordfall-ci-seed; do
+          for p in acrodont-e2e acrodont-e2e-ttl acrodont-e2e-purge acrodont-e2e-limits acrodont-e2e-answers acrodont-e2e-budget acrodont-ci-seed; do
             python3 scripts/stack.py down --project "$p" --volumes || true
           done
       - name: Traces of failed journeys

@@ -4,7 +4,7 @@ import { apiCascade, createCascade, idb, newUser, plainAnswers } from './support
 // PLAN.md § End-to-end tests: the answer limit with two automatic keeps, and
 // ROW_STORAGE_BUDGET "lowered with a test constant". Each runs on its own
 // stack whose frontend is built with lowered limits (the Makefile's
-// WORDFALL_TEST_LIMITS passes): automatic keep above 30 rows, and either a
+// ACRODONT_TEST_LIMITS passes): automatic keep above 30 rows, and either a
 // 2,000-byte answer limit (@answers) or a 5,000-byte row budget (@budget).
 
 /** A cascade's entry on the Cascades page. */

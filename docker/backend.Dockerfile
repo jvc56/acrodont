@@ -3,7 +3,7 @@
 #   --target ops      the backend's tools for scheduled and operator tasks:
 #                     Postgres 16 (server and client), python3 + boto3, and
 #                     scripts/backup.py, restore.py, drill.py and
-#                     wordfall-master-psql. Never serves traffic.
+#                     acrodont-master-psql. Never serves traffic.
 #   --target backend  (the default, last) the server alone on debian-slim.
 # Base images are pinned by digest, so a moved or vanished tag cannot change a
 # build (birdtest's nightly died for weeks on a deleted image). To update one:
@@ -22,8 +22,8 @@ COPY backend/ ./
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/backend/target \
     find src migrations build.rs Cargo.toml Cargo.lock -type f -exec touch {} + \
-    && cargo build --release --locked --bin wordfall \
-    && cp target/release/wordfall /usr/local/bin/wordfall
+    && cargo build --release --locked --bin acrodont \
+    && cp target/release/acrodont /usr/local/bin/acrodont
 
 FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS ops
 # pg_dump must be at least the server's version, and bookworm ships 15, hence PGDG.
@@ -38,16 +38,16 @@ RUN apt-get update \
     && apt-get purge -y gnupg && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 ENV PATH=/usr/lib/postgresql/16/bin:$PATH
-COPY scripts/backup.py scripts/restore.py scripts/drill.py scripts/ops_master_psql.py /opt/wordfall/scripts/
-RUN ln -s /opt/wordfall/scripts/ops_master_psql.py /usr/local/bin/wordfall-master-psql \
-    && chmod 0755 /opt/wordfall/scripts/*.py
+COPY scripts/backup.py scripts/restore.py scripts/drill.py scripts/ops_master_psql.py /opt/acrodont/scripts/
+RUN ln -s /opt/acrodont/scripts/ops_master_psql.py /usr/local/bin/acrodont-master-psql \
+    && chmod 0755 /opt/acrodont/scripts/*.py
 
 FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS backend
 # curl for the container health check; nothing else.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /usr/local/bin/wordfall /usr/local/bin/wordfall
+COPY --from=build /usr/local/bin/acrodont /usr/local/bin/acrodont
 USER nobody
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/wordfall"]
+ENTRYPOINT ["/usr/local/bin/acrodont"]

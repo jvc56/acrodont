@@ -7,7 +7,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const script = path.resolve(here, '../scripts/stack.py');
 
 /** Each configured pass of the suite runs its own stack (see the Makefile's test-e2e). */
-export const PROJECT = process.env.E2E_PROJECT ?? 'wordfall-e2e';
+export const PROJECT = process.env.E2E_PROJECT ?? 'acrodont-e2e';
 export const PORT = Number(process.env.E2E_PORT ?? 5180);
 
 export function stack(cmd: 'up' | 'seed' | 'reset' | 'down', args: string[] = []): string {

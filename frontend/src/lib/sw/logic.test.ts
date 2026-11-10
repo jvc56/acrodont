@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { cacheName, deletable, route } from './logic';
 
-const O = 'https://wordfall.example';
+const O = 'https://acrodont.example';
 const pre = new Set(['/_app/immutable/entry/start.js', '/favicon.svg', '/index.html']);
 const u = (p: string) => new URL(p, O);
 

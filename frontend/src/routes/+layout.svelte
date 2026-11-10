@@ -60,7 +60,7 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<title>Wordfall</title>
+	<title>Acrodont</title>
 </svelte:head>
 
 <div class="min-h-screen bg-background text-foreground">
@@ -73,7 +73,7 @@
 	{#if session.updatedInAnotherTab || updates.updatedElsewhere}
 		<!-- PLAN.md § On the device: the old build's tab keeps running and never reloads by itself. -->
 		<p role="status" class="bg-muted px-4 py-2 text-center text-sm">
-			Wordfall was updated in another tab — reload to continue
+			Acrodont was updated in another tab — reload to continue
 		</p>
 	{/if}
 	<Notices />

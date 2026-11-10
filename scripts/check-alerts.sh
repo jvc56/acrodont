@@ -5,12 +5,12 @@
 #   scripts/check-alerts.sh
 #
 #   1. the alarm topic has a confirmed subscription (not PendingConfirmation);
-#   2. wordfall-no-dump-36h is forced to ALARM and back to OK: an ALARM mail
+#   2. acrodont-no-dump-36h is forced to ALARM and back to OK: an ALARM mail
 #      should arrive (it returns to its real state at its next evaluation);
-#   3. the EventBridge rules wordfall-deploy-failed, wordfall-backup-failed and
-#      wordfall-drill-failed match a sample failure and not a sample success
+#   3. the EventBridge rules acrodont-deploy-failed, acrodont-backup-failed and
+#      acrodont-drill-failed match a sample failure and not a sample success
 #      (aws events test-event-pattern: nothing is sent);
-#   4. the RDS event subscription wordfall-db-events is active.
+#   4. the RDS event subscription acrodont-db-events is active.
 # Checking the inbox is yours.
 set -euo pipefail
 # shellcheck source=scripts/lib/ops.sh
@@ -40,7 +40,7 @@ fi
 
 # 2. A real mail. Setting the state an alarm is already in sends nothing, so
 # an alarm already in ALARM goes to OK first.
-alarm=wordfall-no-dump-36h
+alarm=acrodont-no-dump-36h
 reason="testing the alert path (scripts/check-alerts.sh)"
 state=$(aws cloudwatch describe-alarms --alarm-names "$alarm" --query 'MetricAlarms[0].StateValue' --output text) || state=""
 if [[ -z "$state" || "$state" == None ]]; then
@@ -74,7 +74,7 @@ task_event() {  # family, exit code
     '{clusterArn: $cluster, taskArn: $task, taskDefinitionArn: $td, group: "family:\($f)",
       launchType: "FARGATE", lastStatus: "STOPPED", desiredStatus: "STOPPED",
       stopCode: "EssentialContainerExited", stoppedReason: "Essential container in task exited",
-      containers: [{name: ($f | sub("^wordfall-"; "")), lastStatus: "STOPPED", exitCode: $code}]}')"
+      containers: [{name: ($f | sub("^acrodont-"; "")), lastStatus: "STOPPED", exitCode: $code}]}')"
 }
 check_rule() {  # rule, expected True|False, event, description
   local pattern match
@@ -91,22 +91,22 @@ check_rule() {  # rule, expected True|False, event, description
     fail "$1: $4 -> ${match:-error}, expected $2"
   fi
 }
-check_rule wordfall-deploy-failed True "$(deploy_event SERVICE_DEPLOYMENT_FAILED)" "a failed deployment"
-check_rule wordfall-deploy-failed False "$(deploy_event SERVICE_DEPLOYMENT_COMPLETED)" "a completed deployment"
-check_rule wordfall-backup-failed True "$(task_event wordfall-backup 1)" "a backup task exiting 1"
-check_rule wordfall-backup-failed False "$(task_event wordfall-backup 0)" "a backup task exiting 0"
-check_rule wordfall-backup-failed False "$(task_event wordfall-drill 1)" "a drill task exiting 1"
-check_rule wordfall-drill-failed True "$(task_event wordfall-drill 1)" "a drill task exiting 1"
-check_rule wordfall-drill-failed False "$(task_event wordfall-drill 0)" "a drill task exiting 0"
-check_rule wordfall-drill-failed False "$(task_event wordfall-backup 1)" "a backup task exiting 1"
+check_rule acrodont-deploy-failed True "$(deploy_event SERVICE_DEPLOYMENT_FAILED)" "a failed deployment"
+check_rule acrodont-deploy-failed False "$(deploy_event SERVICE_DEPLOYMENT_COMPLETED)" "a completed deployment"
+check_rule acrodont-backup-failed True "$(task_event acrodont-backup 1)" "a backup task exiting 1"
+check_rule acrodont-backup-failed False "$(task_event acrodont-backup 0)" "a backup task exiting 0"
+check_rule acrodont-backup-failed False "$(task_event acrodont-drill 1)" "a drill task exiting 1"
+check_rule acrodont-drill-failed True "$(task_event acrodont-drill 1)" "a drill task exiting 1"
+check_rule acrodont-drill-failed False "$(task_event acrodont-drill 0)" "a drill task exiting 0"
+check_rule acrodont-drill-failed False "$(task_event acrodont-backup 1)" "a backup task exiting 1"
 
 # 4. RDS events.
-status=$(aws rds describe-event-subscriptions --subscription-name wordfall-db-events \
+status=$(aws rds describe-event-subscriptions --subscription-name acrodont-db-events \
   --query 'EventSubscriptionsList[0].Status' --output text 2>/dev/null) || status=""
 if [[ "$status" == active ]]; then
-  ops_say "the RDS event subscription wordfall-db-events is active"
+  ops_say "the RDS event subscription acrodont-db-events is active"
 else
-  fail "the RDS event subscription wordfall-db-events is '${status:-missing}', not active"
+  fail "the RDS event subscription acrodont-db-events is '${status:-missing}', not active"
 fi
 
 ((failed == 0)) || ops_die "some checks failed (above)"

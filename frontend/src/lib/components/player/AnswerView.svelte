@@ -3,9 +3,12 @@
 	// anagrams one per line in the card's order, hooks Zyzzyva-style and
 	// lower-cased only for single ASCII letters, definitions beneath; a
 	// definition's text; a leave value at the user's decimals, '-' only for a negative one.
-	// Unfound words are highlighted after a typed-mode reveal. The words and a
-	// leave value are drawn in the answer font and size (lib/player/display),
-	// which match the question's by default.
+	// Unfound words are highlighted after a typed-mode reveal; before it, only the
+	// words typed so far show, bare: no hooks, inner hooks or definitions, which
+	// would give hints. The words and a leave value are drawn in the answer font
+	// and size (lib/player/display), which match the question's by default. Every
+	// size is scaled by the CSS variable --fit, which the player lowers to fit the
+	// answer on the screen.
 	import TileText from '$lib/components/TileText.svelte';
 	import { leaveValueText } from '$lib/cascade/leave';
 	import { textStyle } from '$lib/player/display.svelte';
@@ -30,7 +33,8 @@
 		size = 36,
 		spacing = 0,
 		definition = { font: 'Inter', size: 20, spacing: 0 },
-		word = null
+		word = null,
+		typing = null
 	}: {
 		quizType: string;
 		answer: unknown;
@@ -47,15 +51,23 @@
 		definition?: { font: string; size: number; spacing: number };
 		/** A Definition card's word with its hooks, shown above the definition. */
 		word?: Word | null;
+		/** Typed mode before the reveal: the words found so far, shown bare. */
+		typing?: string[] | null;
 	} = $props();
+	/** A text style whose size follows the player's fit factor. */
+	const fitted = (style: string) => style.replace(/font-size: ([\d.]+)px;/, 'font-size: calc($1px * var(--fit, 1));');
 	/** Hooks, front | word | back: equal side columns put the words in one straight column, centred. */
 	const columns = 'grid-template-columns: 1fr auto 1fr;';
-	let definitionStyle = $derived(textStyle(definition.font, definition.size, definition.spacing).replace('line-height: 1.2;', 'line-height: 1.4;'));
-
-	let words = $derived(Array.isArray(answer) ? (answer as Word[]) : []);
-	let missingDefinitions = $derived(
-		quizType === 'anagram' && prefs.anagram_show_definitions && words.some((w) => w.definition === undefined)
+	let definitionStyle = $derived(
+		fitted(textStyle(definition.font, definition.size, definition.spacing)).replace('line-height: 1.2;', 'line-height: 1.4;')
 	);
+	let answerStyle = $derived(fitted(textStyle(font, size, spacing)));
+
+	let all = $derived(Array.isArray(answer) ? (answer as Word[]) : []);
+	let words = $derived(typing ? all.filter((w) => typing.includes(w.word)) : all);
+	let hooks = $derived(!typing && prefs.anagram_show_hooks);
+	let definitions = $derived(!typing && prefs.anagram_show_definitions);
+	let missingDefinitions = $derived(quizType === 'anagram' && definitions && words.some((w) => w.definition === undefined));
 </script>
 
 {#snippet hooked(w: Word, hooks: boolean, missing = false)}
@@ -76,11 +88,11 @@
 
 {#if quizType === 'anagram'}
 	<!-- A list of the anagrams; each item is `display: contents`, so its cells stay in the grid's columns. -->
-	<div role="list" class="grid w-full items-baseline gap-x-3 gap-y-2" style={`${columns} ${textStyle(font, size, spacing)}`}>
+	<div role="list" class="grid w-full items-baseline gap-x-3" style={`${columns} ${answerStyle} row-gap: calc(0.5rem * var(--fit, 1));`} data-typing={typing ? '' : undefined}>
 		{#each words as w (w.word)}
 			<div role="listitem" class="contents">
-				{@render hooked(w, prefs.anagram_show_hooks, found !== null && !found.includes(w.word))}
-				{#if prefs.anagram_show_definitions && w.definition}
+				{@render hooked(w, hooks, !typing && found !== null && !found.includes(w.word))}
+				{#if definitions && w.definition}
 					<div class="mx-auto max-w-2xl text-center font-normal text-muted-foreground" style={`grid-column: 1 / -1; ${definitionStyle}`}>
 						{w.definition}
 					</div>
@@ -94,11 +106,11 @@
 {:else if quizType === 'definition'}
 	<!-- The word with its hooks and inner hooks, then the definition: prose, in the definitions' own typeface and size. -->
 	{#if word}
-		<div class="mb-4 grid w-full items-baseline gap-x-3" style={`${columns} ${textStyle(font, size, spacing)}`}>
+		<div class="mb-4 grid w-full items-baseline gap-x-3" style={`${columns} ${answerStyle}`}>
 			{@render hooked(word, true)}
 		</div>
 	{/if}
 	<p class="mx-auto max-w-2xl text-center" style={definitionStyle}>{String(answer)}</p>
 {:else}
-	<p class="text-center font-semibold" style={textStyle(font, size, spacing)}>{leaveValueText(Number(answer), prefs.leave_value_decimals)}</p>
+	<p class="text-center font-semibold" style={answerStyle}>{leaveValueText(Number(answer), prefs.leave_value_decimals)}</p>
 {/if}

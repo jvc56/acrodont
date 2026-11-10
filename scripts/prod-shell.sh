@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # An interactive shell in an ops task inside the VPC: psql and pg_restore 16,
-# python3 and boto3, DATABASE_URL, BACKUP_DATABASE_URL, wordfall-master-psql.
+# python3 and boto3, DATABASE_URL, BACKUP_DATABASE_URL, acrodont-master-psql.
 #
 #   scripts/prod-shell.sh [--attach TASK_ARN]
 #

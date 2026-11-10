@@ -31,15 +31,15 @@ export default defineConfig({
 	// PLAN.md § API → POST /api/sync: the build's monotonic integer build number,
 	// compared against MIN_APP_VERSION, and its git hash, logged but deciding nothing.
 	define: {
-		__APP_BUILD__: JSON.stringify(Number(process.env.WORDFALL_BUILD ?? 0)),
-		__APP_COMMIT__: JSON.stringify(process.env.WORDFALL_COMMIT ?? 'dev'),
+		__APP_BUILD__: JSON.stringify(Number(process.env.ACRODONT_BUILD ?? 0)),
+		__APP_COMMIT__: JSON.stringify(process.env.ACRODONT_COMMIT ?? 'dev'),
 		// The end-to-end budget journeys' lowered storage limits, as JSON; unset in a release.
-		__TEST_LIMITS__: process.env.WORDFALL_TEST_LIMITS || 'null'
+		__TEST_LIMITS__: process.env.ACRODONT_TEST_LIMITS || 'null'
 	},
 	// default-src 'self' blocks data: URIs, so no asset is inlined as one.
 	build: { assetsInlineLimit: 0 },
 	server: {
-		proxy: { '/api': process.env.WORDFALL_API ?? 'http://localhost:5173' }
+		proxy: { '/api': process.env.ACRODONT_API ?? 'http://localhost:5173' }
 	},
 	// Component tests mount Svelte's browser build.
 	resolve: process.env.VITEST ? { conditions: ['browser'] } : undefined,

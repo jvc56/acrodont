@@ -51,7 +51,7 @@
 	}
 
 	function dragStart(e: DragEvent, key: number) {
-		e.dataTransfer?.setData('application/x-wordfall-node', String(key));
+		e.dataTransfer?.setData('application/x-acrodont-node', String(key));
 		if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
 		e.stopPropagation();
 	}
@@ -60,7 +60,7 @@
 		e.preventDefault();
 		e.stopPropagation();
 		dropIndex = null;
-		const key = Number(e.dataTransfer?.getData('application/x-wordfall-node'));
+		const key = Number(e.dataTransfer?.getData('application/x-acrodont-node'));
 		if (key) moveNode(root, key, group.key, index);
 	}
 </script>

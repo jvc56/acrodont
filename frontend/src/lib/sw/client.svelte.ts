@@ -2,7 +2,7 @@
 // watches `registration.waiting` and offers "a new version is ready"; when the
 // user accepts — or presses reload in the 426 state — it posts SKIP_WAITING.
 // Only the tab that posted it reloads on `controllerchange`; every other tab
-// shows "Wordfall was updated in another tab — reload to continue" and keeps
+// shows "Acrodont was updated in another tab — reload to continue" and keeps
 // running. The app never reloads on its own initiative.
 import { version } from '$app/environment';
 import type { ToWorker } from './logic';

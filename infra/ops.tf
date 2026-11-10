@@ -1,14 +1,14 @@
 # Operator access to the database (BIRDTEST_LESSONS_PLAN.md OPS-1). RDS has no
 # public address and admits only the tasks' security group, so every SQL step
 # in docs/runbook.md runs from this task: the ops image (psql and pg_restore
-# 16, python3, restore.py, wordfall-master-psql), the app's and the dump's
+# 16, python3, restore.py, acrodont-master-psql), the app's and the dump's
 # database URLs from SSM, read access to the backups, the RDS-managed master
 # secret for role setup and rotation, and ECS Exec for a shell.
 # scripts/prod-sql.sh runs one batch through it; scripts/prod-shell.sh opens a
 # shell. Nothing runs it on a schedule.
 
 resource "aws_iam_role" "ops_task" {
-  name               = "wordfall-ops"
+  name               = "acrodont-ops"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
 }
 
@@ -41,7 +41,7 @@ resource "aws_iam_role_policy" "ops_task" {
 }
 
 resource "aws_ecs_task_definition" "ops" {
-  family                   = "wordfall-ops"
+  family                   = "acrodont-ops"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = 512

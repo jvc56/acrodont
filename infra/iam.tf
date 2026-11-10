@@ -10,7 +10,7 @@ data "aws_iam_policy_document" "ecs_assume" {
 
 # Pulls images, writes logs and reads the SSM secrets for every task family.
 resource "aws_iam_role" "execution" {
-  name               = "wordfall-execution"
+  name               = "acrodont-execution"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
 }
 
@@ -34,7 +34,7 @@ resource "aws_iam_role_policy" "execution_ssm" {
 
 # The app task: sends mail, and nothing else.
 resource "aws_iam_role" "task" {
-  name               = "wordfall-task"
+  name               = "acrodont-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
 }
 

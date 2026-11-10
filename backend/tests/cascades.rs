@@ -11,7 +11,7 @@ use axum::http::{header, StatusCode};
 use common::{Client, TestApp};
 use serde_json::{json, Value};
 use uuid::Uuid;
-use wordfall::cascade::order::{from_i64, questions_hash, shuffle};
+use acrodont::cascade::order::{from_i64, questions_hash, shuffle};
 
 fn length(min: i64, max: i64) -> Value {
     json!({ "type": "length", "negated": false, "min": min, "max": max })
@@ -366,7 +366,7 @@ async fn the_search_runs_before_the_transaction(pool: sqlx::PgPool) {
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::COOKIE, cl.cookies.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("; "))
             .header("x-csrf-token", cl.csrf().unwrap().clone())
-            .header("x-wordfall-user", user_id.to_string())
+            .header("x-acrodont-user", user_id.to_string())
             .body(axum::body::Body::from(b.to_string()))
             .unwrap();
         let r = router.clone();

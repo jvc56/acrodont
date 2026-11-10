@@ -17,7 +17,7 @@ import type { RwTx } from '$lib/local/view';
 import { nextBoundary, Rejected, runIndicator, type Grade } from '$lib/cascade/rules';
 import { Distribution } from '$lib/tiles';
 import { finishBanner, runBanner } from './banner';
-import { allFound, emptyTyped, submitTyped, typedGrade, type Submit, type TypedState } from './typed';
+import { emptyTyped, submitTyped, typedGrade, type Submit, type TypedState } from './typed';
 
 export interface Card {
 	pos: number;
@@ -747,7 +747,10 @@ export class Player {
 			out_of_order: 'Out of order'
 		};
 		this.v.card = { ...card, typed: state, note: notes[result.kind] ?? null };
-		if (allFound(state, words)) {
+		// An answer out of alphabetical order misses the card there and then. Finding
+		// every answer does not end it: Enter on an empty input does, so a word the
+		// user still means to try is marked too.
+		if (result.kind === 'out_of_order') {
 			this.v.card = { ...this.v.card, revealed: true, grade: typedGrade(state, words) };
 		}
 		this.emit();

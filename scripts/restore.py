@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Restore a Wordfall dump, and force every device to resync (PLAN.md § Backups → Restoring).
+"""Restore a Acrodont dump, and force every device to resync (PLAN.md § Backups → Restoring).
 
-  ./scripts/restore.py backups/wordfall-2026-09-23.dump --database-url URL
+  ./scripts/restore.py backups/acrodont-2026-09-23.dump --database-url URL
   ./scripts/restore.py s3://bucket/daily/2026-09-23.dump --s3-region R --database-url URL
-  ./scripts/restore.py backups/wordfall-2026-09-23.dump --project wordfall --replace
+  ./scripts/restore.py backups/acrodont-2026-09-23.dump --project acrodont --replace
   ./scripts/restore.py --bump-only --database-url URL     # after an RDS point-in-time restore
 
 Restore into a **new** instance, never over the live one: the target must hold
-no Wordfall schema, except with --replace on a local stack (--project), which
+no Acrodont schema, except with --replace on a local stack (--project), which
 drops it first — the "snapshot before a risky migration edit" case.
 
 The step that is easy to forget and impossible to skip always runs: every
@@ -45,7 +45,7 @@ def compose(project: str, *args: str) -> List[str]:
 
 def psql(args: argparse.Namespace, sql: str) -> str:
     if args.project:
-        cmd = compose(args.project, "exec", "-T", "postgres", "psql", "-U", "wordfall", "-d", "wordfall")
+        cmd = compose(args.project, "exec", "-T", "postgres", "psql", "-U", "acrodont", "-d", "acrodont")
     else:
         cmd = ["psql", "--dbname", args.database_url]
     out = subprocess.run([*cmd, "-v", "ON_ERROR_STOP=1", "-At", "-c", sql],
@@ -68,13 +68,13 @@ def restore(args: argparse.Namespace, dump: Path) -> None:
     has_schema = psql(args, "SELECT to_regclass('public.users') IS NOT NULL") == "t"
     if has_schema:
         if not (args.replace and args.project):
-            sys.exit("restore: the target already holds a Wordfall schema; restore into a new "
+            sys.exit("restore: the target already holds a Acrodont schema; restore into a new "
                      "database (or, for a local stack, pass --project and --replace)")
         psql(args, "DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
     if args.project:
         with open(dump, "rb") as f:
-            subprocess.run(compose(args.project, "exec", "-T", "postgres", "pg_restore", "-U", "wordfall",
-                                   "-d", "wordfall", "--no-owner", "--no-privileges", "--exit-on-error"),
+            subprocess.run(compose(args.project, "exec", "-T", "postgres", "pg_restore", "-U", "acrodont",
+                                   "-d", "acrodont", "--no-owner", "--no-privileges", "--exit-on-error"),
                            stdin=f, check=True)
     else:
         subprocess.run(["pg_restore", "--dbname", args.database_url, "--no-owner", "--no-privileges",

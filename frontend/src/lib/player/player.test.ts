@@ -32,12 +32,15 @@ beforeEach(async () => {
 	prefs = defaultPreferences();
 });
 
-async function cascade(count: number, o: { segment_size?: number; keys?: boolean; cards?: boolean; dist?: boolean } = {}) {
+async function cascade(
+	count: number,
+	o: { segment_size?: number; keys?: boolean; cards?: boolean; dist?: boolean; quiz_type?: 'anagram' | 'definition' } = {}
+) {
 	const idx = Array.from({ length: count }, (_, i) => i);
 	const opts = { segment_size: o.segment_size ?? 0, progression: 'ladder', require_alphabetical: false };
 	await storeCreated(db, {
 		cascade: {
-			id: C, name: 'x', quiz_type: 'anagram', lexicon: 'EN', letter_distribution: 'english', clear_threshold: 80, ...opts,
+			id: C, name: 'x', quiz_type: o.quiz_type ?? 'anagram', lexicon: 'EN', letter_distribution: 'english', clear_threshold: 80, ...opts,
 			options_changed_at: T0, options_seq: '1', options_device_id: 'd', question_count: count, depth: 1, peak_depth: 1,
 			attempts_since_completion: 0, created_at: T0, last_activity_at: T0, completed_at: null, trashed_at: null, updated_seq: '1'
 		},
@@ -341,7 +344,7 @@ describe('the player', () => {
 		expect((await db.getAll('outbox'))[0].op.grade).toBe('missed');
 	});
 
-	it('typed mode: found, already entered, one word at a time, wrong; all found reveals', async () => {
+	it('typed mode: found, already entered, one word at a time, wrong; all found waits for Enter', async () => {
 		await cascade(2);
 		prefs = { ...prefs, anagram_answer_mode: 'typed' };
 		const p = player();
@@ -351,10 +354,35 @@ describe('the player', () => {
 		expect((await p.enter('ABAB'))!.kind).toBe('one_word');
 		expect((await p.enter('AA'))!.kind).toBe('wrong');
 		expect((await p.enter('BA'))!.kind).toBe('found');
+		// Every answer found, but the card waits: the user may have more to try.
+		expect(p.v.card!.revealed).toBe(false);
+		expect((await p.enter('XY'))!.kind).toBe('wrong');
+		expect((await p.enter(''))!.kind).toBe('empty');
 		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'missed']);
 	});
 
-	it('typed mode with alphabetical order: an entry before the furthest is found but out of order', async () => {
+	it('typed mode, every answer found and nothing wrong: Enter on an empty input reveals it correct', async () => {
+		await cascade(2);
+		prefs = { ...prefs, anagram_answer_mode: 'typed' };
+		const p = player();
+		await p.load();
+		await p.enter('AB');
+		await p.enter('BA');
+		expect(p.v.card!.revealed).toBe(false);
+		await p.enter('');
+		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'correct']);
+	});
+
+	it('typed mode is for anagram quizzes only', async () => {
+		await cascade(2, { quiz_type: 'definition' });
+		prefs = { ...prefs, anagram_answer_mode: 'typed' };
+		const p = player();
+		await p.load();
+		expect(p.v.card!.typed).toBeNull();
+		expect(await p.enter('AB')).toBeNull();
+	});
+
+	it('typed mode with alphabetical order: an entry before the furthest misses the card at once', async () => {
 		await cascade(2);
 		const q = (await db.get('quizzes', Q))!;
 		await db.put('quizzes', { ...q, require_alphabetical: true });
@@ -363,7 +391,8 @@ describe('the player', () => {
 		await p.load();
 		await p.enter('BA');
 		expect((await p.enter('AB'))!.kind).toBe('out_of_order');
-		expect(p.v.card!.grade).toBe('missed');
+		// Out of order misses the card there and then.
+		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'missed']);
 	});
 
 	it('typed mode on a cascade whose distribution is missing needs a connection and falls back', async () => {

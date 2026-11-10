@@ -22,7 +22,7 @@ resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
   enable_dns_support   = true
-  tags                 = { Name = "wordfall" }
+  tags                 = { Name = "acrodont" }
 }
 
 resource "aws_internet_gateway" "main" {
@@ -35,7 +35,7 @@ resource "aws_subnet" "public" {
   cidr_block              = cidrsubnet(var.vpc_cidr, 8, count.index)
   availability_zone       = local.azs[count.index]
   map_public_ip_on_launch = true
-  tags                    = { Name = "wordfall-public-${count.index}" }
+  tags                    = { Name = "acrodont-public-${count.index}" }
 }
 
 # No route out: only the database lives here.
@@ -44,7 +44,7 @@ resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = cidrsubnet(var.vpc_cidr, 8, 10 + count.index)
   availability_zone = local.azs[count.index]
-  tags              = { Name = "wordfall-private-${count.index}" }
+  tags              = { Name = "acrodont-private-${count.index}" }
 }
 
 resource "aws_route_table" "public" {
@@ -63,7 +63,7 @@ resource "aws_route_table_association" "public" {
 
 # EC2 refuses an apostrophe in a security group description (birdtest cc3c863).
 resource "aws_security_group" "alb" {
-  name        = "wordfall-alb"
+  name        = "acrodont-alb"
   description = "Public HTTP and HTTPS to the load balancer"
   vpc_id      = aws_vpc.main.id
   ingress {
@@ -89,7 +89,7 @@ resource "aws_security_group" "alb" {
 # The app, backup, drill and ops tasks. Only the ALB may reach them, so a
 # public address admits nothing.
 resource "aws_security_group" "tasks" {
-  name        = "wordfall-tasks"
+  name        = "acrodont-tasks"
   description = "ECS tasks, reachable only from the load balancer"
   vpc_id      = aws_vpc.main.id
   ingress {
@@ -107,7 +107,7 @@ resource "aws_security_group" "tasks" {
 }
 
 resource "aws_security_group" "db" {
-  name        = "wordfall-db"
+  name        = "acrodont-db"
   description = "Postgres, reachable only from the ECS tasks"
   vpc_id      = aws_vpc.main.id
   ingress {

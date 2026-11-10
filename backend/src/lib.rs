@@ -1,4 +1,4 @@
-//! Wordfall backend (PLAN.md § Architecture).
+//! Acrodont backend (PLAN.md § Architecture).
 
 // Row tuples from sqlx::query_as read clearer inline than behind aliases.
 #![allow(clippy::type_complexity)]

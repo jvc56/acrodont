@@ -64,7 +64,7 @@ async fn sixty_four_bit_values_travel_as_unsigned_text(pool: sqlx::PgPool) {
     let mut chosen = None;
     for mask in 1..7u32 {
         let misses: Vec<u32> = (0..3).filter(|i| mask & (1 << i) != 0).collect();
-        if misses.len() < 3 && wordfall::cascade::order::questions_hash(&misses) > (1u64 << 63) {
+        if misses.len() < 3 && acrodont::cascade::order::questions_hash(&misses) > (1u64 << 63) {
             chosen = Some(misses);
             break;
         }
@@ -76,7 +76,7 @@ async fn sixty_four_bit_values_travel_as_unsigned_text(pool: sqlx::PgPool) {
     ops.push(fin.clone());
     let r = d.sync(ops).await;
     let res = result(&r, 3);
-    let hash = wordfall::cascade::order::questions_hash(&misses).to_string();
+    let hash = acrodont::cascade::order::questions_hash(&misses).to_string();
     assert_eq!(res["new_quiz_questions_hash"], hash);
     let (seed, h): (i64, i64) = sqlx::query_as("SELECT shuffle_seed, questions_hash FROM quizzes WHERE id = $1")
         .bind(new)

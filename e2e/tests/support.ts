@@ -99,11 +99,11 @@ export async function apiCascade(
 	page: Page,
 	o: { name: string; quiz_type?: string; lexicon?: string; filters: unknown; segment_size?: number; progression?: string; alphabetical?: boolean }
 ): Promise<string> {
-	const csrf = (await page.context().cookies()).find((c) => c.name === 'wordfall_csrf')!.value;
+	const csrf = (await page.context().cookies()).find((c) => c.name === 'acrodont_csrf')!.value;
 	const me = await (await page.request.get('/api/auth/me')).json();
 	const id = crypto.randomUUID();
 	const r = await page.request.post('/api/cascades', {
-		headers: { 'X-CSRF-Token': csrf, 'X-Wordfall-User': me.user_id },
+		headers: { 'X-CSRF-Token': csrf, 'X-Acrodont-User': me.user_id },
 		data: {
 			id,
 			source_quiz_id: crypto.randomUUID(),
@@ -177,10 +177,10 @@ export async function idb<T>(page: Page, fn: string, arg?: unknown): Promise<T> 
 				r.onsuccess = () => res(r.result);
 				r.onerror = () => rej(r.error);
 			});
-		const unscoped = await open('wordfall');
+		const unscoped = await open('acrodont');
 		const pointer = await req(unscoped.transaction('pointer').objectStore('pointer').get('signed_in'));
 		unscoped.close();
-		const db = await open('wordfall-user-' + pointer.user_id);
+		const db = await open('acrodont-user-' + pointer.user_id);
 		try {
 			return await (async () => { ${fn} })();
 		} finally {

@@ -1,10 +1,10 @@
 //! Sessions, CSRF and account binding (PLAN.md § Authentication).
 //!
-//! - `wordfall_session`: PASETO v4.local, `httpOnly`, `SameSite=Lax`, `Secure`
+//! - `acrodont_session`: PASETO v4.local, `httpOnly`, `SameSite=Lax`, `Secure`
 //!   in production, `SESSION_TTL_SECONDS` long.
-//! - `wordfall_csrf`: readable by scripts, same TTL, double-submitted in the
+//! - `acrodont_csrf`: readable by scripts, same TTL, double-submitted in the
 //!   `X-CSRF-Token` header on every cookie-authenticated write (PQ-002: names).
-//! - `X-Wordfall-User`: the account the tab runs as; a mismatch with the
+//! - `X-Acrodont-User`: the account the tab runs as; a mismatch with the
 //!   session, or no header, is `401` before anything is applied or read.
 
 use axum::extract::FromRequestParts;
@@ -22,10 +22,10 @@ use crate::app::AppState;
 use crate::auth::tokens::SessionClaims;
 use crate::error::ApiError;
 
-pub const SESSION_COOKIE: &str = "wordfall_session";
-pub const CSRF_COOKIE: &str = "wordfall_csrf";
+pub const SESSION_COOKIE: &str = "acrodont_session";
+pub const CSRF_COOKIE: &str = "acrodont_csrf";
 pub const CSRF_HEADER: &str = "x-csrf-token";
-pub const USER_HEADER: &str = "x-wordfall-user";
+pub const USER_HEADER: &str = "x-acrodont-user";
 
 /// A sync in the last seven days of a cookie's life is answered with a fresh one.
 pub const RENEW_WINDOW_DAYS: i64 = 7;
@@ -189,7 +189,7 @@ fn bound_user(headers: &HeaderMap) -> Option<Uuid> {
     headers.get(USER_HEADER)?.to_str().ok()?.trim().parse().ok()
 }
 
-/// An authenticated request: a live session, `X-Wordfall-User` naming its
+/// An authenticated request: a live session, `X-Acrodont-User` naming its
 /// user, and for writes a matching CSRF token.
 pub struct Session(pub CurrentUser);
 

@@ -1,15 +1,16 @@
 # Local stack (PLAN.md § Development). Brought up by scripts/stack.py.
+name: acrodont
 services:
   postgres:
     image: postgres:16@sha256:a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6
     environment:
-      POSTGRES_USER: wordfall
-      POSTGRES_PASSWORD: wordfall
-      POSTGRES_DB: wordfall
+      POSTGRES_USER: acrodont
+      POSTGRES_PASSWORD: acrodont
+      POSTGRES_DB: acrodont
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U wordfall -d wordfall"]
+      test: ["CMD-SHELL", "pg_isready -U acrodont -d acrodont"]
       interval: 1s
       timeout: 3s
       retries: 60
@@ -23,11 +24,11 @@ services:
         CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-2}
     env_file:
       - path: docker/backend.defaults.env
-      - path: ${WORDFALL_ENV_FILE:-.stack/default.env}
+      - path: ${ACRODONT_ENV_FILE:-.stack/default.env}
         required: false
     # MAIL_BACKEND=file writes here (scripts/stack.py sets it per project).
     volumes:
-      - ${WORDFALL_OUTBOX_DIR:-./.stack/outbox}:/outbox
+      - ${ACRODONT_OUTBOX_DIR:-./.stack/outbox}:/outbox
     depends_on:
       postgres:
         condition: service_healthy
@@ -37,12 +38,12 @@ services:
       context: .
       dockerfile: docker/frontend.Dockerfile
       args:
-        APP_BUILD: ${WORDFALL_APP_BUILD:-0}
-        TEST_LIMITS: ${WORDFALL_TEST_LIMITS:-}
+        APP_BUILD: ${ACRODONT_APP_BUILD:-0}
+        TEST_LIMITS: ${ACRODONT_TEST_LIMITS:-}
     ports:
       # Loopback only: Docker's published ports bypass the host firewall, and
       # this stack has fixed credentials. BIND_HOST=0.0.0.0 to test from a phone.
-      - "${BIND_HOST:-127.0.0.1}:${WORDFALL_PORT:-5173}:80"
+      - "${BIND_HOST:-127.0.0.1}:${ACRODONT_PORT:-5173}:80"
     depends_on:
       - backend
 
@@ -54,12 +55,12 @@ services:
     working_dir: /src/frontend
     command: sh -c "npm ci && npx vite dev --host 0.0.0.0 --port 5174"
     environment:
-      WORDFALL_API: http://frontend:80
+      ACRODONT_API: http://frontend:80
     volumes:
       - ./frontend:/src/frontend
       - ./contract-fixtures:/src/contract-fixtures
     ports:
-      - "${BIND_HOST:-127.0.0.1}:${WORDFALL_VITE_PORT:-5174}:5174"
+      - "${BIND_HOST:-127.0.0.1}:${ACRODONT_VITE_PORT:-5174}:5174"
 
 volumes:
   pgdata:

@@ -1,12 +1,12 @@
 # Immutable tags: a tag names one image forever, which is what makes
 # scripts/rollback.sh safe. The backend repository holds <tag> and <tag>-ops.
 resource "aws_ecr_repository" "backend" {
-  name                 = "wordfall-backend"
+  name                 = "acrodont-backend"
   image_tag_mutability = "IMMUTABLE"
 }
 
 resource "aws_ecr_repository" "frontend" {
-  name                 = "wordfall-frontend"
+  name                 = "acrodont-frontend"
   image_tag_mutability = "IMMUTABLE"
 }
 

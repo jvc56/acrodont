@@ -6,7 +6,7 @@ with `grep -n '^#' PLAN.md` if PLAN.md changes.
 
 | Heading | Lines |
 |---|---|
-| # Wordfall — Project Plan | 1–6061 |
+| # Acrodont — Project Plan | 1–6061 |
 |   ## Overview | 3–58 |
 |   ## Glossary | 59–77 |
 |   ## Cascade Rules | 78–427 |
@@ -124,7 +124,7 @@ relevant part of Testing (4749–6026) before starting.
 ### Phase 2 — Accounts
 - UX → Accounts (430–437), Preferences (438–462)
 - Authentication (3871–4056) incl. security bullets, rate limits, CSRF
-- Offline and Sync → Authentication while offline (2885–2995): `X-Wordfall-User`
+- Offline and Sync → Authentication while offline (2885–2995): `X-Acrodont-User`
 - API preamble (4057–4083), API → Auth and account (4084–4100)
 - Schema accounts tables (3103–3192)
 - Configuration (4416–4464)

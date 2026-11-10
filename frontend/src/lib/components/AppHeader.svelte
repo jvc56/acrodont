@@ -23,7 +23,7 @@
 
 <header class="border-b bg-background">
 	<div class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 md:px-6">
-		<a href="/cascades" class="text-lg font-semibold tracking-tight">Wordfall</a>
+		<a href="/cascades" class="text-lg font-semibold tracking-tight">Acrodont</a>
 		<nav aria-label="Main" class="order-last flex w-full gap-1 overflow-x-auto text-sm md:order-none md:w-auto">
 			{#each links as l (l.href)}
 				<a

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Set up this machine to deploy wordfall. Changes nothing in AWS.
+# Set up this machine to deploy acrodont. Changes nothing in AWS.
 #
 #   scripts/onboard-deployer.sh
 #
@@ -7,7 +7,7 @@
 # given. It:
 #   1. checks the tools (aws, terraform >= 1.11, gh, docker, jq,
 #      session-manager-plugin, curl, git, python3);
-#   2. writes ~/.wordfall-env (WORDFALL_ENV) if there is none, asking for
+#   2. writes ~/.acrodont-env (ACRODONT_ENV) if there is none, asking for
 #      AWS_PROFILE, SITE, STATE_BUCKET, STATE_REGION and ACCOUNT;
 #   3. checks the login (`aws sso login` if it has expired) and the account;
 #   4. runs `terraform init` against the shared state (S3, lock file);
@@ -45,13 +45,13 @@ ops_load_env
 if [[ ! -e "$OPS_ENV_FILE" ]]; then
   ops_say "no $OPS_ENV_FILE yet; writing one"
   name='^[A-Za-z0-9._-]+$'
-  ask profile "The AWS CLI profile (from aws configure sso)?" "${AWS_PROFILE:-wordfall}" "$name"
-  ask site "The site's hostname (e.g. wordfall.example.org)?" "${SITE:-}" '^[A-Za-z0-9.-]+\.[A-Za-z]+$'
+  ask profile "The AWS CLI profile (from aws configure sso)?" "${AWS_PROFILE:-acrodont}" "$name"
+  ask site "The site's hostname (e.g. acrodont.example.org)?" "${SITE:-}" '^[A-Za-z0-9.-]+\.[A-Za-z]+$'
   ask bucket "The Terraform state bucket?" "${STATE_BUCKET:-}" '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
   ask region "The state bucket's region?" "${STATE_REGION:-}" '^[a-z]{2}(-[a-z]+)+-[0-9]$'
   ask account "The AWS account id (12 digits)?" "${ACCOUNT:-}" '^[0-9]{12}$'
   (umask 077; cat > "$OPS_ENV_FILE" <<EOF
-# wordfall operator settings (scripts/onboard-deployer.sh). Variables already
+# acrodont operator settings (scripts/onboard-deployer.sh). Variables already
 # set in the environment win over these.
 export AWS_PROFILE=$profile
 export SITE=$site
@@ -73,7 +73,7 @@ ops_login
 # 4. The shared state.
 terraform -chdir="$OPS_INFRA" init -input=false \
   -backend-config="bucket=$STATE_BUCKET" \
-  -backend-config="key=wordfall/production.tfstate" \
+  -backend-config="key=acrodont/production.tfstate" \
   -backend-config="region=$STATE_REGION" \
   -backend-config="use_lockfile=true" \
   || ops_die "terraform init failed (above)"

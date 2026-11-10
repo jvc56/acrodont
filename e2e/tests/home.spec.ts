@@ -23,7 +23,7 @@ test('signed in, / is the Cascades page, and the header leads everywhere, Admin 
 	await nav.getByRole('link', { name: 'Trash', exact: true }).click();
 	await expect(page).toHaveURL(/\/trash$/);
 	await expect(nav.getByRole('link', { name: 'Trash', exact: true })).toHaveAttribute('aria-current', 'page');
-	await page.getByRole('link', { name: 'Wordfall', exact: true }).click();
+	await page.getByRole('link', { name: 'Acrodont', exact: true }).click();
 	await expect(page).toHaveURL(/\/cascades$/);
 
 	await login(page, 'dev');

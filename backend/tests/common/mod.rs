@@ -19,9 +19,9 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use uuid::Uuid;
-use wordfall::AppState;
-use wordfall::auth::mail::{MailKind, RecordingMailer};
-use wordfall::config::Config;
+use acrodont::AppState;
+use acrodont::auth::mail::{MailKind, RecordingMailer};
+use acrodont::config::Config;
 
 pub const PASSWORD: &str = "correct-tile-rack-bingo";
 
@@ -92,7 +92,7 @@ impl TestApp {
     /// catalog tasks (LISTEN, reconcile, heartbeat) running.
     pub async fn with_config(pool: sqlx::PgPool, config: Config) -> Self {
         let app = Self::new_unready_with(pool, config).await;
-        wordfall::catalog::startup(&app.state)
+        acrodont::catalog::startup(&app.state)
             .await
             .expect("catalog startup");
         assert!(app.state.catalog_ready.load(Ordering::Acquire));
@@ -101,7 +101,7 @@ impl TestApp {
 
     /// Reconciles this instance's catalog with the database now.
     pub async fn reconcile(&self) {
-        wordfall::catalog::reconcile(&self.state)
+        acrodont::catalog::reconcile(&self.state)
             .await
             .expect("reconcile");
     }
@@ -195,7 +195,7 @@ impl TestApp {
             .try_init();
         let mail = RecordingMailer::default();
         let state = AppState::new(pool, config, Arc::new(mail.clone()));
-        let router = wordfall::build_router(state.clone());
+        let router = acrodont::build_router(state.clone());
         TestApp {
             state,
             router,
@@ -261,7 +261,7 @@ impl TestApp {
         &self,
         address: &str,
         at_least: usize,
-    ) -> Vec<wordfall::auth::mail::Email> {
+    ) -> Vec<acrodont::auth::mail::Email> {
         for _ in 0..200 {
             let got = self.mail.to(address);
             if got.len() >= at_least {
@@ -273,7 +273,7 @@ impl TestApp {
     }
 
     /// Mail that should not arrive: waits a moment and returns what did.
-    pub async fn settled_mail_to(&self, address: &str) -> Vec<wordfall::auth::mail::Email> {
+    pub async fn settled_mail_to(&self, address: &str) -> Vec<acrodont::auth::mail::Email> {
         tokio::time::sleep(Duration::from_millis(150)).await;
         self.mail.to(address)
     }
@@ -349,7 +349,7 @@ impl<'a> Client<'a> {
     }
 
     pub fn csrf(&self) -> Option<&String> {
-        self.cookies.get("wordfall_csrf")
+        self.cookies.get("acrodont_csrf")
     }
 
     pub async fn request(
@@ -377,7 +377,7 @@ impl<'a> Client<'a> {
             }
         if self.send_user_header
             && let Some(u) = self.user_id {
-                b = b.header("x-wordfall-user", u.to_string());
+                b = b.header("x-acrodont-user", u.to_string());
             }
         let req = match body {
             Some(v) => b
@@ -437,7 +437,7 @@ impl<'a> Client<'a> {
         filename: &str,
         file: &[u8],
     ) -> TestResponse {
-        let boundary = "wordfall-test-boundary-7d1a";
+        let boundary = "acrodont-test-boundary-7d1a";
         let mut body = Vec::new();
         for (k, v) in fields {
             body.extend_from_slice(
@@ -477,7 +477,7 @@ impl<'a> Client<'a> {
             b = b.header("x-csrf-token", t.clone());
         }
         if let Some(u) = self.user_id {
-            b = b.header("x-wordfall-user", u.to_string());
+            b = b.header("x-acrodont-user", u.to_string());
         }
         let resp = self.app.send(b.body(Body::from(body)).unwrap()).await;
         self.absorb(&resp);

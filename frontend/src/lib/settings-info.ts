@@ -17,7 +17,7 @@ export const INFO = {
 	anagram_show_hooks:
 		'Shows the letters that can go before and after each anagram (its hooks), and a dot on a side where removing the end letter still leaves a word (its inner hooks).',
 	anagram_answer_mode:
-		'Flashcard: reveal the answer and grade yourself. Typed: type each anagram, and the card is marked from what you found.',
+		'Flashcard: reveal the answer and grade yourself. Typed (anagram quizzes only): type each anagram, then press Enter on an empty box when you are finished; the card is correct only if you found them all and typed nothing else.',
 	reveal_correct:
 		'The grade a card gets when you reveal its answer, before you toggle it. “Correct” suits studying words you mostly know; “Missed” makes you mark the ones you got.',
 	// A cascade
@@ -31,7 +31,7 @@ export const INFO = {
 	segment_size: 'How many cards each run holds.',
 	progression:
 		'What a pass below the clear threshold does. Ladder keeps the level and sends its misses down to a new level; Drill replaces the level with just its misses until nothing is missed.',
-	alphabetical: 'In typed mode, each anagram must be entered after the ones before it in alphabetical order, or it counts as out of order.',
+	alphabetical: 'In typed mode, each anagram must be entered after the ones before it in alphabetical order. One typed out of order marks the card missed at once.',
 	// This device's display
 	font: 'The typeface. Inter is bundled and works offline; the others use what this device has.',
 	size: 'The text size in pixels.',

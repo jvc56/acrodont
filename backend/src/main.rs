@@ -1,4 +1,4 @@
-use wordfall::config::Config;
+use acrodont::config::Config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -9,5 +9,5 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
     let config = Config::from_env()?;
-    wordfall::app::run(config).await
+    acrodont::app::run(config).await
 }

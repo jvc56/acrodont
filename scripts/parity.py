@@ -4,14 +4,14 @@
 Local only; never in CI. Runs the checked-in searches in
 fixtures/parity/searches.json against a real CSW24 upload and compares each
 word list with Zyzzyva's export for the same search. Zyzzyva has no OR, so the
-searches are single AND groups, and Wordfall's `.` wildcard is written as
+searches are single AND groups, and Acrodont's `.` wildcard is written as
 Zyzzyva's `?` when the search is shown in Zyzzyva's terms.
 
 It also prints the figures that need real data: each index's build time and
 resident size, and the wall-clock time of every search. They are recorded, not
 asserted.
 
-Licensed files, from WORDFALL_LICENSED_DIR (default fixtures/licensed/,
+Licensed files, from ACRODONT_LICENSED_DIR (default fixtures/licensed/,
 which is gitignored):
     english.csv                 the English letter distribution
     CSW24.tsv                   the lexicon
@@ -34,10 +34,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import stack  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-LICENSED = Path(os.environ.get("WORDFALL_LICENSED_DIR", ROOT / "fixtures" / "licensed"))
+LICENSED = Path(os.environ.get("ACRODONT_LICENSED_DIR", ROOT / "fixtures" / "licensed"))
 SEARCHES = ROOT / "fixtures" / "parity" / "searches.json"
 DEVIATIONS = ROOT / "fixtures" / "parity" / "deviations.json"
-PROJECT = "wordfall-parity"
+PROJECT = "acrodont-parity"
 PORT = int(os.environ.get("PARITY_PORT", "5190"))
 LEXICON = "CSW24"
 
@@ -75,7 +75,7 @@ def main() -> int:
     if missing:
         print(f"test-parity: skipped — licensed data not present in {LICENSED} "
               f"(missing: {', '.join(missing[:5])}{' …' if len(missing) > 5 else ''}). "
-              f"Set WORDFALL_LICENSED_DIR to run it.")
+              f"Set ACRODONT_LICENSED_DIR to run it.")
         print("The searches, as entered in Zyzzyva:")
         for s in searches:
             print(f"  {s['name']}: {zyzzyva_form(s['filters'])}")
@@ -134,7 +134,7 @@ def main() -> int:
         ok = not extra and not lacking
         verdict = "ok" if ok else ("known deviation" if known else "DIFF")
         print(f"{verdict:>15} {s['name']}: {len(got)} words, search {elapsed_ms:.0f} ms"
-              + ("" if ok else f"; only in Wordfall {extra[:10]}, only in Zyzzyva {lacking[:10]}"))
+              + ("" if ok else f"; only in Acrodont {extra[:10]}, only in Zyzzyva {lacking[:10]}"))
         if not ok and not known:
             failures += 1
     stack.down(PROJECT)
