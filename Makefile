@@ -3,8 +3,9 @@ SHELL := /bin/bash
 .ONESHELL:
 .SHELLFLAGS := -e -o pipefail -c
 
-# Node 20+ is needed; a user-local install under ~/.local/n is used when present.
-NODE_BIN ?= $(wildcard $(HOME)/.local/n/bin)
+# Node 20+ is needed: the one on PATH, else NODE_BIN, else an `n` install under
+# $N_PREFIX.
+NODE_BIN ?= $(if $(N_PREFIX),$(wildcard $(N_PREFIX)/bin))
 ifneq ($(NODE_BIN),)
 export PATH := $(NODE_BIN):$(PATH)
 endif

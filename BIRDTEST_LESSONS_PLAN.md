@@ -236,9 +236,10 @@ Proposed command line. Existing flags stay; new ones are marked ★.
 - **`next`:** validate it as a same-site path, rejecting `//`, `\` and anything outside visible ASCII. Birdtest's first version let `/<tab>/host` through (audit pass 4).
 - **Compose** sets `DEV_LOGIN=true` in `docker/backend.defaults.env` only.
 
-**Real catalog files.** Your licensed files in `~/Dropbox/WordGameMisc` mostly need no changes, with one exception:
-- `CSW24.csv` (914,624 leaves, `leave,value`) already matches the leave values file format.
-- `csw24.tsv` has two columns (`word⇥definition`), and acrodont requires three (`word⇥playability⇥definition`, PLAN.md § Lexicon file). Either produce a three-column file once, or let the local manifest name a playability file that dev.py joins in. Keep the converter, the manifest and the files out of the repository.
+**Real catalog files.** CSW24 comes from two public repositories, at pinned commits, so every machine gets the same catalog (`scripts/build-licensed-catalog.py`, which dev.py runs when `fixtures/licensed/` is missing):
+- The words, definitions and playability values: the Zyzzyva database in [CrowdsourcedDefs](https://github.com/jvc56/CrowdsourcedDefs) `editions/2/CSW24.zip`, written as the three-column lexicon (`word⇥playability⇥definition`, PLAN.md § Lexicon file).
+- The leave values (914,624 leaves): [MAGPIE-DATA](https://github.com/jvc56/MAGPIE-DATA) `data/lexica/CSW24.klv2`, decoded to `leave,value`.
+- The built files stay out of the repository (`fixtures/licensed/` is gitignored).
 
 **Implementation phases.** Each phase leaves dev.py working:
 
@@ -968,4 +969,4 @@ These changes came from the owner and users once birdtest was live. They are che
 | D3 | Tasks in public subnets with no NAT? (COST-2) | Yes |
 | D4 | RDS `micro` or `small`, and a 7-day PITR window? (COST-3) | `micro` if the constrained scale test passes; 7 days |
 | D5 | Append-only migrations from the first apply, with no "until real launch" exception? (MIG-3) | Yes |
-| D6 | Where real catalog files live for `dev.py --real-catalog`, and who makes the three-column CSW24 file? (DEV-1) | `$ACRODONT_CATALOG_DIR` pointing at `~/Dropbox/WordGameMisc`, with a local `manifest.json` outside the repo |
+| D6 | Where real catalog files live for `dev.py --real-catalog`, and who makes the three-column CSW24 file? (DEV-1) | `scripts/build-licensed-catalog.py` downloads them into the gitignored `fixtures/licensed/`; `$ACRODONT_CATALOG_DIR` can point at another folder with a `manifest.json` |

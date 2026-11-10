@@ -7,7 +7,7 @@ PLAN.md is the specification.
 | To | Run or read |
 |---|---|
 | Develop | `./scripts/dev.py` (PLAN.md § Development; `--help` for scenarios, real catalogs, two devices) |
-| Load CSW24 (definitions, leaves) by default in dev.py | once per machine: `python3 scripts/build-licensed-catalog.py --name CSW24 --definitions ~/Dropbox/WordGameMisc/csw24.tsv --playability ~/Dropbox/WordGameMisc/CSW19-Playability.txt --leaves ~/Dropbox/WordGameMisc/CSW24.csv` (writes the gitignored `fixtures/licensed/`) |
+| Load CSW24 (definitions, leaves) in dev.py | nothing: the first `./scripts/dev.py` downloads it into the gitignored `fixtures/licensed/` (`python3 scripts/build-licensed-catalog.py` rebuilds it), from [CrowdsourcedDefs](https://github.com/jvc56/CrowdsourcedDefs/tree/main/editions/2) and [MAGPIE-DATA](https://github.com/jvc56/MAGPIE-DATA/tree/main/data) at pinned commits |
 | Test | `make test`, `make test-scale`, `make infra-validate`, `make ops-check` (PLAN.md § Running the tests) |
 | Walk the site by hand before a launch | JOURNEYS.md |
 | Operate production | docs/runbook.md: one-time setup, `scripts/deploy.sh`, rollback, alarms, backups |

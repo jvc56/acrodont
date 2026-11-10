@@ -4699,7 +4699,7 @@ constants in `lib/sync/config.ts`.
 That is the whole setup. With no arguments it builds and starts a complete
 Acrodont on <http://localhost:5173>, seeded with the licensed catalog in
 `fixtures/licensed/` (English, CSW24 with its definitions, and CSW24's leave
-values) and a confirmed admin account `dev`. The
+values, downloaded on the first run) and a confirmed admin account `dev`. The
 [fixture catalog](#the-fixture-catalog) (EN-FIX, EN-FIX-OLD, CA-FIX) is for the
 automated tests: dev.py uploads it only with `--fixtures`, or when there is no
 licensed catalog, so the builder is never empty. It opens the browser
@@ -4756,7 +4756,7 @@ Useful flags:
 | Flag | Effect |
 |---|---|
 | `--scenario NAME` | Seed a study state through the real API; repeatable. `studying` (Level 1 finished with misses, Level 2 half graded), `finished` (the completion screen), `segments` (runs of five, one finished with a miss), `typed` (typed answers on), `trash`, `limits` (cascades up to the limit warning), `big` (one cascade near `MAX_QUIZ_QUESTIONS` from the real catalog), `saved-searches`. Operations go through `POST /api/sync`, so the server's rules check them; the quiz state they need is read with SQL, as the integration tests do |
-| `--real-catalog [DIR]`, `--no-real-catalog` | Upload the licensed files `DIR/manifest.json` lists, in the fixture manifest's form. Done by default from `$ACRODONT_CATALOG_DIR`, else from `fixtures/licensed/` when it has a `manifest.json`; `--no-real-catalog` leaves it out, and the fixture catalog stands in. The licensed files never enter the repository (`fixtures/licensed/` is gitignored). `scripts/build-licensed-catalog.py` makes the folder: it joins a word⇥definition file and a playability file into the upload's three-column lexicon, copies the leave values and the distribution, and writes the manifest. The current CSW24 takes its playability from CSW19's values; the 1,814 words added since get 0 |
+| `--real-catalog [DIR]`, `--no-real-catalog` | Upload the licensed files `DIR/manifest.json` lists, in the fixture manifest's form. Done by default from `$ACRODONT_CATALOG_DIR`, else from `fixtures/licensed/`, which dev.py downloads when it has no `manifest.json` (if the download fails, the fixture catalog stands in); `--no-real-catalog` leaves it out, and the fixture catalog stands in. The licensed files never enter the repository (`fixtures/licensed/` is gitignored). `scripts/build-licensed-catalog.py` makes the folder from two public repositories at pinned commits: the words, definitions and playability values from the Zyzzyva database in [CrowdsourcedDefs](https://github.com/jvc56/CrowdsourcedDefs) `editions/2/CSW24.zip`, and the leave values decoded from [MAGPIE-DATA](https://github.com/jvc56/MAGPIE-DATA) `data/lexica/CSW24.klv2`; the distribution is `fixtures/magpie-data/english.csv`. It writes the upload's three-column lexicon, the leave values and the manifest |
 | `--stats` | Print each catalog index's size, its build time, the catalog load time and the backend's memory: what the production task's memory is sized from |
 | `--users N` | N more confirmed users (`dev2`, `dev3`, …) for multi-account work |
 | `--login-as USER`, `--no-login` | Which account the browser opens signed in as, or none |

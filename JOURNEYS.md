@@ -28,7 +28,7 @@ That gives you:
 |---|---|
 | Admin `dev`, password `correct-tile-rack-bingo`; the browser opens signed in as `dev` | dev.py's log |
 | A second user, `dev2`, same password | `--login-as dev2`, or log in |
-| CSW24 with definitions and leave values, from `fixtures/licensed/` (`scripts/build-licensed-catalog.py` makes it; without it, the test catalog's EN-FIX stands in, and the names below say EN-FIX) | `/admin`, the builder |
+| CSW24 with definitions and leave values, from `fixtures/licensed/` (dev.py downloads it on the first run with `scripts/build-licensed-catalog.py`; if that fails, the test catalog's EN-FIX stands in, and the names below say EN-FIX) | `/admin`, the builder |
 | "Studying: CSW24 2–7" (the 20 most probable of each length): Level 1 finished with misses, Level 2 half graded | `/cascades` |
 | "Finished: CSW24 sevens" (the 25 most probable) | `/cascades` |
 | "Segments: CSW24 2–5 in fives" | `/cascades` |

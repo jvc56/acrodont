@@ -8,11 +8,10 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
   (see "Next" below), now with the birdtest lessons implemented (Phase 8b).
 - **Last green checkpoint:** Phase 8b — BIRDTEST_LESSONS_PLAN.md.
 
-## Environment notes (this machine)
+## Environment notes
 
-- Node 22 is installed user-locally at `~/.local/n/bin` (system node is 18).
-  The Makefile prepends it automatically; in a shell use
-  `export PATH=$HOME/.local/n/bin:$PATH`.
+- Node 20+ is needed. When the one on PATH is older, point the Makefile at a
+  newer one with `NODE_BIN=<dir>` or, for an `n` install, `N_PREFIX`.
 - Rust stable 1.98 is pinned in `backend/rust-toolchain.toml`.
 - Compile-checked SQLx queries: `make sqlx-db` starts a Postgres container
   `acrodont-sqlx` on 127.0.0.1:55432 with the schema; `backend/.env`

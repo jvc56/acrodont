@@ -3,8 +3,9 @@
 
 With no arguments it builds and starts the stack, seeds the licensed catalog
 in fixtures/licensed/ (English, CSW24 with definitions, and its leave values:
-scripts/build-licensed-catalog.py makes it; the small test catalog of EN-FIX,
-EN-FIX-OLD and CA-FIX stands in only when it is missing, or with --fixtures)
+scripts/build-licensed-catalog.py downloads it, on the first run; the small
+test catalog of EN-FIX, EN-FIX-OLD and CA-FIX stands in only when that
+download fails, or with --fixtures)
 and a confirmed admin `dev`, opens the browser already signed in on the home
 page, and streams
 a filtered backend log (errors, sync rejections, and a ready-to-click link for
@@ -197,6 +198,17 @@ def default_catalog_dir() -> Optional[str]:
     if os.environ.get("ACRODONT_CATALOG_DIR"):
         return os.environ["ACRODONT_CATALOG_DIR"]
     return str(LICENSED) if (LICENSED / "manifest.json").is_file() else None
+
+
+def build_licensed_catalog() -> Optional[str]:
+    """Download CSW24 into fixtures/licensed/ (scripts/build-licensed-catalog.py),
+    once per machine. Offline, the small fixture catalog stands in."""
+    log("catalog: no fixtures/licensed/ yet; downloading CSW24 (about 50 MB, once)")
+    script = ROOT / "scripts" / "build-licensed-catalog.py"
+    if subprocess.run([sys.executable, str(script), "--out", str(LICENSED)]).returncode != 0:
+        log("catalog: the CSW24 download failed; the small fixture catalog stands in this time")
+        return None
+    return str(LICENSED)
 
 
 def build_catalog(args) -> "stack.Catalog":
@@ -491,8 +503,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="a new deployment: --reset, then no user and no catalog; prints the first-admin steps")
     data.add_argument("--real-catalog", nargs="?", const="", default=None, metavar="DIR",
                       help="upload the licensed files DIR/manifest.json lists. Done by default from "
-                           "$ACRODONT_CATALOG_DIR, else fixtures/licensed/ when it has a manifest.json "
-                           "(scripts/build-licensed-catalog.py makes one)")
+                           "$ACRODONT_CATALOG_DIR, else fixtures/licensed/, which is downloaded "
+                           "(scripts/build-licensed-catalog.py) when missing")
     data.add_argument("--no-real-catalog", action="store_true",
                       help="skip the licensed catalog: the small fixture catalog only")
     data.add_argument("--distribution", action="append", default=[], metavar="NAME=FILE",
@@ -533,14 +545,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.real_catalog is not None and args.no_real_catalog:
         parser.error("--real-catalog and --no-real-catalog contradict each other")
     if args.real_catalog == "":
-        args.real_catalog = default_catalog_dir()
+        args.real_catalog = default_catalog_dir() or build_licensed_catalog()
         if args.real_catalog is None:
-            parser.error("--real-catalog needs a directory, ACRODONT_CATALOG_DIR set, or fixtures/licensed/manifest.json")
-    elif args.real_catalog is None and not (args.no_real_catalog or args.fresh):
-        args.real_catalog = default_catalog_dir()
-        if args.real_catalog is None and not args.quiet:
-            log("catalog: the small fixture catalog only; no fixtures/licensed/manifest.json "
-                "(scripts/build-licensed-catalog.py makes one with CSW24)")
+            parser.error("--real-catalog: the CSW24 download failed; give a directory or set ACRODONT_CATALOG_DIR")
+    elif args.real_catalog is None and not (args.no_real_catalog or args.fresh or args.down or args.snapshot):
+        args.real_catalog = default_catalog_dir() or build_licensed_catalog()
     if args.fresh:
         args.reset = args.no_login = True
 
