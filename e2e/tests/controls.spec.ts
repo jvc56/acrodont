@@ -62,9 +62,9 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await at(page, 2);
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 
-	// Rebind Toggle grade to the wheel and to Shift+T on the Account page, in
+	// Rebind Toggle grade to the wheel and to Shift+T on the Preferences page, in
 	// place of right click and M; X stays bound for the typed-mode check below.
-	await page.goto('/account');
+	await page.goto('/preferences');
 	const toggle = section(page, 'Toggle grade');
 	for (const name of [/^Right click/, /^M/]) {
 		await toggle.getByRole('listitem').filter({ hasText: name }).getByRole('button', { name: 'Remove binding' }).click();
@@ -118,19 +118,24 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await page.keyboard.press('Shift+KeyT');
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 
-	// The change syncs to a second browser.
+	// Controls belong to this device: a second browser keeps the defaults, and
+	// they survive a reload here.
 	await page.goto('/cascades');
 	await expect(page.getByText('Synced')).toBeVisible({ timeout: 30_000 });
 	const other = await browser.newContext({ baseURL });
 	const p2 = await other.newPage();
 	await login(p2, username);
-	await p2.goto('/account');
-	await expect(p2.getByText('Shift+T')).toBeVisible({ timeout: 30_000 });
-	await expect(p2.getByText('Wheel down')).toBeVisible();
+	await p2.goto('/preferences');
+	await expect(section(p2, 'Toggle grade').getByRole('listitem').filter({ hasText: /^Right click/ })).toBeVisible({ timeout: 30_000 });
+	await expect(p2.getByText('Shift+T')).toHaveCount(0);
+	await expect(p2.getByText('Wheel down')).toHaveCount(0);
 	await other.close();
+	await page.goto('/preferences');
+	await page.reload();
+	await expect(page.getByText('Shift+T')).toBeVisible({ timeout: 30_000 });
 
 	// Typed mode: bound letters, Space and Backspace type; Ctrl+Backspace, bound, still goes back.
-	await page.goto('/account');
+	await page.goto('/preferences');
 	await bindOn(page, 'Previous', async () => {
 		await page.keyboard.press('Control+Backspace');
 	});

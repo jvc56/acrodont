@@ -67,7 +67,10 @@ test('segments and progression', async ({ page }) => {
 	const levels = dialog.getByRole('group', { name: 'Levels made from now on' });
 	await levels.getByLabel('When a quiz is finished below the clear threshold').selectOption('drill');
 	await levels.getByRole('button', { name: 'Save options for new levels' }).click();
-	// The dialog closes once the change is written.
+	// The dialog stays open once the change is written, offering to use it more widely.
+	await expect(levels.getByText('✓ Saved for this cascade')).toBeVisible();
+	await expect(levels.getByRole('button', { name: 'new cascades' })).toBeVisible();
+	await dialog.getByRole('button', { name: 'Close' }).click();
 	await expect(dialog).toHaveCount(0);
 	// Written once the Cascades page's options summary says so.
 	await page.goto('/cascades');

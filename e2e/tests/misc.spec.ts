@@ -179,7 +179,7 @@ test('a reveal marks the card correct by default, or missed when set; settings e
 	await press(page, 'Space');
 	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
 	// Each preference has an ⓘ that explains it on hover.
-	await page.goto('/account');
+	await page.goto('/preferences');
 	const row = page.getByText('Default clear threshold (%)', { exact: true }).locator('xpath=..');
 	await row.getByRole('button', { name: 'About this setting' }).hover();
 	await expect(page.getByRole('tooltip')).toContainText('The score a new cascade needs to clear a level');

@@ -9,6 +9,7 @@
 		{ href: '/cascades', label: 'Cascades' },
 		{ href: '/cascades/new', label: 'New cascade' },
 		{ href: '/trash', label: 'Trash' },
+		{ href: '/preferences', label: 'Preferences' },
 		...(session.isAdmin ? [{ href: '/admin', label: 'Admin' }] : [])
 	]);
 
@@ -41,7 +42,7 @@
 				href="/account"
 				aria-current={page.url.pathname === '/account' ? 'page' : undefined}
 				class="rounded-md border px-3 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted"
-				title="Account: preferences, controls, password, log out"
+				title="Account: log out, storage on this device, password"
 			>
 				{session.username || 'Account'}
 			</a>

@@ -260,17 +260,13 @@ async fn app_versions_and_simple_rejections(pool: sqlx::PgPool) {
     assert_eq!(result(&d.sync(vec![p]).await, 0)["reason"], "not_found");
 }
 
-/// Invalid option, preference and binding values are `invalid` before any
+/// Invalid option and preference values are `invalid` before any
 /// write: the row unchanged and nothing recorded as `error`.
 #[sqlx::test]
 async fn out_of_range_values_are_invalid_never_error(pool: sqlx::PgPool) {
     let app = app(pool).await;
     let mut d = device(&app, "alice").await;
     let s = cascade(&app, &mut d, Setup::new(10)).await;
-    let bindings = |code: &str, kind: &str| json!([
-        { "action": "show_next", "kind": kind, "code": code },
-        { "action": "toggle_grade", "kind": "key", "code": "KeyX" },
-        { "action": "previous", "kind": "key", "code": "Backspace" }]);
     let ops = vec![
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 3 })),
         d.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 300001 })),
@@ -278,13 +274,6 @@ async fn out_of_range_values_are_invalid_never_error(pool: sqlx::PgPool) {
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "progression": "spiral" })),
         d.op("set_preferences", json!({ "default_clear_threshold": 0 })),
         d.op("set_preferences", json!({ "leave_value_decimals": 4 })),
-        d.op("set_bindings", json!({ "bindings": bindings("Escape", "key") })),
-        d.op("set_bindings", json!({ "bindings": bindings("thumb", "mouse_button") })),
-        // Any number per action, but never none: Previous is left without one.
-        d.op("set_bindings", json!({ "bindings": [
-            { "action": "show_next", "kind": "key", "code": "Space" }, { "action": "show_next", "kind": "key", "code": "KeyA" },
-            { "action": "show_next", "kind": "key", "code": "KeyB" }, { "action": "show_next", "kind": "key", "code": "KeyC" },
-            { "action": "toggle_grade", "kind": "key", "code": "KeyX" }] })),
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "answer_mode": "spoken" })),
     ];
     let r = d.sync(ops).await;
@@ -303,6 +292,27 @@ async fn out_of_range_values_are_invalid_never_error(pool: sqlx::PgPool) {
     // The schema refuses such a row directly.
     let r = sqlx::query("UPDATE quizzes SET segment_size = 4 WHERE id = $1").bind(s.source_id).execute(app.db()).await;
     assert!(r.is_err());
+}
+
+/// An operation type the server does not know is `invalid`, not recorded, and
+/// does not stop the batch. Controls are the device's own, so `set_bindings`
+/// is one of these.
+#[sqlx::test]
+async fn an_unknown_operation_type_is_invalid(pool: sqlx::PgPool) {
+    let app = app(pool).await;
+    let mut d = device(&app, "alice").await;
+    let s = cascade(&app, &mut d, Setup::new(3)).await;
+    let ops = vec![
+        d.op("set_bindings", json!({ "bindings": [{ "action": "show_next", "kind": "key", "code": "Space" }] })),
+        d.op("teleport", json!({})),
+        d.op("trash_cascade", json!({ "cascade_id": s.cascade_id })),
+    ];
+    let r = d.sync(ops).await;
+    assert_eq!(result(&r, 0)["reason"], "invalid");
+    assert_eq!(result(&r, 1)["reason"], "invalid");
+    assert_eq!(result(&r, 2)["status"], "applied");
+    let types: Vec<String> = sqlx::query_scalar("SELECT op_type::text FROM sync_operations").fetch_all(app.db()).await.unwrap();
+    assert!(types.iter().all(|t| t == "trash_cascade"), "{types:?}");
 }
 
 /// "`set_quiz_options` naming progression or segment_size for a segment-chain

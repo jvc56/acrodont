@@ -414,7 +414,11 @@ Moving on from the last question of a run that is not the last run:
   Trash immediately with **Delete forever**.
 - **Start over** on a complete cascade (or any cascade, from the player's
   **Preferences**) creates a new cascade with the same name, a private copy of the
-  same filters, and the same threshold and [quiz options](#quiz-options).
+  same filters, and the same threshold and [quiz options](#quiz-options). It
+  asks first, saying: "This makes a new cascade of the same words, with the
+  same threshold and options, starting at Level 1. This cascade isn't changed.
+  You'll have both, and each counts toward your limit of 20 until it is deleted
+  from the Trash." (the limit is the one `/api/auth/me` reports).
 - **Exporting** works on anything in the Trash that has not been purged, so a
   cleared quiz can still be downloaded as a word list (see
   [Exporting words](#exporting-words)).
@@ -456,16 +460,43 @@ and delete catalog data (see [Admin](#admin)). See
 ### Preferences
 
 Each user has a set of display and answering preferences. They are edited on
-`/account` and also from the player's **Preferences** dialog, where a
-change takes effect on the current card straight away. That same dialog also holds
-the cascade's own settings and the current quiz's [options](#quiz-options), which
-belong to the cascade and the quiz rather than the user, under headings that
-say so. Both places split the user's preferences in two, each group saying
-where it applies: **Every cascade** (applied to every cascade at once) and
-**Defaults for new cascades**. Preferences belong to the user, not to a cascade, and they sync like
-everything else (see [Offline and Sync](#offline-and-sync)). The three
+the **Preferences page** (`/preferences`, in the site header beside Trash;
+the Account page holds no preferences) and also from the player's
+**Preferences** dialog, where a change takes effect on the current card
+straight away. Preferences belong to the user, not to a cascade, and they sync
+like everything else (see [Offline and Sync](#offline-and-sync)). The
 `Default …` preferences below only prefill the cascade builder; changing one
-never changes a cascade that already exists.
+changes a cascade that already exists only when the user asks, below.
+
+**Where a setting applies.** Every setting has one of four scopes, and each
+group of settings says which, with a badge (*Synced*, *Account · synced*,
+*Not synced*) and a line of text:
+
+| Scope | Settings | Where it is edited |
+|---|---|---|
+| **This cascade** | clear threshold, answer mode, the options of the level being studied and of levels made from now on | the player's Preferences dialog |
+| **Every cascade** | definitions, hooks, leave rounding, the reveal grade | the Preferences page and the player's dialog |
+| **New cascades** | the `Default …` preferences | the Preferences page |
+| **This device** | the [display settings](#display-settings) and the [controls](#controls) | the Preferences page (both) and the player's dialog (display) |
+
+A change to one of **this cascade's** settings applies to that cascade alone,
+at once. The row then says so ("✓ Saved for this cascade") and **offers to
+use the same value more widely**, one tap each: **new cascades**, which sets
+the matching default (`set_preferences`), and, when the user has other
+cascades it can reach, **all N cascades and new ones**, which sets the default
+and gives every cascade not in the Trash the same value (the answer mode
+reaches anagram cascades only). The offer is made for the clear threshold, the
+answer mode and the options of levels made from now on; the options of the
+level being studied belong to that one quiz and offer nothing wider. On the
+Preferences page, a changed default offers the reverse: **all N cascades you
+have**. The offer stays until the dialog or page closes, so it is never gone
+before it is read, and a second change to the same setting starts a fresh one.
+"Every cascade" is not a new kind of change: it is the ordinary
+`set_cascade_options` for each cascade whose value differs, so it works offline,
+syncs, and is judged on the server like any other (a change to a threshold
+applies to every level of each cascade, the pass in progress included). Saving
+the options of levels made from now on no longer closes the dialog, so the
+offer can be read; saving the studied level's options still does.
 
 | Preference | Applies to | Default | Options |
 |---|---|---|---|
@@ -478,7 +509,10 @@ never changes a cascade that already exists.
 | **Show hooks with anagrams** | Anagram answers (with inner hooks) | **on** | on / off |
 | **Default answer mode** (`anagram_answer_mode`) | New Anagram cascades (each keeps its own; see [Typed mode](#typed-mode-anagram-quizzes-only)) | **Flashcard** | Flashcard / Typed |
 | **When an answer is revealed, mark it** (`reveal_correct`) | Flashcard cards (a typed card is graded by what was typed) | **Correct** | Correct / Missed: the grade a card starts with when its answer is shown, before any toggle |
-| **Controls** | Desktop quiz area | Show / Next: left click, Space, `,` or Enter · Toggle grade: right click, `X` or `M` · Previous: middle click, Backspace or `J` | Any number of bindings per action: any mouse button, wheel direction or key, with modifiers. See [Controls](#controls). |
+
+**Controls** are not a preference: they are a setting of the device, edited on
+the Preferences page under **This device** and never synced (see
+[Controls](#controls)).
 
 Question order is **not** a preference: questions are always shuffled.
 
@@ -584,14 +618,14 @@ each, for a glance. Each shows:
   L2 · 38 (waiting) → L3 · 9 (4/9 done, 44.44%)`
 - an **Available offline** badge, download progress, or "not downloaded on
   this device, open to download" for a cascade whose question rows this
-  device does not hold (outside its window or dropped for the storage
-  [budget](#on-the-device), not kept offline, nothing pending)
+  device does not hold (outside its window and not kept for its size, or
+  dropped for the storage [budget](#on-the-device); nothing pending)
 - **Move to Trash**
 
 With nothing listed the page is empty under its header (or, with no lexicon on
 the server, says so). Selecting a cascade opens the player at its deepest
 level, whose **Preferences** dialog holds the rest: the ladder with **Export…** per
-level, **Keep offline**, the options for new quizzes, **Start over** and
+level, the options for new quizzes, **Start over** and
 **Move to Trash**. The header shows how
 much of the [cascade limit](#cascade-limit) is used (`17 of 20 cascades`) and
 the sync status, which is [`SyncStatus`](#frontend) in every one of its states —
@@ -678,8 +712,8 @@ as the term of the data model and the API.
   one settings dialog: everything that can be set from the player, grouped by
   **where it applies**. Each group has a heading, a badge saying whether it
   syncs, and one line saying what it reaches (`SCOPE` in `settings-info.ts`,
-  the same words the Account page uses), and a row of buttons at the top jumps
-  to each group:
+  the same words the Preferences page uses), and a row of buttons at the top
+  jumps to each group (see [Where a setting applies](#preferences)):
   - **This cascade** (synced; other cascades keep their own): "a level clears
     when a pass ends with at least 80% correct", the ladder as a table whose
     columns line up — level, questions, pass, last pass's score, status — with
@@ -687,14 +721,17 @@ as the term of the data model and the API.
     field is left, for the pass in progress too), the answer mode (anagram
     cascades), the [options](#quiz-options) of **the level being studied**
     (that quiz only, from the current card), the options **levels made from now
-    on** start with (the cascade's), Start over and Move to Trash.
+    on** start with (the cascade's), Start over and Move to Trash. The
+    threshold, the answer mode and the options for new levels each offer, once
+    changed, to be used for **new cascades** or for **all N cascades and new
+    ones**.
   - **Every cascade** (the account's; synced; applies to every cascade at
-    once): definitions, hooks, the grade a reveal gives, leave value decimals,
-    and a link to Controls on the Account page.
-  - **Defaults for new cascades** (the account's; synced): the `Default …`
-    preferences, which only prefill the builder.
-  - **This device** (not synced): Keep this cascade offline on this device,
-    and the display settings.
+    once): definitions, hooks, the grade a reveal gives, and leave value
+    decimals.
+  - **This device** (not synced): the display settings.
+
+  A line at the end links to the **Preferences page**, where the defaults for
+  new cascades and this device's controls are.
 
   **A cascade always opens with the menu
   hidden**, whatever happened last time: **☰** in the quiz area's corner
@@ -740,17 +777,19 @@ as the term of the data model and the API.
   position, the borders, whether the status bar is shown, and the repeat
   guard are per device (the `meta` store's `display` value), never synced,
   since what suits a laptop is wrong on a phone; they are in the player's
-  Preferences and on the Account page.
+  Preferences and on the Preferences page.
 - **Every setting is a row with its control at the right end**: a checkbox,
-  a choice or a number, in the player's Preferences, on the Account page
-  and in the quiz options alike (`SettingRow`), so the place to click is
+  a choice or a number, in the player's Preferences, on the Preferences page,
+  in the quiz options and in the builder's threshold and answer mode alike
+  (`SettingRow`), so the place to click is
   always the same. Progression is a choice (Ladder or Drill) with the chosen
   one's explanation beneath, not a pair of radio buttons.
 - **Every setting explains itself**: an ⓘ beside its name (`InfoTip`) shows,
   on hover or focus, what it does — the preferences, this device's display
-  settings, the quiz options, a cascade's threshold and Keep offline, and the
-  builder's threshold. The texts live in one module (`lib/settings-info`), so a
-  setting reads the same on the Account page and in the player.
+  settings, the quiz options, a cascade's threshold, and the builder's
+  threshold and answer mode. The texts live in one module
+  (`lib/settings-info`), so a setting reads the same on the Preferences page
+  and in the player.
 - **Sensitive actions ask first** (`ConfirmDialog`, one per app, in the root
   layout): Move to Trash, Delete forever, Start over, removing an account's
   data from the device, deleting the account, resetting the controls,
@@ -796,7 +835,7 @@ Every quiz is driven by three actions, whatever the device:
   card. The guard is a setting on each device, typed in ms, and **0 (off) by
   default**, so every press counts; a user whose mouse bounces raises it. It
   is beside the display settings in the player's Preferences and on the
-  Account page, since how much a button bounces belongs to the hardware.
+  Preferences page, since how much a button bounces belongs to the hardware.
   Settings saved before the default changed with the old default, 50, read as
   0. The wheel's own 150 ms guard against one flick firing many
   steps is separate.
@@ -870,12 +909,12 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   the player's Preferences with `set_cascade_options`, copied by Start over, and
   never a quiz's.
 - **The tiles typed mode needs** are the cascade's letter distribution. A
-  cascade played card by card (a new one, or one not kept offline) may not
+  cascade played card by card (a new one, or one not downloaded here) may not
   have it yet, so the player fetches it as the card is shown, and a card shown
   as a flashcard for want of it becomes typed when it arrives.
 - The text input sits **at the bottom of the page**, in a bar under the quiz
   area (above the on-screen keyboard on a phone), with a line under it for the
-  notes below ("already entered", "type one word at a time").
+  notes below ("already entered", "not an anagram of the question").
 - **The found count** (`3 of 9 found`) is **off by default**: knowing how many
   anagrams are left is a hint. A display setting on the device turns it on, and
   it then shows in the status bar (in the header on a phone) until the reveal.
@@ -887,14 +926,18 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
     with **no hooks, inner hooks or definitions** until the reveal, since those
     would hint at the words still to find.
   - A word **already entered** is ignored, with a brief "already entered" note.
-  - An entry whose **tile count differs from the question's** is not counted:
-    it cannot be an answer, and it is almost always two words typed together
-    (`RETAINS NASTIER`, which the space-separates-tiles rule reads as one
-    14-tile entry). It is left in the input with "type one word at a time",
-    and neither joins the wrong list nor affects the grade.
-  - Any other word is **wrong**. It is listed in red, struck through, under the
-    answer space (and stays there after the reveal), and the question will be
-    graded missed.
+  - An entry that is **not an anagram of the question** — other tiles, or
+    another number of them — is rejected: it cannot be an answer. For `ABC`,
+    `AB` and `ABD` are rejected; so is `RETAINS NASTIER`, two words typed
+    together, which the space-separates-tiles rule reads as one 14-tile entry,
+    and text that is not tiles of the distribution at all. A blank in the
+    question stands for any one tile, so for `AB?` the entry must hold an `A`
+    and a `B` and one more tile. It is left in the input with "not an anagram
+    of the question", and does not affect the grade.
+  - Any other entry — an anagram of the question that is not an answer, such
+    as `BCA` for `ABC` — is **wrong**: the question will be graded missed. The
+    input clears and **turns red** until the next keystroke; the word itself is
+    never written on the screen, before the reveal or after it.
 - **The card ends only when the user says so**: on **Enter on an empty input**,
   or on **Show / Next**, which before every anagram is found means giving up.
   Finding every anagram does not reveal the answer by itself, because the user
@@ -954,9 +997,9 @@ The default desktop bindings are:
 | **Toggle grade** | Right click | `X`, `M` |
 | **Previous** | Middle click | Backspace, `J` |
 
-An action can hold any number of bindings, but always at least one. Accounts
-made before `,`, `M`, `J` and Enter were added get them with **Reset to
-defaults** on the Account page.
+An action can hold any number of bindings, but always at least one. A device
+whose bindings were saved before `,`, `M`, `J` and Enter were added gets them
+with **Reset to defaults**.
 
 - **What can be bound.** Each action can have any number of bindings. A binding
   can be:
@@ -979,10 +1022,10 @@ defaults** on the Account page.
   itself bound, so a user who
   binds the wheel can still read the end of it; the capture box says so when a
   wheel direction is bound.
-- **Editing.** Bindings are changed in **Controls**, on the Account page and in
-  the player's preferences menu. The user chooses **Add binding** and then
-  presses the key, or clicks or scrolls, inside a capture box. Escape cancels
-  capture and cannot itself be bound.
+- **Editing.** Bindings are changed in **Controls**, under **This device** on
+  the Preferences page; the player's dialog links there. The user chooses
+  **Add binding** and then presses the key, or clicks or scrolls, inside a
+  capture box. Escape cancels capture and cannot itself be bound.
 - **Rules.**
   - A stroke can belong to only one action; binding it to another action moves
     it there, with a notice.
@@ -996,7 +1039,13 @@ defaults** on the Account page.
   buttons. The capture box warns when a stroke is one of these.
 - **Wheel bindings** act at most once every 150 ms, so one flick of the wheel is
   one action.
-- **Sync.** Bindings sync across devices along with the other preferences.
+- **Per device, never synced.** Bindings are kept in the user's `meta` store on
+  the device, beside the display settings, exactly as those are: a laptop's
+  trackpad and a desktop's five-button mouse want different bindings, so one
+  device's choice never changes another's. A new device starts with the
+  defaults; a stored list that is unreadable, or leaves an action with none,
+  is read as the defaults. There is no `set_bindings` operation and no
+  bindings table on the server.
 
 #### Touch zones
 
@@ -2249,8 +2298,8 @@ stores are:
 
 | Store | Contents |
 |---|---|
-| `meta` | user id, username, `device_id` (a UUID made once per device **and user**: it lives in this user-scoped store, so each account on a device syncs as its own device, and its `device_seq` counts from 1 for that account), sync cursor, last sync time, the trash retention period and `max_quiz_questions` as `/api/auth/me` last reported them, when this device last opened each cascade (see [Downloads](#on-the-device) for what counts as an open), the ids of the cascades marked **Keep offline** on this device, and the ids the [budget](#on-the-device) pass dropped while they were still inside the window, which are treated as outside it until the user opens them. The distribution tiles live in their own store below, not here |
-| `preferences` | the user's preferences and bindings as the server last sent them, a base like the cascade stores. The view the app shows is this row with the fields carried by pending `set_preferences` and `set_bindings` operations laid over it, so a change made a moment ago cannot flip back before it is pushed, and a change rejected as `stale` reverts the moment its operation is dropped. The server stamps the row with a sync sequence when the account is created, so a device's first pull always carries it; until that first pull the documented defaults apply |
+| `meta` | user id, username, `device_id` (a UUID made once per device **and user**: it lives in this user-scoped store, so each account on a device syncs as its own device, and its `device_seq` counts from 1 for that account), sync cursor, last sync time, the trash retention period and `max_quiz_questions` as `/api/auth/me` last reported them, when this device last opened each cascade (see [Downloads](#on-the-device) for what counts as an open), and the ids the [budget](#on-the-device) pass dropped while they were still inside the window, which are treated as outside it until the user opens them; and this device's own settings, never synced: the display settings (`display`) and the [controls](#controls) (`bindings`). The distribution tiles live in their own store below, not here |
+| `preferences` | the user's preferences as the server last sent them, a base like the cascade stores (controls are not here: they live in `meta`, per device, see [Controls](#controls)). The view the app shows is this row with the fields carried by pending `set_preferences` operations laid over it, so a change made a moment ago cannot flip back before it is pushed, and a change rejected as `stale` reverts the moment its operation is dropped. The server stamps the row with a sync sequence when the account is created, so a device's first pull always carries it; until that first pull the documented defaults apply |
 | `distributions` | the tiles (letter, blank letter, value, vowel) of every distribution the user's cascades use, keyed by name. A pulled cascade row carries its `lexicon` and `letter_distribution` names, and the download manager fetches a distribution the store lacks from `GET /api/letter-distributions/:name` before any cascade on it shows **Available offline**; typed mode on a cascade whose distribution is missing shows "needs a connection" like a missing card, since it cannot split typed text into tiles |
 | `cascades`, `quizzes`, `quiz_questions`, `quiz_attempts` | the **base**: the server's rows as of the last pull, written only by the sync engine. A base question row also holds its `position`, which the device computes from the quiz's seed in a worker when it builds or rebuilds the quiz, once per attempt; the player keeps the inverse map in memory for the quiz being played. A base quiz row also carries a `pending` flag, set by the staging move and the drop pass on an **active** quiz when its question rows are yet to be fetched and its counters show any grade (an unplayed quiz needs only its index list; a cleared quiz is never flagged, since its rows are fetched only for a restore or an export), and cleared only by the full fetch sequence |
 | `overlay_cascades`, `overlay_quizzes`, `overlay_quiz_questions`, `overlay_quiz_attempts` | the **overlay**: only the rows the outbox has changed or created, keyed like the base. The player's view of any row is the overlay's version if there is one, else the base's. It holds a few hundred rows in normal use, never a second copy of a cascade, except for a level created by a `finish` that is still in the outbox, which lives there until the finish is acknowledged, and except during a long offline session, when it holds one row per pending grade until the outbox drains |
@@ -2279,11 +2328,10 @@ stores are:
   creating that cascade: Next 20 ms median, 61 ms at worst; a card being
   fetched shows a spinner, never the card before.
 - Every cascade **opened or created on this device in the last 14 days** is
-  kept downloaded, plus any cascade the user marks **Keep offline**. The
-  window is judged entirely locally: the `meta` store records, per device and
-  user, when this device last opened each cascade, where an **open** is:
-  navigating to its player, creating it, exporting it, turning Keep offline on
-  for it, or an `applyLocally` of a `grade`, `move_cursor`, `finish`,
+  kept downloaded. The window is judged entirely locally: the `meta` store
+  records, per device and user, when this device last opened each cascade,
+  where an **open** is: navigating to its player, creating it, exporting it,
+  or an `applyLocally` of a `grade`, `move_cursor`, `finish`,
   `finish_segment` or `restore_quiz` on it. Trash, purge, options and
   preferences operations never extend the window, so trashing a cascade does
   not hold its rows for a fortnight. The
@@ -2294,19 +2342,14 @@ stores are:
   page marks every cascade whose question rows this device does not hold
   "not downloaded on this device, open to download", so it can be pulled
   ahead of a flight. A cascade whose active
-  quizzes hold more than `AUTO_KEEP_ROWS` question rows (a constant beside the
-  window in `lib/sync/config.ts`, 50,000 by default) is treated as kept
-  offline from the moment this device has opened it and learned its size, so
-  reopening it never means refetching hundreds of thousands of rows; until
-  then its toggle reads "kept automatically once opened". This keep holds
-  against the **14-day window** only. It never holds against
+  quizzes hold more than `AUTO_KEEP_OFFLINE_ROWS` question rows (a constant
+  beside the window in `lib/sync/config.ts`, 50,000 by default) is **kept
+  automatically** from the moment this device has opened it and learned its
+  size, so reopening it never means refetching hundreds of thousands of rows.
+  This keep holds against the **14-day window** only. It never holds against
   `ROW_STORAGE_BUDGET` below, which drops automatically kept cascades once
-  nothing else is left to drop, and never against the answer limit; only the
-  user's own Keep offline does either. The player's Preferences
-  shows its Keep offline toggle on, with a hint saying why, and the user can
-  turn it off; the opt-out
-  is recorded in the `meta` store beside the kept ids, and the window then
-  applies to that cascade like any other. The automatic keep is re-evaluated
+  nothing else is left to drop, and never against the answer limit. Nothing
+  shows it and nothing turns it off. The automatic keep is re-evaluated
   from the pulled quiz rows after every pull, so a cascade whose large level
   clears and whose active rows fall below the threshold becomes subject to
   the window again at the next drop pass; its rows come back on open. Cleared
@@ -2336,7 +2379,7 @@ stores are:
   **pending** quiz (always an active one) from the grades endpoint, then the
   missing **question keys** from the card pages with `keys=1`, then the missing
   answers from the same pages in full, for
-  cascades inside the window or kept offline, in a worker, materialising each
+  cascades inside the window or kept automatically, in a worker, materialising each
   quiz's positions once its list and grades are present, behind the same
   download progress the cards show. Keys come before answers, and before any
   other cascade's answers, because they cost far less and are what makes
@@ -2361,7 +2404,7 @@ stores are:
   the user's answers missing, and the next `finish` rejected `ungraded`. For any other cascade the same sequence runs the first time
   the user opens it on this device, behind a short progress indicator, and so
   needs a connection for whatever it has never fetched. A cascade in the
-  window or kept offline opens offline, recomputing positions if needed; if
+  window or kept automatically opens offline, recomputing positions if needed; if
   its cards are gone the question still shows, from the `questions` store, and
   the reveal shows "answer needs a connection", so grading
   still works, with a typed card falling back to flashcard mode (see
@@ -2374,27 +2417,25 @@ stores are:
   device therefore emits no `finish_segment` and no `finish`: Show / Next does
   nothing and the player says "some questions in this run still need a
   connection", with the count, so the user is never left pressing a dead
-  control. The ladder marks such a level as still downloading. Turning **Keep offline** on runs the same sequence for
-  that cascade at once, behind the same progress; turning it off makes the
-  cascade subject to the window again at the next drop pass. **Cards record
+  control. The ladder marks such a level as still downloading. **Cards record
   which of definitions and hooks they hold.** When a preference asks for
   something a cascade's cards lack, the download manager refetches that
   cascade's cards, as full cards with the flags the preferences now ask for,
   on the same schedule as index lists: at once for cascades in the window or
-  kept offline, on first open otherwise, behind the same progress. Until they
+  kept automatically, on first open otherwise, behind the same progress. Until they
   arrive the player shows the words without the missing part, with one line
   in the answer area saying definitions are downloading, or need a
   connection. No confirmation is asked for the size; the window is already
   the user's opt-in. The download
-  manager evaluates the window, and drops what has left it, after every pull
-  and whenever Keep offline changes; a budget-dropped cascade is neither
+  manager evaluates the window, and drops what has left it, after every pull;
+  a budget-dropped cascade is neither
   fetched nor dropped again, since it already holds nothing. Lists are fetched
   one quiz per call, deepest level first, so the quiz the user will play next
   is ready before the waiting levels above it; new non-source quizzes are rare
   per pull, so no batch endpoint is needed. Grade rows pulled for a quiz in
   the window whose index list has not arrived yet are stored as they arrive
   and get their positions then; for a cascade outside the window, not kept
-  offline and holding no rows here they are not sent at all, since the device
+  automatically and holding no rows here they are not sent at all, since the device
   leaves it out of the sync
   request's `question_rows_for`; a cascade whose rows the drop pass spared for
   its pending operations stays in the list, so its rows never go stale
@@ -2415,10 +2456,9 @@ stores are:
   card waits for `Retry-After` rather than falling back.
 - Answer data above a 500 MB soft limit is evicted, least recently opened on
   this device first. Only the `cards` store is ever evicted, never the
-  `questions` store, never unsynced operations, and never
-  the cards of a cascade the user marked **Keep offline** or with pending
-  operations. Keeping the keys is what lets a cascade whose answers are gone
-  still be played and exported: the question is local, only the answer is not,
+  `questions` store, never unsynced operations, and never the cards of a
+  cascade with pending operations. Keeping the keys is what lets a cascade
+  whose answers are gone still be played and exported: the question is local, only the answer is not,
   and a typed card falls back to flashcard mode (see
   [Typed mode](#typed-mode-anagram-quizzes-only)).
   An automatic keep by size protects a cascade's rows from the **window**
@@ -2428,19 +2468,14 @@ stores are:
   a cascade whose cards are gone — and **"answers need a connection" while the
   device is offline**, since there is no progress to show until the download
   manager can fetch again, and a bar sitting at nothing would read as a stuck
-  download rather than as the state the reveal already explains. When the user-kept cascades alone exceed the
-  limit, nothing is evicted. The Account page's storage line lists every kept
-  cascade, automatic or not, with its answer size, its much smaller key size
-  and its Keep offline toggle — but only while the device actually holds data
-  for it, so a cascade the [budget](#on-the-device) dropped leaves the list
-  rather than sitting in it as "kept automatically" with nothing behind it,
-  which would say the opposite of what the pass just did. Its badge reads
-  "kept automatically once opened", exactly as for a cascade this device has
-  never opened, and the Cascades page offers "open to download". The line
-  gives the device's total rows and keys
-  against `ROW_STORAGE_BUDGET`, saying when the user's own Keep offline is what
-  holds that total above the budget, since the drop pass will not touch those,
-  so the storage problem and its remedy are on one page. That budget and the
+  download rather than as the state the reveal already explains. The Account
+  page's storage line (**Offline storage**) gives the device's total rows and
+  keys against `ROW_STORAGE_BUDGET`, and under **Cascades on this device**
+  lists, by name, every cascade the device holds question rows, keys or
+  answers for, with its answer size and its much smaller key size — so a
+  cascade the [budget](#on-the-device) dropped leaves the list rather than
+  sitting in it with nothing behind it, and the Cascades page offers "open to
+  download". That budget and the
   answer limit are **per user**, so a device several accounts have used can hold
   several of each; the line lists every account in the unscoped `accounts` table
   that still has data here — never a row emptied by the removal action and kept
@@ -2451,11 +2486,6 @@ stores are:
   login page, since deleting the database under a live session would leave the
   app pointing at nothing. It is the same action the logout dialog offers (see
   [Authentication while offline](#authentication-while-offline)).
-- **Keep offline is a property of this device** and never syncs: the set of
-  kept cascade ids lives in the `meta` store, per device and user, and a
-  second device shows the toggle off, unless the cascade is kept automatically
-  by size, until its user turns it on. Syncing it
-  would let one phone's choice fill a tablet that never asked.
 - **Local size.** A cascade costs one copy of its quiz rows in the base plus the
   overlay's few hundred rows, or, while an offline session's grades are still
   unsent, one overlay row per pending grade: roughly 100–200 bytes per question
@@ -2468,7 +2498,7 @@ stores are:
   as well; the window is what bounds them, and the automatic keep never
   protects them. The [scale test](#scale-tests) asserts the row count
   and records the bytes. When a cascade leaves the window and is not kept
-  offline, the device drops everything it can fetch or recompute again: every
+  automatically, the device drops everything it can fetch or recompute again: every
   quiz's question rows, graded or not, their positions, its question keys and
   its cards, keeping
   only the cascade, quiz and attempt rows; nothing is dropped while the cascade
@@ -2490,12 +2520,11 @@ stores are:
   step 3 of the rebase promotes nothing for it, and if the device is online
   the download manager runs the full sequence for that one quiz at once (index
   list, graded rows, positions, hash check) together with the cascade's missing
-  question keys, as it
-  does for Keep offline, so the level is playable when the user opens it;
+  question keys, so the level is playable when the user opens it;
   offline, its first open fetches its list and grades. The restore was an
   open, so the cascade is in the window and the drop pass leaves those rows
-  alone. So the window and Keep offline bound local storage: the
-  base holds question rows only for cascades in the window or kept offline,
+  alone. So the window and the automatic keep bound local storage: the base
+  holds question rows only for cascades in the window or kept automatically,
   plus cascade, quiz and attempt rows for the rest.
 - **A total budget bounds the rows and keys**, because the window alone does
   not: a hundred cascades of 300,000 questions each, all opened inside a
@@ -2506,22 +2535,19 @@ stores are:
   cascades in last-opened order, oldest first, until the total is under the
   budget; so a cascade can leave before its 14 days are up, which is the only
   thing that overrides the window. It takes them in **two tiers**: first every
-  cascade that is not kept at all, oldest first, and then the ones kept
-  **automatically by size**, oldest first. It never drops a
-  cascade the **user** marked Keep offline, one that holds pending operations,
-  or one with its player open. The automatic keep has to be in the second tier
+  cascade that is not kept, oldest first, and then the ones kept
+  **automatically by size**, oldest first. It never drops one that holds
+  pending operations or one with its player open, and nothing else is exempt,
+  so the pass gets under the budget unless everything left is one of those.
+  The automatic keep has to be in the second tier
   rather than skipped, because the budget exists for a device full of large
   cascades and every cascade large enough to fill it is automatically kept: a
   pass that skipped them could never bring forty 300,000-question cascades
   under 2 GB, which is the case the budget was written for. What the automatic
   keep still buys in that case is order — the small unkept cascades go first,
   and a large one is refetched on its next open only when nothing smaller is
-  left to drop. When the cascades the user kept offline exceed the budget on
-  their own, nothing more is dropped, exactly as nothing is evicted when
-  user-kept answers exceed the answer limit, and the Account page's storage
-  line says so beside the total, since only turning Keep offline off can
-  resolve it. That line shows the total against the budget beside the
-  per-cascade sizes.
+  left to drop. The Account page's storage line shows the total against the
+  budget beside the per-cascade sizes.
 - **A budget drop is remembered, or it would undo itself.** A cascade the
   budget drops is typically still inside the 14-day window — that is the whole
   point of the budget overriding it: the pass takes the oldest last-open first,
@@ -2531,8 +2557,7 @@ stores are:
   refetch its index lists, grades, keys and cards at once, putting the base
   back over the budget for the following pass to drop again — an endless
   drop-and-refetch cycle that would spend `DOWNLOAD_RATE_PER_MINUTE` forever
-  and never settle. So the pass **records the id** in the `meta` store, beside
-  the Keep offline ids and the automatic-keep opt-outs, and from then on the
+  and never settle. So the pass **records the id** in the `meta` store (`budget_dropped`), and from then on the
   device treats that cascade exactly as it treats one outside the window: no
   index lists, no graded rows, no keys and no cards are fetched for it, it is
   left out of the sync request's `question_rows_for` (it holds no rows and will
@@ -2560,15 +2585,15 @@ stores are:
   - **An `applyLocally`**: the aborted unit **is** what the user just did. The
     grade, cursor move or finish reached neither the overlay nor the outbox, so
     the player cannot pretend it was saved and cannot advance past the card. It
-    stays on that card and shows the storage message where the grade would go,
-    with the remedies below, and writes the action when the user frees space —
+    stays on that card and shows the storage message where the grade would go
+    ("Free space by removing another account's data on the Account page.", with
+    **Try again**), and writes the action when the user frees space —
     the one place in the plan where studying stops, because the alternative is a
     Show / Next that silently does nothing.
   If the retry also
   fails, the sync status reads "not enough room on this device", and the Account
-  page's storage line says the same beside a **Keep offline** column the user
-  can turn off **and beside the other accounts' totals with their removal
-  action**, which is the only remedy when the space belongs to an account that is
+  page's storage line says the same **beside the other accounts' totals with
+  their removal action**, which is the only remedy when the space belongs to an account that is
   not signed in, since the drop pass and eviction are per user.
 - The app calls `navigator.storage.persist()` on first login. The Account page
   notes that some browsers, notably Safari, can clear site data after a period
@@ -2590,7 +2615,6 @@ stores are:
 | `purge_quiz` | quiz | the quiz is cleared (`not_cleared`) and its cascade is not trashed (`trashed`) | Delete it permanently and record a tombstone |
 | `purge_cascade` | cascade | the cascade is trashed (`not_trashed`) | Delete it and all its quizzes permanently and record tombstones |
 | `set_preferences` | changed fields, at | every carried value is in the range [Preferences](#preferences) gives it (clear threshold 1–100, leave value decimals 0–3, segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, the answer mode one of the two, and the remaining preferences flags; otherwise `invalid`, checked before any write exactly as for the options operations, so an out-of-range value is never a constraint violation recorded as `error`), and the preferences were last changed by this device (`changed_by_device_id`), or the device had seen the current preferences (`seen_seq`), or `at` is later than the row's `changed_at`; otherwise rejected as `stale` | Set the carried fields, `changed_at` and `changed_by_device_id`, as one unit |
-| `set_bindings` | the full list of bindings, at | the list is valid (`invalid`, before any write): every action has 1–3 bindings, no stroke is used twice, and every binding is one the schema allows — a mouse button named `left`, `middle`, `right`, `back` or `forward`, a wheel direction `up` or `down`, or a key whose `code` matches the column's pattern and is not `Escape`; and the bindings were last changed by this device (`bindings_device_id`), or the device had seen the current bindings (`seen_seq`), or `at` is later than `bindings_changed_at`, otherwise `stale` | Replace the bindings as one unit and set `bindings_device_id` |
 
 Every operation also carries its `id`, `device_seq`, the device's
 timestamp, and `seen_seq`: the device's sync cursor when the operation was
@@ -2622,21 +2646,20 @@ comparison is against the question row's `updated_seq`, which moves only when
 the grade does. For options it is against the cascade or quiz row's
 `options_seq`, the sequence of its last options change, because those rows'
 `updated_seq` also moves with every grade counter and cursor move and would
-make the rule fall back to timestamps far too often. For preferences and
-bindings the preferences row's `updated_seq` serves, since it moves only for
-them.
+make the rule fall back to timestamps far too often. For preferences the
+preferences row's `updated_seq` serves, since it moves only for them.
 
 **Device clocks are clamped.** Wherever a timestamp is compared or stored for
 these rules (`graded_at`, `cursor_moved_at`, `options_changed_at`,
-`changed_at`, `bindings_changed_at`, and `finished_at`, which is clamped
+`changed_at`, and `finished_at`, which is clamped
 although nothing compares it), the server uses
 `least(at, now() + 5 minutes)`, so a device whose clock is a year ahead can
 win a concurrent comparison by at most five minutes and its later changes
 lose to real later ones. The operation itself is still applied; only the
 timestamp is capped. A clock that is behind is left alone, since an offline
 device's timestamps are legitimately old. **A device's own changes never
-compete on timestamps**: grades, cursor moves, options, preferences and
-bindings each record the device that last changed them, and a later change
+compete on timestamps**: grades, cursor moves, options and preferences each
+record the device that last changed them, and a later change
 from that same device applies in `device_seq` order whatever its `at`, so
 two option changes from a fast clock in one batch are both applied rather
 than the second losing to the first's clamped stamp.
@@ -2648,9 +2671,8 @@ a question not in the quiz; which of those it was decides the notice, see
 [Conflicts](#conflicts)), `trashed`, `not_active` (the quiz is cleared), `not_deepest`,
 `stale_attempt` (attempt number or seed mismatch), `ungraded`, `bad_segment` (no
 segment size, not a multiple, not past the cursor, or past the end),
-`duplicate_segment`, `stale` (a grade, cursor move, options, preferences or
-bindings change that lost the `seen_seq` and timestamp comparison to another
-device's),
+`duplicate_segment`, `stale` (a grade, cursor move, options or preferences
+change that lost the `seen_seq` and timestamp comparison to another device's),
 `not_cleared` (restore or purge of a quiz that is not cleared), `not_trashed`
 (restore or purge of a cascade that is not trashed), `bad_cursor`
 (below `run_start`, or at or past the next boundary or the question count),
@@ -2748,11 +2770,11 @@ which alarms. Then:
 1. The server returns every row belonging to the user with `updated_seq` greater
    than the device's cursor and at most the sequence this request's push took,
    in this table order: cascades, quizzes, quiz attempts, quiz questions,
-   preferences with bindings, then tombstones for purged items, so a quiz row
+   preferences, then tombstones for purged items, so a quiz row
    always precedes its questions. A quiz question row is sent exactly when its
    `updated_seq` is past the cursor, **it is graded, its quiz is active, and
    its cascade is in the request's `question_rows_for`** (the cascades in the
-   device's window and not budget-dropped, kept offline, or whose base holds
+   device's window and not budget-dropped, kept automatically, or whose base holds
    question rows; with an
    empty list a pull carries no
    question rows at all, and the quizzes left out stay pending on the device;
@@ -2812,9 +2834,8 @@ which alarms. Then:
    tombstone does, since nothing else would ever reclaim them: the drop pass
    only sees cascades the base still holds, and eviction orders answers by a
    last-open time an orphan has none of. The same transaction also removes that
-   cascade's entries from the `meta` store — its last-open time, its
-   **Keep offline** id, its automatic-keep opt-out and its budget-dropped
-   mark — since nothing else ever
+   cascade's entries from the `meta` store — its last-open time and its
+   budget-dropped mark — since nothing else ever
    would, and the Account page's storage line would otherwise list a cascade
    that no longer exists. The deletion of graded question rows
    applies only to the **active** quizzes of cascades in the request's
@@ -2838,7 +2859,7 @@ which alarms. Then:
 **Applying a pull on the device** works like a rebase, run once after the last
 page of the pull has arrived. Pages are written as they come, to one of two
 places. Question rows go straight to the base when the player could not be
-using an order they might disturb: for a quiz in the window or kept offline
+using an order they might disturb: for a quiz in the window or kept automatically
 whose `pending` flag is not set (the grades endpoint brings a pending quiz
 everything it needs, so nothing is written for it here), grade rows for an
 unchanged attempt of a quiz that is also not flagged pending, and every row of
@@ -3035,7 +3056,7 @@ offline**. Using one device on a plane never conflicts. The rules:
 | A quiz's segment size changed on one device while another device passed a boundary | The `finish_segment` is rejected if its segment end is no longer a multiple of the size the server has. The drill quiz it created locally and the grades on it are dropped, with the usual notice. |
 | The cascade's options changed on one device while another, offline with the old options, finished a quiz or restored one | The server builds the new or restored quiz from the options it has, so the device's local copy of that quiz may carry different options. The rebase replaces it with the server's row, and any `finish_segment` the device sent against a segment size the server's copy does not have is rejected and dropped. |
 | The cursor moved on two devices in the same attempt | A device that had seen the other's cursor (`seen_seq`) wins; otherwise the later `cursor_moved_at`. A device's own moves always apply in order. If the winning cursor is already past a boundary the loser then tries to pass, the loser's `finish_segment` is rejected and its drill quiz dropped, with the usual notice. |
-| Preferences changed on two devices | The later operation wins whole, as for options: unless the device had seen the current preferences (`seen_seq`), an older operation is rejected as `stale` whatever fields it carries, and the losing device's view reverts to the server's row as soon as the rejected operation is dropped from the outbox. Bindings are a separate unit with their own timestamp. |
+| Preferences changed on two devices | The later operation wins whole, as for options: unless the device had seen the current preferences (`seen_seq`), an older operation is rejected as `stale` whatever fields it carries, and the losing device's view reverts to the server's row as soon as the rejected operation is dropped from the outbox. Controls never conflict: they are per device and never synced. |
 
 Rejected operations are never retried. After the rebase, the device shows what
 the server has, and a notice appears only when the user's own work was dropped:
@@ -3250,10 +3271,6 @@ CREATE TYPE grade AS ENUM ('correct', 'missed');
 
 CREATE TYPE anagram_answer_mode AS ENUM ('flashcard', 'typed');
 
-CREATE TYPE input_action AS ENUM ('show_next', 'toggle_grade', 'previous');
-
-CREATE TYPE input_kind AS ENUM ('mouse_button', 'wheel', 'key');
-
 -- 'cleared' means finished and in the Trash, whether or not the score met the
 -- clear threshold (see Progression).
 CREATE TYPE quiz_status AS ENUM ('active', 'cleared');
@@ -3283,7 +3300,7 @@ CREATE TYPE finish_outcome AS ENUM (
 CREATE TYPE sync_op_type AS ENUM (
     'grade', 'move_cursor', 'finish', 'finish_segment', 'restore_quiz',
     'trash_cascade', 'restore_cascade', 'purge_quiz', 'purge_cascade',
-    'set_preferences', 'set_bindings', 'set_cascade_options', 'set_quiz_options'
+    'set_preferences', 'set_cascade_options', 'set_quiz_options'
 );
 
 CREATE TYPE sync_op_status AS ENUM ('applied', 'rejected');
@@ -3381,7 +3398,8 @@ CREATE TABLE user_preferences (
     anagram_show_hooks        BOOLEAN NOT NULL DEFAULT true,
     anagram_answer_mode       anagram_answer_mode NOT NULL DEFAULT 'flashcard',
                                   -- what new Anagram cascades start with; each keeps its own
-    -- Defaults for new cascades only; changing one never touches an existing cascade.
+    -- Defaults for new cascades only; changing one touches an existing cascade only when the
+    -- user asks for every cascade (§ Where a setting applies), through set_cascade_options.
     default_segment_size      INTEGER NOT NULL DEFAULT 0
                                   CHECK (default_segment_size = 0
                                          OR default_segment_size BETWEEN 5 AND 300000),
@@ -3393,33 +3411,9 @@ CREATE TABLE user_preferences (
                                   -- set_preferences; an older operation is rejected whole
     changed_by_device_id      UUID,                               -- NULL until the first change;
                                   -- that device's own next change always applies
-    bindings_changed_at       TIMESTAMPTZ NOT NULL DEFAULT now(), -- device time of latest binding change
-    bindings_device_id        UUID,                               -- likewise for bindings
     updated_seq               BIGINT NOT NULL                     -- the sequence registration took, then
-                                  -- bumped by every preferences or bindings change,
+                                  -- bumped by every preferences change,
                                   -- so every device's first pull carries the row
-);
-
--- Desktop controls. The defaults are inserted with the user; every action keeps
--- at least one binding.
-CREATE TABLE user_input_bindings (
-    user_id  UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    action   input_action NOT NULL,
-    slot     SMALLINT NOT NULL CHECK (slot >= 0),
-    kind     input_kind NOT NULL,
-    code     TEXT NOT NULL,
-    ctrl     BOOLEAN NOT NULL DEFAULT false,
-    shift    BOOLEAN NOT NULL DEFAULT false,
-    alt      BOOLEAN NOT NULL DEFAULT false,
-    meta     BOOLEAN NOT NULL DEFAULT false,
-    PRIMARY KEY (user_id, action, slot),
-    UNIQUE (user_id, kind, code, ctrl, shift, alt, meta), -- one action per stroke
-    CHECK (CASE kind
-        WHEN 'mouse_button' THEN code IN ('left', 'middle', 'right', 'back', 'forward')
-        WHEN 'wheel'        THEN code IN ('up', 'down')
-        WHEN 'key'          THEN code ~ '^[A-Za-z0-9]{1,32}$'  -- KeyboardEvent.code
-                                 AND code <> 'Escape'
-    END)
 );
 
 -- -------------------------------------------------------------------------
@@ -4142,7 +4136,7 @@ The flows are the conventional ones, built directly on Axum:
   registration that replaces an expired unconfirmed account still replaces it
   when the cap has been reached; its code goes out with the next registration
   after the window. The
-  `user_preferences` row and the default `user_input_bindings` are
+  `user_preferences` row is
   created with the user, and registration takes the account's first sync
   sequence and stamps the preferences row with it, so a new device's first pull
   carries the preferences even when they were never changed.
@@ -4415,7 +4409,7 @@ person to write it copies names rather than choosing them.
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/grades?from=<idx>&limit=<n>` | The quiz's graded rows for the attempt its row names, which for a cleared quiz is the attempt it finished on, as the parallel arrays a pull uses, in idx order, with the quiz row's `attempt` and `shuffle_seed` so the device can tell whether they belong to the order it holds. `from` is an **index, not an offset**, as on the card pages: the response holds the graded rows whose `question_idx` is in `from … from+limit−1`, `limit` ≤ 50,000, so the device pages the index space by `from += limit` until `from` reaches the cascade's `question_count` and a sparse page — most of a quiz's questions may be ungraded — means nothing is left behind. The questions endpoint below reads `from` the other way, as an offset into a dense list, which is why the two are written `<idx>` and `<n>`. There is no `min_updated_seq` here, which only a pull's fast path needs; the device stamps these rows with the sequence of the sync it made before the fetch. Not cacheable. Fetched when the device materialises a quiz whose rows it dropped on leaving the download window; never part of a pull. If the device's quiz row names a different attempt or seed, the device discards the response, syncs and fetches again. `404` for another user's or a purged quiz. |
 | `POST` | `/api/cascades/:id/export-token` | Body: the export's choices, as the query of the export row below. Checks the session, `X-Acrodont-User`, the cascade and quiz, and `EXPORT_RATE_PER_MINUTE`, answering `401`, `404` and `429` with `Retry-After` exactly as any other request does, which a navigation could not show the page; on success returns `{ url }`, the export URL with a token valid for **60 seconds and one use**, bound to this user and these choices: a PASETO under the HKDF-derived export key, which any task can verify and no session validator can decrypt, its use recorded in `export_tokens_spent` (see [Exporting words](#exporting-words)). The dialog navigates a hidden `<iframe>` to it at once, and mints a new one for any retry |
 | `GET` | `/api/cascades/:id/export?scope=<cascade\|quiz>&quiz_id=<uuid>&which=<all\|correct\|missed\|ungraded>&format=<txt\|csv>&lines=<answers\|questions>&columns=<list>&order=<study\|alphabetical>&definitions=<0\|1>&hooks=<0\|1>&decimals=<0-3>&token=<token>` | The same file the device builds locally (see [Exporting words](#exporting-words)), streamed as `text/plain` or `text/csv` with a `Content-Disposition` filename. Used when the device doesn't have what the export needs. `token` is the single-use, 60-second token the row above issued for exactly these choices; it is the request's proof of account, since a download navigation cannot send a header, and an expired, reused or mismatched token answers `204 No Content`, which the dialog's hidden frame discards. `404` for another user's or a purged cascade, and for a `quiz_id` that is not this cascade's, has been purged, or is unknown. |
-| `POST` | `/api/sync` | Body `{ device_id, app_version, cursor, page_token?, question_rows_for[], ops[] }`, where `app_version` is the frontend build's **monotonic integer build number**, injected into the SPA at build time and compared numerically against `MIN_APP_VERSION` (see [Configuration](#configuration)) — never a hash or a semver string, so "too old to sync" is one comparison and raising the floor is one number in the task definition; the build's git hash is logged beside it for support but decides nothing. `question_rows_for` lists every cascade whose question rows this device holds or wants: in its window and not [budget-dropped](#on-the-device), kept offline, **or whose base already holds question rows** (at most the cascade limit). The third case is what keeps a cascade the drop pass spared for its pending operations from going stale: the device holds its rows, so it must keep receiving their changes. A cascade the device holds no rows for and will not open is left out, and stays pending on the device. It is expected on every non-paged request, an omitted field means an empty list, ids that belong to another user or no longer exist are ignored, and the server omits `quiz_questions` rows for every other cascade. `cursor` is `null` for a full pull (a first sync or a resync), whose operations are pushed like any other's → `{ results: [{ op_id, status, reason?, outcome?, new_quiz_question_count?, new_quiz_questions_hash? }], changes: { cascades[], quizzes[], quiz_questions[], quiz_attempts[], preferences?, tombstones[] }, sync_seq, next_page_token?, resync_required? }`. `outcome` is set on an applied `finish` (a `finish_outcome`) or `finish_segment` (`drilled` or `continued`), and `new_quiz_question_count` and `new_quiz_questions_hash` whenever a quiz was created, reset or restored: the created quiz's when one was created, otherwise the reset or restored quiz's own; a repeated operation returns the recorded fields unchanged; pulled `quizzes[]` rows carry `questions_hash`; `preferences` includes `bindings[]`. |
+| `POST` | `/api/sync` | Body `{ device_id, app_version, cursor, page_token?, question_rows_for[], ops[] }`, where `app_version` is the frontend build's **monotonic integer build number**, injected into the SPA at build time and compared numerically against `MIN_APP_VERSION` (see [Configuration](#configuration)) — never a hash or a semver string, so "too old to sync" is one comparison and raising the floor is one number in the task definition; the build's git hash is logged beside it for support but decides nothing. `question_rows_for` lists every cascade whose question rows this device holds or wants: in its window and not [budget-dropped](#on-the-device), kept automatically by size, **or whose base already holds question rows** (at most the cascade limit). The third case is what keeps a cascade the drop pass spared for its pending operations from going stale: the device holds its rows, so it must keep receiving their changes. A cascade the device holds no rows for and will not open is left out, and stays pending on the device. It is expected on every non-paged request, an omitted field means an empty list, ids that belong to another user or no longer exist are ignored, and the server omits `quiz_questions` rows for every other cascade. `cursor` is `null` for a full pull (a first sync or a resync), whose operations are pushed like any other's → `{ results: [{ op_id, status, reason?, outcome?, new_quiz_question_count?, new_quiz_questions_hash? }], changes: { cascades[], quizzes[], quiz_questions[], quiz_attempts[], preferences?, tombstones[] }, sync_seq, next_page_token?, resync_required? }`. `outcome` is set on an applied `finish` (a `finish_outcome`) or `finish_segment` (`drilled` or `continued`), and `new_quiz_question_count` and `new_quiz_questions_hash` whenever a quiz was created, reset or restored: the created quiz's when one was created, otherwise the reset or restored quiz's own; a repeated operation returns the recorded fields unchanged; pulled `quizzes[]` rows carry `questions_hash`. |
 
 On the wire, `quiz_questions` changes are grouped per quiz as parallel arrays
 (`question_idx[]`, `grade[]`, `graded_at[]`), with no positions: the device
@@ -4515,13 +4509,14 @@ SvelteKit static SPA. The routes:
 
 | Route | Page |
 |---|---|
-| `/` | No page of its own: there is no landing or home page. It goes to the Cascades page when logged in, where logging in lands too, and to the log-in page (with Create an account) when logged out. A deleted account ends on the log-in page. With no lexicon yet, the empty Cascades page says so (and, to an admin, where to upload one). The site header is how to reach every page. Every logged-in page but the player shows the site header: Acrodont (home), Cascades, New cascade, Trash, Admin for admins, the sync status and the account |
+| `/` | No page of its own: there is no landing or home page. It goes to the Cascades page when logged in, where logging in lands too, and to the log-in page (with Create an account) when logged out. A deleted account ends on the log-in page. With no lexicon yet, the empty Cascades page says so (and, to an admin, where to upload one). The site header is how to reach every page. Every logged-in page but the player shows the site header: Acrodont (home), Cascades, New cascade, Trash, Preferences, Admin for admins, the sync status and the account |
 | `/register`, `/register/check-email`, `/confirm-email`, `/login`, `/reset-password`, `/reset-password/confirm` | Auth |
 | `/cascades` | Cascades page: one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done, 31.58%)`), its download status and Move to Trash; the rest is in the player's Preferences |
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, threshold, preview) |
 | `/cascades/:id` | Player for the cascade's deepest level, with the ladder panel |
 | `/trash` | Cleared quizzes and trashed cascades |
-| `/account` | Preferences, controls, sync status, offline storage use with the total rows and keys against the budget and every kept cascade this device still holds data for (automatic or not), its answer size, its key size and its Keep offline toggle, every account with data on this device and **Remove this account's data from this device** for each, password, sign out everywhere, delete account |
+| `/preferences` | Preferences, in three groups by [where they apply](#preferences): **Every cascade**, **New cascades** (the defaults, each offering, once changed, to give the cascades you have the same value) and **This device** (the display settings and the [controls](#controls)) |
+| `/account` | Log out, sync status, offline storage use with the total rows and keys against the budget and, for each cascade this device holds data for, its answer size and key size, every account with data on this device and **Remove this account's data from this device** for each, password, sign out everywhere, delete account. No preferences: those are on `/preferences` |
 | `/admin` | Catalog overview with delete actions (admins only; others get a not-found page) |
 | `/admin/letter-distributions/new`, `/admin/lexicons/new`, `/admin/leave-sets/new` | Upload forms with validation error lists |
 
@@ -4546,7 +4541,7 @@ Modules:
   `401` handling) and the download manager (its own `429` and `Retry-After`
   backoff, yielding to a page the player needs, card pages split into the
   `questions` and `cards` stores with `keys=1` first, the 14-day policy,
-  `ROW_STORAGE_BUDGET`, Keep offline, eviction of answers only, and the
+  `ROW_STORAGE_BUDGET`, the automatic keep by size, eviction of answers only, and the
   quota-error path).
 - **`lib/export/`**: builds a word list or CSV from the local stores, in a worker
   and in chunks, and decides when the export has to come from the server
@@ -4609,12 +4604,13 @@ Components:
 - **`Flashcard`**: question, answer and grade display. The font scales for long
   alphagrams and long definitions.
 - **`ControlsEditor`**: the binding list per action, the capture box, conflict
-  and reserved-stroke notices, and Reset to defaults. It saves through a
-  `set_bindings` operation.
-- **`TypedAnagramCard`**: answer input, found counter, found and wrong lists,
-  give-up and override controls. It checks entries against the card's answer
-  list locally, sets aside an entry whose tile count differs from the
-  question's without counting it, and, when the quiz requires alphabetical order, against the
+  and reserved-stroke notices, and Reset to defaults. It saves to this device's
+  `meta` store (`lib/player/controls`), never through an operation.
+- **`TypedAnagramCard`**: answer input, found counter, the found list (wrong
+  entries are counted but never listed: the input turns red), give-up and
+  override controls. It checks entries against the card's answer list
+  locally, sets aside an entry that is not an anagram of the question without
+  counting it, and, when the quiz requires alphabetical order, against the
   furthest answer entered so far, marking an out-of-order answer and showing the
   hint for what comes next.
 - **`AnagramAnswerList`**: shared by both anagram modes. Renders words with
@@ -4636,12 +4632,8 @@ Components:
   happen — plus notices about dropped work.
 - **`OfflineBadge`**: Available offline, download progress, "answers need a
   connection" for a cascade whose cards are gone while the device is offline, or
-  the Keep offline
-  toggle, shown on with a hint for a cascade kept automatically by size, or
-  reading "kept automatically once opened" for one this device has not opened
-  **or has dropped for the storage budget**, since neither holds rows here;
-  the same toggle appears beside each kept cascade on the Account page's
-  storage line.
+  "not downloaded on this device, open to download" for one whose question rows
+  this device does not hold.
 - **`PreferencesMenu`**: the gear menu in the player. It applies changes locally
   through a `set_preferences` operation and updates the current card straight
   away.
@@ -4703,9 +4695,9 @@ startup rather than falling back to a default.
 
 Client-side limits (14-day download window, 500 MB answer storage soft limit,
 the 2 GB `ROW_STORAGE_BUDGET` for rows and question keys, the 50,000-row
-automatic Keep offline threshold, 30-second sync interval, the 400 ms
-`PREVIEW_DEBOUNCE_MS` and the 2-second `PREVIEW_MIN_INTERVAL_MS`) are
-constants in `lib/sync/config.ts`.
+`AUTO_KEEP_OFFLINE_ROWS` threshold for the automatic keep, 30-second sync
+interval, the 400 ms `PREVIEW_DEBOUNCE_MS` and the 2-second
+`PREVIEW_MIN_INTERVAL_MS`) are constants in `lib/sync/config.ts`.
 
 ---
 
@@ -4759,7 +4751,7 @@ What it does, in order:
    outbox (`MAIL_BACKEND=file`), `POST /api/auth/confirm-email`, and only then
    `is_admin` set with SQL, because [no endpoint can](#admin). Registering
    rather than inserting rows is what gives the account its `user_preferences`
-   row stamped with its first sync sequence and its default bindings. The
+   row stamped with its first sync sequence. The
    password is a fixed passphrase that meets the `zxcvbn` rule,
    `correct-tile-rack-bingo`, printed on every run.
 6. **Uploads the catalog** through the real admin API, as that user, skipping
@@ -5465,11 +5457,10 @@ rows dropped, and a second Trash export fetching them again; a Trash export of
 a cleared quiz holding only part of its rows, or its rows without positions,
 or a set that fails the hash check, fetching them before it writes anything;
 a pull that reports a pending quiz cleared clearing its flag; eviction taking an automatically kept cascade's answers while
-sparing its rows, its question keys and a user-kept cascade's answers, and taking
+sparing its rows and its question keys, and taking
 them in **last-opened order, oldest first** — three cascades over the limit with
 distinct last-open times, the oldest losing its answers first and the one opened
-this morning last, with a user-kept cascade skipped even when it is the oldest of
-all — with the
+this morning last, and none exempt while the total is over the limit — with the
 player then showing that cascade's questions from the `questions` store and
 "answer needs a connection" on the reveal, grading still saved, and a
 questions-only export of it still written from local data; a **typed** anagram
@@ -5484,9 +5475,8 @@ manager fetching every in-window cascade's keys with `keys=1` before any
 cascade's answers, and a restored quiz's per-quiz sequence fetching the
 cascade's missing keys too; a tombstone and a full pull's deletion each removing
 a cascade's `questions` and `cards` entries with its rows, and its `meta`
-entries too — its last-open time, its Keep offline id, its automatic-keep
-opt-out and its budget-dropped mark — so the Account page's storage line stops
-listing it; the drop pass
+entries too — its last-open time and its budget-dropped mark — so the Account
+page's storage line stops listing it; the drop pass
 removing a cascade's question keys along with its rows, and the next open
 fetching both back from the card pages;
 a quiz cleared offline getting a provisional `cleared_at` from the operation's
@@ -5496,19 +5486,16 @@ the Trash while it is gone from the Cascades page, and the acknowledged rows
 replacing both; the drop pass dropping the least recently opened unkept cascade
 when the base's rows and keys pass `ROW_STORAGE_BUDGET`, before its 14 days are
 up, and skipping one that holds pending operations or has its player open; the
-same pass taking its two tiers in order, so an **automatically kept** cascade
-is dropped only once every unkept one is gone and then oldest first, a
-**user-kept** one is never dropped at all, and a base whose user-kept cascades
-alone exceed the budget ends the pass still over it with the storage line
-saying so rather than looping; a cascade the budget dropped **while it was
+same pass taking its two tiers in order, so an **automatically kept** cascade,
+even the least recently opened, is dropped only once every unkept one is gone,
+and then oldest first with none exempt; a cascade the budget dropped **while it was
 still inside the window** being marked in `meta` and left alone by the next
 pull's download manager — no index list, no grades, no keys, no cards, absent
 from `question_rows_for`, its quizzes pending — so the pass settles in one run
 instead of dropping and refetching the same cascade forever, then opening it
-clearing the mark and fetching it back whole, and **turning Keep offline on for
-a marked cascade** doing the same without opening its player, since that counts
-as an open (see [Downloads](#on-the-device)) and the pass may never drop a
-user-kept cascade again, and the same mark left by the
+clearing the mark and fetching it back whole, a marked cascade over
+`AUTO_KEEP_OFFLINE_ROWS` counting as neither wanted nor kept until it is
+opened, and the same mark left by the
 quota path's drop so its retry refetches nothing; a `QuotaExceededError` thrown by a pull's per-cascade transaction
 leaving the cursor unadvanced and the outbox intact, running the drop pass **and
 then the answer eviction**, in that order, and
@@ -5517,8 +5504,7 @@ device" while studying continues; the same error thrown by an **`applyLocally`**
 instead, where the grade reached neither the overlay nor the outbox: the player
 stays on that card with the storage message in place of the grade, Show / Next
 advances nothing, and the grade is written once a cascade is removed and the
-retry succeeds — and a base whose cascades are all **user-kept** reaching that
-state with both passes freeing nothing, so the message is the only outcome; the download manager reading a missing
+retry succeeds; the download manager reading a missing
 distribution's tiles from the `distributions` store and never from `meta`; a page of a pull written while the player is on
 the quiz changing nothing the player reads until the last page; a `finish`
 rejected `ungraded` after a `not_found` grade dropping the finish and leaving
@@ -5591,15 +5577,13 @@ builder prefills the cap rather than that stored default, so a lowered cap never
 sends a value the server refuses; a resync on a device holding five 300,000-question cascades
 comparing base and pull within the [scale test](#scale-tests)'s budget; the
 Cascades page showing **Available offline**, not the download label, for a
-kept cascade outside the window; the `stale`,
+cascade opened inside the window; the `stale`,
 `stale_attempt` and `not_active` grade notices for grades with no finish of
 this device behind them; a `finish` rejected `not_active` showing the
 finished-elsewhere sentence; and a restored quiz whose options the server
-built from cascade options changed elsewhere taking the server's row; Keep offline
-starting a fetch at once, the drop pass skipping a kept cascade, a cascade over
-the automatic Keep offline threshold not being dropped when it leaves the
-window and being dropped once the user turns Keep offline off, and eviction
-skipping a kept cascade's cards while taking an unkept one's; cards fetched
+built from cascade options changed elsewhere taking the server's row; a
+cascade over `AUTO_KEEP_OFFLINE_ROWS` not being dropped when it leaves the
+window, and eviction taking its cards all the same; cards fetched
 without definitions, the preference turned on offline, the player showing
 words only, and the cards refetched with definitions on reconnect; a first sync
 sending `cursor: null`; a `resync_required` response dropping the acknowledged
@@ -5832,9 +5816,9 @@ they run in parallel and leave nothing behind.
     `set_cascade_options` carrying a clear threshold of 0, 101 or 50.5, is
     rejected as `invalid` before any write, so no such operation is ever
     recorded with reason `error`; the same for a `set_preferences` carrying a
-    clear threshold of 0 or `leave_value_decimals` of 4, and for a
-    `set_bindings` naming `Escape`, a mouse button the column does not allow, or
-    a fourth binding for one action — each `invalid`, with the row unchanged and
+    clear threshold of 0 or `leave_value_decimals` of 4, and for an operation
+    of a type the server does not know (`set_bindings`, which controls no
+    longer use) — each `invalid`, with the row unchanged and
     nothing recorded as `error`, since an `error` alarms (see
     [Monitoring](#deployment-and-operations)).
   - A `restore_quiz` whose application raises a database error inside its
@@ -6120,12 +6104,14 @@ environment. That is how a deployment is smoke-tested and how the
   account, the next sync answers `401`, it shows **Log in to sync** with its
   cascades still readable, and its Account page still offers to remove them.
 - Switch to typed mode: the input sits at the bottom of the page, a found word
-  shows in the answer space with no hooks or definitions, a wrong entry grades
-  missed, finding every anagram reveals nothing until Enter on an empty input,
+  shows in the answer space with no hooks or definitions, an entry that is
+  not an anagram of the question (`RETAINX`) stays in the input with "not an
+  anagram of the question", an anagram that is not an answer (`EINARST`)
+  turns the input red, is never shown, and grades missed, finding every anagram reveals nothing until Enter on an empty input,
   which then grades correct, a repeated entry is ignored, a right click before the reveal still toggles the grade while a
   left click only focuses the input, the next card's input has the focus with
   no click, and switching modes mid-card clears the entries. Two answers typed on one line (`RETAINS NASTIER`) stay in the input
-  with "type one word at a time" and the card, with every anagram then found,
+  with "not an anagram of the question" and the card, with every anagram then found,
   still grades correct. With **Enter bound to Toggle grade**, Enter on a typed
   word submits it and leaves the grade alone, and Enter on an empty input
   reveals the answer; with **`Shift+T` bound to Toggle grade**, typing a `T`
@@ -6207,20 +6193,19 @@ environment. That is how a deployment is smoke-tested and how the
   "downloads when online" note and the ladder's "waiting for download" level,
   go online and see it download without opening the cascade, then open it and
   play.
-- Over the answer limit with two automatic keeps, see the Account page list
-  both with their answer and key sizes, turn one off, and see its answers freed
-  on the next drop pass while its questions still show in the player. Go offline
+- Over the answer limit with two automatic keeps, see the least recently
+  opened one's answers freed while its questions still show in the player, and
+  the Account page list both with their answer and key sizes. Go offline
   and see that cascade's badge read "answers need a connection" rather than a
   download bar at zero, and see it return to progress on reconnecting.
-- Over `ROW_STORAGE_BUDGET`, lowered with a test constant, see the Account
-  page's total against the budget and the least recently opened unkept cascade
-  dropped before its window expires, with a kept one untouched; then, still over
-  the budget with nothing unkept left, see the oldest **automatically** kept
-  cascade dropped too and the one the user marked Keep offline left whole, with
-  the storage line saying that only turning Keep offline off can bring the total
-  down. See the dropped cascades leave the storage line's kept list rather than
-  sitting in it at zero bytes, their badges reading "kept automatically once
-  opened". Stay online for several sync cycles and see them stay
+- Over `ROW_STORAGE_BUDGET`, lowered with a test constant, see the least
+  recently opened unkept cascade dropped before its window expires when an
+  **automatically** kept one takes the total over, and the kept one's rows held
+  while its player is open; then, with a second automatic keep and nothing
+  unkept left, see the oldest automatically kept cascade dropped once its player
+  closes, then the next. See the Account page's total against the budget, and
+  the dropped cascades absent from its list of cascades on this device rather
+  than sitting in it at zero bytes. Stay online for several sync cycles and see them stay
   dropped — the storage total steady, no download progress reappearing, and the
   Cascades page offering "open to download" — then open one and see it come
   back whole and listed again.
@@ -6238,8 +6223,9 @@ environment. That is how a deployment is smoke-tested and how the
     back, with no context menu appearing; a double click advances once, and a
     wheel binding fires once per flick.
   - Clicks on the side rails do nothing to the quiz.
-  - Rebind Toggle grade to the wheel and to `Shift+T`, and see both work and
-    the change sync to a second browser context.
+  - Rebind Toggle grade to the wheel and to `Shift+T` on the Preferences page,
+    and see both work, survive a reload, and **not** reach a second browser
+    context, which keeps the defaults: controls are per device.
   - Bind wheel-down to Show / Next, reveal a Definition card whose definition
     overflows the panel, and see wheel-down advance without scrolling the text,
     the capture box having warned it would, while the scrollbar and the Page
@@ -6332,21 +6318,21 @@ run at production's `EXPORT_CONCURRENCY` of one, against the production task's
     size of 5 over 20,000 questions, leaving 4,000 chain quizzes in the Trash,
     so its pull pages on quiz rows alone: assert the page count, that no page
     exceeds 50,000 rows, and that the resync stays within the same budget.
-  - Let a 130,000-question cascade leave the download window with the
-    automatic Keep offline turned off, and assert the drop pass finishes within
-    budget and the base holds only its cascade, quiz and attempt rows. Run the
-    same pass on forty such cascades all inside the window, every one of them
-    over `AUTO_KEEP_ROWS` and so **automatically** kept, and assert it brings
-    the base's rows and keys under `ROW_STORAGE_BUDGET` within budget, oldest
-    last-open first: this is the case the budget exists for, and it is only
-    reachable because an automatic keep is the pass's second tier rather than a
-    skip. Mark one of the forty **Keep offline** by hand and assert it is the
-    one cascade still whole at the end. Then run one more pull and assert that
-    **nothing is refetched**: every cascade the pass dropped is marked
-    budget-dropped in `meta` although all forty are inside the window, the
-    download manager issues no request for any of them, the sync request's
-    `question_rows_for` names only the kept one, and the base's total stays
-    under the budget instead of oscillating. Run the
+  - Open a 130,000-question cascade, over `AUTO_KEEP_OFFLINE_ROWS` and so
+    **automatically** kept, and fifteen days on, still kept, run the quota
+    path's drop pass over it: assert it finishes within budget, the base holds
+    only its cascade, quiz and attempt rows, and the cascade is marked
+    budget-dropped. Run the pass on forty such cascades all inside the window,
+    every one of them automatically kept, and assert it brings the base's rows
+    and keys under `ROW_STORAGE_BUDGET` within budget, oldest last-open first
+    and no more than needed, the most recently opened still whole: this is the
+    case the budget exists for, and it is only reachable because an automatic
+    keep is the pass's second tier rather than a skip. Then run one more pull
+    and assert that **nothing is refetched**: every cascade the pass dropped is
+    marked budget-dropped in `meta` although all forty are inside the window,
+    the download manager issues no request for any of them, the sync request's
+    `question_rows_for` names exactly the cascades still holding rows, and the
+    base's total stays under the budget instead of oscillating. Run the
     same case on a cascade that also holds five cleared 65,000-question
     levels inside the window, asserting the row count before the pass counts
     them and the pass removes them too.

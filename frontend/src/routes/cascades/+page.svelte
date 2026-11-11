@@ -2,9 +2,9 @@
 	// The Cascades page (PLAN.md § Cascades page): newest activity first, one
 	// row each for a glance — its options in short form, a compact ladder with
 	// the current level's progress, whether it is on this device, and Move to
-	// Trash; the rest (Keep offline, quiz options, Export…, Start over) is in
-	// the player. The header shows the cascade limit. Everything reads the local
-	// stores and works offline.
+	// Trash; the rest (quiz options, Export…, Start over) is in the player.
+	// The header shows the cascade limit. Everything reads the local stores and
+	// works offline.
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
 	import { session } from '$lib/auth/session.svelte';

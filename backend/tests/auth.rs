@@ -35,7 +35,7 @@ async fn expire_codes(app: &TestApp, email: &str) {
 // ---------------------------------------------------------------------------
 
 #[sqlx::test]
-async fn register_creates_user_preferences_and_bindings(pool: sqlx::PgPool) {
+async fn register_creates_user_and_preferences(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
     let mut c = app.client();
     let r = c
@@ -55,30 +55,6 @@ async fn register_creates_user_preferences_and_bindings(pool: sqlx::PgPool) {
     .await
     .unwrap();
     assert_eq!((sync_seq, prefs_seq), (1, 1));
-    let bindings: Vec<(String, i16, String, String)> = sqlx::query_as(
-        "SELECT b.action::text, b.slot, b.kind::text, b.code FROM user_input_bindings b
-         JOIN users u ON u.id = b.user_id WHERE u.username = 'alice' ORDER BY 1, 2",
-    )
-    .fetch_all(app.db())
-    .await
-    .unwrap();
-    let expected = [
-        ("previous", 0, "mouse_button", "middle"),
-        ("previous", 1, "key", "Backspace"),
-        ("previous", 2, "key", "KeyJ"),
-        ("show_next", 0, "mouse_button", "left"),
-        ("show_next", 1, "key", "Space"),
-        ("show_next", 2, "key", "Comma"),
-        ("show_next", 3, "key", "Enter"),
-        ("toggle_grade", 0, "mouse_button", "right"),
-        ("toggle_grade", 1, "key", "KeyX"),
-        ("toggle_grade", 2, "key", "KeyM"),
-    ];
-    let got: Vec<_> = bindings
-        .iter()
-        .map(|(a, s, k, c)| (a.as_str(), *s, k.as_str(), c.as_str()))
-        .collect();
-    assert_eq!(got, expected);
     // Only the SHA-256 of the code is stored, with a 24-hour expiry.
     let (hash_len, hours): (i32, f64) = sqlx::query_as(
         "SELECT octet_length(code_hash), extract(epoch FROM expires_at - created_at)::float8 / 3600
@@ -760,7 +736,6 @@ async fn delete_account_cascades_and_clears_cookies(pool: sqlx::PgPool) {
     for table in [
         "users",
         "user_preferences",
-        "user_input_bindings",
         "email_confirmations",
     ] {
         let n: i64 =

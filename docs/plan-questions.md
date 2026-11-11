@@ -224,49 +224,41 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
 
 ## PQ-017 — The forty-cascade drop pass (open)
 
-- **Plan:** Scale tests (5972–5985): forty 300,000-question cascades inside
+- **Plan:** Scale tests (6321–6336): forty 130,000-question cascades inside
   the window, all automatically kept; the pass "brings the base's rows and
-  keys under `ROW_STORAGE_BUDGET` … oldest last-open first", one marked Keep
-  offline "is the one cascade still whole at the end", and the next sync's
-  `question_rows_for` "names only the kept one". Downloads (2291–2296): the
-  pass drops "until the total is under the budget"; Local size (2247–2250):
+  keys under `ROW_STORAGE_BUDGET` … oldest last-open first and no more than
+  needed, the most recently opened still whole". Downloads (2534–2536): the
+  pass drops "until the total is under the budget"; Local size (2491):
   "roughly 100–200 bytes per question per level".
-- **Issue:** Two things. (1) Whether forty cascades exceed 2 GB at all depends
-  on the per-row estimate: with about 56 bytes per measured English key, they
-  are over only when a row counts for more than about 123 bytes. The first
-  estimate, 120, left them under budget, so the pass had nothing to do.
-  (2) A pass that stops once under budget drops about six of the forty, not
-  thirty-nine. So "the one cascade still whole" and "names only the kept one"
-  contradict "until the total is under the budget".
-- **Provisional choice:**
-  - (1) `ROW_BYTES` is 150, the middle of the plan's range
-    (`frontend/src/lib/sync/downloads.ts`).
-  - (2) The pass keeps the plan's rule and stops once under budget. The scale
-    test (`frontend/src/lib/sync/scale-drop.scale.ts`) makes the
-    oldest-opened cascade the one kept by hand. It asserts that cascade is
-    still whole, and that the dropped cascades are exactly the next-oldest
-    ones, just enough to fit under the budget. It also asserts that the
-    sync's `question_rows_for` names exactly the cascades still holding rows,
-    the kept one among them.
+- **Issue:** Whether forty cascades exceed 2 GB at all depends on the per-row
+  estimate: with about 56 bytes per measured English key, they are over only
+  when a row counts for more than about 123 bytes. The first estimate, 120,
+  left them under budget, so the pass had nothing to do.
+- **Provisional choice:** `ROW_BYTES` is 150, the middle of the plan's range
+  (`frontend/src/lib/sync/downloads.ts`). The pass stops once under budget, so
+  it drops only a few of the cascades. The scale test
+  (`frontend/src/lib/sync/scale-drop.scale.ts`) takes "still whole" to mean
+  the most recently opened cascade: it asserts that one is whole, that the
+  dropped cascades are exactly the oldest-opened ones, just enough to fit
+  under the budget, and that the next sync's `question_rows_for` names
+  exactly the cascades still holding rows.
 
-## PQ-018 — The answer-limit journey and the automatic keep (open)
+## PQ-018 — The answer-limit journey and the automatic keep (decided)
 
-- **Plan:** End-to-end tests (5862–5866): "Over the answer limit with two
-  automatic keeps, see the Account page list both with their answer and key
-  sizes, turn one off, and see its answers freed on the next drop pass while
-  its questions still show in the player." Downloads (2204–2214): "never the
-  cards of a cascade the user marked Keep offline"; "An automatic keep by size
-  protects a cascade's rows from the window alone, never its cards".
-- **Issue:** An automatic keep never protects cards, so turning one off
-  changes nothing about eviction. Over the limit, the pass evicts the least
-  recently opened cascade's answers whether or not it is still kept.
-- **Provisional choice:** eviction follows the Downloads rule. The journey
+- **Plan:** End-to-end tests (6196–6200): "Over the answer limit with two
+  automatic keeps, see the least recently opened one's answers freed while its
+  questions still show in the player". Downloads (2464–2465): "An automatic
+  keep by size protects a cascade's rows from the window alone, never its
+  cards".
+- **Issue:** An automatic keep never protects cards, so over the limit the pass
+  evicts the least recently opened cascade's answers whether or not it is kept
+  automatically, and nothing the user does on the Account page changes that.
+- **Choice:** eviction follows the Downloads rule. The journey
   (`e2e/tests/budget.spec.ts`) opens the first cascade before the second and
-  checks the Account page lists both with their answer and key sizes. It then
-  turns off the first one's keep and checks the first one's answers are gone
-  after the next pass while its keys stay. Its question still shows in the
-  player, it reads "Answers need a connection" offline, and it shows download
-  progress again online.
+  checks the first one's answers are gone while its keys stay, and that the
+  Account page lists both with their answer and key sizes. Its question still
+  shows in the player, it reads "Answers need a connection" offline, and it
+  shows download progress again online.
 
 ## PQ-019 — Device scale cases too large to run in minutes (decided)
 

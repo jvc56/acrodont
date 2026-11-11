@@ -1,6 +1,6 @@
 // The download manager (PLAN.md § On the device → Downloads, the budget,
 // eviction and the quota path; § Frontend → lib/sync). After every pull it
-// fetches, for the cascades in the window or kept offline: missing
+// fetches, for the cascades in the window or kept automatically: missing
 // distributions, missing index lists (deepest level first), the graded rows
 // of every pending quiz, then every cascade's question keys, then answers.
 // It drops what has left the window, holds rows and keys under
@@ -114,7 +114,7 @@ export interface DownloadOptions {
 	rowBudget?: number;
 	answerLimit?: number;
 	/** Figures for the Account page's storage line. */
-	onTotals?: (t: { rows: number; keys: number; answer_bytes: number; over_budget_by_user_kept: boolean }) => void;
+	onTotals?: (t: { rows: number; keys: number; answer_bytes: number }) => void;
 }
 
 const isQuota = (e: unknown) => e instanceof DOMException && e.name === 'QuotaExceededError';
@@ -248,10 +248,10 @@ export class DownloadManager {
 		for (const id of wanted) await this.keys(id);
 		for (const id of wanted) await this.cards(id);
 		await this.evict();
-		await this.totals(pol);
+		await this.totals();
 	}
 
-	/** Everything one cascade needs, now: a first open, Keep offline, a restore (§ Downloads). */
+	/** Everything one cascade needs, now: a first open, a restore (§ Downloads). */
 	async ensureCascade(cascadeId: string): Promise<void> {
 		await this.distributionFor(cascadeId);
 		await this.questionRows(cascadeId);
@@ -607,10 +607,10 @@ export class DownloadManager {
 	/**
 	 * Cascades that left the window, then — over ROW_STORAGE_BUDGET, or on the
 	 * quota path — the least recently opened unkept cascades, then the
-	 * automatically kept ones, never a user-kept one, one with pending
-	 * operations, or one with its player open.
+	 * automatically kept ones, never one with pending operations or with its
+	 * player open.
 	 */
-	async dropPass(pol: Policy, o: { force?: boolean } = {}): Promise<{ overByUserKept: boolean }> {
+	async dropPass(pol: Policy, o: { force?: boolean } = {}): Promise<void> {
 		const guard = await this.protectedIds();
 		for (const id of await this.db.getAllKeys('cascades')) {
 			if (!pol.wanted.has(id) && !guard.has(id) && (await this.holdsData(id))) await this.dropCascade(id, false);
@@ -626,7 +626,7 @@ export class DownloadManager {
 		}
 		const over = () => total > this.rowBudget || (o.force === true && total > 0);
 		const byAge = (list: string[]) => list.sort((a, b) => (opens[a] ?? '').localeCompare(opens[b] ?? ''));
-		const tier1 = byAge(ids.filter((id) => !pol.userKept.has(id) && !pol.autoKept.has(id)));
+		const tier1 = byAge(ids.filter((id) => !pol.autoKept.has(id)));
 		const tier2 = byAge(ids.filter((id) => pol.autoKept.has(id)));
 		let dropped = false;
 		for (const id of [...tier1, ...tier2]) {
@@ -636,19 +636,17 @@ export class DownloadManager {
 			total -= size.get(id)!;
 			dropped = true;
 		}
-		return { overByUserKept: total > this.rowBudget };
 	}
 
-	/** Answers above the soft limit, least recently opened first; never a user-kept cascade's or one with pending operations. */
+	/** Answers above the soft limit, least recently opened first; never a cascade's with pending operations. */
 	async evict(o: { force?: boolean } = {}) {
 		const sizes = await getMeta(this.db, 'sizes');
 		const opens = await getMeta(this.db, 'opens');
-		const keep = new Set(await getMeta(this.db, 'keep_offline'));
 		const guard = new Set<string>();
 		for (const e of await this.db.getAll('outbox')) if (e.cascade_id) guard.add(e.cascade_id);
 		let total = Object.values(sizes).reduce((n, s) => n + s.answer_bytes, 0);
 		const candidates = Object.keys(sizes)
-			.filter((id) => sizes[id].answer_bytes > 0 && !keep.has(id) && !guard.has(id))
+			.filter((id) => sizes[id].answer_bytes > 0 && !guard.has(id))
 			.sort((a, b) => (opens[a] ?? '').localeCompare(opens[b] ?? ''));
 		let evicted = false;
 		for (const id of candidates) {
@@ -664,14 +662,12 @@ export class DownloadManager {
 		}
 	}
 
-	private async totals(pol: Policy) {
+	private async totals() {
 		const sizes = await getMeta(this.db, 'sizes');
 		const rows = (await this.db.count('quiz_questions')) * ROW_BYTES;
 		const keys = Object.values(sizes).reduce((n, s) => n + s.key_bytes, 0);
 		const answer_bytes = Object.values(sizes).reduce((n, s) => n + s.answer_bytes, 0);
-		let userKept = 0;
-		for (const id of pol.userKept) userKept += await this.rowBytes(id);
-		this.opts.onTotals?.({ rows, keys, answer_bytes, over_budget_by_user_kept: userKept > this.rowBudget });
+		this.opts.onTotals?.({ rows, keys, answer_bytes });
 	}
 
 	// -------------------------------------------------------------------------

@@ -315,7 +315,9 @@ async fn first_syncs(pool: sqlx::PgPool) {
     let prefs = &pages[0]["changes"]["preferences"];
     assert_eq!(prefs["default_clear_threshold"], 80);
     assert_eq!(prefs["reveal_correct"], true, "a reveal marks a card correct by default");
-    assert!(prefs["bindings"].as_array().is_some_and(|b| !b.is_empty()));
+    for gone in ["bindings", "bindings_changed_at", "bindings_device_id"] {
+        assert!(prefs.get(gone).is_none(), "controls are the device's own, never pulled: {gone}");
+    }
 }
 
 /// "The grades endpoint returns a quiz's graded rows in pages with its attempt

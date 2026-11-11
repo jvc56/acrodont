@@ -1,31 +1,11 @@
-//! `set_preferences` and `set_bindings` validation (PLAN.md § Operations,
-//! § Preferences, § Controls). Every carried value is checked before any write,
-//! so an out-of-range value is `invalid`, never a constraint violation.
-
-use std::collections::HashSet;
+//! `set_preferences` validation (PLAN.md § Operations, § Preferences). Every
+//! carried value is checked before any write, so an out-of-range value is
+//! `invalid`, never a constraint violation.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::cascade::rules::Reason;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
-#[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "input_action", rename_all = "snake_case")]
-pub enum InputAction {
-    ShowNext,
-    ToggleGrade,
-    Previous,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
-#[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "input_kind", rename_all = "snake_case")]
-pub enum InputKind {
-    MouseButton,
-    Wheel,
-    Key,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
@@ -33,22 +13,6 @@ pub enum InputKind {
 pub enum AnswerMode {
     Flashcard,
     Typed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Binding {
-    pub action: InputAction,
-    pub kind: InputKind,
-    pub code: String,
-    #[serde(default)]
-    pub ctrl: bool,
-    #[serde(default)]
-    pub shift: bool,
-    #[serde(default)]
-    pub alt: bool,
-    #[serde(default)]
-    pub meta: bool,
 }
 
 /// The preference fields a `set_preferences` may carry, typed and in range.
@@ -111,76 +75,11 @@ pub fn parse_preferences(fields: &Map<String, Value>, cap: u32) -> Result<Prefer
     Ok(c)
 }
 
-/// The full list: every action has 1–3 bindings, no stroke is used twice, and
-/// every binding is one the schema allows.
-pub fn validate_bindings(v: &Value) -> Result<Vec<Binding>, Reason> {
-    let list: Vec<Binding> = serde_json::from_value(v.clone()).map_err(|_| Reason::Invalid)?;
-    let mut strokes = HashSet::new();
-    for b in &list {
-        let ok = match b.kind {
-            InputKind::MouseButton => matches!(b.code.as_str(), "left" | "middle" | "right" | "back" | "forward"),
-            InputKind::Wheel => matches!(b.code.as_str(), "up" | "down"),
-            InputKind::Key => {
-                (1..=32).contains(&b.code.len())
-                    && b.code.bytes().all(|c| c.is_ascii_alphanumeric())
-                    && b.code != "Escape"
-            }
-        };
-        if !ok {
-            return Err(Reason::Invalid);
-        }
-        if !strokes.insert((b.kind, b.code.clone(), b.ctrl, b.shift, b.alt, b.meta)) {
-            return Err(Reason::Invalid);
-        }
-    }
-    for action in [InputAction::ShowNext, InputAction::ToggleGrade, InputAction::Previous] {
-        let n = list.iter().filter(|b| b.action == action).count();
-        if n == 0 {
-            return Err(Reason::Invalid);
-        }
-    }
-    Ok(list)
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::*;
-
-    fn defaults() -> Value {
-        json!([
-            { "action": "show_next", "kind": "mouse_button", "code": "left" },
-            { "action": "show_next", "kind": "key", "code": "Space" },
-            { "action": "toggle_grade", "kind": "mouse_button", "code": "right" },
-            { "action": "toggle_grade", "kind": "key", "code": "KeyX" },
-            { "action": "previous", "kind": "mouse_button", "code": "middle" },
-            { "action": "previous", "kind": "key", "code": "Backspace" }
-        ])
-    }
-
-    #[test]
-    fn bindings_rules() {
-        assert!(validate_bindings(&defaults()).is_ok());
-        let mut v = defaults();
-        v[1]["code"] = json!("Escape");
-        assert_eq!(validate_bindings(&v), Err(Reason::Invalid));
-        let mut v = defaults();
-        v[0]["code"] = json!("thumb");
-        assert_eq!(validate_bindings(&v), Err(Reason::Invalid));
-        let mut v = defaults();
-        for code in ["up", "down"] {
-            v.as_array_mut().unwrap().push(json!({ "action": "previous", "kind": "wheel", "code": code }));
-        }
-        v.as_array_mut().unwrap().push(json!({ "action": "previous", "kind": "key", "code": "KeyJ" }));
-        assert!(validate_bindings(&v).is_ok(), "an action holds any number of bindings");
-        let mut v = defaults();
-        v[3]["code"] = json!("Space");
-        v[3]["action"] = json!("toggle_grade");
-        assert_eq!(validate_bindings(&v), Err(Reason::Invalid), "a stroke used twice");
-        let v = json!([{ "action": "show_next", "kind": "key", "code": "Space" }]);
-        assert_eq!(validate_bindings(&v), Err(Reason::Invalid), "every action keeps one");
-    }
 
     #[test]
     fn preference_ranges() {

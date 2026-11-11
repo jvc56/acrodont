@@ -13,7 +13,6 @@ import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
 import { DownloadManager, ROW_BYTES, type DownloadApi, wantsHooks } from './downloads';
 import { SyncEngine } from './engine';
-import { setKeepOffline } from './keep';
 import { policy } from './policy';
 import { FakeServer } from './testing/fake-server';
 
@@ -286,24 +285,21 @@ describe('the download manager', () => {
 		expect(await b.db.get('distributions', 'english')).toBeDefined();
 	});
 
-	it('evicts answers least recently opened first, sparing a user-kept cascade and every cascade’s keys and rows', async () => {
+	it('evicts answers least recently opened first, every cascade’s while over the limit, sparing every cascade’s keys and rows', async () => {
 		const server = new FakeServer();
 		for (const [c, q] of [[C1, Q1], [C2, Q2], [C3, Q3]]) server.create({ id: c, source_id: q, count: 4 });
 		const b = await Dev.make(server, { answerLimit: 1 });
 		const t = b.now;
 		b.now = t - 3 * DAY;
-		await b.open(C1); // the oldest, but kept by the user
+		await b.open(C1);
 		b.now = t - 2 * DAY;
 		await b.open(C2);
 		b.now = t - DAY;
 		await b.open(C3);
 		b.now = t;
-		await b.db.put('meta', [C1], 'keep_offline');
 		await b.sync();
-		// The limit (one byte) is still exceeded by the kept cascade alone: C2 and C3 lose theirs.
-		expect(await b.count('cards', C1)).toBe(4);
-		expect(await b.count('cards', C2)).toBe(0);
-		expect(await b.count('cards', C3)).toBe(0);
+		// The limit (one byte) is exceeded by any one cascade's answers: none is exempt.
+		for (const c of [C1, C2, C3]) expect(await b.count('cards', c)).toBe(0);
 		for (const c of [C1, C2, C3]) {
 			expect(await b.count('questions', c)).toBe(4);
 			expect(await b.count('quiz_questions', c)).toBe(4);
@@ -363,24 +359,34 @@ describe('the download manager', () => {
 		expect(await b.count('quiz_questions', C1)).toBe(50);
 	});
 
-	it('the budget takes automatically kept cascades only after every unkept one, and never a user-kept one', async () => {
+	it('the budget takes automatically kept cascades only after every unkept one, and then exempts none', async () => {
 		const server = new FakeServer();
 		server.create({ id: C1, source_id: Q1, count: 20 });
 		server.create({ id: C2, source_id: Q2, count: 20 });
 		server.create({ id: C3, source_id: Q3, count: 20 });
 		const b = await Dev.make(server);
-		for (const c of [C1, C2, C3]) await b.open(C1 === c ? c : c);
+		// C1 is the least recently opened, but the unkept ones go first anyway.
+		const t = b.now;
+		b.now = t - 2 * DAY;
+		await b.open(C1);
+		b.now = t;
+		for (const c of [C2, C3]) await b.open(c);
 		await b.sync();
-		await b.db.put('meta', [C3], 'keep_offline');
 		const pol = await policy(b.db, new Date(b.now));
 		pol.autoKept.add(C1);
-		pol.userKept.add(C3);
-		(b.dl as unknown as { rowBudget: number }).rowBudget = 1;
-		const r = await b.dl.dropPass(pol);
+		// A budget that holds C1 alone: both unkept cascades go, the automatic keep stays.
+		const sizes = await getMeta(b.db, 'sizes');
+		const budget = b.dl as unknown as { rowBudget: number };
+		budget.rowBudget = 20 * ROW_BYTES + sizes[C1].key_bytes;
+		await b.dl.dropPass(pol);
 		expect(await b.count('quiz_questions', C2)).toBe(0);
+		expect(await b.count('quiz_questions', C3)).toBe(0);
+		expect(await b.count('quiz_questions', C1)).toBe(20);
+		// Still over with nothing unkept left: the automatic keep goes too.
+		budget.rowBudget = 1;
+		await b.dl.dropPass(pol);
 		expect(await b.count('quiz_questions', C1)).toBe(0);
-		expect(await b.count('quiz_questions', C3)).toBe(20);
-		expect(r.overByUserKept).toBe(true);
+		expect((await getMeta(b.db, 'budget_dropped')).sort()).toEqual([C1, C2, C3]);
 	});
 
 	// PLAN.md § Downloads: "A budget drop is remembered, or it would undo itself" —
@@ -544,24 +550,5 @@ describe('the download manager', () => {
 		expect((await b.rows(l2)).every((r) => r.position !== null)).toBe(true);
 		expect((await b.quizRow(l2))!.pending).toBeUndefined();
 		void writeMeta;
-	});
-
-	it('Keep offline on a budget-dropped cascade clears the mark and fetches it whole without an open player; off lets the window drop it', async () => {
-		const server = new FakeServer();
-		server.create({ id: C1, source_id: Q1, count: 5 });
-		const b = await Dev.make(server);
-		await b.sync();
-		await b.db.put('meta', [C1], 'budget_dropped');
-		await setKeepOffline(b.db, C1, true, b.dl, new Date(b.now));
-		expect(await getMeta(b.db, 'budget_dropped')).toEqual([]);
-		expect(await b.count('quiz_questions', C1)).toBe(5);
-		expect(await b.count('cards', C1)).toBe(5);
-		// Kept: the drop pass leaves it however old its last open.
-		b.now += 30 * DAY;
-		await b.dl.run();
-		expect(await b.count('cards', C1)).toBe(5);
-		await setKeepOffline(b.db, C1, false, b.dl, new Date(b.now));
-		expect(await b.count('quiz_questions', C1)).toBe(0);
-		expect(await getMeta(b.db, 'auto_keep_optout')).toEqual([C1]);
 	});
 });

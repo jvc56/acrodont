@@ -1,7 +1,6 @@
 <script lang="ts">
 	// The cascade builder (PLAN.md § Creating a cascade), laid out like
 	// Zyzzyva's Search tab. Needs a connection: searching runs on the server.
-	import InfoTip from '$lib/components/InfoTip.svelte';
 	import { INFO } from '$lib/settings-info';
 	import { confirmAction } from '$lib/confirm.svelte';
 	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
@@ -14,6 +13,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import FilterGroup from '$lib/components/builder/FilterGroup.svelte';
 	import QuizOptionsForm from '$lib/components/QuizOptionsForm.svelte';
+	import SettingRow from '$lib/components/SettingRow.svelte';
 	import TileText from '$lib/components/TileText.svelte';
 	import { api, ApiError } from '$lib/api';
 	import { session } from '$lib/auth/session.svelte';
@@ -365,25 +365,16 @@
 
 	<Card.Root>
 		<Card.Content class="grid gap-4 pt-6">
-			<div class="grid max-w-xs gap-1">
-				<div class="flex items-center gap-1.5">
-					<Label for="threshold">Clear threshold (%)</Label>
-					<InfoTip text={INFO.clear_threshold} />
-				</div>
-				<Input id="threshold" type="number" min="1" max="100" bind:value={threshold} />
-				<p class="text-xs text-muted-foreground">Score at least this much on a quiz to clear it.</p>
-			</div>
+			<SettingRow label="Clear threshold (%)" info={INFO.clear_threshold} for="threshold" hint="Score at least this much on a quiz to clear it.">
+				<Input id="threshold" class="h-8 w-24" type="number" min="1" max="100" bind:value={threshold} />
+			</SettingRow>
 			{#if quizType === 'anagram'}
-				<div class="grid max-w-xs gap-1">
-					<div class="flex items-center gap-1.5">
-						<Label for="answer-mode">Answer mode</Label>
-						<InfoTip text={INFO.answer_mode} />
-					</div>
+				<SettingRow label="Answer mode" info={INFO.answer_mode} for="answer-mode">
 					<select id="answer-mode" class="rounded border bg-background px-2 py-1" bind:value={answerMode}>
 						<option value="flashcard">Flashcard</option>
 						<option value="typed">Typed</option>
 					</select>
-				</div>
+				</SettingRow>
 			{/if}
 			<QuizOptionsForm
 				bind:options

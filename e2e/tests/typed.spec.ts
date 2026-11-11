@@ -51,11 +51,24 @@ test('typed mode', async ({ page }) => {
 	const box = (await page.getByLabel('Type an answer').boundingBox())!;
 	expect(box.y).toBeGreaterThan(page.viewportSize()!.height * 0.6);
 
-	// A wrong entry, then Enter on an empty input reveals: missed.
+	// A word that is not an anagram of the question is rejected and left in the input to fix.
+	await type(page, 'RETAINX');
+	await expect(page.getByText('Not an anagram of the question')).toBeVisible();
+	await expect(page.getByLabel('Type an answer')).toHaveValue('RETAINX');
+	await expect(page.getByLabel('Type an answer')).not.toHaveAttribute('data-wrong');
+	// An anagram that is not an answer is wrong: the input turns red, and the word is never shown.
 	await type(page, 'EINARST');
-	await expect(page.getByText('EINARST')).toBeVisible();
+	await expect(page.getByLabel('Type an answer')).toHaveAttribute('data-wrong', 'true');
+	await expect(page.getByLabel('Type an answer')).toHaveValue('');
+	await expect(page.getByText('EINARST')).toHaveCount(0);
+	// Typing again clears the red.
+	await page.getByLabel('Type an answer').pressSequentially('R');
+	await expect(page.getByLabel('Type an answer')).not.toHaveAttribute('data-wrong');
+	await page.getByLabel('Type an answer').fill('');
+	// Enter on an empty input reveals: missed, still without the wrong word.
 	await type(page, '');
 	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
+	await expect(page.getByText('EINARST')).toHaveCount(0);
 	await next(page, false);
 
 	// A found word shows in the answer space, bare: no hooks, inner hooks or definitions until the reveal.
@@ -64,12 +77,12 @@ test('typed mode', async ({ page }) => {
 	await expect(typing.getByRole('listitem')).toHaveCount(1);
 	await expect(typing.getByRole('listitem')).toHaveText(/^\W*RETAINS\W*$/);
 	await expect(page.locator('[data-answer]')).toHaveCount(1);
-	// A repeated entry is ignored; two words on one line stay in the input.
+	// A repeated entry is ignored; two words on one line are not an anagram, and stay in the input.
 	await type(page, 'RETAINS');
 	await expect(page.getByText('Already entered')).toBeVisible();
 	await page.getByLabel('Type an answer').fill('RETAINS NASTIER');
 	await page.getByLabel('Type an answer').press('Enter');
-	await expect(page.getByText('Type one word at a time')).toBeVisible();
+	await expect(page.getByText('Not an anagram of the question')).toBeVisible();
 	await expect(page.getByLabel('Type an answer')).toHaveValue('RETAINS NASTIER');
 	// Every anagram found: the card waits for Enter on an empty input, then is correct.
 	for (const w of AEINRST_WORDS.filter((w) => w !== 'RETAINS')) await type(page, w);

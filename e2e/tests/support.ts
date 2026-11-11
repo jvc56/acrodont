@@ -141,11 +141,11 @@ export const AEINRST_WORDS = ['ANESTRI', 'ANTSIER', 'NASTIER', 'RATINES', 'RETAI
 
 /** Sets a preference in the player's settings menu. */
 /**
- * Hooks and definitions off, from the Account page: they are on by default, and
+ * Hooks and definitions off, from the Preferences page: they are on by default, and
  * the journeys sized in answer bytes were measured on answers without them.
  */
 export async function plainAnswers(page: Page) {
-	await page.goto('/account');
+	await page.goto('/preferences');
 	for (const label of ['Show definitions with anagrams', 'Show hooks with anagrams']) {
 		await page.getByLabel(label).uncheck();
 		await expect(page.getByLabel(label)).not.toBeChecked();

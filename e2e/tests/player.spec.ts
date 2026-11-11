@@ -97,12 +97,14 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await expect(menu.getByRole('button', { name: 'Levels' })).toHaveCount(0);
 	await menu.getByRole('button', { name: 'Preferences' }).click();
 	const prefs = page.getByRole('dialog', { name: 'Preferences' });
-	for (const name of ['This cascade', 'Every cascade', 'Defaults for new cascades', 'This device']) {
+	for (const name of ['This cascade', 'Every cascade', 'This device']) {
 		await expect(prefs.getByRole('region', { name })).toBeVisible();
 	}
+	// The defaults for new cascades are on the Preferences page, not here.
+	await expect(prefs.getByLabel('Default clear threshold (%)')).toHaveCount(0);
+	await expect(prefs.getByRole('link', { name: 'Preferences page' })).toBeVisible();
 	const levels = prefs.getByRole('region', { name: 'This cascade' });
-	await expect(levels.getByText('Your other cascades keep their own.')).toBeVisible();
-	await expect(prefs.getByRole('region', { name: 'Defaults for new cascades' }).getByText(/prefilled with these when you build it/)).toBeVisible();
+	await expect(levels.getByText(/Your other cascades keep their own/)).toBeVisible();
 	await expect(prefs.getByRole('region', { name: 'This device' }).getByText(/not synced/)).toBeVisible();
 	await expect(levels.getByRole('table', { name: 'Ladder' })).toBeVisible();
 	await expect(levels.getByRole('columnheader')).toHaveText(['Level', 'Questions', 'Pass', 'Last pass', 'Status', 'Actions']);
@@ -115,8 +117,9 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await threshold.fill('55');
 	await threshold.press('Tab');
 	await expect(levels.getByText(/at least\s+55%\s+correct/)).toBeVisible();
-	// The account's default is apart from it, and unchanged.
-	await expect(prefs.getByRole('region', { name: 'Defaults for new cascades' }).getByLabel('Default clear threshold (%)')).toHaveValue('80');
+	// Saved for this cascade alone, with the offer to use it for new cascades too, which is not taken here.
+	await expect(levels.getByText('✓ Saved for this cascade')).toBeVisible();
+	await expect(levels.getByRole('button', { name: 'new cascades' })).toBeVisible();
 	await prefs.getByRole('button', { name: 'Close' }).click();
 	await expect(prefs).toHaveCount(0);
 	// It syncs to another device.

@@ -287,7 +287,7 @@ export class FakeServer {
 
 	private applyOp(w: Record<string, unknown>, device: string, seq: number): Partial<SyncResult> {
 		const type = w.type as string;
-		if (type === 'set_preferences' || type === 'set_bindings') {
+		if (type === 'set_preferences') {
 			const seen = w.seen_seq as number;
 			if (this.prefsDevice !== device && this.prefsSeq > seen && !((w.at as string) > this.prefsAt)) {
 				throw new Rejected('stale');
@@ -470,10 +470,7 @@ export class FakeServer {
 					),
 					changed_at: this.prefsAt,
 					changed_by_device_id: this.prefsDevice || null,
-					bindings_changed_at: T0,
-					bindings_device_id: null,
-					updated_seq: String(this.prefsSeq),
-					bindings: []
+					updated_seq: String(this.prefsSeq)
 				};
 			} else {
 				(changes[it.table] as WireRow[]).push(it.row);

@@ -1,16 +1,13 @@
-// PLAN.md § Scale tests: "Let a 130,000-question cascade leave the download
-// window with the automatic Keep offline turned off, and assert the drop pass
-// finishes within budget and the base holds only its cascade, quiz and
-// attempt rows. Run the same pass on forty such cascades all inside the
-// window, every one of them over AUTO_KEEP_ROWS and so automatically kept,
-// and assert it brings the base's rows and keys under ROW_STORAGE_BUDGET
-// within budget, oldest last-open first … Mark one of the forty Keep offline
-// by hand and assert it is the one cascade still whole at the end. Then run
-// one more pull and assert that nothing is refetched … Run the same case on
-// a cascade that also holds five cleared 150,000-question levels inside the
-// window, asserting the row count before the pass counts them and the pass
-// removes them too." See PQ-017 for what "still whole" and "only the kept
-// one" are taken to mean.
+// PLAN.md § Scale tests: the drop pass on a 130,000-question cascade, which
+// is over AUTO_KEEP_OFFLINE_ROWS and so kept automatically once opened (it
+// never leaves the window by age), dropped whole by the quota path, the base
+// left holding only its cascade, quiz and attempt rows. Then the pass on many
+// such cascades all inside the window, every one automatically kept: it
+// brings the base's rows and keys under ROW_STORAGE_BUDGET within budget,
+// oldest last-open first and no more than needed, the newest still whole, and
+// one more pull refetches nothing. The heavy cascade also holds five cleared
+// levels inside the window: the row count before the pass counts them and the
+// pass removes them too. See PQ-017 for what "still whole" is taken to mean.
 //
 // The single cascade runs at the plan's size. The many-cascade case runs as
 // many cascades as an account may hold (MAX_CASCADES_PER_USER, 20) against
@@ -28,7 +25,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { getMeta } from '$lib/local/meta';
 import { ROW_STORAGE_BUDGET, AUTO_KEEP_OFFLINE_ROWS } from './config';
 import { ROW_BYTES } from './downloads';
-import { setKeepOffline } from './keep';
 import { policy } from './policy';
 import { FakeServer } from './testing/fake-server';
 import { DAY, ids, QUESTIONS, report, ScaleDev, ServerPlayer, timed } from './testing/scale';
@@ -56,7 +52,7 @@ async function total(d: ScaleDev) {
 }
 
 describe('the drop pass at 130,000 questions', () => {
-	it('drops a cascade that left the window, leaving its cascade, quiz and attempt rows', async () => {
+	it('the quota path drops an automatically kept cascade, leaving its cascade, quiz and attempt rows', async () => {
 		const server = new FakeServer();
 		const { cascade, source } = ids(1);
 		server.create({ id: cascade, source_id: source, count: QUESTIONS });
@@ -64,14 +60,16 @@ describe('the drop pass at 130,000 questions', () => {
 		await d.open(cascade);
 		await d.sync();
 		expect(await d.countFor('quiz_questions', cascade)).toBe(QUESTIONS);
-		// The automatic keep turned off, and fifteen days on.
-		await setKeepOffline(d.db, cascade, false, null, new Date(d.now));
+		// Fifteen days on it is still wanted: kept automatically for its size.
 		d.now += 15 * DAY;
-		const [, ms] = await timed(async () => d.dl.dropPass(await policy(d.db, new Date(d.now))));
-		report('drop pass, one cascade out of the window', ms, ONE_DROP_BUDGET_MS, `${QUESTIONS} rows, keys and answers`);
+		const pol = await policy(d.db, new Date(d.now));
+		expect(pol.autoKept.has(cascade) && pol.wanted.has(cascade)).toBe(true);
+		const [, ms] = await timed(async () => d.dl.dropPass(pol, { force: true }));
+		report('drop pass, one automatically kept cascade on the quota path', ms, ONE_DROP_BUDGET_MS, `${QUESTIONS} rows, keys and answers`);
 		for (const s of ['quiz_questions', 'questions', 'cards'] as const) expect(await d.countFor(s, cascade)).toBe(0);
 		expect(await d.db.get('cascades', cascade)).toBeDefined();
 		expect(await d.db.get('quizzes', source)).toBeDefined();
+		expect(await getMeta(d.db, 'budget_dropped')).toEqual([cascade]);
 		expect(ms).toBeLessThanOrEqual(ONE_DROP_BUDGET_MS);
 	});
 
@@ -83,13 +81,12 @@ describe('the drop pass at 130,000 questions', () => {
 		// Answers are beside the point here, and twenty cascades' would pass the soft limit.
 		d.refuse = (c) => c.kind === 'cards';
 		const t0 = d.now;
-		// Opened an hour apart, the first oldest; the first is also kept by hand.
+		// Opened an hour apart, the first oldest.
 		for (let i = 0; i < MANY; i++) {
 			d.now = t0 - (MANY - i) * HOUR;
 			await d.open(all[i].cascade);
 		}
 		d.now = t0;
-		await setKeepOffline(d.db, all[0].cascade, true, null, new Date(t0 - MANY * HOUR));
 		await d.engine.sync();
 
 		// The second-oldest also holds five cleared 150,000-question levels.
@@ -108,7 +105,7 @@ describe('the drop pass at 130,000 questions', () => {
 		// Everything downloaded: every cascade's rows and keys.
 		await d.dl.run().catch(() => undefined);
 		const pol = await policy(d.db, new Date(d.now));
-		expect(pol.autoKept.size).toBe(MANY - 1);
+		expect(pol.autoKept.size).toBe(MANY);
 		for (const { cascade } of all) expect(await d.countFor('questions', cascade)).toBe(SIZE);
 		const heavyRows = await d.countFor('quiz_questions', heavy.cascade);
 		expect(heavyRows).toBe(SIZE + CLEARED_LEVELS * (SIZE / 2));
@@ -125,13 +122,15 @@ describe('the drop pass at 130,000 questions', () => {
 		const after = await total(d);
 		report('drop pass, twenty cascades', ms, MANY_DROP_BUDGET_MS, `${dropped.length} dropped, ${(after / 2 ** 30).toFixed(2)} GiB left`);
 		expect(after).toBeLessThanOrEqual(ROW_STORAGE_BUDGET);
-		// Oldest last-open first, skipping the one kept by hand, and no more than needed:
-		// the heavy one, then the next-oldest, until under budget.
-		expect(dropped).toEqual(all.slice(1, 1 + dropped.length).map((x) => x.cascade));
+		// Oldest last-open first, none exempt, and no more than needed:
+		// the oldest, then the heavy one, then the next-oldest, until under budget.
+		expect(dropped).toEqual(all.slice(0, dropped.length).map((x) => x.cascade));
 		expect(after + sizeOf.get(dropped.at(-1)!)!).toBeGreaterThan(ROW_STORAGE_BUDGET);
-		// The hand-kept cascade, the oldest opened, is whole.
-		expect(await d.countFor('quiz_questions', all[0].cascade)).toBe(SIZE);
-		expect(await d.countFor('questions', all[0].cascade)).toBe(SIZE);
+		// The newest opened is whole.
+		const newest = all[MANY - 1].cascade;
+		expect(dropped).not.toContain(newest);
+		expect(await d.countFor('quiz_questions', newest)).toBe(SIZE);
+		expect(await d.countFor('questions', newest)).toBe(SIZE);
 		// The cleared levels went with their cascade.
 		expect(await d.countFor('quiz_questions', heavy.cascade)).toBe(0);
 		expect(ms).toBeLessThanOrEqual(MANY_DROP_BUDGET_MS);
@@ -144,7 +143,7 @@ describe('the drop pass at 130,000 questions', () => {
 		for (const { cascade } of all) if ((await d.countFor('quiz_questions', cascade)) > 0) holding.push(cascade);
 		expect(d.calls.filter((c) => dropped.includes(c.cascade))).toEqual([]);
 		expect(d.requests[before].question_rows_for).toEqual([...holding].sort());
-		expect(holding).toContain(all[0].cascade);
+		expect(holding).toEqual(all.slice(dropped.length).map((x) => x.cascade));
 		for (const id of dropped) expect(holding).not.toContain(id);
 		expect(await getMeta(d.db, 'budget_dropped')).toEqual(dropped);
 		expect(await total(d)).toBeLessThanOrEqual(ROW_STORAGE_BUDGET);

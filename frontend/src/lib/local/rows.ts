@@ -130,16 +130,6 @@ export interface CardRow {
 	word?: WordHooks;
 }
 
-export interface Binding {
-	action: 'show_next' | 'toggle_grade' | 'previous';
-	kind: 'key' | 'mouse_button' | 'wheel';
-	code: string;
-	ctrl: boolean;
-	shift: boolean;
-	alt: boolean;
-	meta: boolean;
-}
-
 export type AnswerMode = 'flashcard' | 'typed';
 
 export interface PreferencesRow {
@@ -156,10 +146,7 @@ export interface PreferencesRow {
 	reveal_correct?: boolean;
 	changed_at: string;
 	changed_by_device_id: string | null;
-	bindings_changed_at: string;
-	bindings_device_id: string | null;
 	updated_seq: number;
-	bindings: Binding[];
 }
 
 export interface DistributionRow {
@@ -170,7 +157,7 @@ export interface DistributionRow {
 /** An outbox entry: the operation as sent, and what the device needs to find it. */
 export interface OutboxEntry {
 	device_seq: number;
-	/** The cascade it touches; absent for preferences and bindings. */
+	/** The cascade it touches; absent for preferences. */
 	cascade_id?: string;
 	/** Set on a `move_cursor` only, so a newer one finds the pending one. */
 	cursor_quiz?: string;
@@ -224,16 +211,7 @@ export function attemptFromWire(w: Wire, cascadeId: string, seq: number): Attemp
 }
 
 export function preferencesFromWire(w: Wire): PreferencesRow {
-	const bindings = ((w.bindings as Wire[]) ?? []).map((b) => ({
-		action: b.action,
-		kind: b.kind,
-		code: b.code,
-		ctrl: b.ctrl,
-		shift: b.shift,
-		alt: b.alt,
-		meta: b.meta
-	})) as Binding[];
-	return { ...(w as unknown as PreferencesRow), updated_seq: num(w.updated_seq), bindings };
+	return { ...(w as unknown as PreferencesRow), updated_seq: num(w.updated_seq) };
 }
 
 /** Operations that create, reset or restore a quiz: never on the rebase's fast path. */

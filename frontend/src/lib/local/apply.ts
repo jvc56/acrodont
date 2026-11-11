@@ -91,8 +91,7 @@ export type NewOp =
 			progression?: Progression;
 			require_alphabetical?: boolean;
 	  }
-	| { type: 'set_preferences'; [field: string]: unknown }
-	| { type: 'set_bindings'; bindings: unknown[] };
+	| { type: 'set_preferences'; [field: string]: unknown };
 
 export const APPLY_STORES: StoreName[] = [...view.VIEW_STORES, 'meta', 'outbox'];
 
@@ -516,7 +515,6 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 			return { cascade_id: c.id };
 		}
 		case 'set_preferences':
-		case 'set_bindings':
 			// No overlay rows: the preferences view is the base row with the
 			// pending operations' fields laid over it (see `preferencesView`).
 			return {};

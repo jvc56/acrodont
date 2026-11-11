@@ -15,7 +15,7 @@ export const DOWNLOAD_WINDOW_DAYS = 14;
 export const ANSWER_STORAGE_SOFT_LIMIT_BYTES = TEST.ANSWER_STORAGE_SOFT_LIMIT_BYTES ?? 500 * 1024 * 1024;
 /** Rows and question keys, measured. */
 export const ROW_STORAGE_BUDGET = TEST.ROW_STORAGE_BUDGET ?? 2 * 1024 * 1024 * 1024;
-/** A cascade this large is kept offline automatically once opened. */
+/** A cascade this large, once opened here, is kept downloaded past DOWNLOAD_WINDOW_DAYS (the budget drops it only after every smaller one). */
 export const AUTO_KEEP_OFFLINE_ROWS = TEST.AUTO_KEEP_OFFLINE_ROWS ?? 50_000;
 export const SYNC_INTERVAL_MS = 30_000;
 export const PREVIEW_DEBOUNCE_MS = 400;

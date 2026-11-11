@@ -127,7 +127,7 @@ test('export: counts, offline files, the definitions fallback, and one file thro
 	await newUser(page, 'exp');
 	// Definitions are on by default: off before the cascade downloads, so its
 	// cards never hold them and the definitions fallback below has a cause.
-	await page.goto('/account');
+	await page.goto('/preferences');
 	await page.getByLabel('Show definitions with anagrams').uncheck();
 	await expect(page.getByLabel('Show definitions with anagrams')).not.toBeChecked();
 	const player = await createCascade(page, { name: 'Export journey' });

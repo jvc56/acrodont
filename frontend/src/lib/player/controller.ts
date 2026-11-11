@@ -35,7 +35,7 @@ export interface Card {
 	saved: Grade | null;
 	/** Typed mode on this card; null in flashcard mode or when falling back. */
 	typed: TypedState | null;
-	/** The last typed entry's note: already entered, one word at a time, out of order. */
+	/** The last typed entry's note: already entered, not an anagram of the question, out of order. */
 	note: string | null;
 }
 
@@ -752,7 +752,7 @@ export class Player {
 			card.typed,
 			text,
 			words,
-			this.dist.parseMagpie(card.key, true).length,
+			this.dist.parseMagpie(card.key, true),
 			this.dist,
 			this.v.quiz!.require_alphabetical
 		);
@@ -762,7 +762,7 @@ export class Player {
 		}
 		const notes: Record<string, string> = {
 			already: 'Already entered',
-			one_word: 'Type one word at a time',
+			not_anagram: 'Not an anagram of the question',
 			out_of_order: 'Out of order'
 		};
 		this.v.card = { ...card, typed: state, note: notes[result.kind] ?? null };

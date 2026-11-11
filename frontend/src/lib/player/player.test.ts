@@ -15,9 +15,10 @@ import { defaultPreferences } from '$lib/local/preferences';
 import type { PreferencesRow } from '$lib/local/rows';
 import { questionsHash } from '$lib/cascade/order';
 import { AHEAD, AHEAD_LOW, Player } from './controller';
-import { bind, inputOwns, actionFor, Debounce } from './bindings';
-import { DEFAULT_BINDINGS } from '$lib/local/preferences';
+import { bind, inputOwns, actionFor, Debounce, DEFAULT_BINDINGS, normalizeBindings } from './bindings';
 import { finishBanner } from './banner';
+import { emptyTyped, isAnagramOf, submitTyped, typedGrade } from './typed';
+import { Distribution } from '$lib/tiles';
 
 const C = 'c1000000-0000-4000-8000-000000000000';
 const Q = 'a1000000-0000-4000-8000-000000000000';
@@ -362,21 +363,46 @@ describe('the player', () => {
 		expect((await db.getAll('outbox'))[0].op.grade).toBe('missed');
 	});
 
-	it('typed mode: found, already entered, one word at a time, wrong; all found waits for Enter', async () => {
+	it('typed mode: found, already entered, not an anagram; all found waits for Enter', async () => {
 		await cascade(2);
 		await makeTyped();
 		const p = player();
 		await p.load();
 		expect((await p.enter('ab'))!.kind).toBe('found');
 		expect((await p.enter('AB'))!.kind).toBe('already');
-		expect((await p.enter('ABAB'))!.kind).toBe('one_word');
-		expect((await p.enter('AA'))!.kind).toBe('wrong');
+		// Not the question's tiles: rejected, with a note, and no effect on the grade.
+		expect((await p.enter('ABAB'))!.kind).toBe('not_anagram');
+		expect(p.v.card!.note).toBe('Not an anagram of the question');
+		expect((await p.enter('AA'))!.kind).toBe('not_anagram');
+		expect((await p.enter('XY'))!.kind).toBe('not_anagram');
+		expect((await p.enter('A1'))!.kind).toBe('not_anagram');
 		expect((await p.enter('BA'))!.kind).toBe('found');
 		// Every answer found, but the card waits: the user may have more to try.
 		expect(p.v.card!.revealed).toBe(false);
-		expect((await p.enter('XY'))!.kind).toBe('wrong');
 		expect((await p.enter(''))!.kind).toBe('empty');
-		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'missed']);
+		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'correct']);
+	});
+
+	it('typed entries: only an anagram of the question can be wrong', () => {
+		const tiles = [{ letter: '?', blank_letter: '?', count: 2, value: 0, is_vowel: false }];
+		for (const L of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') tiles.push({ letter: L, blank_letter: L.toLowerCase(), count: 2, value: 1, is_vowel: 'AEIOU'.includes(L) });
+		const dist = new Distribution('english', tiles);
+		const abc = dist.parseMagpie('ABC', true);
+		const submit = (text: string, question = abc, answers = ['CAB']) => submitTyped(emptyTyped(), text, answers, question, dist, false);
+		// ABC: AB and ABD are not anagrams, so they are rejected; BCA is one, and not a word, so it is wrong.
+		expect(submit('AB').result.kind).toBe('not_anagram');
+		expect(submit('ABD').result.kind).toBe('not_anagram');
+		expect(submit('ABCC').result.kind).toBe('not_anagram');
+		expect(submit('AB').state.wrong).toEqual([]);
+		const bca = submit('bca');
+		expect(bca.result.kind).toBe('wrong');
+		expect(typedGrade(bca.state, ['CAB'])).toBe('missed');
+		expect(submit('CAB').result.kind).toBe('found');
+		// A blank stands for any one tile: AB? takes ABD, and not AXY.
+		const blank = dist.parseMagpie('AB?', true);
+		expect(isAnagramOf(dist.parseTyped('DAB', false), blank)).toBe(true);
+		expect(isAnagramOf(dist.parseTyped('AXY', false), blank)).toBe(false);
+		expect(submit('BAD', blank, ['ABS']).result.kind).toBe('wrong');
 	});
 
 	it('typed mode, every answer found and nothing wrong: Enter on an empty input reveals it correct', async () => {

@@ -64,7 +64,7 @@ pub struct IncomingOp {
     pub body: Value,
 }
 
-pub const OP_TYPES: [&str; 13] = [
+pub const OP_TYPES: [&str; 12] = [
     "grade",
     "move_cursor",
     "finish",
@@ -75,7 +75,6 @@ pub const OP_TYPES: [&str; 13] = [
     "purge_quiz",
     "purge_cascade",
     "set_preferences",
-    "set_bindings",
     "set_cascade_options",
     "set_quiz_options",
 ];

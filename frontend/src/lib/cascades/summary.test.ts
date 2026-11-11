@@ -1,5 +1,5 @@
 // PLAN.md § Unit tests → Frontend: the Cascades page showing Available
-// offline, not the download label, for a kept cascade outside the window; a
+// offline, not the download label, for a cascade opened inside the window; a
 // quiz cleared offline and a cascade trashed offline getting provisional
 // entries that read "purges 30 days after this syncs", the trashed cascade
 // still listed in the Trash while gone from the Cascades page, and the
@@ -15,13 +15,11 @@ import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
 import { DownloadManager, type DownloadApi } from '$lib/sync/downloads';
 import { SyncEngine } from '$lib/sync/engine';
-import { setKeepOffline } from '$lib/sync/keep';
 import { FakeServer } from '$lib/sync/testing/fake-server';
 import { cascadeSummaries, ladderText, optionsSummary, trashGroups } from './summary';
 
 const C = 'c1000000-0000-4000-8000-000000000000';
 const Q = 'a1000000-0000-4000-8000-000000000000';
-const DAY = 86_400_000;
 
 async function device(server: FakeServer, clock: () => Date) {
 	globalThis.indexedDB = new IDBFactory();
@@ -58,19 +56,19 @@ describe('the Cascades and Trash pages', () => {
 		expect(optionsSummary({ segment_size: 0, progression: 'ladder', require_alphabetical: false })).toBe('');
 	});
 
-	it('show Available offline, not the download label, for a kept cascade outside the window', async () => {
+	it('show Available offline, not the download label, for a cascade opened inside the window', async () => {
 		const server = new FakeServer();
 		server.create({ id: C, source_id: Q, count: 4 });
-		let now = Date.now();
+		const now = Date.now();
 		const { db, engine, dl } = await device(server, () => new Date(now));
 		await engine.sync();
 		expect((await cascadeSummaries(db, true))[0].offline).toBe('not_downloaded');
-		await setKeepOffline(db, C, true, dl, new Date(now));
-		now += 30 * DAY;
+		const tx = db.transaction(['meta'], 'readwrite');
+		await recordOpen(tx as unknown as RwTx, C, new Date(now).toISOString());
+		await tx.done;
 		await dl.run();
 		const [s] = await cascadeSummaries(db, true);
 		expect(s.offline).toBe('available');
-		expect(s.keptByUser).toBe(true);
 		expect(ladderText(s.levels)).toBe('L1 · 4 (0/4 done, 0.00%)');
 	});
 

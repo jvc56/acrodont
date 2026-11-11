@@ -276,8 +276,8 @@ async fn insert_confirmation(
     Ok(())
 }
 
-/// The user, its preferences row stamped with the account's first sync
-/// sequence, and the default bindings, in one transaction.
+/// The user and its preferences row stamped with the account's first sync
+/// sequence, in one transaction.
 async fn create_user(
     tx: &mut sqlx::PgConnection,
     username: &str,
@@ -297,25 +297,6 @@ async fn create_user(
         "INSERT INTO user_preferences (user_id, updated_seq) VALUES ($1, $2)",
         user.id,
         user.sync_seq,
-    )
-    .execute(&mut *tx)
-    .await?;
-    // Show / Next: left click, Space, comma or Enter. Toggle grade: right
-    // click, X or M. Previous: middle click, Backspace or J (PLAN.md §
-    // Preferences). An action can hold any number more.
-    sqlx::query!(
-        "INSERT INTO user_input_bindings (user_id, action, slot, kind, code) VALUES
-            ($1, 'show_next',    0, 'mouse_button', 'left'),
-            ($1, 'show_next',    1, 'key',          'Space'),
-            ($1, 'show_next',    2, 'key',          'Comma'),
-            ($1, 'show_next',    3, 'key',          'Enter'),
-            ($1, 'toggle_grade', 0, 'mouse_button', 'right'),
-            ($1, 'toggle_grade', 1, 'key',          'KeyX'),
-            ($1, 'toggle_grade', 2, 'key',          'KeyM'),
-            ($1, 'previous',     0, 'mouse_button', 'middle'),
-            ($1, 'previous',     1, 'key',          'Backspace'),
-            ($1, 'previous',     2, 'key',          'KeyJ')",
-        user.id,
     )
     .execute(&mut *tx)
     .await?;

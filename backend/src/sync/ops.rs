@@ -7,7 +7,7 @@ use serde_json::Value;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use super::prefs::{self, InputAction, InputKind};
+use super::prefs;
 use super::{Effects, IncomingOp};
 use crate::cascade::order::{from_i64, questions_hash, shuffle, to_i64};
 use crate::cascade::rows::{Origin, Progression, QuizStatus};
@@ -308,7 +308,6 @@ pub async fn apply(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpRes
         "set_cascade_options" => set_cascade_options(conn, ctx, op).await,
         "set_quiz_options" => set_quiz_options(conn, ctx, op).await,
         "set_preferences" => set_preferences(conn, ctx, op).await,
-        "set_bindings" => set_bindings(conn, ctx, op).await,
         _ => Err(OpError::Rejected(Reason::Invalid)),
     }
 }
@@ -904,53 +903,6 @@ async fn set_preferences(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) ->
         ctx.device,
         ctx.seq,
         p.reveal_correct,
-    )
-    .execute(conn)
-    .await?;
-    Ok(Effects::default())
-}
-
-async fn set_bindings(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult {
-    let at = at_of(op)?;
-    let list = prefs::validate_bindings(field(op, "bindings")?)?;
-    let row = sqlx::query!(
-        "SELECT bindings_changed_at, bindings_device_id, updated_seq FROM user_preferences WHERE user_id = $1 FOR UPDATE",
-        ctx.user
-    )
-    .fetch_one(&mut *conn)
-    .await?;
-    let at = clamp(ctx, at);
-    let wins = row.bindings_device_id == Some(ctx.device) || row.updated_seq <= op.seen_seq || at > row.bindings_changed_at;
-    if !wins {
-        return Err(OpError::Rejected(Reason::Stale));
-    }
-    sqlx::query!("DELETE FROM user_input_bindings WHERE user_id = $1", ctx.user).execute(&mut *conn).await?;
-    let mut slots = std::collections::HashMap::<InputAction, i16>::new();
-    for b in &list {
-        let slot = slots.entry(b.action).or_insert(0);
-        sqlx::query!(
-            "INSERT INTO user_input_bindings (user_id, action, slot, kind, code, ctrl, shift, alt, meta)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-            ctx.user,
-            b.action as InputAction,
-            *slot,
-            b.kind as InputKind,
-            b.code,
-            b.ctrl,
-            b.shift,
-            b.alt,
-            b.meta,
-        )
-        .execute(&mut *conn)
-        .await?;
-        *slot += 1;
-    }
-    sqlx::query!(
-        "UPDATE user_preferences SET bindings_changed_at = $2, bindings_device_id = $3, updated_seq = $4 WHERE user_id = $1",
-        ctx.user,
-        at,
-        ctx.device,
-        ctx.seq
     )
     .execute(conn)
     .await?;

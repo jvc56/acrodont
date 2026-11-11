@@ -30,3 +30,15 @@ describes:
   `anagram_answer_mode` had nothing to backfill on a fresh database and went.
 
 A database made by the earlier files no longer matches: `./scripts/dev.py --reset`.
+
+## 2026-11-11: controls are per device and no longer synced
+
+Player controls became a setting each device keeps for itself, never sent to
+the server, so the server's half went: the `user_input_bindings` table (and the
+`input_action` and `input_kind` types only it used),
+`user_preferences.bindings_changed_at` and `bindings_device_id`, and
+`'set_bindings'` from `sync_op_type`. `user_preferences.updated_seq` is now
+bumped by preference changes alone. Nothing is deployed, so the edit is in
+place.
+
+A database made by the earlier file no longer matches: `./scripts/dev.py --reset`.

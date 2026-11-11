@@ -1,9 +1,11 @@
 // The `meta` store (PLAN.md § On the device → IndexedDB stores): identity,
 // this device's id and next `device_seq`, the sync cursor, what
-// `/api/auth/me` last reported, last-open times, and the Keep offline,
-// automatic-keep opt-out and budget-dropped ids. All per device and user.
+// `/api/auth/me` last reported, last-open times, this device's controls and
+// display settings, and the budget-dropped
+// ids. All per device and user.
 import type { IDBPTransaction } from 'idb';
 import type { StoreName, UserDb, UserSchema } from './db';
+import { DEFAULT_BINDINGS, type Binding } from '$lib/player/bindings';
 
 export interface MetaValues {
 	identity: { user_id: string; username: string };
@@ -14,11 +16,11 @@ export interface MetaValues {
 	server: { trash_retention_days: number; max_quiz_questions: number; max_cascades_per_user?: number };
 	/** When this device last opened each cascade (ISO time). */
 	opens: Record<string, string>;
-	keep_offline: string[];
-	auto_keep_optout: string[];
 	budget_dropped: string[];
 	/** Bytes of each cascade's question keys and answers, measured as they were written. */
 	sizes: Record<string, { key_bytes: number; answer_bytes: number }>;
+	/** The player's controls on this device (lib/player/controls.svelte.ts); never synced. */
+	bindings: Binding[];
 	/** How the player looks and responds on this device (lib/player/display.svelte.ts); never synced. */
 	display: {
 		/** One of lib/player/display's FONTS; Inter by default. */
@@ -58,10 +60,9 @@ export const META_DEFAULTS: { [K in MetaKey]: () => MetaValues[K] } = {
 	sync: () => ({ cursor: null, last_sync_at: null }),
 	server: () => ({ trash_retention_days: 30, max_quiz_questions: 130_000, max_cascades_per_user: 20 }),
 	opens: () => ({}),
-	keep_offline: () => [],
-	auto_keep_optout: () => [],
 	budget_dropped: () => [],
 	sizes: () => ({}),
+	bindings: () => DEFAULT_BINDINGS.map((b) => ({ ...b })),
 	display: () => ({
 		question_font: 'Inter',
 		answer_font: 'Inter',

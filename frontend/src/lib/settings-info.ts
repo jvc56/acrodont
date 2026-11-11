@@ -1,15 +1,16 @@
 // What each setting does, for the ⓘ beside it (InfoTip). One place, so the
-// Account page and the player's Preferences explain a setting the same way.
+// Preferences page and the player's Preferences explain a setting the same way.
 
 /**
  * Where a group of settings applies, said once above the group, in the same
- * words on the Account page and in the player's Preferences.
+ * words on the Preferences page and in the player's Preferences.
  */
 export const SCOPE = {
-	cascade: 'Saved with this cascade and synced to your other devices. Your other cascades keep their own.',
+	cascade:
+		'Saved with this cascade and synced to your other devices. Your other cascades keep their own; after a change you can use it for new cascades, or for every cascade, too.',
 	every: 'Synced to all your devices. A change applies to every cascade at once.',
 	defaults:
-		'Synced to all your devices. A new cascade is prefilled with these when you build it; the cascades you already have keep their own, which you change in each cascade’s Preferences.',
+		'Synced to all your devices. A new cascade is prefilled with these when you build it. After a change you can give the cascades you already have the same value, too.',
 	device: 'Kept on this device only and not synced, so your other devices keep their own.'
 } as const;
 
@@ -37,8 +38,6 @@ export const INFO = {
 	// A cascade
 	clear_threshold:
 		'The score a pass needs to clear a level of this cascade. A change applies at once, to every level, including the pass you are in.',
-	keep_offline:
-		'Keeps this cascade’s questions and answers on this device even when you haven’t opened it for a while, so you can study it with no connection.',
 	// Quiz options
 	segmented:
 		'Studies a level a run at a time. After each run, the cards you missed are drilled before the next run starts.',

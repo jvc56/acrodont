@@ -449,13 +449,8 @@ describe('the preferences view', () => {
 		expect((await preferencesView(db)).default_clear_threshold).toBe(80);
 		await applyLocally(db, { type: 'set_preferences', default_clear_threshold: 70 });
 		await applyLocally(db, { type: 'set_preferences', leave_value_decimals: 2, default_clear_threshold: 75 });
-		await applyLocally(db, {
-			type: 'set_bindings',
-			bindings: [{ action: 'show_next', kind: 'key', code: 'Enter', ctrl: false, shift: false, alt: false, meta: false }]
-		});
 		const v = await preferencesView(db);
 		expect([v.default_clear_threshold, v.leave_value_decimals]).toEqual([75, 2]);
-		expect(v.bindings.map((b) => b.code)).toEqual(['Enter']);
 		// Dropping the pending operation (a stale rejection) reverts the view.
 		expect(layPreferences(defaultPreferences(), []).default_clear_threshold).toBe(80);
 	});

@@ -1,10 +1,65 @@
 // Controls (PLAN.md § Taking a quiz → Controls, Typed mode → Protecting
 // typing). Strokes are keys by physical position (`KeyboardEvent.code`),
 // mouse buttons or wheel directions, each with an exact set of modifiers.
-import type { Binding } from '$lib/local/rows';
+// Controls are a setting of this device, never synced: what suits a laptop's
+// keyboard and mouse is wrong on another machine (lib/player/controls).
+
+export interface Binding {
+	action: 'show_next' | 'toggle_grade' | 'previous';
+	kind: 'key' | 'mouse_button' | 'wheel';
+	code: string;
+	ctrl: boolean;
+	shift: boolean;
+	alt: boolean;
+	meta: boolean;
+}
 
 export type Action = Binding['action'];
 export type Stroke = Omit<Binding, 'action'>;
+
+export const ACTIONS: Action[] = ['show_next', 'toggle_grade', 'previous'];
+const KINDS: Binding['kind'][] = ['key', 'mouse_button', 'wheel'];
+
+const binding = (action: Action, kind: Binding['kind'], code: string): Binding => ({
+	action,
+	kind,
+	code,
+	ctrl: false,
+	shift: false,
+	alt: false,
+	meta: false
+});
+
+export const DEFAULT_BINDINGS: Binding[] = [
+	binding('show_next', 'mouse_button', 'left'),
+	binding('show_next', 'key', 'Space'),
+	binding('show_next', 'key', 'Comma'),
+	binding('show_next', 'key', 'Enter'),
+	binding('toggle_grade', 'mouse_button', 'right'),
+	binding('toggle_grade', 'key', 'KeyX'),
+	binding('toggle_grade', 'key', 'KeyM'),
+	binding('previous', 'mouse_button', 'middle'),
+	binding('previous', 'key', 'Backspace'),
+	binding('previous', 'key', 'KeyJ')
+];
+
+/**
+ * A stored list made valid: well-formed bindings kept, the rest dropped, no
+ * stroke twice. One that leaves an action with none, or anything unreadable,
+ * is the defaults, so the player always has every action.
+ */
+export function normalizeBindings(stored: unknown): Binding[] {
+	if (!Array.isArray(stored)) return DEFAULT_BINDINGS.map((b) => ({ ...b }));
+	const out: Binding[] = [];
+	for (const raw of stored as Partial<Binding>[]) {
+		if (!raw || typeof raw !== 'object') continue;
+		if (!ACTIONS.includes(raw.action as Action) || !KINDS.includes(raw.kind as Binding['kind']) || typeof raw.code !== 'string' || !raw.code) continue;
+		const b: Binding = { action: raw.action!, kind: raw.kind!, code: raw.code, ctrl: !!raw.ctrl, shift: !!raw.shift, alt: !!raw.alt, meta: !!raw.meta };
+		if (b.kind === 'key' && b.code === 'Escape') continue;
+		if (!out.some((o) => sameStroke(o, b))) out.push(b);
+	}
+	return ACTIONS.every((a) => out.some((b) => b.action === a)) ? out : DEFAULT_BINDINGS.map((b) => ({ ...b }));
+}
 
 const MOUSE = ['left', 'middle', 'right', 'back', 'forward'];
 
