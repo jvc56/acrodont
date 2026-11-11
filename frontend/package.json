@@ -21,6 +21,7 @@
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"@tailwindcss/vite": "^4.3.3",
 		"@testing-library/svelte": "^5.4.2",
+		"@types/node": "^22.20.5",
 		"@vitest/browser-playwright": "^5.0.1",
 		"bits-ui": "^2.19.3",
 		"cn": "^0.4.0",

@@ -97,6 +97,9 @@ test('trash: export a cleared quiz’s missed words offline, see purge dates, re
 	expect(await playLevel(page, (i) => i < 5)).toMatch(/^Level 1/);
 	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2 cleared with 80%. Its 1 missed questions are now Level 2.');
 	await availableOffline(page, 'Trash journey');
+	// The clear must have synced: until the server's cleared time arrives, the
+	// Trash says "deleted forever 30 days after this syncs" instead of a date.
+	await expect(page.getByText('Synced')).toBeVisible({ timeout: 60_000 });
 	await context.setOffline(true);
 	await page.goto('/trash');
 	await expect(page.getByText(/^deleted forever on \d/).first()).toBeVisible();
