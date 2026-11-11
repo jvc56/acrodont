@@ -170,6 +170,11 @@ export class SyncEngine {
 				return;
 			}
 			const body = reply.body as SyncResponse;
+			// The account's storage, for the Cascades page and the limit checks, offline too.
+			if (body.storage) {
+				const s = await getMeta(this.db, 'server');
+				await this.db.put('meta', { ...s, storage_bytes: body.storage.used, max_storage_bytes: body.storage.limit }, 'server');
+			}
 			const acked = ackedOf(batch, body);
 			const rctx = { device_id, max_quiz_questions: server.max_quiz_questions, now: this.now };
 			if (reply.status === 426) {

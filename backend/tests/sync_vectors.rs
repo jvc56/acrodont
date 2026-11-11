@@ -8,7 +8,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::sync::{insert_cascade, Device, Setup};
+use common::sync::{assert_storage_consistent, insert_cascade, Device, Setup};
 use common::TestApp;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -129,7 +129,7 @@ fn same_result(got: &Value, want: &Value, ctx: &str) {
 }
 
 async fn run_vectors(pool: sqlx::PgPool, filter: impl Fn(&str) -> bool) {
-    let app = TestApp::with(pool, &[("SYNC_RATE_PER_MINUTE", "100000"), ("MAX_CASCADES_PER_USER", "1000")]).await;
+    let app = TestApp::with(pool, &[("SYNC_RATE_PER_MINUTE", "100000")]).await;
     let c = app.signed_in("player").await;
     let user = c.user_id.unwrap();
     let mut dev = Device::new(c);
@@ -178,6 +178,10 @@ async fn run_vectors(pool: sqlx::PgPool, filter: impl Fn(&str) -> bool) {
             }
             if let Some(state) = steps[j - 1].get("state") {
                 assert_eq!(db_state(&app, setup.cascade_id).await, expected(state), "{name} after step {}", j - 1);
+                // STORAGE_LIMIT_PLAN.md § Tests: each cascade's figure is what
+                // its rows hold, and the user's total their sum, after every
+                // operation the vectors make.
+                assert_storage_consistent(&app, user).await;
             }
             i = j;
         }

@@ -365,6 +365,22 @@ describe('the sync engine', () => {
 		expect(await a.db.get('overlay_cascades', C1)).toBeUndefined();
 	});
 
+	it('every sync response’s storage is kept, and each cascade carries its own figure', async () => {
+		const { server, a } = await setup();
+		const before = await getMeta(a.db, 'server');
+		expect(before.storage_bytes).toBe(server.storage().used);
+		expect(before.max_storage_bytes).toBe(100_000_000);
+		expect((await a.db.get('cascades', C1))!.storage_bytes).toBe(server.storage().used);
+		// A finish with misses makes a level: the server's figure grows, and the device follows.
+		await a.play(Q1, 'XXCCC');
+		await a.finish(Q1);
+		await a.sync();
+		const after = await getMeta(a.db, 'server');
+		expect(after.storage_bytes).toBeGreaterThan(before.storage_bytes!);
+		expect(after.storage_bytes).toBe(server.storage().used);
+		expect((await a.db.get('cascades', C1))!.storage_bytes).toBe(after.storage_bytes);
+	});
+
 	it('a cascade outside the window holds no question rows, and its played quizzes are pending', async () => {
 		const server = new FakeServer();
 		server.create({ id: C1, source_id: Q1, count: 5 });

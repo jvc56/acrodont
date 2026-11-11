@@ -4,6 +4,7 @@
 // server does, and pulls exactly the rows changed since the cursor, in table
 // order, paged by total rows with the ceiling fixed by the first page
 // (PLAN.md § The sync cycle). The server itself is tested in backend/tests.
+import { levelBytes, STORAGE_COSTS } from '$lib/cascades/storage';
 import { questionsHash, toI64, fromI64 } from '$lib/cascade/order';
 import { Rejected, type Grade, type Progression } from '$lib/cascade/rules';
 import { positionsOf, SimCascade, type Op, type SimQuiz } from '$lib/cascade/sim';
@@ -138,6 +139,12 @@ export class FakeServer {
 			require_alphabetical: s.opts.require_alphabetical,
 			answer_mode: e.answer_mode,
 			...e.settings,
+			// The server's count, from the same per-row costs: the questions and each level's rows.
+			storage_bytes: String(
+				STORAGE_COSTS.cascade_row +
+					[...e.sim.quizzes.values()].reduce((n, q) => n + levelBytes(q.state.question_count), 0) +
+					count * STORAGE_COSTS.question_row
+			),
 			options_changed_at: e.options_at,
 			options_seq: String(e.options_seq),
 			options_device_id: e.options_device,
@@ -260,8 +267,16 @@ export class FakeServer {
 		if (req.cursor !== null && req.cursor < this.floor) {
 			return { status: 200, body: { results, sync_seq: String(seq), resync_required: true }, retryAfter: null };
 		}
-		const body = { ...this.page({ cur: req.cursor, ceil: seq, qrf: req.question_rows_for, after: 0 }), results };
+		const body = { ...this.page({ cur: req.cursor, ceil: seq, qrf: req.question_rows_for, after: 0 }), results, storage: this.storage() };
 		return { status: 200, body, retryAfter: null };
+	}
+
+	/** The account's storage as every response reports it: each cascade's figure, summed. */
+	storageLimit = 100_000_000;
+	storage() {
+		let used = 0;
+		for (const e of this.cascades.values()) used += Number(this.cascadeRow(e).storage_bytes);
+		return { used, limit: this.storageLimit };
 	}
 
 	private apply(w: Record<string, unknown>, device: string, seq: number): SyncResult {

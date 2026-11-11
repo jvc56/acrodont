@@ -66,7 +66,14 @@ impl<'a> Device<'a> {
     }
 
     pub async fn raw_sync(&mut self, body: Value) -> TestResponse {
-        self.client.post("/api/sync", body).await
+        let r = self.client.post("/api/sync", body).await;
+        if r.status == StatusCode::OK || r.status == StatusCode::UPGRADE_REQUIRED {
+            // STORAGE_LIMIT_PLAN.md § S1: every response, every page and every
+            // resync included, carries the account's storage against its limit.
+            let s = &r.json()["storage"];
+            assert!(s["used"].is_i64() && s["limit"].is_i64(), "storage on every sync response: {s}");
+        }
+        r
     }
 
     /// One request; advances the cursor when the pull is complete.
@@ -205,9 +212,9 @@ pub async fn insert_cascade(app: &TestApp, user: Uuid, s: &Setup) {
     sqlx::query(
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, spec_id, clear_threshold, segment_size,
                                progression, require_alphabetical, options_changed_at, options_seq, options_device_id,
-                               question_count, depth, updated_seq)
+                               question_count, depth, updated_seq, storage_bytes)
          VALUES ($1, $2, 'test', 'anagram', $3, $4, $5, $6, $7::quiz_progression, $8, now() - interval '1 day', $9, $10,
-                 $11, 1, $9)",
+                 $11, 1, $9, 0)",
     )
     .bind(s.cascade_id)
     .bind(user)
@@ -267,6 +274,49 @@ pub async fn insert_cascade(app: &TestApp, user: Uuid, s: &Setup) {
     .await
     .unwrap();
     tx.commit().await.unwrap();
+    account(app, s.cascade_id).await;
+}
+
+/// Sets a cascade written straight to the database to the storage its rows
+/// hold, by the server's own formula, and its user's total with it, as the
+/// server would have kept them.
+pub async fn account(app: &TestApp, cascade: Uuid) {
+    let mut conn = app.db().acquire().await.unwrap();
+    let measured = acrodont::storage::measure_cascade(&mut conn, cascade).await.unwrap();
+    sqlx::query(
+        "WITH c AS (SELECT user_id, storage_bytes FROM cascades WHERE id = $1),
+              u AS (UPDATE users SET storage_bytes = users.storage_bytes + $2 - c.storage_bytes FROM c WHERE users.id = c.user_id)
+         UPDATE cascades SET storage_bytes = $2 WHERE id = $1",
+    )
+    .bind(cascade)
+    .bind(measured)
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+}
+
+/// The account's storage invariants: each cascade's figure is what its rows
+/// hold by the formula, and the user's total is the sum of its cascades' and
+/// saved searches'. Returns the total.
+pub async fn assert_storage_consistent(app: &TestApp, user: Uuid) -> i64 {
+    let mut conn = app.db().acquire().await.unwrap();
+    let cascades: Vec<(Uuid, i64)> = sqlx::query_as("SELECT id, storage_bytes FROM cascades WHERE user_id = $1")
+        .bind(user)
+        .fetch_all(&mut *conn)
+        .await
+        .unwrap();
+    for (id, kept) in &cascades {
+        let measured = acrodont::storage::measure_cascade(&mut conn, *id).await.unwrap();
+        assert_eq!(*kept, measured, "cascade {id}'s storage_bytes is what its rows hold");
+    }
+    let searches: i64 = sqlx::query_scalar("SELECT coalesce(sum(storage_bytes), 0)::int8 FROM saved_searches WHERE user_id = $1")
+        .bind(user)
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap();
+    let total: i64 = sqlx::query_scalar("SELECT storage_bytes FROM users WHERE id = $1").bind(user).fetch_one(&mut *conn).await.unwrap();
+    assert_eq!(total, cascades.iter().map(|c| c.1).sum::<i64>() + searches, "the user's total is the sum");
+    total
 }
 
 /// The positions of a quiz, from the database.
@@ -381,5 +431,6 @@ pub async fn insert_cleared_chains(app: &TestApp, user: Uuid, s: &Setup, n: i32,
     .await
     .unwrap();
     tx.commit().await.unwrap();
+    account(app, s.cascade_id).await;
     seq
 }

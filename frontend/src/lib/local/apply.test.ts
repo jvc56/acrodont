@@ -61,6 +61,7 @@ async function seed(db: UserDb, s: Setup) {
 		show_hooks: true,
 		reveal_correct: true,
 		leave_value_decimals: 1,
+		storage_bytes: 0,
 		lexicon: 'EN-FIX',
 		letter_distribution: 'english',
 		clear_threshold: s.threshold ?? 80,

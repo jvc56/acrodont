@@ -105,6 +105,12 @@ CREATE TABLE users (
     session_generation  INTEGER NOT NULL DEFAULT 0,     -- bumped to revoke all sessions
     sync_seq            BIGINT NOT NULL DEFAULT 0,      -- last sync sequence value issued
     sync_floor_seq      BIGINT NOT NULL DEFAULT 0,      -- tombstones at or below this were pruned
+    storage_bytes       BIGINT NOT NULL DEFAULT 0 CHECK (storage_bytes >= 0),
+                            -- the sum of the user's cascades' and saved searches'
+                            -- storage_bytes, kept in the same transactions (Storage limit)
+    storage_limit_bytes BIGINT CHECK (storage_limit_bytes >= 0),
+                            -- set only via SQL: replaces MAX_STORAGE_BYTES_PER_USER
+                            -- for this account
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (sync_floor_seq <= sync_seq)
 );
@@ -366,6 +372,8 @@ CREATE TABLE saved_searches (
     user_id     UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     name        TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
     spec_id     UUID NOT NULL UNIQUE REFERENCES search_specs (id),
+    storage_bytes BIGINT NOT NULL CHECK (storage_bytes >= 0),  -- its spec's, by the
+                            -- storage formula (Storage limit); counted in users.storage_bytes
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (user_id, name)
@@ -389,7 +397,7 @@ CREATE TABLE cascades (
 
     -- Quiz options: what every quiz created for this cascade starts with.
     segment_size         INTEGER NOT NULL DEFAULT 0
-                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 130000),
+                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 300000),
                                  -- 0 = no segments; the minimum of 5 rules out the
                                  -- one-question run. See Quiz options for the
                                  -- ceil(question_count / S) bound on chain quizzes
@@ -409,7 +417,7 @@ CREATE TABLE cascades (
     options_device_id    UUID NOT NULL,              -- the device that made it (the creator at first);
                                                      -- its own next change always applies
 
-    question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 130000),
+    question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 300000),
     depth             INTEGER NOT NULL CHECK (depth >= 1),
                           -- number of active levels; Level 1 is always the Source quiz
     peak_depth        INTEGER NOT NULL DEFAULT 1 CHECK (peak_depth >= depth),
@@ -422,6 +430,11 @@ CREATE TABLE cascades (
     last_activity_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at      TIMESTAMPTZ,                -- latest finish of the Source quiz with no misses
     trashed_at        TIMESTAMPTZ,                -- set only by the user
+    storage_bytes     BIGINT NOT NULL CHECK (storage_bytes >= 0),
+                          -- the rows the account holds because of this cascade, by the
+                          -- storage formula (Storage limit): set at creation, changed by
+                          -- every new level and attempt and every purged quiz, each with
+                          -- an updated_seq bump; counted in users.storage_bytes
     updated_seq       BIGINT NOT NULL,
 
     -- The leave value set must belong to the cascade's lexicon.
@@ -439,7 +452,7 @@ CREATE INDEX cascades_leave_set_id ON cascades (leave_set_id) WHERE leave_set_id
 -- The cascade's questions, in search order. Immutable.
 CREATE TABLE cascade_questions (
     cascade_id    UUID NOT NULL REFERENCES cascades (id) ON DELETE CASCADE,
-    idx           INTEGER NOT NULL CHECK (idx BETWEEN 0 AND 129999),
+    idx           INTEGER NOT NULL CHECK (idx BETWEEN 0 AND 299999),
     question_key  TEXT NOT NULL CHECK (char_length(question_key) BETWEEN 1 AND 300),
                       -- alphagram, word or canonical leave, in MAGPIE notation
     PRIMARY KEY (cascade_id, idx)
@@ -466,7 +479,7 @@ CREATE TABLE quizzes (
 
     -- Quiz options, copied from the cascade at creation and editable afterwards.
     segment_size         INTEGER NOT NULL DEFAULT 0
-                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 130000),
+                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 300000),
     progression          quiz_progression NOT NULL DEFAULT 'ladder',
     require_alphabetical BOOLEAN NOT NULL DEFAULT false,
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
@@ -485,7 +498,7 @@ CREATE TABLE quizzes (
                                                   -- shuffle_seed above: a hash with its top bit set
                                                   -- reads back negative, and the wire form is the
                                                   -- unsigned decimal either way (see API)
-    question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 130000),
+    question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 300000),
     correct_count     INTEGER NOT NULL DEFAULT 0 CHECK (correct_count >= 0),
     missed_count      INTEGER NOT NULL DEFAULT 0 CHECK (missed_count >= 0),
     cursor            INTEGER NOT NULL DEFAULT 0,
@@ -526,9 +539,9 @@ CREATE UNIQUE INDEX quizzes_one_per_segment
 
 CREATE TABLE quiz_questions (
     quiz_id       UUID NOT NULL REFERENCES quizzes (id) ON DELETE CASCADE,
-    question_idx  INTEGER NOT NULL CHECK (question_idx BETWEEN 0 AND 129999),
+    question_idx  INTEGER NOT NULL CHECK (question_idx BETWEEN 0 AND 299999),
                       -- index into cascade_questions
-    position      INTEGER NOT NULL CHECK (position BETWEEN 0 AND 129999),
+    position      INTEGER NOT NULL CHECK (position BETWEEN 0 AND 299999),
     grade         grade,
     graded_at     TIMESTAMPTZ,                    -- device time, for latest-wins between devices
     graded_by_device_id UUID,                     -- a device's own regrade always applies
@@ -552,7 +565,7 @@ CREATE TABLE quiz_attempts (
                         -- without it the candidate set is every quiz the user owns:
                         -- 60,000 chain quizzes would mean 60,000 seeks per sync
     attempt         INTEGER NOT NULL CHECK (attempt >= 1),
-    question_count  INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 130000),
+    question_count  INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 300000),
     correct_count   INTEGER NOT NULL CHECK (correct_count >= 0),
     missed_count    INTEGER NOT NULL CHECK (missed_count >= 0),
     outcome         finish_outcome NOT NULL,

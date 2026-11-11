@@ -1,6 +1,7 @@
 // What the Cascades and Trash pages show, from the local view (PLAN.md
 // § Cascades page, § Trash page, § On the device → Downloads). Everything
 // here works offline.
+import { levelBytes } from './storage';
 import { APPLY_STORES } from '$lib/local/apply';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';
@@ -12,7 +13,6 @@ import { percent } from '$lib/player/banner';
 import { DownloadManager } from '$lib/sync/downloads';
 import { policy } from '$lib/sync/policy';
 
-export { DEFAULT_CASCADE_LIMIT, cascadeWarning } from './limits';
 
 export type OfflineState = 'available' | 'downloading' | 'answers_need_connection' | 'not_downloaded';
 
@@ -115,6 +115,8 @@ export interface TrashEntry {
 	/** When it will be purged; null while the date is provisional ("deleted forever 30 days after this syncs"). */
 	purgesAt: string | null;
 	provisional: boolean;
+	/** The storage Delete forever frees: the whole cascade's, or one level's (PLAN.md § Storage limit). */
+	bytes: number;
 }
 
 export interface TrashGroup {
@@ -124,6 +126,8 @@ export interface TrashGroup {
 	earliest: string | null;
 	/** The cascade's rows are not on this device: a restore "downloads when online". */
 	notHere: boolean;
+	/** The storage the group's entries hold: a trashed cascade's own, or its cleared levels'. */
+	bytes: number;
 }
 
 const DAY = 86_400_000;
@@ -147,7 +151,8 @@ export async function trashGroups(db: UserDb): Promise<TrashGroup[]> {
 				score: null,
 				outcome: null,
 				purgesAt: provisional ? null : plus(c.trashed_at!, days),
-				provisional
+				provisional,
+				bytes: c.storage_bytes ?? 0
 			});
 		}
 		for (const q of await view.quizzesOf(t, c.id)) {
@@ -163,7 +168,8 @@ export async function trashGroups(db: UserDb): Promise<TrashGroup[]> {
 				score: last ? percent(last.correct_count, last.question_count) : null,
 				outcome: last?.outcome ?? null,
 				purgesAt: provisional || trashed ? null : plus(q.cleared_at!, days),
-				provisional: provisional && !trashed
+				provisional: provisional && !trashed,
+				bytes: levelBytes(q.question_count)
 			});
 		}
 		if (!entries.length) continue;
@@ -173,7 +179,9 @@ export async function trashGroups(db: UserDb): Promise<TrashGroup[]> {
 			trashed,
 			entries,
 			earliest: dates.length ? dates.sort()[0] : null,
-			notHere: (await db.countFromIndex('quiz_questions', 'cascade_id', c.id)) === 0
+			notHere: (await db.countFromIndex('quiz_questions', 'cascade_id', c.id)) === 0,
+			// A trashed cascade's figure already holds its levels.
+			bytes: trashed ? (c.storage_bytes ?? 0) : entries.reduce((n, e) => n + e.bytes, 0)
 		});
 	}
 	return groups.sort((a, b) => (a.earliest ?? '9').localeCompare(b.earliest ?? '9'));

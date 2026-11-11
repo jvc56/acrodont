@@ -5,11 +5,14 @@
 	// one segmented attempt can leave tens of thousands. Entries show the final
 	// score, cleared or replaced, and the date it will be deleted forever, or
 	// "deleted forever 30 days after this syncs" while that date is provisional.
-	// ("Purge" is the operation's name, never the page's word.) `version` is
+	// ("Purge" is the operation's name, never the page's word.) Everything in it
+	// still counts toward the account's storage, and each entry says how much
+	// Delete forever frees (PLAN.md § Storage limit). `version` is
 	// bumped by the page when it moves something to the Trash; `onchange` runs
 	// after a restore or a deletion, so the cascades above can refresh.
 	import { Button } from '$lib/components/ui/button';
 	import { canDeleteForever, PAGE, trashGroups, type TrashEntry, type TrashGroup } from '$lib/cascades/summary';
+	import { formatBytes } from '$lib/cascades/storage';
 	import { applyLocally, type NewOp } from '$lib/local/apply';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta } from '$lib/local/meta';
@@ -19,12 +22,15 @@
 	let { db, version = 0, onchange = () => undefined }: { db: UserDb; version?: number; onchange?: () => unknown } = $props();
 
 	let groups = $state<TrashGroup[]>([]);
+	/** Read at least once: until then nothing says the Trash is empty. */
+	let loaded = $state(false);
 	let open = $state<Record<string, number>>({});
 	let days = $state(30);
 
 	async function refresh() {
 		groups = await trashGroups(db);
 		days = (await getMeta(db, 'server')).trash_retention_days;
+		loaded = true;
 	}
 
 	$effect(() => {
@@ -52,7 +58,7 @@
 		const what = e.kind === 'cascade' ? `“${e.cascade.name}” and everything in it` : `Level ${e.quiz!.level} of “${e.cascade.name}”`;
 		const ok = await confirmAction({
 			title: `Delete ${what} forever?`,
-			body: 'It cannot be restored or exported afterwards.',
+			body: `It cannot be restored or exported afterwards. This frees ${formatBytes(e.bytes)} of your storage.`,
 			action: 'Delete forever',
 			destructive: true
 		});
@@ -65,12 +71,18 @@
 	const date = (iso: string) => new Date(iso).toLocaleDateString();
 	// A group holding one entry is rendered expanded.
 	const shown = (g: TrashGroup) => open[g.cascade.id] ?? (g.entries.length === 1 ? PAGE : 0);
+	const total = $derived(groups.reduce((n, g) => n + g.bytes, 0));
 </script>
 
 
-<section id="trash" class="scroll-mt-6" aria-labelledby="trash-heading">
-	<h2 id="trash-heading" class="mb-3 text-xl font-semibold">Trash</h2>
-	{#if groups.length === 0}<p class="text-muted-foreground">The Trash is empty.</p>{/if}
+<section id="trash" class="scroll-mt-6" aria-labelledby="trash-heading" data-loaded={loaded || undefined}>
+	<div class="mb-3 flex flex-wrap items-baseline justify-between gap-x-4">
+		<h2 id="trash-heading" class="text-xl font-semibold">Trash</h2>
+		{#if groups.length}
+			<p class="text-sm text-muted-foreground" data-trash-storage>The Trash holds {formatBytes(total)} of your storage.</p>
+		{/if}
+	</div>
+	{#if loaded && groups.length === 0}<p class="text-muted-foreground">The Trash is empty.</p>{/if}
 	<ul class="space-y-3">
 		{#each groups as g (g.cascade.id)}
 			{@const n = shown(g)}
@@ -78,7 +90,7 @@
 				<button class="flex w-full items-baseline justify-between text-left" onclick={() => (open[g.cascade.id] = n ? 0 : PAGE)}>
 					<span class="font-medium">{g.trashed ? `${g.cascade.name} (cascade in the Trash)` : g.cascade.name}</span>
 					<span class="text-sm text-muted-foreground">
-						{`${g.entries.length} ${g.entries.length === 1 ? 'entry' : 'entries'}${g.earliest ? ` · deleted forever from ${date(g.earliest)}` : ''}`}
+						{`${g.entries.length} ${g.entries.length === 1 ? 'entry' : 'entries'} · ${formatBytes(g.bytes)}${g.earliest ? ` · deleted forever from ${date(g.earliest)}` : ''}`}
 					</span>
 				</button>
 				{#if n}
@@ -96,7 +108,7 @@
 									<Button size="sm" variant="outline" onclick={() => restore(e)}>Restore</Button>
 									<Button size="sm" variant="outline" href={`/cascades/${g.cascade.id}/export${e.kind === 'quiz' ? `?quiz=${e.id}` : ''}`}>Export…</Button>
 									{#if canDeleteForever(e)}
-										<Button size="sm" variant="outline" onclick={() => deleteForever(e)}>Delete forever</Button>
+										<Button size="sm" variant="outline" onclick={() => deleteForever(e)}>Delete forever ({formatBytes(e.bytes)})</Button>
 									{/if}
 								</span>
 								{#if g.notHere}<span class="w-full text-xs text-muted-foreground">Downloads when online.</span>{/if}

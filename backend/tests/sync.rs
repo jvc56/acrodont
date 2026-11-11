@@ -124,7 +124,7 @@ async fn operations_apply_in_device_seq_order_and_a_rejection_does_not_stop_the_
 /// "The request-level 400s, each leaving nothing written and no operation recorded".
 #[sqlx::test]
 async fn request_level_400s(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("SYNC_MAX_OPS", "3"), ("MAX_CASCADES_PER_USER", "2")]).await;
+    let app = TestApp::with(pool, &[("SYNC_MAX_OPS", "3")]).await;
     let mut d = device(&app, "alice").await;
     let ops: Vec<Value> = (0..4).map(|_| d.op("trash_cascade", json!({ "cascade_id": Uuid::new_v4() }))).collect();
     let base = json!({ "device_id": d.id, "app_version": 1, "cursor": d.cursor, "question_rows_for": [] });
@@ -137,8 +137,8 @@ async fn request_level_400s(pool: sqlx::PgPool) {
     b["page_token"] = json!("x");
     cases.push(("page_token with an operation", b));
     let mut b = base.clone();
-    b["question_rows_for"] = json!([Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()]);
-    cases.push(("question_rows_for over the cascade limit", b));
+    b["question_rows_for"] = json!((0..=acrodont::config::MAX_QUESTION_ROWS_FOR).map(|_| Uuid::new_v4()).collect::<Vec<_>>());
+    cases.push(("question_rows_for past MAX_QUESTION_ROWS_FOR", b));
     let mut b = base.clone();
     let mut o = ops[0].clone();
     o["device_id"] = json!(d.id);

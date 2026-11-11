@@ -46,7 +46,14 @@ async fn run_locked(state: &AppState) -> anyhow::Result<()> {
     delete_stale_unconfirmed(state).await?;
     prune_export_tokens(state).await?;
     prune_catalog_status(state).await?;
+    recount_storage(state).await?;
     Ok(())
+}
+
+/// Each user's storage total recounted from their cascades and saved
+/// searches; any drift is logged and corrected (STORAGE_LIMIT_PLAN.md § S1).
+pub async fn recount_storage(state: &AppState) -> anyhow::Result<u64> {
+    Ok(crate::storage::recount_users(&state.db).await?)
 }
 
 /// Users with anything past the retention period.
@@ -88,7 +95,12 @@ pub async fn purge_trash(state: &AppState) -> anyhow::Result<()> {
         .fetch_all(&mut *tx)
         .await?;
         if !quizzes.is_empty() {
+            // What they free, per cascade, read before they go.
+            let freed = crate::storage::quizzes_bytes(&mut tx, &quizzes).await?;
             sqlx::query!("DELETE FROM quizzes WHERE id = ANY($1)", &quizzes).execute(&mut *tx).await?;
+            for (cascade, bytes) in freed {
+                crate::storage::add_to_cascade(&mut tx, user, cascade, -bytes, seq).await?;
+            }
             sqlx::query!(
                 "INSERT INTO sync_tombstones (user_id, entity, entity_id, seq)
                  SELECT $1, 'quiz', q, $3 FROM UNNEST($2::uuid[]) AS q

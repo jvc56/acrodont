@@ -15,7 +15,8 @@ import { SyncEngine } from '../engine';
 import type { SyncRequest, SyncResponse } from '../protocol';
 import { FakeServer } from './fake-server';
 
-export const QUESTIONS = 130_000;
+/** The question ceiling (PLAN.md § Storage limit, D3). */
+export const QUESTIONS = 300_000;
 export const DAY = 86_400_000;
 
 /** IndexedDB writes (put, add, delete, clear), counted across every database. */
@@ -184,7 +185,7 @@ export class ScaleDev {
 	 * What `gradeAll` leaves on a quiz with no grades yet — an overlay row per
 	 * question, the quiz's counts, the cascade's activity, an outbox entry per
 	 * grade in position order — written in one transaction. The setup for the
-	 * budgets that start from a graded quiz: 130,000 transactions of their own
+	 * budgets that start from a graded quiz: 300,000 transactions of their own
 	 * would take the better part of an hour and measure nothing the plan asks.
 	 * `scale.test.ts` holds it to `gradeAll`'s result.
 	 */

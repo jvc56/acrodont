@@ -342,17 +342,22 @@ pub struct Me {
     is_admin: bool,
     trash_retention_days: u32,
     max_quiz_questions: u32,
-    max_cascades_per_user: u32,
+    /// The account's server storage and its effective limit, in bytes
+    /// (STORAGE_LIMIT_PLAN.md § S1).
+    storage_bytes: i64,
+    max_storage_bytes: i64,
 }
 
-fn me_body(state: &AppState, id: Uuid, username: String, is_admin: bool) -> Me {
+fn me_body(state: &AppState, id: Uuid, username: String, is_admin: bool, storage: (i64, Option<i64>)) -> Me {
+    let usage = crate::storage::Usage::new(storage.0, storage.1, state.config.max_storage_bytes_per_user);
     Me {
         user_id: id,
         username,
         is_admin,
         trash_retention_days: state.config.trash_retention_days,
         max_quiz_questions: state.config.max_quiz_questions,
-        max_cascades_per_user: state.config.max_cascades_per_user,
+        storage_bytes: usage.used,
+        max_storage_bytes: usage.limit,
     }
 }
 
@@ -386,7 +391,7 @@ async fn login(
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let row = sqlx::query!(
         "SELECT id, username::text AS \"username!\", password_hash, email_confirmed_at,
-                is_admin, session_generation
+                is_admin, session_generation, storage_bytes, storage_limit_bytes
          FROM users WHERE username = $1",
         body.username.trim() as &str,
     )
@@ -411,7 +416,7 @@ async fn login(
     let cookies = SessionCookies::issue(&state, user.id, user.session_generation, None);
     Ok((
         cookies,
-        Json(me_body(&state, user.id, user.username, user.is_admin)),
+        Json(me_body(&state, user.id, user.username, user.is_admin, (user.storage_bytes, user.storage_limit_bytes))),
     )
         .into_response())
 }
@@ -431,7 +436,7 @@ async fn me(
     let cookies = SessionCookies::csrf_for(&state, &user.claims, csrf);
     (
         cookies,
-        Json(me_body(&state, user.id, user.username, user.is_admin)),
+        Json(me_body(&state, user.id, user.username, user.is_admin, (user.storage_bytes, user.storage_limit_bytes))),
     )
         .into_response()
 }
@@ -450,7 +455,8 @@ async fn dev_login(
     ApiJson(body): ApiJson<DevLoginBody>,
 ) -> ApiResult<Response> {
     let user = sqlx::query!(
-        "SELECT id, username::text AS \"username!\", email_confirmed_at, is_admin, session_generation
+        "SELECT id, username::text AS \"username!\", email_confirmed_at, is_admin, session_generation,
+                storage_bytes, storage_limit_bytes
          FROM users WHERE username = $1",
         body.username.trim() as &str,
     )
@@ -461,7 +467,8 @@ async fn dev_login(
         return Err(ApiError::Forbidden("email_unconfirmed"));
     }
     let cookies = SessionCookies::issue(&state, user.id, user.session_generation, None);
-    Ok((cookies, Json(me_body(&state, user.id, user.username, user.is_admin))).into_response())
+    let storage = (user.storage_bytes, user.storage_limit_bytes);
+    Ok((cookies, Json(me_body(&state, user.id, user.username, user.is_admin, storage))).into_response())
 }
 
 /// Clears both cookies. Needs neither a session nor a CSRF token when no

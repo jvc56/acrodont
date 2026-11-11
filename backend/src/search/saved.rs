@@ -19,6 +19,7 @@ use crate::app::AppState;
 use crate::auth::Session;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::ApiJson;
+use crate::storage;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -129,59 +130,63 @@ async fn save(State(state): State<AppState>, Session(user): Session, ApiJson(b):
         return Err(path_errors(errors));
     }
     let tree = tree.expect("validated");
+    let bytes = storage::spec_bytes(&tree);
 
     let mut tx = state.db.begin().await?;
     sqlx::query!("SELECT id FROM users WHERE id = $1 FOR UPDATE", user.id).fetch_one(&mut *tx).await?;
     let same_name = sqlx::query!(
-        "SELECT id, spec_id FROM saved_searches WHERE user_id = $1 AND name = $2",
+        "SELECT id, spec_id, storage_bytes FROM saved_searches WHERE user_id = $1 AND name = $2",
         user.id,
         b.name
     )
     .fetch_optional(&mut *tx)
     .await?;
+    if same_name.is_some() && !b.overwrite {
+        return Err(ApiError::conflict("name_taken"));
+    }
+    // Checked after locking the user's row, so two saves cannot both take the
+    // last space; an overwrite needs only what it adds to the one it replaces.
+    let needed = bytes - same_name.as_ref().map_or(0, |o| o.storage_bytes);
+    let usage = storage::usage(&mut tx, user.id, state.config.max_storage_bytes_per_user).await?;
+    if !usage.fits(needed) {
+        return Err(usage.refusal(needed));
+    }
     if let Some(old) = &same_name {
-        if !b.overwrite {
-            return Err(ApiError::conflict("name_taken"));
-        }
         sqlx::query!("DELETE FROM saved_searches WHERE id = $1", old.id).execute(&mut *tx).await?;
         sqlx::query!("DELETE FROM search_specs WHERE id = $1", old.spec_id).execute(&mut *tx).await?;
     }
-    // Checked after locking the user's row, so two saves cannot both take the
-    // last slot; an overwrite takes no new slot.
-    let count = sqlx::query_scalar!(r#"SELECT count(*) AS "n!" FROM saved_searches WHERE user_id = $1"#, user.id)
-        .fetch_one(&mut *tx)
-        .await?;
-    let limit = i64::from(state.config.max_saved_searches_per_user);
-    if count >= limit {
-        return Err(ApiError::Conflict(json!({ "error": "saved_search_limit", "limit": limit, "count": count })));
-    }
     let spec_id = insert_spec(&mut tx, user.id, b.quiz_type, &tree, SpecKind::SavedSearch).await?;
     sqlx::query!(
-        "INSERT INTO saved_searches (id, user_id, name, spec_id) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO saved_searches (id, user_id, name, spec_id, storage_bytes) VALUES ($1, $2, $3, $4, $5)",
         b.id,
         user.id,
         b.name,
-        spec_id
+        spec_id,
+        bytes
     )
     .execute(&mut *tx)
     .await?;
+    storage::add_to_user(&mut tx, user.id, needed).await?;
     tx.commit().await?;
     let s = summary(&mut *state.db.acquire().await?, user.id, b.id).await?.ok_or(ApiError::NotFound)?;
     Ok((StatusCode::CREATED, Json(s)).into_response())
 }
 
-/// Deletes a saved search and its spec.
+/// Deletes a saved search and its spec, and frees what it held. The user's
+/// row is locked first, the order a save takes.
 async fn remove(State(state): State<AppState>, Session(user): Session, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
     let mut tx = state.db.begin().await?;
-    let spec = sqlx::query_scalar!(
-        "DELETE FROM saved_searches WHERE id = $1 AND user_id = $2 RETURNING spec_id",
+    sqlx::query!("SELECT id FROM users WHERE id = $1 FOR UPDATE", user.id).fetch_one(&mut *tx).await?;
+    let gone = sqlx::query!(
+        "DELETE FROM saved_searches WHERE id = $1 AND user_id = $2 RETURNING spec_id, storage_bytes",
         id,
         user.id
     )
     .fetch_optional(&mut *tx)
     .await?
     .ok_or(ApiError::NotFound)?;
-    sqlx::query!("DELETE FROM search_specs WHERE id = $1", spec).execute(&mut *tx).await?;
+    sqlx::query!("DELETE FROM search_specs WHERE id = $1", gone.spec_id).execute(&mut *tx).await?;
+    storage::add_to_user(&mut tx, user.id, -gone.storage_bytes).await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }

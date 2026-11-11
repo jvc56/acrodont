@@ -60,7 +60,7 @@ test-e2e: frontend-deps
 	# (PLAN.md § End-to-end tests: "through the same --env flag a developer would use").
 	E2E_PROJECT=acrodont-e2e-ttl E2E_PORT=5181 E2E_ENV='SESSION_TTL_SECONDS=20' E2E_TTL_WAIT_MS=25000 npx playwright test --grep @ttl
 	E2E_PROJECT=acrodont-e2e-purge E2E_PORT=5182 E2E_ENV='TRASH_RETENTION_DAYS=0 PURGE_INTERVAL_SECONDS=3' npx playwright test --grep @purge
-	E2E_PROJECT=acrodont-e2e-limits E2E_PORT=5183 E2E_ENV='MAX_SAVED_SEARCHES_PER_USER=2' E2E_SAVED_LIMIT=2 npx playwright test --grep @limits
+	E2E_PROJECT=acrodont-e2e-limits E2E_PORT=5183 E2E_ENV='MAX_STORAGE_BYTES_PER_USER=20000' E2E_STORAGE_LIMIT=20000 npx playwright test --grep @limits
 	# The storage journeys, on a frontend built with lowered client limits ("lowered with a test constant").
 	E2E_PROJECT=acrodont-e2e-answers E2E_PORT=5184 ACRODONT_TEST_LIMITS='{"AUTO_KEEP_OFFLINE_ROWS":30,"ANSWER_STORAGE_SOFT_LIMIT_BYTES":2000}' npx playwright test --grep @answers
 	E2E_PROJECT=acrodont-e2e-budget E2E_PORT=5185 ACRODONT_TEST_LIMITS='{"AUTO_KEEP_OFFLINE_ROWS":30,"ROW_STORAGE_BUDGET":5000}' npx playwright test --grep @budget

@@ -18,6 +18,7 @@ pub mod purge;
 pub mod rate;
 pub mod export;
 pub mod search;
+pub mod storage;
 pub mod sync;
 
 pub use app::{AppState, build_router};

@@ -29,6 +29,8 @@ export interface CascadeRow {
 	reveal_correct: boolean;
 	/** A Leave Value cascade's: the decimal places leave values are rounded to, 0 to 3. */
 	leave_value_decimals: number;
+	/** What the cascade holds on the server, in bytes, as the server last counted it (PLAN.md § Storage limit). */
+	storage_bytes: number;
 	options_changed_at: string;
 	options_seq: number;
 	options_device_id: string;
@@ -197,7 +199,13 @@ const num = (v: unknown) => (typeof v === 'string' ? Number(v) : (v as number));
 
 /** A pulled cascade row, stamped with the response's sequence. */
 export function cascadeFromWire(w: Wire, seq: number): CascadeRow {
-	return { ...(w as unknown as CascadeRow), options_seq: num(w.options_seq), updated_seq: num(w.updated_seq), seq };
+	return {
+		...(w as unknown as CascadeRow),
+		options_seq: num(w.options_seq),
+		updated_seq: num(w.updated_seq),
+		storage_bytes: num(w.storage_bytes ?? 0),
+		seq
+	};
 }
 
 export function quizFromWire(w: Wire, seq: number): QuizRow {

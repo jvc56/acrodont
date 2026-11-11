@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, username::text AS \"username!\", email_confirmed_at, is_admin, session_generation\n         FROM users WHERE username = $1",
+  "query": "SELECT id, username::text AS \"username!\", email_confirmed_at, is_admin, session_generation,\n                storage_bytes, storage_limit_bytes\n         FROM users WHERE username = $1",
   "describe": {
     "columns": [
       {
@@ -52,6 +52,28 @@
             "name": "session_generation"
           }
         }
+      },
+      {
+        "ordinal": 5,
+        "name": "storage_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "storage_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "storage_limit_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "storage_limit_bytes"
+          }
+        }
       }
     ],
     "parameters": {
@@ -69,8 +91,10 @@
       null,
       true,
       false,
-      false
+      false,
+      false,
+      true
     ]
   },
-  "hash": "df09c80620ab1cef0d5cc4bf567a507feab7120eed788551c32d888221dbadbc"
+  "hash": "123e3b00feeb61ee9e0d3ed0046ce060b80a23e4663f977dfeb6ec7cb98a29aa"
 }

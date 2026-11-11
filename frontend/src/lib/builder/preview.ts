@@ -27,6 +27,8 @@ export interface PreviewResponse {
 	count: number;
 	sample: string[];
 	over_cap: boolean;
+	/** What a cascade from this search would hold as created, in bytes (PLAN.md § Storage limit). */
+	storage_bytes?: number;
 }
 
 export interface PathError {
@@ -39,6 +41,8 @@ export interface PreviewState {
 	count: number | null;
 	sample: string[];
 	overCap: boolean;
+	/** The server's estimate of the new cascade's storage, when it gave one. */
+	storageBytes: number | null;
 	busy: boolean;
 	loading: boolean;
 	errors: PathError[];
@@ -69,6 +73,7 @@ export class PreviewScheduler {
 		count: null,
 		sample: [],
 		overCap: false,
+		storageBytes: null,
 		busy: false,
 		loading: false,
 		errors: [],
@@ -169,6 +174,7 @@ export class PreviewScheduler {
 				count: r.count,
 				sample: r.sample,
 				overCap: r.over_cap,
+				storageBytes: r.storage_bytes ?? null,
 				busy: false,
 				loading: false,
 				errors: [],

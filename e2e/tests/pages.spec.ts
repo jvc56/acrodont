@@ -22,8 +22,10 @@ test('the Cascades page lists a cascade, the Trash takes it and gives it back', 
 	await page.goto('/cascades');
 	const row = page.getByRole('listitem').filter({ hasText: name });
 	await expect(row).toBeVisible();
-	await expect(row.getByText(/of \d+ cascades/)).toHaveCount(0);
-	await expect(page.getByText(/\d+ of 20 cascades/)).toBeVisible();
+	// No cascade count: the account's storage against its one limit, and each cascade's own figure.
+	await expect(page.getByText(/of \d+ cascades/)).toHaveCount(0);
+	await expect(page.getByText(/^[\d.]+ (B|KB|MB) of 100 MB used$/)).toBeVisible({ timeout: 30_000 });
+	await expect(row.locator('[data-cascade-storage]')).toHaveText(/^[\d.]+ (B|KB|MB)$/);
 	await expect(row.getByText('Available offline')).toBeVisible({ timeout: 30_000 });
 	// Moving to the Trash asks first: Cancel keeps it.
 	await row.getByRole('button', { name: 'Move to Trash' }).click();
@@ -35,6 +37,11 @@ test('the Cascades page lists a cascade, the Trash takes it and gives it back', 
 	await expect(page.getByRole('link', { name, exact: true })).toHaveCount(0);
 	await page.goto('/trash');
 	await expect(page.getByText(`${name} (cascade in the Trash)`)).toBeVisible();
+	// What the Trash holds still counts, and Delete forever says what it frees.
+	await expect(page.locator('[data-trash-storage]')).toHaveText(/^The Trash holds [\d.]+ (B|KB|MB) of your storage\.$/);
+	await expect(
+		page.getByRole('listitem').filter({ hasText: /^The whole cascade/ }).getByRole('button', { name: /^Delete forever \([\d.]+ (B|KB|MB)\)$/ })
+	).toBeVisible();
 	await page.getByRole('listitem').filter({ hasText: `${name} (cascade in the Trash)` }).getByRole('button', { name: 'Restore' }).click();
 	await expect(page.getByText(`${name} (cascade in the Trash)`)).toHaveCount(0);
 	await page.goto('/cascades');

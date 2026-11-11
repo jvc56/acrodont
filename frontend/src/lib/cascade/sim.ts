@@ -99,7 +99,7 @@ export class SimCascade {
 	purged = false;
 	quizzes = new Map<string, SimQuiz>();
 	purgedQuizzes = new Set<string>();
-	maxQuizQuestions = 130_000;
+	maxQuizQuestions = 300_000;
 
 	constructor(threshold: number, opts: Opts, count: number, sourceId: string, sourceSeed: bigint) {
 		this.state = {

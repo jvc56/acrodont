@@ -58,3 +58,26 @@ the column defaults. Its four remaining settings moved onto `cascades`, set by
 range. Nothing is deployed, so the edit is in place.
 
 A database made by the earlier file no longer matches: `./scripts/dev.py --reset`.
+
+## 2026-11-11: one storage limit; the question ceiling is 300,000
+
+STORAGE_LIMIT_PLAN.md replaces the cascade and saved-search counts with one
+per-account storage limit, and raises the question ceiling (decisions D1–D5):
+
+- `cascades.storage_bytes BIGINT NOT NULL CHECK (>= 0)`: the bytes the account
+  holds because of the cascade, by the formula in `backend/src/storage.rs` and
+  the per-row sizes in `contract-fixtures/storage.json`. Set at creation and
+  Start over, changed by each finish's attempt and new level and each purged
+  quiz, each with an `updated_seq` bump.
+- `saved_searches.storage_bytes BIGINT NOT NULL CHECK (>= 0)`: its spec's.
+- `users.storage_bytes BIGINT NOT NULL DEFAULT 0 CHECK (>= 0)`: the sum of the
+  two, kept in the same transactions under the user row's lock, and recounted
+  by the purge task.
+- `users.storage_limit_bytes BIGINT` (NULL, `CHECK (>= 0)`): an account's own
+  limit, set only via SQL, in place of `MAX_STORAGE_BYTES_PER_USER`.
+- Every `BETWEEN 1 AND 130000` question-count and segment-size CHECK is
+  `300000` again, and every `BETWEEN 0 AND 129999` index and position CHECK
+  `299999` (undoing the 2026-11-09 edit), matching `QUESTION_CEILING`.
+
+Nothing is deployed, so the edit is in place. A database made by the earlier
+file no longer matches: `./scripts/dev.py --reset`.

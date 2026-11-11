@@ -34,7 +34,7 @@ That gives you:
 | "Segments: CSW24 2–5 in fives" | `/cascades` |
 | "Trashed: CSW24 eights" | the Trash, under the cascades on `/cascades` |
 | Three saved searches | the builder's Load dialog |
-| Filler cascades up to the limit warning (18 of 20) | `/cascades` |
+| Filler cascades until the account holds 90–100% of its 100 MB storage limit, so the Cascades page warns it is almost full (on EN-FIX, whose cascades are tens of KB, add `--env MAX_STORAGE_BYTES_PER_USER=1000000` to the command above) | `/cascades` |
 
 For a phone on the same network, start with `BIND_HOST=0.0.0.0` and open
 `http://<this machine>:5173`.
@@ -71,11 +71,15 @@ as a link (`[mail] confirm …`).
 ## Part 3: cascades, Trash, export, account
 
 - [ ] **C-1** **Do** build a cascade: Anagram, CSW24, Length 7–8, then preview. **Expect** a count and a sample, no settings on the page (no threshold, answer mode or segments), and a note that the cascade's settings can be changed in its Settings once it is created; Create opens it, clearing at 80%, with flashcards.
-- [ ] **C-2** **Do** look at the header on `/cascades`. **Expect** "18 of 20 cascades" (or your count), with the warning in the builder.
-- [ ] **C-3** **Do** create two more cascades. **Expect** "20 of 20"; Create and Start over are disabled, with a link to the Trash on the Cascades page.
-- [ ] **C-4** **Do** restore "Trashed" from the Trash on `/cascades`. **Expect** it back among the cascades above at once; restoring never counts as a new cascade. Moving a cascade to the Trash there shows it in the Trash below at once.
-- [ ] **C-5** **Do** Delete forever a trashed cascade. **Expect** a slot freed.
+- [ ] **C-2** **Do** look at the header on `/cascades`, hover a cascade's size, then open the builder and preview a search. **Expect** "X MB of 100 MB used" with an amber meter and "Almost full: empty the Trash or delete cascades to make room", and no count of cascades. Each cascade's row shows its size (such as "4.2 MB"); hovering it splits it into questions and filters, and levels. The builder says "This cascade will use about X. Y of 100 MB used." under the count. Sizes are in decimal units (1 MB is 1,000,000 bytes).
+- [ ] **C-3** **Do** in the builder, preview a search too big for the room left (Anagram, CSW24, Length 2–15), then a small one, and create it. **Expect** the big one says "It won’t fit: empty the Trash or delete cascades to make room." in red, with Create Cascade disabled; the small one is created. If the device's figure was behind, Create answers "This cascade needs about X, and Y of your 100 MB is free. Empty the Trash or delete cascades to make room."
+- [ ] **C-14** **Do** with storage full or nearly so, finish a level with misses, then go back to `/cascades`. **Expect** the finish works (studying is never refused); once storage is past the limit the header says "Over your storage by X: you can keep studying, but can’t create cascades until you make room", the meter is red, and New cascade is disabled. In the player's Settings, Start over is disabled ("Start over: your storage is full").
+- [ ] **C-15** **Do** look at the Trash on `/cascades`, then Move to Trash a cascade. **Expect** "The Trash holds X of your storage.", each group showing its size, and each Delete forever button saying what it frees ("Delete forever (X)"). Move to Trash's confirmation says the storage is freed only once the cascade is deleted forever; the header's figure does not drop.
+- [ ] **C-4** **Do** restore "Trashed" from the Trash on `/cascades`. **Expect** it back among the cascades above at once; the storage figure does not change, and restoring is allowed even when storage is full. Moving a cascade to the Trash there shows it in the Trash below at once.
+- [ ] **C-5** **Do** Delete forever a trashed cascade. **Expect** a confirmation ending "This frees X of your storage."; afterwards the header's figure drops by that much (at the next sync), and if that makes room, the over-limit message goes and New cascade and the builder's Create work again.
+- [ ] **C-16** **Do** with storage full, save a search with a pasted word list in the builder. **Expect** "This search needs about X of storage, and Y is free. Make room by emptying the Trash or deleting cascades or saved searches."; overwriting a saved search with a smaller one is accepted.
 - [ ] **C-6** **Do** load each saved search in the builder. **Expect** its filters, the name, and a preview.
+- [ ] **C-17** **Do** open the Account page. **Expect** a card "Storage on this device", saying it is what this device has downloaded to study offline and pointing to the Cascades page for your account's storage, with its figures in the same decimal units.
 - [ ] **C-7** **Do** export "Studying" as text and as CSV, all and missed only. **Expect** downloads whose names say what is in them; offline, the export still works from the device.
 - [ ] **C-8** **Do** in a cascade's Settings (⚙ in the player, Settings in the desktop menu, beside Acrodont, Admin for admins, and Account), see each setting's explanation written under its name, then change a setting under Cascade Settings and a binding under Device Settings, then reload. **Expect** both persist, each saved as soon as it changed, with no Save button; the cascade's setting reaches the other device, the binding does not (controls are per device). The header has no settings link, and the Account page says settings are in a cascade's Settings.
 - [ ] **C-9** **Do** Sign out everywhere, then use the other device. **Expect** "Log in to sync"; studying still works.

@@ -5,6 +5,7 @@
 	// size, and every account with data here — its
 	// figures from its `accounts` row, never from opening its database — each
 	// with "Remove this account's data from this device".
+	import { formatBytes } from '$lib/cascades/storage';
 	import { goto } from '$app/navigation';
 	import { confirmAction } from '$lib/confirm.svelte';
 	import * as Card from '$lib/components/ui/card';
@@ -32,7 +33,7 @@
 	let total = $state(0);
 
 	// KB below a megabyte, so a small device's figures don't all read 0.0 MB.
-	const mb = (b: number) => (b < 1_048_576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1_048_576).toFixed(1)} MB`);
+	const mb = formatBytes;
 
 	async function refresh() {
 		accounts = await storageLine();
@@ -79,8 +80,12 @@
 </script>
 
 <Card.Root>
-	<Card.Header><Card.Title>Offline storage</Card.Title></Card.Header>
+	<Card.Header><Card.Title>Storage on this device</Card.Title></Card.Header>
 	<Card.Content class="grid gap-3 text-sm">
+		<p class="text-muted-foreground">
+			What this device has downloaded to study offline. Your account’s storage, which its limit counts, is on the
+			<a class="underline" href="/cascades">Cascades page</a>.
+		</p>
 		<p>Rows and question keys: {mb(total)} of {mb(ROW_STORAGE_BUDGET)}.</p>
 		{#if syncState.status === 'no_room'}<p class="text-destructive">Not enough room on this device.</p>{/if}
 		{#if held.length}

@@ -1,4 +1,4 @@
-// PLAN.md § Scale tests: the drop pass on a 130,000-question cascade, which
+// PLAN.md § Scale tests: the drop pass on a 300,000-question cascade, which
 // is over AUTO_KEEP_OFFLINE_ROWS and so kept automatically once opened (it
 // never leaves the window by age), dropped whole by the quota path, the base
 // left holding only its cascade, quiz and attempt rows. Then the pass on many
@@ -9,12 +9,13 @@
 // levels inside the window: the row count before the pass counts them and the
 // pass removes them too. See PQ-017 for what "still whole" is taken to mean.
 //
-// The single cascade runs at the plan's size. The many-cascade case runs as
-// many cascades as an account may hold (MAX_CASCADES_PER_USER, 20) against
-// ROW_STORAGE_BUDGET and AUTO_KEEP_OFFLINE_ROWS at a tenth (PQ-019): 56,000-
-// question cascades, the heavy one with five cleared 28,000-question levels.
-// At the 130,000-question cap, 20 full cascades come to well under the real
-// budget, so no account reaches the pass by size alone. The size is chosen so
+// The single cascade runs at the plan's size. The many-cascade case runs 20
+// large cascades, all opened inside the window and so all kept automatically,
+// against ROW_STORAGE_BUDGET and AUTO_KEEP_OFFLINE_ROWS at a tenth (PQ-019):
+// 56,000-question cascades, the heavy one with five cleared 28,000-question
+// levels. Twenty was the old cascade limit; with none now (PLAN.md § Storage
+// limit), it stays as a case of many automatic keeps, and scale-many.scale.ts
+// covers an account of 500 smaller cascades. The size is chosen so
 // the question rows alone (22.5 × SIZE rows at ROW_BYTES) stay under the tenth
 // and the keys the final download adds (about 54 bytes each) take the total
 // over it: then only the measured pass drops anything, as the plan's case has
@@ -37,7 +38,7 @@ vi.mock('./config', async (original) => {
 
 const ONE_DROP_BUDGET_MS = 120_000;
 const MANY_DROP_BUDGET_MS = 120_000;
-/** MAX_CASCADES_PER_USER. */
+/** Many large cascades, every one kept automatically (see above). */
 const MANY = 20;
 /** See above: rows alone under a tenth of the budget, rows and keys over it. */
 const SIZE = 56_000;
@@ -51,7 +52,7 @@ async function total(d: ScaleDev) {
 	return (await d.count('quiz_questions')) * ROW_BYTES + keys;
 }
 
-describe('the drop pass at 130,000 questions', () => {
+describe('the drop pass at the question ceiling', () => {
 	it('the quota path drops an automatically kept cascade, leaving its cascade, quiz and attempt rows', async () => {
 		const server = new FakeServer();
 		const { cascade, source } = ids(1);

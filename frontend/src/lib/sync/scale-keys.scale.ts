@@ -1,11 +1,11 @@
 // PLAN.md § Scale tests: "assert the keys-only pass for ten such cascades
-// takes a fraction of the card-page requests their answers need (at 130,000
+// takes a fraction of the card-page requests their answers need (at 300,000
 // questions, 2 keys requests a cascade against 13 answer pages),
 // and that the bytes it moves are within a quarter of those ten cascades'
 // answers rather than a tenth, the ratio Downloads states."
 //
 // Three such cascades rather than ten (PQ-019): the ratios are per cascade and
-// need the full 130,000 questions (a smaller cascade fits its keys in one page
+// need the full 300,000 questions (a smaller cascade fits its keys in one page
 // against several of answers), while ten cost six million IndexedDB writes
 // before the pass is done — a quarter of an hour. Three give 6 requests against
 // the answers' 39, the same ratio.
@@ -17,7 +17,7 @@ import { ids, QUESTIONS, report, ScaleDev, timed } from './testing/scale';
 const CASCADES = 3;
 const KEYS_PASS_BUDGET_MS = 600_000;
 
-describe('the keys-only pass for three 130,000-question cascades (PQ-019)', () => {
+describe('the keys-only pass for three 300,000-question cascades (PQ-019)', () => {
 	it('takes 2 requests a cascade against the answers’ 13, moving under a quarter of their bytes', async () => {
 		const server = new FakeServer();
 		const d = await ScaleDev.make(server);

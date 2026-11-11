@@ -416,8 +416,10 @@ async fn login_sets_session_and_csrf_cookies_with_one_ttl(pool: sqlx::PgPool) {
     assert_eq!(body["username"], "ivy");
     assert_eq!(body["is_admin"], false);
     assert_eq!(body["trash_retention_days"], 30);
-    assert_eq!(body["max_quiz_questions"], 130000);
-    assert_eq!(body["max_cascades_per_user"], 20);
+    assert_eq!(body["max_quiz_questions"], 300000);
+    assert_eq!(body["storage_bytes"], 0);
+    assert_eq!(body["max_storage_bytes"], 100_000_000);
+    assert!(body.get("max_cascades_per_user").is_none());
     let session = r.set_cookie("acrodont_session").unwrap();
     let csrf = r.set_cookie("acrodont_csrf").unwrap();
     assert!(session.contains("HttpOnly"));
@@ -1140,12 +1142,22 @@ async fn an_expired_unconfirmed_account_does_not_hold_a_place(pool: sqlx::PgPool
     assert_eq!(c.post("/api/auth/register", reg("fresh", "fresh@example.com")).await.status, StatusCode::ACCEPTED);
 }
 
-/// /api/auth/me reports the cascade limit, so the device shows the server's.
+/// /api/auth/me reports the account's storage and its effective limit, so the
+/// device shows the server's: the configured one, or the account's own
+/// override; and no cascade limit.
 #[sqlx::test]
-async fn me_reports_the_cascade_limit(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("MAX_CASCADES_PER_USER", "7")]).await;
+async fn me_reports_the_storage_limit(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("MAX_STORAGE_BYTES_PER_USER", "7000000")]).await;
     let mut c = app.signed_in("limits").await;
-    assert_eq!(c.get("/api/auth/me").await.json()["max_cascades_per_user"], 7);
+    let me = c.get("/api/auth/me").await.json();
+    assert_eq!((me["storage_bytes"].as_i64(), me["max_storage_bytes"].as_i64()), (Some(0), Some(7_000_000)));
+    assert!(me.get("max_cascades_per_user").is_none());
+    sqlx::query("UPDATE users SET storage_bytes = 1234, storage_limit_bytes = 9000000 WHERE username = 'limits'")
+        .execute(app.db())
+        .await
+        .unwrap();
+    let me = c.get("/api/auth/me").await.json();
+    assert_eq!((me["storage_bytes"].as_i64(), me["max_storage_bytes"].as_i64()), (Some(1234), Some(9_000_000)));
 }
 
 /// DEV_LOGIN: absent by default (404), and with it a confirmed account gets a

@@ -66,6 +66,8 @@ test('@env @purge a cleared quiz is purged and the tombstone removes it from a s
 		.poll(
 			async () => {
 				await p2.goto('/trash');
+				// Read once the Trash has loaded, not while it is still being read.
+				await expect(p2.locator('#trash[data-loaded]')).toBeVisible({ timeout: 15_000 });
 				return await p2.getByText('The Trash is empty.').isVisible();
 			},
 			{ timeout: 120_000, intervals: [3000] }
@@ -74,32 +76,62 @@ test('@env @purge a cleared quiz is purged and the tombstone removes it from a s
 	await other.close();
 });
 
-// The saved-search limit (MAX_SAVED_SEARCHES_PER_USER lowered).
-test('@env @limits Save Search at the limit is refused with the limit and count; an overwrite is accepted', async ({ page }) => {
-	test.setTimeout(120_000);
+// The storage limit, lowered (MAX_STORAGE_BYTES_PER_USER, E2E_STORAGE_LIMIT):
+// creating stops when the next cascade would not fit, studying never stops,
+// and deleting forever makes room again (PLAN.md § Storage limit).
+test('@env @limits the storage limit: creation stops at it, studying goes past it, deleting forever makes room', async ({ page }) => {
+	test.setTimeout(300_000);
 	await newUser(page, 'limits');
-	const limit = Number(process.env.E2E_SAVED_LIMIT ?? 2);
-	await page.goto('/cascades/new');
-	await page.getByLabel('Lexicon').selectOption('EN-FIX');
-	await page.getByLabel('Minimum').first().fill('7');
-	await page.getByLabel('Maximum').first().fill('7');
-	await expect(page.getByText(/\d+ questions/).first()).toBeVisible({ timeout: 15_000 });
-	const save = async (name: string) => {
-		await page.getByRole('button', { name: 'Save Search…' }).click();
-		await page.getByPlaceholder('Name').fill(name);
-		await page.getByRole('button', { name: 'Save', exact: true }).click();
+	const limit = Number(process.env.E2E_STORAGE_LIMIT ?? 20000);
+	const estimate = page.locator('[data-storage-estimate]');
+	const builder = async () => {
+		await page.goto('/cascades/new');
+		await page.getByLabel('Lexicon').selectOption('EN-FIX');
+		await page.getByLabel('Minimum').first().fill('7');
+		await page.getByLabel('Maximum').first().fill('7');
+		await expect(page.getByText(/\d+ questions/).first()).toBeVisible({ timeout: 15_000 });
+		await expect(estimate).toContainText(/This cascade will use about [\d.]+ (B|KB)\./);
 	};
-	for (let i = 0; i < limit; i++) {
-		await save(`S${i}`);
-		await expect(page.getByRole('dialog')).toHaveCount(0);
+	// Cascades until the next would not fit: at least one fits, and not many.
+	let made = 0;
+	for (;;) {
+		await builder();
+		if ((await estimate.textContent())!.includes('won’t fit')) break;
+		await page.getByLabel('Cascade name').fill(`Room ${made}`);
+		await page.getByRole('button', { name: 'Create Cascade' }).click();
+		// The device's figure can be a sync behind: then the server refuses it, with what it needs.
+		const refused = page.getByText(/^This cascade needs about [\d.]+ (B|KB)/);
+		await expect(page.getByText('1 / 18').or(refused)).toBeVisible({ timeout: 30_000 });
+		if (await refused.isVisible()) break;
+		made++;
+		expect(made).toBeLessThan(10);
 	}
-	await save('one too many');
-	await expect(page.getByText(`You have ${limit} of ${limit} saved searches, the most you can keep. Delete one first.`)).toBeVisible();
-	await page.keyboard.press('Escape');
-	// A name already taken asks before replacing.
-	await save('S0');
-	await confirm(page, 'Replace');
-	await expect(page.getByRole('dialog')).toHaveCount(0);
+	expect(made).toBeGreaterThan(0);
+	await expect(page.getByRole('button', { name: 'Create Cascade' })).toBeDisabled();
+
+	// Studying is never refused: two passes with all but one missed add two levels, past
+	// the limit. (A pass with every question missed makes no level: it only reshuffles.)
+	await page.goto('/cascades');
+	await page.getByRole('link', { name: 'Room 0', exact: true }).click();
+	expect(await playLevel(page, (i) => i > 0)).toMatch(/^Level 1: \d+%\. Reshuffled, and its 17 missed questions are now Level 2\.$/);
+	expect(await playLevel(page, (i) => i > 0)).toMatch(/^Level 2/);
+	await expect(page.getByText('Level 3 of 3')).toBeVisible();
+	await page.goto('/cascades');
+	await expect(page.locator('[data-storage="over"]')).toBeVisible({ timeout: 30_000 });
+	await expect(page.getByText(/^Over your storage by [\d.]+ (B|KB)/)).toBeVisible();
+	await expect(page.getByRole('button', { name: 'New cascade' })).toBeDisabled();
+	await expect(page.getByText(new RegExp(`of ${limit / 1000} KB used$`))).toBeVisible();
+
+	// The Trash still counts; deleting forever makes room.
+	await page.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Room 0', exact: true }) }).getByRole('button', { name: 'Move to Trash' }).click();
+	await confirm(page, 'Move to Trash');
+	await expect(page.locator('[data-storage="over"]')).toBeVisible();
+	await page.getByRole('listitem').filter({ hasText: /^The whole cascade/ }).getByRole('button', { name: /^Delete forever/ }).click();
+	await confirm(page, 'Delete forever');
+	await expect(page.locator('[data-storage="over"]')).toHaveCount(0, { timeout: 30_000 });
+	await expect(page.getByRole('link', { name: 'New cascade' })).toBeVisible();
+	await builder();
+	await expect(page.getByRole('button', { name: 'Create Cascade' })).toBeEnabled();
 });
 
 // A cascade whose segmented attempt left 5,000 cleared chain quizzes opens /trash in budget.

@@ -1,7 +1,8 @@
 //! PLAN.md § API → Cascades and sync (`POST /api/cascades`, start-over, card
 //! pages) and § Integration tests (creation for all three types, options,
-//! idempotent ids, the cascade limit and its races, search before the
-//! transaction, word-list totals, card pages with `keys=1`, account binding).
+//! idempotent ids, search before the transaction, word-list totals, card
+//! pages with `keys=1`, account binding). The storage limit and its races are
+//! `tests/storage.rs`.
 
 mod common;
 
@@ -152,16 +153,27 @@ async fn every_combination_of_quiz_options(pool: sqlx::PgPool) {
     assert_eq!(c.post("/api/cascades", b).await.status, StatusCode::BAD_REQUEST);
 }
 
+/// Puts the account exactly at its storage limit, through the per-account
+/// override.
+async fn fill_to_the_limit(app: &TestApp, user: &str) {
+    sqlx::query("UPDATE users SET storage_limit_bytes = storage_bytes WHERE username = $1")
+        .bind(user)
+        .execute(app.db())
+        .await
+        .unwrap();
+}
+
 /// "A repeated `POST /api/cascades` or start-over with the same `id` returns
-/// the existing cascade and takes no second slot; an `id` held by another user
-/// is refused."
+/// the existing cascade and takes no second share of storage; an `id` held by
+/// another user is refused."
 #[sqlx::test]
 async fn creation_is_idempotent_by_device_minted_ids(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("MAX_CASCADES_PER_USER", "1")]).await;
+    let app = TestApp::new(pool).await;
     let mut c = app.seed_fixture_catalog("root").await;
     let b = body("EN-FIX", "anagram", sevens());
     let first = c.post("/api/cascades", b.clone()).await;
     assert_eq!(first.status, StatusCode::CREATED);
+    fill_to_the_limit(&app, "root").await;
     let again = c.post("/api/cascades", b.clone()).await;
     assert_eq!(again.status, StatusCode::OK, "at the limit, the retry is still answered");
     assert_eq!(again.json()["cascade"], first.json()["cascade"]);
@@ -174,9 +186,9 @@ async fn creation_is_idempotent_by_device_minted_ids(pool: sqlx::PgPool) {
     let mut b2 = body("EN-FIX", "anagram", sevens());
     b2["source_quiz_id"] = b["source_quiz_id"].clone();
     assert_eq!(bob.post("/api/cascades", b2).await.status, StatusCode::CONFLICT);
-    // Start over, repeated with the same id.
-    let app2 = TestApp::with(app.db().clone(), &[("MAX_CASCADES_PER_USER", "5")]).await;
-    let mut c2 = Client::new(&app2, "203.0.113.1");
+    // Start over, repeated with the same id, with room for it.
+    sqlx::query("UPDATE users SET storage_limit_bytes = NULL").execute(app.db()).await.unwrap();
+    let mut c2 = Client::new(&app, "203.0.113.1");
     c2.cookies = c.cookies.clone();
     c2.user_id = c.user_id;
     let so = json!({ "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
@@ -184,14 +196,17 @@ async fn creation_is_idempotent_by_device_minted_ids(pool: sqlx::PgPool) {
     let path = format!("/api/cascades/{}/start-over", b["id"].as_str().unwrap());
     let r1 = c2.post(&path, so.clone()).await;
     assert_eq!(r1.status, StatusCode::CREATED, "{:?}", r1.json());
+    let used: i64 = sqlx::query_scalar("SELECT storage_bytes FROM users WHERE username = 'root'").fetch_one(app.db()).await.unwrap();
     let r2 = c2.post(&path, so).await;
     assert_eq!(r2.status, StatusCode::OK);
     assert_eq!(count(&app, "cascades").await, 2);
+    let after: i64 = sqlx::query_scalar("SELECT storage_bytes FROM users WHERE username = 'root'").fetch_one(app.db()).await.unwrap();
+    assert_eq!(after, used, "the retry is counted once");
 }
 
 #[sqlx::test]
 async fn start_over_copies_the_spec_threshold_options_and_settings(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("MAX_CASCADES_PER_USER", "2")]).await;
+    let app = TestApp::new(pool).await;
     let mut c = app.seed_fixture_catalog("root").await;
     let mut b = body("EN-FIX", "leave_value", json!({ "op": "and", "children": [
         { "type": "leave_value", "negated": false, "min": 30.0, "max": null },
@@ -239,12 +254,15 @@ async fn start_over_copies_the_spec_threshold_options_and_settings(pool: sqlx::P
     assert_eq!(specs.len(), 2);
     assert_ne!(specs[0].0, specs[1].0);
     assert!(specs.iter().all(|s| s.1 == "leave_value"));
+    // And the same storage: the same rows.
+    assert_eq!(n["storage_bytes"], o["storage_bytes"]);
     // At the limit, Start over is refused.
+    fill_to_the_limit(&app, "root").await;
     let so = json!({ "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
                      "at": "2026-01-01T00:00:00Z" });
     let r = c.post(&format!("/api/cascades/{}/start-over", b["id"].as_str().unwrap()), so).await;
     assert_eq!(r.status, StatusCode::CONFLICT);
-    assert_eq!(r.json()["error"], "cascade_limit");
+    assert_eq!(r.json()["error"], "storage_limit");
 }
 
 #[sqlx::test]
@@ -346,38 +364,19 @@ async fn word_list_totals_on_creation_and_preview(pool: sqlx::PgPool) {
     assert_eq!(count(&app, "search_specs").await, before, "nothing written");
 }
 
-/// "the cascade limit, including trashed cascades counting toward it and two
-/// simultaneous creations competing for the last slot".
-#[sqlx::test]
-async fn the_cascade_limit(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("MAX_CASCADES_PER_USER", "2")]).await;
-    let mut c = app.seed_fixture_catalog("root").await;
-    let first = body("EN-FIX", "anagram", sevens());
-    assert_eq!(c.post("/api/cascades", first.clone()).await.status, StatusCode::CREATED);
-    sqlx::query("UPDATE cascades SET trashed_at = now()").execute(app.db()).await.unwrap();
-    let mut other = Client::new(&app, "203.0.113.2");
-    other.cookies = c.cookies.clone();
-    other.user_id = c.user_id;
-    let (a, b) = tokio::join!(
-        c.post("/api/cascades", body("EN-FIX", "anagram", sevens())),
-        other.post("/api/cascades", body("EN-FIX", "definition", sevens()))
-    );
-    let mut statuses = [a.status, b.status];
-    statuses.sort();
-    assert_eq!(statuses, [StatusCode::CREATED, StatusCode::CONFLICT]);
-    let refused = if a.status == StatusCode::CONFLICT { a } else { b };
-    assert_eq!(refused.json(), json!({ "error": "cascade_limit", "limit": 2, "count": 2 }));
-    assert_eq!(count(&app, "cascades").await, 2);
-}
-
 /// "A cascade creation runs its search before opening a transaction: with a
 /// slow search, the purge task for the same user acquires that user's row
 /// while the search is still running, and neither blocks the other; a
-/// creation over the limit is refused before the search runs at all, and one
-/// that loses the limit race after searching is refused with `409`."
+/// creation from an account at its storage limit is refused before the search
+/// runs at all, and one that loses the race for the last space after searching
+/// is refused with `409`." The limit holds either cascade, not both.
 #[sqlx::test]
 async fn the_search_runs_before_the_transaction(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("SEARCH_CONCURRENCY", "1"), ("SEARCH_TIMEOUT_MS", "20000"), ("MAX_CASCADES_PER_USER", "1")]).await;
+    let app = TestApp::with(
+        pool,
+        &[("SEARCH_CONCURRENCY", "1"), ("SEARCH_TIMEOUT_MS", "20000"), ("MAX_STORAGE_BYTES_PER_USER", "10000")],
+    )
+    .await;
     let c = app.seed_fixture_catalog("root").await;
     let user_id = c.user_id.unwrap();
     // A slow search: the only permit is held, so both creations wait inside
@@ -420,8 +419,9 @@ async fn the_search_runs_before_the_transaction(pool: sqlx::PgPool) {
     statuses.sort();
     // One wins; the other loses the limit race after searching.
     assert_eq!(statuses, [StatusCode::CREATED, StatusCode::CONFLICT]);
-    // Over the limit, a creation is refused before its search: with the permit
+    // At the limit, a creation is refused before its search: with the permit
     // held it answers 409 at once, not 503.
+    fill_to_the_limit(&app, "root").await;
     let _held = app.state.search_permits.clone().acquire_owned().await.unwrap();
     let mut cl = Client::new(&app, "203.0.113.1");
     cl.cookies = c.cookies.clone();
@@ -430,6 +430,8 @@ async fn the_search_runs_before_the_transaction(pool: sqlx::PgPool) {
         .await
         .expect("answered without waiting for a permit");
     assert_eq!(r.status, StatusCode::CONFLICT);
+    assert_eq!(r.json()["error"], "storage_limit");
+    assert_eq!(r.json()["needed"], 0, "not known before the search");
 }
 
 // ---------------------------------------------------------------------------

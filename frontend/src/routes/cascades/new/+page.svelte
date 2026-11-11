@@ -40,22 +40,26 @@
 	import { storeCreated, type Created } from '$lib/local/created';
 	import { getMeta } from '$lib/local/meta';
 	import { CASCADE_SETTING_DEFAULTS } from '$lib/local/rows';
-	import { allCascades, cascadeWarning } from '$lib/cascades/summary';
+	import { DEFAULT_STORAGE_LIMIT, formatBytes } from '$lib/cascades/storage';
 	import { userDb } from '$lib/local/open';
 	import { PREVIEW_MANUAL_ENTRIES } from '$lib/sync/config';
 	import type { Distribution } from '$lib/tiles';
 
-	const cap = $derived(session.me?.max_quiz_questions ?? 130_000);
+	const cap = $derived(session.me?.max_quiz_questions ?? 300_000);
 
 	let quizType = $state<QuizType>('anagram');
 	let lexicons = $state<LexiconInfo[]>([]);
 	let lexicon = $state('');
 	let dist = $state<Distribution | null>(null);
 	let root = $state<GroupState>(newGroup('and', [newRow('length', 'anagram', null)]));
-	let cascadeCount = $state(0);
+	/** The account's storage and its limit, as the server last reported them (PLAN.md § Storage limit). */
+	let used = $state(0);
+	let limit = $state(DEFAULT_STORAGE_LIMIT);
 	let name = $state('');
 	let nameEdited = $state(false);
 	let preview = $state<PreviewState | null>(null);
+	/** The new cascade would not fit: the server would refuse it, so the button says so first. */
+	let wontFit = $derived(used >= limit || (preview?.storageBytes != null && used + preview.storageBytes > limit));
 	let creating = $state(false);
 	/** What the creation is doing, for the screen shown over the builder. */
 	let createStage = $state<'server' | 'device'>('server');
@@ -91,7 +95,9 @@
 	onMount(async () => {
 		if (session.userId) {
 			const db = await userDb(session.userId, session.username);
-			cascadeCount = (await allCascades(db)).length;
+			const server = await getMeta(db, 'server');
+			used = server.storage_bytes ?? 0;
+			limit = server.max_storage_bytes ?? DEFAULT_STORAGE_LIMIT;
 		}
 		try {
 			lexicons = await loadLexicons();
@@ -166,9 +172,11 @@
 			await storeCreated(await userDb(session.userId, session.username), created, new Date(), (f) => (createProgress = f));
 			await goto(`/cascades/${body.id}`);
 		} catch (e) {
-			if (e instanceof ApiError && e.code === 'cascade_limit') {
-				const b = e.body as { limit: number };
-				createError = `You have reached the limit of ${b.limit} cascades. Empty the Trash to make room.`;
+			if (e instanceof ApiError && e.code === 'storage_limit') {
+				const b = e.body as { used: number; limit: number; needed: number };
+				used = b.used;
+				limit = b.limit;
+				createError = `This cascade needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your ${formatBytes(b.limit)} is free. Empty the Trash or delete cascades to make room.`;
 			} else if (e instanceof ApiError && e.code === 'empty') createError = 'The search matched nothing.';
 			else if (e instanceof ApiError && e.code === 'over_cap')
 				createError = `The search matched ${(e.body as { count: number }).count.toLocaleString()} questions, more than ${cap.toLocaleString()}. Narrow it.`;
@@ -202,9 +210,9 @@
 					action: 'Replace'
 				});
 				if (ok) await save(true, id);
-			} else if (e instanceof ApiError && e.code === 'saved_search_limit') {
-				const b = e.body as { limit: number; count: number };
-				saveMessage = `You have ${b.count} of ${b.limit} saved searches, the most you can keep. Delete one first.`;
+			} else if (e instanceof ApiError && e.code === 'storage_limit') {
+				const b = e.body as { used: number; limit: number; needed: number };
+				saveMessage = `This search needs about ${formatBytes(b.needed)} of storage, and ${formatBytes(Math.max(0, b.limit - b.used))} is free. Make room by emptying the Trash or deleting cascades or saved searches.`;
 			} else if (e instanceof ApiError && e.status === 400) {
 				saveMessage = (e.body as { errors?: { message: string }[] })?.errors?.map((x) => x.message).join(' ') ?? 'Invalid.';
 			} else saveMessage = 'The search could not be saved.';
@@ -355,16 +363,17 @@
 				created. Every new cascade starts with the same ones.
 			</p>
 			{#if createError}<p class="text-sm text-destructive">{createError}</p>{/if}
-			{#if cascadeCount >= session.cascadeLimit}
-				<p class="text-sm">You have {cascadeCount} of {session.cascadeLimit} cascades. <a class="underline" href="/cascades#trash">Empty the Trash</a> to make room.</p>
-			{:else if cascadeCount >= cascadeWarning(session.cascadeLimit)}
-				<p class="text-sm text-muted-foreground">{cascadeCount} of {session.cascadeLimit} cascades used.</p>
-			{/if}
+			<!-- What the new cascade will hold, against what is free: an estimate, labelled as one; the server decides. -->
+			<p class="text-sm {wontFit ? 'text-destructive' : 'text-muted-foreground'}" data-storage-estimate>
+				{#if preview?.storageBytes != null && !preview.overCap}This cascade will use about {formatBytes(preview.storageBytes)}.{/if}
+				{formatBytes(used)} of {formatBytes(limit)} used.
+				{#if wontFit}It won’t fit: <a class="underline" href="/cascades#trash">empty the Trash</a> or delete cascades to make room.{/if}
+			</p>
 			<div>
 				<Button
 					type="button"
 					onclick={create}
-					disabled={creating || cascadeCount >= session.cascadeLimit || !lexicon || !dist || wire.errors.size > 0 || !name.trim()}
+					disabled={creating || wontFit || !lexicon || !dist || wire.errors.size > 0 || !name.trim()}
 				>
 					{busy ? 'the server is busy' : creating ? 'Creating…' : 'Create Cascade'}
 				</Button>

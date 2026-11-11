@@ -42,7 +42,7 @@ test('over the answer limit with two automatic keeps @env @answers', async ({ pa
 	for (const name of ['Answers A', 'Answers B']) {
 		const row = page.getByRole('row').filter({ hasText: name });
 		await expect(row).toBeVisible({ timeout: 30_000 });
-		await expect(row.getByRole('cell').filter({ hasText: /^\d+\.\d (KB|MB)$/ })).toHaveCount(2);
+		await expect(row.getByRole('cell').filter({ hasText: /^\d+(\.\d)? (B|KB|MB)$/ })).toHaveCount(2);
 	}
 	await page.evaluate(async () => {
 		await navigator.serviceWorker.ready;
@@ -98,7 +98,7 @@ test('over ROW_STORAGE_BUDGET: unkept first, then the automatic keeps; drops sta
 	// The storage line: the total against the lowered budget, and no cascade listed with nothing behind it.
 	await page.goto('/account');
 	const total = page.getByText(/^Rows and question keys: /);
-	await expect(page.getByText(/^Rows and question keys: [\d.]+ KB of 4\.9 KB\.$/)).toBeVisible();
+	await expect(page.getByText(/^Rows and question keys: [\d.]+ (B|KB) of 5\.0 KB\.$/)).toBeVisible();
 	await expect(page.getByRole('row').filter({ hasText: /Budget/ })).toHaveCount(0);
 	const steady = await total.textContent();
 

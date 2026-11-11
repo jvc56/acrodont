@@ -13,7 +13,6 @@ import {
 } from '$lib/local/accounts';
 import { closeUserDb, onUpdatedElsewhere, userDb } from '$lib/local/open';
 import { authApi } from './client';
-import { DEFAULT_CASCADE_LIMIT } from '$lib/cascades/limits';
 import { getMeta } from '$lib/local/meta';
 import type { Me } from './types';
 
@@ -29,8 +28,6 @@ class Session {
 	/** The server no longer accepts this tab's session: "Log in to sync". */
 	needsLogin = $state(false);
 	me = $state<Me | null>(null);
-	/** MAX_CASCADES_PER_USER as the server last reported it, offline included. */
-	cascadeLimit = $state(DEFAULT_CASCADE_LIMIT);
 	/** Signing out on the way to the landing page (a deleted account), not to /login. */
 	toLanding = $state(false);
 }
@@ -58,8 +55,7 @@ function applyMe(me: Me) {
 	session.me = me;
 	session.isAdmin = me.is_admin;
 	session.username = me.username;
-	if (me.max_cascades_per_user) session.cascadeLimit = me.max_cascades_per_user;
-	// The server's limits as /api/auth/me last reported them.
+	// The server's limits, and the account's storage, as /api/auth/me last reported them.
 	void userDb(me.user_id, me.username)
 		.then((db) =>
 			db.put(
@@ -67,7 +63,8 @@ function applyMe(me: Me) {
 				{
 					trash_retention_days: me.trash_retention_days,
 					max_quiz_questions: me.max_quiz_questions,
-					max_cascades_per_user: me.max_cascades_per_user
+					storage_bytes: me.storage_bytes,
+					max_storage_bytes: me.max_storage_bytes
 				},
 				'server'
 			)
@@ -91,12 +88,6 @@ export async function initSession() {
 		session.userId = id;
 		session.username = row?.username ?? '';
 		bindUser(id);
-		void userDb(id, session.username)
-			.then(async (db) => {
-				const server = await getMeta(db, 'server');
-				if (server.max_cascades_per_user) session.cascadeLimit = server.max_cascades_per_user;
-			})
-			.catch(() => undefined);
 	} else {
 		await retryQueuedLogout(sendQueuedLogout);
 	}

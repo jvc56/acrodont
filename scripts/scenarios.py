@@ -84,9 +84,6 @@ class Seeder:
         # Seeds travel as unsigned decimal text; Postgres stores them signed.
         return {"attempt": int(attempt), "seed": str(int(seed) % 2 ** 64), "positions": positions}
 
-    def cascade_count(self) -> int:
-        return int(self.sql(f"SELECT count(*) FROM cascades WHERE user_id = '{self.http.user_id}'")[0][0])
-
     # -- writing ---------------------------------------------------------------
 
     def op(self, op_type: str, **fields) -> dict:
@@ -213,19 +210,56 @@ def trash(s: Seeder) -> None:
     s.sync([s.op("trash_cascade", cascade_id=c)])
 
 
+# The searches `limits` fills an account with, broadest first.
+FILLER_SEARCHES = [length(2, 15), length(2, 8), length(7, 8), length(2, 6), length(6, 6), length(5, 5),
+                   length(4, 4), length(3, 3), length(2, 2), small(2, 2, 3)]
+# At most this many fillers a run: a 100 MB account on the 154-word fixture
+# catalog would need thousands.
+MAX_FILLERS = 60
+
+
 def limits(s: Seeder) -> None:
-    """The cascade-limit warning: 90% of MAX_CASCADES_PER_USER."""
+    """The storage warning: cascades until the account holds 90% (and under
+    100%) of its storage limit (STORAGE_LIMIT_PLAN.md § S6).
+
+    Each filler is the broadest search whose cascade, by the preview's
+    `storage_bytes`, still fits under the limit. On CSW24 a handful fill the
+    default 100 MB. The fixture catalog's cascades are a few tens of KB, so
+    there run it on a stack with a lowered limit:
+    `./scripts/dev.py --fixtures --env MAX_STORAGE_BYTES_PER_USER=1000000 --scenario limits`.
+    """
     status, me = s.http.json("GET", "/api/auth/me")
-    limit = int(me.get("max_cascades_per_user", 20)) if status == 200 else 20
-    target = -(-limit * 9 // 10)
-    n = s.cascade_count()
+    if status != 200:
+        raise RuntimeError(f"/api/auth/me answered {status}: {me}")
+    limit = int(me["max_storage_bytes"])
+    target = limit * 9 // 10
+    sizes = []
+    for filters in FILLER_SEARCHES:
+        st, preview = s.http.json("POST", "/api/search/preview",
+                                  {"lexicon": s.lexicon, "quiz_type": "anagram", "filters": filters})
+        if st == 200 and preview["count"] > 0 and not preview["over_cap"]:
+            sizes.append((int(preview["storage_bytes"]), filters))
+    sizes.sort(key=lambda x: -x[0])
     i = 1
-    while n < target:
+    made = 0
+    while made < MAX_FILLERS:
+        status, me = s.http.json("GET", "/api/auth/me")
+        used = int(me["storage_bytes"])
+        if used >= target:
+            stack.log(f"scenario limits: {used:,} of {limit:,} bytes used")
+            return
+        fitting = [(n, f) for n, f in sizes if used + n <= limit]
+        if not fitting:
+            break
         name = f"Filler {i}"
-        if not s.cascade_named(name):
-            s.create(name, small(2, 2, 10))
-            n += 1
         i += 1
+        if s.cascade_named(name):
+            continue
+        s.create(name, fitting[0][1])
+        made += 1
+    status, me = s.http.json("GET", "/api/auth/me")
+    stack.log(f"scenario limits: stopped at {int(me['storage_bytes']):,} of {limit:,} bytes; for the warning, "
+              "lower the limit: --env MAX_STORAGE_BYTES_PER_USER=1000000")
 
 
 def big(s: Seeder) -> None:
@@ -237,7 +271,7 @@ def big(s: Seeder) -> None:
     if s.cascade_named(name):
         return
     status, me = s.http.json("GET", "/api/auth/me")
-    cap = int(me.get("max_quiz_questions", 130000))
+    cap = int(me.get("max_quiz_questions", 300000))
     for lo, hi in ((7, 9), (7, 8), (7, 7)):
         st, preview = s.http.json("POST", "/api/search/preview",
                                   {"lexicon": s.real_lexicon, "quiz_type": "anagram", "filters": length(lo, hi)})
@@ -265,7 +299,7 @@ SCENARIOS: Dict[str, Scenario] = {s.name: s for s in [
     Scenario("segments", "a cascade in segments of five, the first finished with a miss, the second started", segments),
     Scenario("typed", "typed answers on (a preference, for every Anagram cascade) and a cascade to try them", typed),
     Scenario("trash", "a cascade in the Trash", trash),
-    Scenario("limits", "cascades up to the limit warning (90% of MAX_CASCADES_PER_USER)", limits),
+    Scenario("limits", "cascades up to the storage warning (90% of MAX_STORAGE_BYTES_PER_USER; on the fixture catalog with --env MAX_STORAGE_BYTES_PER_USER=1000000)", limits),
     Scenario("big", "one cascade near MAX_QUIZ_QUESTIONS from the licensed catalog (CSW24 by default)", big),
     Scenario("saved-searches", "three saved searches in the builder's Load dialog", saved_searches),
 ]}

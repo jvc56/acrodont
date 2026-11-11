@@ -11,6 +11,7 @@ use super::{Effects, IncomingOp};
 use crate::cascade::order::{from_i64, questions_hash, shuffle, to_i64};
 use crate::cascade::rows::{AnswerMode, Origin, Progression, QuizStatus};
 use crate::cascade::rules::{self, CascadeState, FinishResult, Grade, NewQuiz, Opts, QuizState, Reason, SegmentResult};
+use crate::storage;
 
 pub enum OpError {
     Rejected(Reason),
@@ -456,6 +457,9 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
     let r = rules::finish(&mut l.cascade, &l.quiz, l.correct as u32, misses, seed);
     let outcome = r.outcome();
     record_attempt(conn, ctx, &l, outcome, at).await?;
+    // Studying never fails for storage (STORAGE_LIMIT_PLAN.md § S3): the
+    // attempt and any new level are counted, past the limit or not.
+    let mut added = storage::attempt_bytes();
     let mut fx = Effects { outcome: Some(outcome.as_str().to_owned()), ..Default::default() };
     match &r {
         FinishResult::Finished { replacement, .. } => {
@@ -472,6 +476,7 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
             .await?;
             if let Some(n) = replacement {
                 let (c, h) = insert_quiz(conn, ctx, new_id, l.cascade_id, quiz, n, at).await?;
+                added += storage::level_bytes(c.into());
                 fx.new_quiz_question_count = Some(c);
                 fx.new_quiz_questions_hash = Some(h);
             }
@@ -480,6 +485,7 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
             let qs = reset_quiz(conn, ctx, quiz, l.quiz.attempt + 1, *reset_seed, at).await?;
             let _ = qs;
             let (c, h) = insert_quiz(conn, ctx, new_id, l.cascade_id, quiz, new_level, at).await?;
+            added += storage::level_bytes(c.into());
             fx.new_quiz_question_count = Some(c);
             fx.new_quiz_questions_hash = Some(h);
         }
@@ -495,6 +501,7 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
             .await?;
     }
     write_cascade(conn, ctx, l.cascade_id, &l.cascade, Some(at)).await?;
+    storage::add_to_cascade(conn, ctx.user, l.cascade_id, added, ctx.seq).await?;
     if matches!(r, FinishResult::Completed { .. }) {
         sqlx::query!("UPDATE cascades SET completed_at = now() WHERE id = $1", l.cascade_id).execute(&mut *conn).await?;
     }
@@ -551,9 +558,11 @@ async fn finish_segment(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> 
     .await?;
     let r = rules::finish_segment(&mut l.cascade, &l.quiz, run_misses.into_iter().map(|i| i as u32).collect(), end, seed);
     let mut fx = Effects::default();
+    let mut added = 0;
     match &r {
         SegmentResult::Drilled(n) => {
             let (c, h) = insert_quiz(conn, ctx, new_id, l.cascade_id, quiz, n, at).await?;
+            added = storage::level_bytes(c.into());
             fx.outcome = Some("drilled".into());
             fx.new_quiz_question_count = Some(c);
             fx.new_quiz_questions_hash = Some(h);
@@ -572,6 +581,7 @@ async fn finish_segment(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> 
     .execute(&mut *conn)
     .await?;
     write_cascade(conn, ctx, l.cascade_id, &l.cascade, Some(at)).await?;
+    storage::add_to_cascade(conn, ctx.user, l.cascade_id, added, ctx.seq).await?;
     Ok(fx)
 }
 
@@ -710,13 +720,17 @@ async fn purge_quiz(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpRe
     if l.quiz.active {
         return Err(OpError::Rejected(Reason::NotCleared));
     }
+    // What it frees: its level and its attempts, read before they go.
+    let freed: i64 = storage::quizzes_bytes(conn, &[quiz]).await?.iter().map(|(_, b)| b).sum();
     sqlx::query!("DELETE FROM quizzes WHERE id = $1", quiz).execute(&mut *conn).await?;
     tombstone(conn, ctx.user, "quiz", quiz, ctx.seq).await?;
+    storage::add_to_cascade(conn, ctx.user, l.cascade_id, -freed, ctx.seq).await?;
     Ok(Effects::default())
 }
 
-/// Deletes a cascade by id, table by table, with its spec, and writes
-/// tombstones for it and each of its quizzes. Shared with the purge task.
+/// Deletes a cascade by id, table by table, with its spec, writes
+/// tombstones for it and each of its quizzes, and takes what it held off the
+/// user's total. Shared with the purge task.
 pub async fn purge_cascade_rows(conn: &mut PgConnection, user: Uuid, id: Uuid, seq: i64) -> Result<u64, sqlx::Error> {
     let quizzes: Vec<Uuid> = sqlx::query_scalar!("SELECT id FROM quizzes WHERE cascade_id = $1", id)
         .fetch_all(&mut *conn)
@@ -726,10 +740,11 @@ pub async fn purge_cascade_rows(conn: &mut PgConnection, user: Uuid, id: Uuid, s
     sqlx::query!("UPDATE quizzes SET origin_quiz_id = NULL WHERE cascade_id = $1", id).execute(&mut *conn).await?;
     sqlx::query!("DELETE FROM quizzes WHERE cascade_id = $1", id).execute(&mut *conn).await?;
     sqlx::query!("DELETE FROM cascade_questions WHERE cascade_id = $1", id).execute(&mut *conn).await?;
-    let spec = sqlx::query_scalar!("DELETE FROM cascades WHERE id = $1 RETURNING spec_id", id)
+    let gone = sqlx::query!("DELETE FROM cascades WHERE id = $1 RETURNING spec_id, storage_bytes", id)
         .fetch_one(&mut *conn)
         .await?;
-    sqlx::query!("DELETE FROM search_specs WHERE id = $1", spec).execute(&mut *conn).await?;
+    sqlx::query!("DELETE FROM search_specs WHERE id = $1", gone.spec_id).execute(&mut *conn).await?;
+    storage::add_to_user(conn, user, -gone.storage_bytes).await?;
     sqlx::query!(
         "INSERT INTO sync_tombstones (user_id, entity, entity_id, seq)
          SELECT $1, 'quiz', q, $3 FROM UNNEST($2::uuid[]) AS q

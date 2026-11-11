@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT q.cascade_id,\n                  sum($2::int8 + q.question_count::int8 * $3::int8\n                      + $4::int8 * (SELECT count(*) FROM quiz_attempts a WHERE a.quiz_id = q.id))::int8 AS \"bytes!\"\n           FROM quizzes q WHERE q.id = ANY($1) GROUP BY q.cascade_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cascade_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "quizzes",
+            "name": "cascade_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "bytes!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "81a6b646e08e4eeca5cb43229947f4404f466d3886626792070eab6332bb72e1"
+}

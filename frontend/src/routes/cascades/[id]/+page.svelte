@@ -12,7 +12,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api } from '$lib/api';
+	import { api, ApiError } from '$lib/api';
 	import { session } from '$lib/auth/session.svelte';
 	import CascadeLadder from '$lib/components/CascadeLadder.svelte';
 	import QuizOptionsForm from '$lib/components/QuizOptionsForm.svelte';
@@ -32,7 +32,7 @@
 	import { storeCreated, type Created } from '$lib/local/created';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta, recordOpen } from '$lib/local/meta';
-	import { allCascades } from '$lib/cascades/summary';
+	import { DEFAULT_STORAGE_LIMIT, formatBytes } from '$lib/cascades/storage';
 	import {
 		applyToAll,
 		copySettings,
@@ -76,7 +76,7 @@
 	let fitArea = $state<HTMLElement | null>(null);
 	let answerBox = $state<HTMLElement | null>(null);
 	let quizOptions = $state<QuizOptions | null>(null);
-	let maxQuiz = $state(130_000);
+	let maxQuiz = $state(300_000);
 
 	// The repeat guard is a setting on this device (display.repeat_guard_ms), read on every press.
 	const actions = new Debounce(() => display.value.repeat_guard_ms);
@@ -408,8 +408,9 @@
 		copied = null;
 		copyFrom = '';
 		if (db) {
-			const all = await allCascades(db);
-			atLimit = all.length >= session.cascadeLimit;
+			// Start over makes a new cascade, which needs room; the server checks the exact figure.
+			const server = await getMeta(db, 'server');
+			atLimit = (server.storage_bytes ?? 0) >= (server.max_storage_bytes ?? DEFAULT_STORAGE_LIMIT);
 			sources = c ? await copySources(db, c) : [];
 		}
 		settingsOpen = true;
@@ -528,7 +529,7 @@
 		if (!db || !session.userId) return;
 		const ok = await confirmAction({
 			title: `Start “${v?.cascade?.name ?? 'this cascade'}” over?`,
-			body: `This makes a new cascade of the same words, with the same threshold and options, starting at Level 1. This cascade isn’t changed. You’ll have both, and each counts toward your limit of ${session.cascadeLimit} until it is deleted from the Trash.`,
+			body: `This makes a new cascade of the same words, with the same threshold and options, starting at Level 1. This cascade isn’t changed. You’ll have both, and each counts toward your storage until it is deleted from the Trash.`,
 			action: 'Start over'
 		});
 		if (!ok) return;
@@ -542,8 +543,11 @@
 			await storeCreated(db, created, new Date(), (f) => starting && (starting.progress = f));
 			settingsOpen = false;
 			await goto(`/cascades/${body.id}`);
-		} catch {
-			cascadeError = 'Start over needs a connection.';
+		} catch (e) {
+			if (e instanceof ApiError && e.code === 'storage_limit') {
+				const b = e.body as { used: number; limit: number; needed: number };
+				cascadeError = `Starting over needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your storage is free. Empty the Trash or delete cascades to make room.`;
+			} else cascadeError = 'Start over needs a connection.';
 		} finally {
 			starting = null;
 		}
@@ -1004,7 +1008,7 @@
 							<Button
 								variant="outline"
 								disabled={atLimit}
-								title={atLimit ? 'Start over: at the cascade limit' : 'A new cascade of the same questions, from Level 1'}
+								title={atLimit ? 'Start over: your storage is full' : 'A new cascade of the same questions, from Level 1'}
 								onclick={startOver}>Start over</Button
 							>
 							<Button variant="outline" class="hover:text-destructive" onclick={moveToTrash}>Move to Trash</Button>

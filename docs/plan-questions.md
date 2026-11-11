@@ -199,7 +199,7 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   the literal sentence otherwise (`frontend/src/lib/sync/notices.ts`,
   `keptSentence`).
 
-## PQ-015 — Where the device learns the cascade limit (open)
+## PQ-015 — Where the device learns the cascade limit (superseded by PQ-023)
 
 - **Plan:** Cascade limit (405–427): "The Cascades page shows `87 of 100
   cascades`, and the cascade builder shows a warning from 90";
@@ -211,6 +211,11 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   client constant (`frontend/src/lib/cascades/summary.ts`, `CASCADE_LIMIT`),
   with the warning from 90, as PQ-010 does for the search rate. The server's
   `409` still refuses creation at its own configured limit.
+- **Since PQ-023:** there is no cascade limit. `/api/auth/me` and every sync
+  response report the account's storage and its effective limit
+  (`storage_bytes`, `max_storage_bytes`; `storage: { used, limit }`), which
+  the device keeps in `meta.server`; `DEFAULT_STORAGE_LIMIT` in
+  `lib/cascades/storage.ts` stands in only until the server has reported one.
 
 ## PQ-016 — The expired-session journey's TTL (open)
 
@@ -311,6 +316,11 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   a long history, and the user accepted it. The drop pass runs as many
   cascades as an account may hold (20) at 56,000 questions each against a
   tenth of the budget.
+- **Since PQ-023:** there is no cascade count to hold. The drop pass keeps
+  its twenty 56,000-question cascades as a case of many automatic keeps, and
+  `scale-many.scale.ts` covers an account of 500 smaller cascades. The device
+  suites' `QUESTIONS` is 300,000 again; the first-sync budget of 150 s was
+  measured at the 130,000-question cap and stands until it is measured again.
 
 ## PQ-020 — Two kinds of settings, no defaults for new cascades (decided)
 
@@ -437,3 +447,56 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   - PLAN.md § Authentication, § Auth and account, § Frontend,
     § Configuration, § Unit tests and § Integration tests, and JOURNEYS.md
     V-6, V-10 and V-11, describe the result.
+
+## PQ-023 — One storage limit instead of cascade limits (decided)
+
+- **Plan:** § Cascade limit and § Configuration, as they stood before this
+  decision: at most 20 cascades an account, the Trash included
+  (`MAX_CASCADES_PER_USER`, reported as `max_cascades_per_user`, refused with
+  `409 cascade_limit`); at most 200 saved searches (`MAX_SAVED_SEARCHES_PER_USER`,
+  `409 saved_search_limit`); at most 130,000 questions a cascade
+  (`QUESTION_CEILING`, with the migration's CHECKs at 130000 and 129999 while
+  § Schema still showed 300000 and 299999); and a sync request's
+  `question_rows_for` bounded by the cascade limit.
+- **Issue:** The count limits were blunt. Twenty cascades of 200 questions and
+  twenty of 130,000 were both "at the limit", though the second account held
+  hundreds of times the space, and nothing told a user how close they were to
+  anything that mattered. The 130,000 ceiling left out any search over a whole
+  lexicon. STORAGE_LIMIT_PLAN.md works it through.
+- **Decision (2026-11-11):** One per-account storage limit, sized from what
+  the owner named, in place of every count limit.
+  - **D1, the default:** `MAX_STORAGE_BYTES_PER_USER` = 100,000,000 bytes
+    (100 MB), sized from three cascades: every CSW24 anagram of 7 and 8
+    letters (64,353 questions, 18.64 MB as created, 30.74 MB studied hard),
+    every CSW24 definition of 7 and 8 letters (76,847 questions, 22.25 MB /
+    36.70 MB) and 10,000 CSW24 leave values (2.88 MB / 4.76 MB). All three
+    come to 43.77 MB as created and 72.20 MB studied hard, leaving 27.8 MB of
+    headroom, 1.39 times the need. An account's own limit,
+    `users.storage_limit_bytes`, can replace it, set only through SQL.
+  - **D2, saved searches count:** a saved search's spec counts toward the same
+    limit, so there is one limit. An In Word List entry costs about 110 bytes,
+    so a 300,000-entry list is about 33 MB.
+  - **D3, the question ceiling:** 300,000, so any word search over a whole
+    lexicon fits. `QUESTION_CEILING`, `MAX_QUIZ_QUESTIONS`'s default and every
+    schema CHECK are 300,000 / 299,999, and PLAN.md § Schema matches the
+    migration again. The server's scale tests pass every budget at 300,000.
+    A 300,000-question cascade is about 87 MB as created.
+  - **D4, the Trash counts:** its rows are still stored and can be restored;
+    only purging frees storage, after `TRASH_RETENTION_DAYS` or with Delete
+    forever.
+  - **D5, no count cap:** nothing bounds how many cascades or saved searches
+    an account holds. `question_rows_for` gets a protocol bound of its own,
+    `MAX_QUESTION_ROWS_FOR` = 1,000.
+  - Storage is counted from row counts with fixed per-row sizes
+    (`contract-fixtures/storage.json`), kept on `cascades`, `saved_searches`
+    and `users` in the transactions that change the rows, checked only where
+    something new is made (creation, Start over, saving a search, each
+    refused with `409 storage_limit` and `used`, `limit`, `needed`), and never
+    on studying. `MAX_CASCADES_PER_USER`, `MAX_SAVED_SEARCHES_PER_USER`,
+    `cascade_limit` and `saved_search_limit` are gone.
+  - PLAN.md § Overview, § Storage limit (in place of § Cascade limit),
+    § Quiz options, § Creating a cascade, § Cascades page, § Trash, § Search
+    Engine, § Working at 300,000 questions, § Operations, § The sync cycle,
+    § Schema, § Purge task, § API, § Frontend, § Configuration, § Deployment
+    and Operations (Capacity) and the test sections, and JOURNEYS.md C-2 to
+    C-5 and C-14 to C-17, describe the result.
