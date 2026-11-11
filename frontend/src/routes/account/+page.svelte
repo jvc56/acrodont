@@ -19,11 +19,6 @@
 	import type { UserDb } from '$lib/local/db';
 	import { syncNow, syncState } from '$lib/sync/runtime.svelte';
 
-	let current = $state('');
-	let next = $state('');
-	let pwErrors = $state<FieldError[]>([]);
-	let pwMessage = $state<string | null>(null);
-	let pwError = $state<string | null>(null);
 
 	let everywherePw = $state('');
 	let everywhereErrors = $state<FieldError[]>([]);
@@ -50,19 +45,6 @@
 			return null;
 		}
 		return describe(e);
-	}
-
-	async function changePassword(e: SubmitEvent) {
-		e.preventDefault();
-		pwErrors = [];
-		pwError = pwMessage = null;
-		try {
-			await authApi.changePassword(current, next);
-			current = next = '';
-			pwMessage = 'Password changed. Your other devices have been signed out.';
-		} catch (err) {
-			pwError = fieldErrorsOr(err, (f) => (pwErrors = f));
-		}
 	}
 
 	async function signOutEverywhere(e: SubmitEvent) {
@@ -156,19 +138,6 @@
 	{#if db}
 		<StorageCard {db} />
 	{/if}
-
-	<Card.Root>
-		<Card.Header><Card.Title>Change password</Card.Title></Card.Header>
-		<Card.Content>
-			<form class="grid gap-4" onsubmit={changePassword}>
-				<FormError message={pwError} />
-				{#if pwMessage}<p class="text-sm">{pwMessage}</p>{/if}
-				<Field id="current_password" label="Current password" type="password" bind:value={current} errors={pwErrors} autocomplete="current-password" />
-				<Field id="new_password" label="New password" type="password" bind:value={next} errors={pwErrors} autocomplete="new-password" />
-				<Button type="submit">Change password</Button>
-			</form>
-		</Card.Content>
-	</Card.Root>
 
 	<Card.Root>
 		<Card.Header>

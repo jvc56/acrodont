@@ -1,0 +1,9 @@
+- use 'Ladder' instead of 'Cascade' everywhere in acrodont. Once you are done, there should be no instances of 'Cascade' anywhere in the repo.
+- device settings input alignment
+- the 'Show how many anagrams are found in typed mode' setting should be a cascade setting not a device setting
+- when changing device settings, there should also be an option to apply it to all devices, like how when changing cascade settings offers to apply it to all cascades.
+- resetting controls to defaults should offer to reset controls to defaults for all devices
+- instead of saying 'deleted forever from ...' say 'deleted forever on ...'
+- remove the 'Index' column for lexicons and leaves
+- add a storage column for all assets in Catalog, the storage column should show how much total storage that uses (this means everything needed for the asset, including but not limited to the data and index, etc.)
+- the default clear threshold should be 90%

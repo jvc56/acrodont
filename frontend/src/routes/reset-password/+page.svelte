@@ -25,8 +25,8 @@
 <AuthCard title="Reset your password">
 	{#if sent}
 		<p class="text-sm">
-			If that address belongs to a confirmed account, we have sent it a link to set a new
-			password. The link works for 30 minutes.
+			If that address has a confirmed account, a reset link is on its way, with the account's
+			username. The link expires in 30 minutes.
 		</p>
 	{:else}
 		<form class="grid gap-4" onsubmit={submit}>

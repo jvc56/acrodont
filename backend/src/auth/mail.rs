@@ -323,7 +323,10 @@ pub fn account_exists_email(public_url: &str, to: &str) -> Email {
     }
 }
 
-pub fn reset_email(public_url: &str, to: &str, token: &str) -> Email {
+/// The username too: signing in asks for it, and someone who has forgotten
+/// their password may have forgotten that as well. The mail goes only to the
+/// address's owner.
+pub fn reset_email(public_url: &str, to: &str, username: &str, token: &str) -> Email {
     let link = format!(
         "{}/reset-password/confirm?token={}",
         public_url.trim_end_matches('/'),
@@ -333,8 +336,8 @@ pub fn reset_email(public_url: &str, to: &str, token: &str) -> Email {
         to: to.into(),
         subject: "Reset your Acrodont password".into(),
         body: format!(
-            "Set a new password within 30 minutes:\n{link}\n\nIf you did not ask for this, \
-             you can ignore this email.\n"
+            "Your Acrodont username is {username}.\n\nReset your password (valid for 30 minutes):\n{link}\n\n\
+             If you did not ask for this, you can ignore this email.\n"
         ),
         kind: MailKind::PasswordReset {
             token: token.into(),
@@ -381,7 +384,7 @@ mod tests {
         for i in 0..70 {
             q.send(confirmation(&format!("u{i}@x.y"))).await.unwrap();
         }
-        q.send(reset_email("http://x", "r@x.y", "t")).await.unwrap();
+        q.send(reset_email("http://x", "r@x.y", "reader", "t")).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_secs(71 * 31)).await;
         // Nothing to assert on a stuck mailer but that the worker moved on:
         // the queue drained, so a new message is accepted at once.

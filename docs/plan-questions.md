@@ -36,6 +36,9 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   `400 { error: "invalid_code" | "invalid_token" }`.
 - Marked in `backend/src/auth/session.rs`, `backend/src/auth/password.rs`,
   `backend/src/error.rs`, `frontend/src/lib/api.ts`.
+- **Since PQ-022:** there is no change-password endpoint, so its body
+  `{ current_password, new_password }` and its `204` no longer apply; the
+  length bounds stand, for registration and a reset alike.
 
 ## PQ-003 — Which responses slide the session TTL (open)
 
@@ -386,3 +389,51 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   - PLAN.md § Settings, § Cascade limit, § Cascades page, § Trash, § Desktop
     layout, § Controls, § Exporting words, § Frontend and § End-to-end tests
     describe the result.
+
+## PQ-022 — Password changes and resets match birdtest (decided)
+
+- **Plan:** Authentication, as it stood before this decision: **Change
+  password** on `/account` (`POST /api/account/password`, the current and the
+  new password, bumping `session_generation` and re-issuing this session)
+  beside a reset by email; the strength rule ("`zxcvbn` (score ≥ 3) and
+  length") at registration only, scored against the username and address
+  whole, on the request's own thread; a reset limited only by the shared
+  per-IP auth bucket and the email caps, its mail carrying only the link, and
+  no rule named for its new password.
+- **Issue:** Two ways to set a password, hardened differently, where birdtest
+  has one. A reset's new password was scored without the account's username
+  or address, so it could be either. Asking
+  for a reset could bury one address in mail from many sources, and a link
+  refused a password could be replayed without bound. zxcvbn matched the
+  address whole, so `jsmith` passed for `jsmith@example.com`, and a crafted
+  password cost close to a second of scoring on the executor, stalling every
+  request behind it.
+- **Decision (2026-11-11):** Match birdtest (`PLAN.md` § Password Reset Flow).
+  - No signed-in password change: the route, the Account page's card and its
+    client call are gone. A reset by email is the one way to change a
+    password. Sign out everywhere and delete account, each with password
+    re-entry, stay on `/account`.
+  - One strength rule for registration and a reset: length, then a `zxcvbn`
+    score of at least 3 against the username, the address and the address's
+    local part. Scoring runs on the blocking pool in turns of its own, at most
+    2 at once; a request waits at most 10 seconds for a turn, else `503` with
+    Retry-After 10.
+  - Asking for a reset still always answers `202 {}`, with the lookup and the
+    email after the response, and is now also limited to
+    `RESET_RATE_PER_HOUR` (new, default 5) per caller and per address named,
+    answered `429` alike for every address. The mail carries the account's
+    username, since signing in asks for it. The link still lasts 30 minutes.
+  - Setting the new password reads the link first, without a lock, so a wrong
+    or spent link is `400 invalid_token` and costs neither a score nor a hash;
+    then takes a scoring turn and charges the link's own
+    `RESET_RATE_PER_HOUR` bucket, whoever sends it (a link refused a weak
+    password still works); scores against the account's username and address
+    and hashes, both outside any transaction; then locks the account row,
+    spends the token and every other outstanding one, stores the hash and
+    bumps `session_generation`. The `204` clears the caller's cookies, and the
+    page goes to `/login` with no message.
+  - The length bounds stay acrodont's own, 8–128 characters (PQ-002); birdtest
+    is followed for the reset's hardening, not for its bounds.
+  - PLAN.md § Authentication, § Auth and account, § Frontend,
+    § Configuration, § Unit tests and § Integration tests, and JOURNEYS.md
+    V-6, V-10 and V-11, describe the result.

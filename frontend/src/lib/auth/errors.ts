@@ -5,6 +5,8 @@ export function describe(e: unknown): string {
 	if (e instanceof ApiError) {
 		if (e.status === 429)
 			return `Too many attempts. Try again in ${e.retryAfterSeconds ?? 60} seconds.`;
+		if (e.status === 503)
+			return `The server is busy. Try again in ${e.retryAfterSeconds ?? 10} seconds.`;
 		if (e.status >= 500) return 'Something went wrong on the server. Try again shortly.';
 		return 'That did not work. Check the details and try again.';
 	}

@@ -4134,7 +4134,16 @@ The flows are the conventional ones, built directly on Axum:
 
 - **Register** (`/register`): username, email and password. The server
   validates all fields and returns `400` with **every** field error at once.
-  Passwords are checked for strength with `zxcvbn` (score ≥ 3) and length.
+  **The strength rule**, which a reset's new password meets too: 8 to 128
+  characters, then a `zxcvbn` score of at least 3, scored against the
+  username, the address and the address's local part. zxcvbn matches each
+  input whole, so the address alone would let `jsmith` through for
+  `jsmith@example.com`. A crafted password costs zxcvbn close to a second, so
+  scoring runs on the blocking pool in turns of its own, at most two at once:
+  a flood of scorings waits on scoring alone, never on sign-in's hashing or
+  any other request. A request waits at most 10 seconds for a turn and is
+  otherwise answered `503` with `Retry-After: 10`, which
+  `/reset-password/confirm` shows as the server being busy checking passwords.
   A taken username is reported as a field error, since usernames are not secret,
   and that check runs before anything below, so a `400` never also sends an
   email. An email already in use gets the same response as a successful
@@ -4187,7 +4196,8 @@ The flows are the conventional ones, built directly on Axum:
   purpose; that is accepted over unlimited guessing against one account. The
   other auth endpoints that need no session — register, confirm-email,
   reset-password and its confirm — share one per-IP bucket,
-  `AUTH_RATE_PER_IP_PER_MINUTE` (30), on top of the email caps under Register.
+  `AUTH_RATE_PER_IP_PER_MINUTE` (30), on top of the email caps under Register
+  and the reset's own limits under Password reset.
   `GET /api/auth/me` needs a session and is not on a per-IP bucket, and neither
   is logout, whose queued retry already honours `429`. On success the server sets:
   - a PASETO **v4.local** session token (32-byte key from
@@ -4212,16 +4222,49 @@ The flows are the conventional ones, built directly on Axum:
   of a cookie's life is answered with a fresh cookie of the full TTL, so an
   active user is never signed out for age, and a device that stays offline
   past the TTL sees **Log in to sync** with its local data intact.
-- **Password reset**: always answers with the same message, and the email is
-  queued after the response so both branches take the same time. If the email
-  belongs to a confirmed account, a 30-minute single-use token is emailed.
-  Completing a reset spends every other outstanding reset token and increments
-  `session_generation`, which signs out every session.
-- **Change password**, **Sign out everywhere** and **delete account** (each
-  with password re-entry) are on `/account`. Changing the password also bumps
-  `session_generation` and issues a new session to the current device, and
-  **Sign out everywhere does the same**: it signs out every other session and
-  re-issues this one, since the user has just re-entered the password here and
+- **Password reset** is the one way to change a password. There is no
+  signed-in password change, as in birdtest: a signed-in user who wants a new
+  password asks for a reset link like anyone else, and every new password
+  passes through the one hardened path below.
+  - **Asking** (`/reset-password`, from "Forgot password?" on `/login`)
+    answers `202 {}` whether or not the address has an account, and the lookup and the email happen after the
+    response, so both branches take the same time. If the address belongs to
+    a confirmed account, a 30-minute single-use token is emailed (only its
+    SHA-256 is stored), and the mail carries the account's username too:
+    signing in asks for it, and someone who has forgotten a password may have
+    forgotten that as well. The mail goes only to the address's owner.
+    Asking is limited to `RESET_RATE_PER_HOUR` (5) an hour **per caller** and
+    **per address named** (lower-cased), on top of the per-IP auth bucket and
+    the email caps under Register. The first bounds bulk probing; the second
+    stops one address being buried in reset mail from many sources. Past
+    either, the answer is `429` with `Retry-After`, alike for every address,
+    so the limit reveals nothing about which addresses have accounts.
+  - **Setting the new password** (`/reset-password/confirm?token=…`) reads
+    the link first, without a lock (hash match, unused, unexpired): a wrong or
+    spent link is `400 invalid_token` and costs neither a score nor a hash.
+    It then takes a scoring turn and charges **the link's own bucket**,
+    `RESET_RATE_PER_HOUR` an hour, whoever sends it. A link refused a weak
+    password still works, so without that bucket a link replayed from many
+    addresses would be a queue of scorings that no per-address limit bounds;
+    charging only once a turn is held means a request turned away busy
+    (`503`) spends none of the owner's tries. The password is held to the
+    strength rule against the account's username and address, then hashed,
+    both outside any transaction, so neither wait holds a lock. Then one
+    transaction locks the account row (`FOR NO KEY UPDATE`; an account
+    deleted meanwhile leaves nothing to lock, and the link is
+    `invalid_token`), spends the token (checked again, so a link spent
+    meanwhile is `invalid_token` too), spends **every other outstanding reset
+    token** for the account, so an earlier link cannot be replayed, stores the
+    new hash and increments `session_generation`. That signs out every
+    session, an attacker's included: a reset is what someone does who
+    suspects another person has access. The `204` clears the caller's session
+    and CSRF cookies as well, and the page forgets any session it holds and
+    goes to `/login` with no message: signing in with the new password is the
+    confirmation.
+- **Sign out everywhere** and **delete account** (each with password
+  re-entry) are on `/account`. Sign out everywhere bumps `session_generation`,
+  which signs out every other session, and issues a new session to the current
+  device, since the user has just re-entered the password here and
   "everywhere" means everywhere else. A device that wants to be signed out as
   well uses Log out.
   **Deleting the account clears this device's copy of it.** On a `2xx` the app
@@ -4354,11 +4397,10 @@ enough for a filter tree holding a 300,000-entry In Word List; Axum's default of
 | `POST` | `/api/auth/confirm-email` | Confirm with the emailed code |
 | `POST` | `/api/auth/login` | Start a session |
 | `POST` | `/api/auth/logout` | Clear the session cookie **and the CSRF cookie**, so no token outlives the session it was issued with; login re-sets both. The token is stateless, so a copy of it stays valid until its TTL; a user who suspects a copy uses **Sign out everywhere**. This is the one endpoint that needs **neither a session nor a CSRF token** *when no session cookie arrives with it*: there is then nothing to clear and nothing to forge, and it answers `2xx`, so a device offline past both cookies' TTL is not left retrying forever. With a session cookie it is CSRF-checked like any other write, which is the ordinary state of the [queued logout](#authentication-while-offline). It is **exempt from the account-binding `X-Acrodont-User` check**: the queued logout is sent while no account is signed in, so it could never satisfy it, and a `401` would clear its flag with the cookie still alive. The queued logout runs when no account is **signed in**, not when no cookie is held, and the `httpOnly` session cookie it exists to clear is still in the browser, so the app sends the double-submit token with it. Either way the answer is a `2xx`, never a `401`-or-`403` guess |
-| `POST` | `/api/auth/reset-password` | Request a reset email |
-| `POST` | `/api/auth/reset-password/confirm` | Set a new password with a reset token |
+| `POST` | `/api/auth/reset-password` | Body `{ email }` → `202 {}` whether or not the address has an account; the lookup and the reset email (with the account's username) follow the response. `429` past `RESET_RATE_PER_HOUR` per caller or per address named, alike for every address (see [Authentication](#authentication)) |
+| `POST` | `/api/auth/reset-password/confirm` | Body `{ token, password }` → `204`, clearing the caller's session and CSRF cookies. The link is checked first (`400 invalid_token`, before any scoring), then the link's own `RESET_RATE_PER_HOUR` bucket (`429`), then the strength rule against the account's username and address (`400` field error on `password`; the link still works); `503` with `Retry-After: 10` when no scoring turn comes within 10 seconds. Spends every outstanding token of the account and bumps `session_generation`. The one way to change a password |
 | `GET` | `/api/auth/me` | `{ user_id, username, is_admin, trash_retention_days, max_quiz_questions }` or `401`. Exempt from the account-binding `X-Acrodont-User` check, since it only reports whose session cookie the browser holds, which the startup comparison reads. The retention period and the cap go into the `meta` store, so the Trash can show purge dates offline and the option forms validate segment size against the server's cap |
-| `POST` | `/api/account/sign-out-everywhere` | Body `{ password }`. Bump `session_generation` and re-issue this device's session and CSRF cookies, as a password change does, so every other session is refused from its next request while this one keeps working |
-| `POST` | `/api/account/password` | Change the password (current and new); bumps `session_generation` and re-issues this session |
+| `POST` | `/api/account/sign-out-everywhere` | Body `{ password }`. Bump `session_generation` and re-issue this device's session and CSRF cookies, so every other session is refused from its next request while this one keeps working |
 | `DELETE` | `/api/account` | Delete the account (requires password). On a `2xx` the device removes its own local copy of that account, as [Authentication](#authentication) describes |
 
 A cascade's settings are read and written through sync, not a separate
@@ -4543,12 +4585,14 @@ SvelteKit static SPA. The routes:
 | Route | Page |
 |---|---|
 | `/` | No page of its own. It goes to the Cascades page, the landing page, when logged in, where logging in lands too, and to the log-in page (with Create an account) when logged out. A deleted account ends on the log-in page. With no lexicon yet, the empty Cascades page says so (and, to an admin, where to upload one). Every logged-in page but the player shows the site header (`AppHeader`): Acrodont (home, the Cascades page); for admins only, a Main nav holding just Admin; then the sync status and the account link. New cascade and the Trash are on the Cascades page, not in the header |
-| `/register`, `/register/check-email`, `/confirm-email`, `/login`, `/reset-password`, `/reset-password/confirm` | Auth |
+| `/register`, `/register/check-email`, `/confirm-email`, `/login` | Auth |
+| `/reset-password` | "Reset your password": an address, then "If that address has a confirmed account, a reset link is on its way, with the account's username. The link expires in 30 minutes." |
+| `/reset-password/confirm` | "Choose a new password" (every device will be signed out), one field and **Set new password**. On success it forgets any session this tab holds and goes to `/login` with no message. A `429` says "Too many tries, with this link or from this address. Try again in N minutes, or ask for a new link."; a `503` says the server is busy checking passwords; a spent or expired link says to ask for a new one; a link with no token says so, with a link to ask for a new one, and shows no form |
 | `/cascades` | Cascades page, the landing page: New cascade, then one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done, 31.58%)`), its download status and Move to Trash; the rest is in the player's Settings. Below the cascades, the [Trash](#trash) (`#trash`) |
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, name, preview), with no settings: a note says a new cascade's settings are changed in its Settings once it is created |
 | `/cascades/:id` | Player for the cascade's deepest level, whose Settings dialog holds the ladder and every [setting](#settings), the cascade's and this device's |
 | `/trash` | No page of its own: redirects to `/cascades#trash`, so an old link lands on the Cascades page scrolled to the Trash |
-| `/account` | Log out, sync status, offline storage use with the total rows and keys against the budget and, for each cascade this device holds data for, its answer size and key size, every account with data on this device and **Remove this account's data from this device** for each, password, sign out everywhere, delete account. No settings: a line says each cascade's settings, and this device's display and controls, are in the cascade's Settings (⚙ in the player) |
+| `/account` | Log out, sync status, offline storage use with the total rows and keys against the budget and, for each cascade this device holds data for, its answer size and key size, every account with data on this device and **Remove this account's data from this device** for each, sign out everywhere, delete account. No password change: a new password comes only from a [reset](#authentication). No settings: a line says each cascade's settings, and this device's display and controls, are in the cascade's Settings (⚙ in the player) |
 | `/admin` | Catalog overview with delete actions (admins only; others get a not-found page) |
 | `/admin/letter-distributions/new`, `/admin/lexicons/new`, `/admin/leave-sets/new` | Upload forms with validation error lists |
 
@@ -4760,6 +4804,7 @@ startup rather than falling back to a default.
 | `LOGIN_FAILURES_PER_IP_PER_MINUTE` | `10` | Failed logins per IP; a successful login spends nothing, so a room logging in together is never refused |
 | `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE` | `10` | Failed logins per username, checked before any Argon2 verify |
 | `AUTH_RATE_PER_IP_PER_MINUTE` | `30` | Per IP; register, confirm-email, reset-password and its confirm. Not `GET /api/auth/me`, which needs a session, and not logout |
+| `RESET_RATE_PER_HOUR` | `5` | Password resets an hour, each key its own bucket: asking for a link per caller (`ip:`) and per address named (`em:`, lower-cased), and setting a password per link (`tok:`), whoever sends it. On top of `AUTH_RATE_PER_IP_PER_MINUTE` and the email caps |
 | `CATALOG_RECONCILE_SECONDS` | `60` | Fallback reload interval if a notification is missed |
 | `TRUSTED_PROXY_HOPS` | `0` | `1` behind the ALB or compose Nginx |
 | `DEV_LOGIN` | `false` | `true` only on a local stack: adds `POST /api/dev/login {username}`, a session for a confirmed account without its password, answered as `/api/auth/login` is, for `./scripts/dev.py --login-as`. Startup **refuses** it together with `SECURE_COOKIES=true`, so a TLS deployment cannot start with it on; without it the route does not exist (404) |
@@ -5404,6 +5449,11 @@ Pure functions and in-memory structures, no database and no network.
   every draw from a small bag that spells the word with up to two blanks, for
   bags holding two, one and no blanks, and check that ranks, minimum ranks and
   maximum ranks are consistent on ties.
+- **Passwords** (`auth/password.rs`): the dev passphrase meets the
+  [strength rule](#authentication) and `password1` and a too-short password do
+  not; a password strong on its own is refused when it is the address's local
+  part; and scoring runs in its own turn off the executor, returning the same
+  field error.
 
 **Frontend** (`npm run check`, then Vitest): `lib/cascade` against the shared
 rule and shuffle vectors, `lib/local` against `fake-indexeddb`, `lib/sync`'s
@@ -5924,6 +5974,15 @@ they run in parallel and leave nothing behind.
     confirm-email, reset-password or reset-password/confirm from one address in
     the minute answers `429` with `Retry-After`, while `GET /api/auth/me` and
     logout from that address do not.
+  - The reset limits (`reset_limits`), at `RESET_RATE_PER_HOUR`'s default of 5
+    with the per-IP auth bucket raised out of the way: five resets asked for
+    one address from five addresses are answered `202`, and a sixth from a
+    sixth address, the address in another case, `429`; five from one caller
+    for five addresses are answered `202`, and its sixth, for a sixth
+    address, `429`; a wrong link sent with a weak password is
+    `400 invalid_token`, refused as a link rather than scored; and a real link
+    refused a weak password five times from five addresses is answered `429`
+    on its sixth try, a strong password from yet another address included.
   - The two endpoints that need no session are limited per IP: with
     `CATALOG_RATE_PER_MINUTE` lowered, `GET /api/lexicons` and
     `GET /api/letter-distributions/:name` answer `429` with `Retry-After` once
@@ -5960,7 +6019,8 @@ they run in parallel and leave nothing behind.
   - Re-registering an unconfirmed email re-sends a code while the old one is
     valid and replaces the account once it has expired, and its username is
     taken while the code is valid and free after; a fourth confirmation,
-    notice or reset email to one address from one IP within 24 hours is not sent
+    notice or reset email to one address from one IP within 24 hours (with
+    `RESET_RATE_PER_HOUR` raised, so the reset limits do not answer first) is not sent
     while the response stays the same and a request from another IP still
     sends, while the **twenty-first** to that address within 24 hours is not sent
     from any IP, however many addresses the requests come from, so the per-IP cap
@@ -5982,6 +6042,16 @@ they run in parallel and leave nothing behind.
     refused `403` like any other write, and **with the session cookie and a
     matching token** — the ordinary queued logout, whose cookie the browser
     still holds — answered `2xx` with both cookies cleared
+  - a **password reset** (`password_reset`): the reset email carrying the
+    account's username ("Your Acrodont username is …"); a weak password and
+    one that is the account's address each refused as a `password` field
+    error with the link still working after; the strong password accepted
+    with `204` and the caller's session cookie cleared; every other
+    outstanding token spent and every session answered `401`; the link
+    refused a second time; and the new password logging in. And **no
+    signed-in password change** (`there_is_no_signed_in_password_change`):
+    `POST /api/account/password` from a signed-in session is answered `404`
+    or `405`, since the route does not exist
   - saved-search overwrite answering `409` without `overwrite` and replacing
     the old spec with it, and delete removing the spec; a save recording its
     `quiz_type` on the spec, `GET /api/searches/:id` returning it, and Start over

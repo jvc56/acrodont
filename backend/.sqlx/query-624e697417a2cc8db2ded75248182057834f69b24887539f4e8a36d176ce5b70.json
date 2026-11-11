@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, email::text AS \"email!\" FROM users\n         WHERE email = $1 AND email_confirmed_at IS NOT NULL",
+  "query": "SELECT id, username::text AS \"username!\", email::text AS \"email!\" FROM users\n         WHERE email = $1 AND email_confirmed_at IS NOT NULL",
   "describe": {
     "columns": [
       {
@@ -16,6 +16,12 @@
       },
       {
         "ordinal": 1,
+        "name": "username!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
         "name": "email!",
         "type_info": "Text",
         "origin": "Expression"
@@ -33,8 +39,9 @@
     },
     "nullable": [
       false,
+      null,
       null
     ]
   },
-  "hash": "ea77537c947a71855d0e01356851aa55d35eed5077aa76349e9565d4a78fe37a"
+  "hash": "624e697417a2cc8db2ded75248182057834f69b24887539f4e8a36d176ce5b70"
 }

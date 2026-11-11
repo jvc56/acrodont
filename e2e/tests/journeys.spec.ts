@@ -143,13 +143,19 @@ test('export: counts, offline files, the definitions fallback, and one file thro
 	// export's grades are the active quizzes' current attempts (§ Exporting words),
 	// and the finished Level 1 attempt is behind the Source quiz's reset.
 	await expect(page.getByText('1 / 3')).toBeVisible();
+	// As playLevel does: the finish syncs first, since a press that lands in the
+	// refresh its rebase brings is lost.
+	await expect(page.getByText('Synced', { exact: true })).toBeVisible({ timeout: 15_000 });
 	await press(page, 'Space');
 	await press(page, 'KeyX');
+	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
 	await press(page, 'Space');
 	await expect(page.getByText('2 / 3')).toBeVisible();
 	await press(page, 'Space');
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	await press(page, 'Space');
 	await expect(page.getByText('3 / 3')).toBeVisible();
+	await expect(page.getByText('1 ✓ 1 ✗')).toBeVisible();
 	await availableOffline(page, 'Export journey');
 	const exportPage = `${player}/export`;
 	// With the cards complete, the question count and the entry count.
