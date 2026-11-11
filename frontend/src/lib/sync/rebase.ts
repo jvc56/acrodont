@@ -218,9 +218,7 @@ export async function rebase(db: UserDb, st: PullState, acked: Acked[], ctx: Reb
 		await rebaseCascade(db, st, id, workFor(byCascade.get(id) ?? []), ctx, out);
 	}
 
-	// Preferences: the base row; the view is recomputed on every read.
-	const tx = db.transaction(['preferences', 'meta'], 'readwrite');
-	if (st.preferences) await tx.objectStore('preferences').put(st.preferences, 'row');
+	const tx = db.transaction(['meta'], 'readwrite');
 	if (ctx.advance !== false) {
 		await writeMeta(tx as unknown as RwTx, 'sync', {
 			cursor: st.seq,

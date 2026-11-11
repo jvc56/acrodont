@@ -1,51 +1,43 @@
 <script lang="ts">
-	// The Trash (PLAN.md § Trash page): finished quizzes and trashed cascades,
-	// grouped by cascade and collapsed, each group rendering its entries in
-	// pages of 100 behind Show more, since one segmented attempt can leave tens
-	// of thousands. Entries show the final score, cleared or replaced, and the
-	// date it will be deleted forever, or "deleted forever 30 days after this
-	// syncs" while that date is provisional. ("Purge" is the operation's name,
-	// never the page's word.)
-	import { onMount } from 'svelte';
-	import { session } from '$lib/auth/session.svelte';
+	// The Trash (PLAN.md § Trash), shown under the cascades on the Cascades page:
+	// finished quizzes and trashed cascades, grouped by cascade and collapsed,
+	// each group rendering its entries in pages of 100 behind Show more, since
+	// one segmented attempt can leave tens of thousands. Entries show the final
+	// score, cleared or replaced, and the date it will be deleted forever, or
+	// "deleted forever 30 days after this syncs" while that date is provisional.
+	// ("Purge" is the operation's name, never the page's word.) `version` is
+	// bumped by the page when it moves something to the Trash; `onchange` runs
+	// after a restore or a deletion, so the cascades above can refresh.
 	import { Button } from '$lib/components/ui/button';
 	import { canDeleteForever, PAGE, trashGroups, type TrashEntry, type TrashGroup } from '$lib/cascades/summary';
 	import { applyLocally, type NewOp } from '$lib/local/apply';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta } from '$lib/local/meta';
-	import { userDb } from '$lib/local/open';
 	import { afterLocalWrite, syncState } from '$lib/sync/runtime.svelte';
 	import { confirmAction } from '$lib/confirm.svelte';
 
-	let db = $state<UserDb | null>(null);
+	let { db, version = 0, onchange = () => undefined }: { db: UserDb; version?: number; onchange?: () => unknown } = $props();
+
 	let groups = $state<TrashGroup[]>([]);
 	let open = $state<Record<string, number>>({});
 	let days = $state(30);
 
 	async function refresh() {
-		if (!db) return;
 		groups = await trashGroups(db);
 		days = (await getMeta(db, 'server')).trash_retention_days;
 	}
 
-	onMount(() => {
-		void (async () => {
-			if (!session.userId) return;
-			db = await userDb(session.userId, session.username);
-			await refresh();
-		})();
-	});
-
 	$effect(() => {
 		void syncState.changed.tick;
+		void version;
 		void refresh();
 	});
 
 	async function write(op: NewOp) {
-		if (!db) return;
 		await applyLocally(db, op);
 		afterLocalWrite();
 		await refresh();
+		await onchange();
 	}
 
 	function restore(e: TrashEntry) {
@@ -75,10 +67,9 @@
 	const shown = (g: TrashGroup) => open[g.cascade.id] ?? (g.entries.length === 1 ? PAGE : 0);
 </script>
 
-<main class="mx-auto max-w-4xl p-6">
-	<header class="mb-6 flex items-center justify-between">
-		<h1 class="text-2xl font-semibold">Trash</h1>
-	</header>
+
+<section id="trash" class="scroll-mt-6" aria-labelledby="trash-heading">
+	<h2 id="trash-heading" class="mb-3 text-xl font-semibold">Trash</h2>
 	{#if groups.length === 0}<p class="text-muted-foreground">The Trash is empty.</p>{/if}
 	<ul class="space-y-3">
 		{#each groups as g (g.cascade.id)}
@@ -119,4 +110,4 @@
 			</li>
 		{/each}
 	</ul>
-</main>
+</section>

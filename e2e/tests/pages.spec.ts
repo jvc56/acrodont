@@ -32,7 +32,7 @@ test('the Cascades page lists a cascade, the Trash takes it and gives it back', 
 	await expect(row).toBeVisible();
 	await row.getByRole('button', { name: 'Move to Trash' }).click();
 	await confirm(page, 'Move to Trash');
-	await expect(page.getByText(name)).toHaveCount(0);
+	await expect(page.getByRole('link', { name, exact: true })).toHaveCount(0);
 	await page.goto('/trash');
 	await expect(page.getByText(`${name} (cascade in the Trash)`)).toBeVisible();
 	await page.getByRole('listitem').filter({ hasText: `${name} (cascade in the Trash)` }).getByRole('button', { name: 'Restore' }).click();

@@ -43,7 +43,7 @@ CREATE TYPE finish_outcome AS ENUM (
 CREATE TYPE sync_op_type AS ENUM (
     'grade', 'move_cursor', 'finish', 'finish_segment', 'restore_quiz',
     'trash_cascade', 'restore_cascade', 'purge_quiz', 'purge_cascade',
-    'set_preferences', 'set_cascade_options', 'set_quiz_options'
+    'set_cascade_options', 'set_quiz_options'
 );
 
 CREATE TYPE sync_op_status AS ENUM ('applied', 'rejected');
@@ -129,35 +129,6 @@ CREATE TABLE password_reset_tokens (
 );
 CREATE INDEX password_reset_tokens_user_id_unused
     ON password_reset_tokens (user_id) WHERE used_at IS NULL;
-
--- One row per user, inserted in the same transaction as the user.
-CREATE TABLE user_preferences (
-    user_id                   UUID PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
-    default_clear_threshold   SMALLINT NOT NULL DEFAULT 80
-                                  CHECK (default_clear_threshold BETWEEN 1 AND 100),
-    leave_value_decimals      SMALLINT NOT NULL DEFAULT 1
-                                  CHECK (leave_value_decimals BETWEEN 0 AND 3),
-    anagram_show_definitions  BOOLEAN NOT NULL DEFAULT true,
-    anagram_show_hooks        BOOLEAN NOT NULL DEFAULT true,
-    anagram_answer_mode       anagram_answer_mode NOT NULL DEFAULT 'flashcard',
-                                  -- what new Anagram cascades start with; each keeps its own
-    -- Defaults for new cascades only; changing one touches an existing cascade only when the
-    -- user asks for every cascade (§ Where a setting applies), through set_cascade_options.
-    default_segment_size      INTEGER NOT NULL DEFAULT 0
-                                  CHECK (default_segment_size = 0
-                                         OR default_segment_size BETWEEN 5 AND 130000),
-    default_progression       quiz_progression NOT NULL DEFAULT 'ladder',
-    default_require_alphabetical BOOLEAN NOT NULL DEFAULT false,
-    reveal_correct            BOOLEAN NOT NULL DEFAULT true,   -- a reveal marks the card
-                                  -- correct (false: missed) until toggled
-    changed_at                TIMESTAMPTZ NOT NULL DEFAULT now(), -- device time of the latest
-                                  -- set_preferences; an older operation is rejected whole
-    changed_by_device_id      UUID,                               -- NULL until the first change;
-                                  -- that device's own next change always applies
-    updated_seq               BIGINT NOT NULL                     -- the sequence registration took, then
-                                  -- bumped by every preferences change,
-                                  -- so every device's first pull carries the row
-);
 
 -- -------------------------------------------------------------------------
 -- Catalog (uploaded by admins; immutable once uploaded)
@@ -426,6 +397,12 @@ CREATE TABLE cascades (
     require_alphabetical BOOLEAN NOT NULL DEFAULT false,
     answer_mode          anagram_answer_mode NOT NULL DEFAULT 'flashcard',
                                  -- the cascade's own, never a quiz's (Typed mode)
+    show_definitions     BOOLEAN NOT NULL DEFAULT true,  -- Anagram: each anagram's definition on reveal
+    show_hooks           BOOLEAN NOT NULL DEFAULT true,  -- Anagram: hooks on reveal
+    reveal_correct       BOOLEAN NOT NULL DEFAULT true,  -- a reveal marks the card correct
+                                 -- (false: missed) until toggled
+    leave_value_decimals SMALLINT NOT NULL DEFAULT 1    -- Leave Value: decimal places shown
+                             CHECK (leave_value_decimals BETWEEN 0 AND 3),
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
                              -- set_cascade_options; an older operation is rejected whole
     options_seq          BIGINT NOT NULL,            -- sync sequence of that change, for seen_seq

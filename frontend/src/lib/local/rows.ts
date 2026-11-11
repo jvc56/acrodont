@@ -21,6 +21,14 @@ export interface CascadeRow {
 	require_alphabetical: boolean;
 	/** Flashcard or typed, the cascade's own (an Anagram cascade's; inert in the others). */
 	answer_mode: AnswerMode;
+	/** An Anagram cascade's: each anagram's definition shows with the answer. */
+	show_definitions: boolean;
+	/** An Anagram cascade's: each anagram's hooks and inner hooks show with the answer. */
+	show_hooks: boolean;
+	/** Whether showing an answer marks it correct (else missed) until toggled. */
+	reveal_correct: boolean;
+	/** A Leave Value cascade's: the decimal places leave values are rounded to, 0 to 3. */
+	leave_value_decimals: number;
 	options_changed_at: string;
 	options_seq: number;
 	options_device_id: string;
@@ -37,6 +45,19 @@ export interface CascadeRow {
 	/** Overlay only: the outbox purged it. */
 	deleted?: boolean;
 }
+
+/** The per-cascade settings every new cascade starts with (PLAN.md § Settings). */
+export const CASCADE_SETTING_DEFAULTS = {
+	clear_threshold: 80,
+	segment_size: 0,
+	progression: 'ladder',
+	require_alphabetical: false,
+	answer_mode: 'flashcard',
+	show_definitions: true,
+	show_hooks: true,
+	reveal_correct: true,
+	leave_value_decimals: 1
+} as const satisfies Partial<CascadeRow>;
 
 export interface QuizRow {
 	id: string;
@@ -132,23 +153,6 @@ export interface CardRow {
 
 export type AnswerMode = 'flashcard' | 'typed';
 
-export interface PreferencesRow {
-	default_clear_threshold: number;
-	leave_value_decimals: number;
-	anagram_show_definitions: boolean;
-	anagram_show_hooks: boolean;
-	/** The answer mode new Anagram cascades start with; each cascade keeps its own. */
-	anagram_answer_mode: AnswerMode;
-	default_segment_size: number;
-	default_progression: Progression;
-	default_require_alphabetical: boolean;
-	/** Whether showing an answer marks it correct (else missed) until toggled; absent from rows pulled before it existed. */
-	reveal_correct?: boolean;
-	changed_at: string;
-	changed_by_device_id: string | null;
-	updated_seq: number;
-}
-
 export interface DistributionRow {
 	name: string;
 	tiles: { letter: string; blank_letter: string; count: number; value: number; is_vowel: boolean }[];
@@ -157,7 +161,7 @@ export interface DistributionRow {
 /** An outbox entry: the operation as sent, and what the device needs to find it. */
 export interface OutboxEntry {
 	device_seq: number;
-	/** The cascade it touches; absent for preferences. */
+	/** The cascade it touches. */
 	cascade_id?: string;
 	/** Set on a `move_cursor` only, so a newer one finds the pending one. */
 	cursor_quiz?: string;
@@ -208,10 +212,6 @@ export function quizFromWire(w: Wire, seq: number): QuizRow {
 
 export function attemptFromWire(w: Wire, cascadeId: string, seq: number): AttemptRow {
 	return { ...(w as unknown as AttemptRow), cascade_id: cascadeId, updated_seq: num(w.updated_seq), seq };
-}
-
-export function preferencesFromWire(w: Wire): PreferencesRow {
-	return { ...(w as unknown as PreferencesRow), updated_seq: num(w.updated_seq) };
 }
 
 /** Operations that create, reset or restore a quiz: never on the rebase's fast path. */

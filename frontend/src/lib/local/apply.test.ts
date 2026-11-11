@@ -14,10 +14,9 @@ import { questionsHash, shuffle } from '$lib/cascade/order';
 import { nextBoundary, Rejected, runIndicator, runIndicatorText, type Progression, type QuizState } from '$lib/cascade/rules';
 import { userDbName } from './accounts';
 import { applyLocally, APPLY_STORES, type NewOp } from './apply';
-import { MIGRATIONS, openUserDb, USER_DB_VERSION, type UserDb } from './db';
+import { openUserDb, upgradeFrom, USER_DB_VERSION, type UserDb } from './db';
 import { getMeta, initMeta } from './meta';
-import { defaultPreferences, layPreferences, preferencesView } from './preferences';
-import type { CascadeRow, QuestionRow, QuizRow } from './rows';
+import { CASCADE_SETTING_DEFAULTS, type CascadeRow, type QuestionRow, type QuizRow } from './rows';
 import * as view from './view';
 import type { RwTx } from './view';
 
@@ -58,6 +57,10 @@ async function seed(db: UserDb, s: Setup) {
 		name: 'test',
 		quiz_type: 'anagram',
 		answer_mode: 'flashcard',
+		show_definitions: true,
+		show_hooks: true,
+		reveal_correct: true,
+		leave_value_decimals: 1,
 		lexicon: 'EN-FIX',
 		letter_distribution: 'english',
 		clear_threshold: s.threshold ?? 80,
@@ -400,21 +403,31 @@ describe('the per-user database', () => {
 			// The fixture: the schema as of version v, holding an outbox and an overlay.
 			const old = await openDB(name, v, {
 				upgrade(db, oldVersion, _newVersion, tx) {
-					for (let i = oldVersion; i < v; i++) MIGRATIONS[i](db as never, tx as never);
+					void upgradeFrom(db as never, tx as never, oldVersion, v);
 				}
 			});
 			const q = { id: 'q1', cascade_id: 'c1', status: 'active' } as unknown as QuizRow;
 			const row = { quiz_id: 'q1', question_idx: 3, cascade_id: 'c1', position: 0, grade: 'missed', graded_at: 't', seq: 0 };
 			const op = { id: 'o', device_seq: 7, seen_seq: 0, at: 't', type: 'grade', quiz_id: 'q1', question_idx: 3 };
 			const entry = { device_seq: 7, cascade_id: 'c1', op };
+			const c = { id: 'c1', name: 'x', clear_threshold: 60 } as unknown as CascadeRow;
 			await old.put('overlay_quizzes', q);
 			await old.put('overlay_quiz_questions', row as QuestionRow);
 			await old.put('outbox', entry);
+			await old.put('cascades', c);
+			// Before version 3, a change to the account's preferences could be waiting to be sent.
+			if (v < 3) {
+				const prefs = { id: 'p', device_seq: 8, seen_seq: 0, at: 't', type: 'set_preferences', leave_value_decimals: 2 };
+				await old.put('outbox', { device_seq: 8, op: prefs } as never);
+			}
 			old.close();
 			const db = await openUserDb(USER);
 			expect(db.version).toBe(USER_DB_VERSION);
 			expect(await db.get('overlay_quizzes', 'q1')).toEqual(q);
 			expect(await db.get('overlay_quiz_questions', ['q1', 3])).toEqual(row);
+			// Version 3 drops the account's preferences and gives each cascade its settings at their defaults.
+			expect(db.objectStoreNames.contains('preferences' as never)).toBe(false);
+			expect(await db.get('cascades', 'c1')).toEqual(v < 3 ? { ...CASCADE_SETTING_DEFAULTS, ...c } : c);
 			// Version 2 indexes what each queued operation touches, and gives the entries already queued theirs.
 			expect(await db.getAll('outbox')).toEqual([v < 2 ? { ...entry, touches: ['q:q1', 'qq:q1:3'] } : entry]);
 			expect(await db.countFromIndex('outbox', 'touches', 'qq:q1:3')).toBe(v < 2 ? 1 : 0);
@@ -443,15 +456,19 @@ describe('the per-user database', () => {
 	});
 });
 
-describe('the preferences view', () => {
-	it('uses the documented defaults before the first pull and lays pending changes over the base', async () => {
+describe("a cascade's settings", () => {
+	it('set_cascade_options carries what an answer shows and how a reveal grades, each checked', async () => {
 		const db = await freshDb();
-		expect((await preferencesView(db)).default_clear_threshold).toBe(80);
-		await applyLocally(db, { type: 'set_preferences', default_clear_threshold: 70 });
-		await applyLocally(db, { type: 'set_preferences', leave_value_decimals: 2, default_clear_threshold: 75 });
-		const v = await preferencesView(db);
-		expect([v.default_clear_threshold, v.leave_value_decimals]).toEqual([75, 2]);
-		// Dropping the pending operation (a stale rejection) reverts the view.
-		expect(layPreferences(defaultPreferences(), []).default_clear_threshold).toBe(80);
+		await seed(db, { cascade_id: 'c1', source_id: 'q1', count: 5, seed: 1n });
+		await applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', show_definitions: false, show_hooks: false });
+		await applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', reveal_correct: false, leave_value_decimals: 3 });
+		const tx = db.transaction(APPLY_STORES) as unknown as RwTx;
+		const c = (await view.cascade(tx, 'c1'))!;
+		expect([c.show_definitions, c.show_hooks, c.reveal_correct, c.leave_value_decimals]).toEqual([false, false, false, 3]);
+		for (const bad of [{ leave_value_decimals: 4 }, { leave_value_decimals: 1.5 }, { show_hooks: 'yes' }, { reveal_correct: null }]) {
+			await expect(applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', ...bad } as NewOp)).rejects.toMatchObject({
+				reason: 'invalid'
+			});
+		}
 	});
 });

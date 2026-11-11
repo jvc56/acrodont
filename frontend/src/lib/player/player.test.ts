@@ -11,8 +11,6 @@ import { openUserDb, type UserDb } from '$lib/local/db';
 import { initMeta } from '$lib/local/meta';
 import { applyLocally } from '$lib/local/apply';
 import * as view from '$lib/local/view';
-import { defaultPreferences } from '$lib/local/preferences';
-import type { PreferencesRow } from '$lib/local/rows';
 import { questionsHash } from '$lib/cascade/order';
 import { AHEAD, AHEAD_LOW, Player } from './controller';
 import { bind, inputOwns, actionFor, Debounce, DEFAULT_BINDINGS, normalizeBindings } from './bindings';
@@ -26,13 +24,11 @@ const T0 = '2026-01-01T00:00:00.000Z';
 const WORDS = ['AB', 'BA'];
 
 let db: UserDb;
-let prefs: PreferencesRow;
 
 beforeEach(async () => {
 	globalThis.indexedDB = new IDBFactory();
 	db = await openUserDb('u');
 	await initMeta(db, 'u', 'u');
-	prefs = defaultPreferences();
 });
 
 async function cascade(
@@ -44,6 +40,7 @@ async function cascade(
 		dist?: boolean;
 		quiz_type?: 'anagram' | 'definition';
 		answer_mode?: 'flashcard' | 'typed';
+		reveal_correct?: boolean;
 	} = {}
 ) {
 	const idx = Array.from({ length: count }, (_, i) => i);
@@ -53,7 +50,8 @@ async function cascade(
 			id: C, name: 'x', quiz_type: o.quiz_type ?? 'anagram', lexicon: 'EN', letter_distribution: 'english', clear_threshold: 80, ...opts,
 			options_changed_at: T0, options_seq: '1', options_device_id: 'd', question_count: count, depth: 1, peak_depth: 1,
 			attempts_since_completion: 0, created_at: T0, last_activity_at: T0, completed_at: null, trashed_at: null, updated_seq: '1',
-			answer_mode: o.answer_mode ?? 'flashcard'
+			answer_mode: o.answer_mode ?? 'flashcard', show_definitions: true, show_hooks: true,
+			reveal_correct: o.reveal_correct ?? true, leave_value_decimals: 1
 		},
 		source_quiz: {
 			id: Q, cascade_id: C, level: 1, origin: 'source', origin_quiz_id: null, origin_attempt: null, origin_segment_end: null,
@@ -86,7 +84,7 @@ async function makeTyped() {
 }
 
 function player() {
-	return new Player(db, C, { prefs: async () => prefs, ensure: async () => undefined, seed: () => '777' });
+	return new Player(db, C, { ensure: async () => undefined, seed: () => '777' });
 }
 
 const ops = async () => (await db.getAll('outbox')).map((e) => e.op.type);
@@ -95,7 +93,7 @@ describe('the player', () => {
 	it('Next shows the next card before its writes are saved, from the cards held in memory', async () => {
 		await cascade(5);
 		let saved = 0;
-		const p = new Player(db, C, { prefs: async () => prefs, ensure: async () => undefined, seed: () => '777', afterWrite: () => saved++ });
+		const p = new Player(db, C, { ensure: async () => undefined, seed: () => '777', afterWrite: () => saved++ });
 		await p.load();
 		await new Promise((r) => setTimeout(r, 50)); // the background cache fill
 		let savedWhenShown = -1;
@@ -126,14 +124,15 @@ describe('the player', () => {
 		expect([p.v.card!.pos, p.v.card!.revealed, p.v.card!.saved]).toEqual([0, true, 'correct']);
 	});
 
-	it('a reveal marks the card correct, or missed when the preference says so; Toggle flips either', async () => {
-		await cascade(5);
-		const p = new Player(db, C, { prefs: async () => ({ ...prefs, reveal_correct: false }), ensure: async () => undefined, seed: () => '777' });
+	it('a reveal marks the card correct, or missed when the cascade’s setting says so; Toggle flips either', async () => {
+		await cascade(5, { reveal_correct: false });
+		const p = player();
 		await p.load();
 		await p.showNext();
 		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'missed']);
 		await p.toggle();
 		expect(p.v.card!.grade).toBe('correct');
+		await cascade(5);
 		const q = player();
 		await q.load();
 		await q.showNext();
@@ -143,14 +142,14 @@ describe('the player', () => {
 	it('Show and Toggle act at once during a slow reload, which keeps them; Next waits for it', async () => {
 		await cascade(5);
 		let hold: Promise<void> | null = null;
-		const p = new Player(db, C, {
-			prefs: async () => {
-				await hold;
-				return prefs;
-			},
-			ensure: async () => undefined,
-			seed: () => '777'
-		});
+		const p = player();
+		// The reload's reads wait on `hold`.
+		const inner = p as unknown as { loadNow: (keep: boolean) => Promise<void> };
+		const loadNow = inner.loadNow.bind(p);
+		inner.loadNow = async (keep) => {
+			await hold;
+			return loadNow(keep);
+		};
 		await p.load();
 		let release!: () => void;
 		hold = new Promise((r) => (release = r));
@@ -202,7 +201,6 @@ describe('the player', () => {
 		const asked: number[][] = [];
 		const fetched: number[] = [];
 		const p = new Player(db, C, {
-			prefs: async () => prefs,
 			ensure: async () => undefined,
 			seed: () => '777',
 			fetchCard: async (_c, idx, ahead) => {
@@ -417,14 +415,12 @@ describe('the player', () => {
 		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'correct']);
 	});
 
-	it("the cascade's own answer mode decides, never the account default", async () => {
+	it("the cascade's own answer mode decides", async () => {
 		await cascade(2, { answer_mode: 'typed' });
 		const p = player();
 		await p.load();
-		// The account default is flashcard; the cascade says typed.
 		expect(p.v.card!.typed).not.toBeNull();
 		await cascade(2, { answer_mode: 'flashcard' });
-		prefs = { ...prefs, anagram_answer_mode: 'typed' };
 		const q = player();
 		await q.load();
 		expect(q.v.card!.typed).toBeNull();
@@ -487,7 +483,6 @@ describe('the player', () => {
 		await makeTyped();
 		let fetched = 0;
 		const p = new Player(db, C, {
-			prefs: async () => prefs,
 			ensure: async () => undefined,
 			seed: () => '777',
 			fetchDistribution: async () => {

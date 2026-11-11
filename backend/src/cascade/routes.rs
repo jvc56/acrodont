@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::order::{questions_hash, shuffle, to_i64};
-use super::rows::{self, Progression};
+use super::rows::{self, AnswerMode, Progression};
 use crate::app::AppState;
 use crate::auth::{CurrentUser, Session};
 use crate::catalog::tiles::Tile;
@@ -23,7 +23,6 @@ use crate::extract::ApiJson;
 use crate::search::routes::{path_errors, prepare, run, Prepared};
 use crate::search::store::{copy_spec, insert_spec, load_spec, SpecKind};
 use crate::search::wire::{tree_to_json, PathError, QuizType};
-use crate::sync::prefs::AnswerMode;
 
 pub const MAX_CARDS_PER_PAGE: i64 = 10_000;
 pub const MAX_KEYS_PER_PAGE: i64 = 100_000;
@@ -83,8 +82,19 @@ struct NewCascade {
     progression: Progression,
     require_alphabetical: bool,
     answer_mode: AnswerMode,
+    /// Start over copies the original's; a new cascade takes the column defaults.
+    display: Option<Display>,
     /// Start over copies the original's spec; creation stores the request's tree.
     copy_of_spec: Option<Uuid>,
+}
+
+/// What a card shows and what a reveal marks (PLAN.md § Settings): the
+/// cascade's own, set by `set_cascade_options`.
+struct Display {
+    show_definitions: bool,
+    show_hooks: bool,
+    reveal_correct: bool,
+    leave_value_decimals: i16,
 }
 
 fn check_fields(state: &AppState, name: &str, threshold: i64, segment_size: i64) -> Result<(), ApiError> {
@@ -222,6 +232,19 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     )
     .execute(&mut *tx)
     .await?;
+    if let Some(d) = &n.display {
+        sqlx::query!(
+            "UPDATE cascades SET show_definitions = $2, show_hooks = $3, reveal_correct = $4, leave_value_decimals = $5
+             WHERE id = $1",
+            n.id,
+            d.show_definitions,
+            d.show_hooks,
+            d.reveal_correct,
+            d.leave_value_decimals,
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
     sqlx::query!(
         "INSERT INTO cascade_questions (cascade_id, idx, question_key)
          SELECT $1, * FROM UNNEST($2::int4[], $3::text[])",
@@ -301,13 +324,15 @@ async fn create(
         progression: b.progression,
         require_alphabetical: b.require_alphabetical,
         answer_mode: b.answer_mode,
+        display: None,
         copy_of_spec: None,
     };
     store(&state, &user, n, p).await
 }
 
 /// A new cascade with the same name, a private copy of the same filters, and
-/// the same threshold and quiz options. Subject to the cascade limit.
+/// the same threshold, quiz options, answer mode and display settings. Subject
+/// to the cascade limit.
 async fn start_over(
     State(state): State<AppState>,
     Session(user): Session,
@@ -321,7 +346,8 @@ async fn start_over(
     let mut conn = state.db.acquire().await?;
     let row = sqlx::query!(
         r#"SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS "progression: Progression",
-                  c.require_alphabetical, c.answer_mode AS "answer_mode: AnswerMode", l.name AS lexicon
+                  c.require_alphabetical, c.answer_mode AS "answer_mode: AnswerMode", c.show_definitions,
+                  c.show_hooks, c.reveal_correct, c.leave_value_decimals, l.name AS lexicon
            FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2"#,
         original,
         user.id
@@ -343,6 +369,12 @@ async fn start_over(
         progression: row.progression,
         require_alphabetical: row.require_alphabetical,
         answer_mode: row.answer_mode,
+        display: Some(Display {
+            show_definitions: row.show_definitions,
+            show_hooks: row.show_hooks,
+            reveal_correct: row.reveal_correct,
+            leave_value_decimals: row.leave_value_decimals,
+        }),
         copy_of_spec: Some(row.spec_id),
     };
     store(&state, &user, n, p).await

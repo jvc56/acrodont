@@ -26,6 +26,10 @@ use crate::extract::ApiJson;
 
 pub const MAX_INDEX_PAGE: i64 = 50_000;
 
+/// The `set_cascade_options` fields a `set_quiz_options` never carries.
+const CASCADE_ONLY_FIELDS: [&str; 6] =
+    ["clear_threshold", "answer_mode", "show_definitions", "show_hooks", "reveal_correct", "leave_value_decimals"];
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/sync", post(sync))
@@ -119,9 +123,11 @@ fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Reques
             let target = if op_type == "set_cascade_options" { "cascade_id" } else { "quiz_id" };
             for k in m.keys() {
                 let allowed = ["id", "device_seq", "seen_seq", "at", "type", target, "segment_size", "progression", "require_alphabetical"];
-                // The clear threshold and answer mode are the cascade's alone, never a quiz's.
-                let threshold = op_type == "set_cascade_options" && (k == "clear_threshold" || k == "answer_mode");
-                if !allowed.contains(&k.as_str()) && !threshold {
+                // The clear threshold, answer mode and display settings are the
+                // cascade's alone, never a quiz's.
+                let cascade_only = op_type == "set_cascade_options"
+                    && CASCADE_ONLY_FIELDS.contains(&k.as_str());
+                if !allowed.contains(&k.as_str()) && !cascade_only {
                     return Err(bad(&format!("{op_type} carries only the fields that changed; {k} is not one")));
                 }
             }

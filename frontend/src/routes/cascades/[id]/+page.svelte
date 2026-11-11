@@ -3,11 +3,11 @@
 	// for a fine pointer at least 900 px wide, a hideable menu on the left, the
 	// quiz area with the question at the top, and a status bar along the bottom;
 	// tap zones otherwise. The three actions from mouse, wheel, keys and taps;
-	// typed mode; the Preferences dialog, which holds everything else, grouped
-	// by where it applies (this cascade and its levels, every cascade, this
-	// device), where a change to this cascade offers to be used for new
-	// cascades or every cascade too; banners, the completion screen, and a
-	// trashed cascade's Restore.
+	// typed mode; the Settings dialog, which holds every setting there is, in
+	// two groups: this cascade's (synced; a change offers to be used for every
+	// cascade too, and another cascade's can be copied) and this device's
+	// (its display and controls, never synced); banners, the completion
+	// screen, and a trashed cascade's Restore.
 	import { INFO, SCOPE } from '$lib/settings-info';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -20,8 +20,8 @@
 	import TileText from '$lib/components/TileText.svelte';
 	import AnswerView from '$lib/components/player/AnswerView.svelte';
 	import DisplaySettings from '$lib/components/player/DisplaySettings.svelte';
-	import AccountPreferences from '$lib/components/preferences/AccountPreferences.svelte';
-	import ApplyWider from '$lib/components/preferences/ApplyWider.svelte';
+	import ApplyWider from '$lib/components/settings/ApplyWider.svelte';
+	import ControlsEditor from '$lib/components/settings/ControlsEditor.svelte';
 	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
 	import SettingRow from '$lib/components/SettingRow.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -33,10 +33,17 @@
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta, recordOpen } from '$lib/local/meta';
 	import { allCascades } from '$lib/cascades/summary';
-	import { applyAsDefault, applyToAll, reachable, type CascadeFields, type Widening } from '$lib/preferences/widen';
+	import {
+		applyToAll,
+		copySettings,
+		copySources,
+		kindOf,
+		reachable,
+		type CascadeSettings,
+		type Widening
+	} from '$lib/settings/cascade';
 	import { userDb } from '$lib/local/open';
-	import { defaultPreferences, preferencesView } from '$lib/local/preferences';
-	import type { AnswerMode, AttemptRow, PreferencesRow } from '$lib/local/rows';
+	import type { AnswerMode, AttemptRow, CascadeRow } from '$lib/local/rows';
 	import type { RwTx } from '$lib/local/view';
 	import { PLAYER_LOCK } from '$lib/sync/downloads';
 	import { afterLocalWrite, ensureCascade, fetchAhead, fetchCard, fetchDistribution, playerActs, syncState } from '$lib/sync/runtime.svelte';
@@ -54,7 +61,6 @@
 	let db = $state<UserDb | null>(null);
 	let player = $state<Player | null>(null);
 	let v = $state<PlayerView | null>(null);
-	let prefs = $state<PreferencesRow>(defaultPreferences());
 	let attempts = $state<AttemptRow[]>([]);
 	let desktop = $state(true);
 	let landscape = $state(false);
@@ -62,8 +68,10 @@
 	let typedText = $state('');
 	let typedInput = $state<HTMLInputElement | null>(null);
 	let typedFocused = $state(false);
-	/** The last entry was wrong: the input shows red until the next keystroke. Wrong words are never shown. */
+	/** The last entry was wrong: the input shows red until the next keystroke. */
 	let typedWrong = $state(false);
+	/** The last entry the card took (an anagram of the question), shown under the input: green if right, red if wrong. */
+	let lastEntry = $state<{ text: string; correct: boolean } | null>(null);
 	/** The scrolling quiz area, and the answer inside it that shrinks to fit it. */
 	let fitArea = $state<HTMLElement | null>(null);
 	let answerBox = $state<HTMLElement | null>(null);
@@ -116,16 +124,23 @@
 	let atLimit = $state(false);
 	let cascadeError = $state<string | null>(null);
 	/**
-	 * The offer under each of this cascade's settings changed since Preferences
+	 * The offer under each of this cascade's settings changed since Settings
 	 * opened: the values saved, and how many cascades "all" would reach.
 	 */
-	type Offer = { fields: CascadeFields; reach: number; serial: number };
-	let offers = $state<{ threshold?: Offer; mode?: Offer; levels?: Offer }>({});
+	type Offer = { fields: CascadeSettings; reach: number; serial: number };
+	let offers = $state<Record<string, Offer>>({});
 	let offerSerial = 0;
+	/** The level's options were just saved: says so under them. */
+	let levelSaved = $state(0);
+	/** The cascades whose settings this one can copy, the one chosen, and what copying did. */
+	let sources = $state<CascadeRow[]>([]);
+	let copyFrom = $state('');
+	let copied = $state<string | null>(null);
+	/** Bumped when a copy changes the options under the forms, so they show the new ones. */
+	let formKey = $state(0);
 
 	async function refreshSide() {
 		if (!db) return;
-		prefs = await preferencesView(db);
 		attempts = await db.getAllFromIndex('quiz_attempts', 'cascade_id', id);
 	}
 
@@ -160,7 +175,6 @@
 			}
 			syncState.openCascade = id;
 			const p = new Player(d, id, {
-				prefs: () => preferencesView(d),
 				ensure: (cid) => ensureCascade(d, cid),
 				fetchCard: (cid, idx, ahead) => fetchCard(d, cid, idx, ahead),
 				fetchAhead: (cid, idx) => fetchAhead(d, cid, idx),
@@ -322,17 +336,18 @@
 	);
 
 	// Typed mode: each card's input takes focus as the card comes up (and when
-	// Preferences or a confirmation closes over it), so the next answer can be
+	// Settings or a confirmation closes over it), so the next answer can be
 	// typed straight away, with no click in the box.
 	$effect(() => {
 		const input = typedInput;
 		if (typingCard && input && !settingsOpen && !confirmState.current) input.focus();
 	});
 
-	// A new card to type starts with the input as normal, not red from the last one.
+	// A new card to type starts with the input as normal, not red from the last one, and no last entry.
 	$effect(() => {
 		void typingCard;
 		typedWrong = false;
+		lastEntry = null;
 	});
 
 	async function onTypedKey(e: KeyboardEvent) {
@@ -343,6 +358,10 @@
 		// A word that is not an anagram of the question stays in the input to fix; everything else clears it.
 		if (r && r.kind !== 'not_anagram') typedText = '';
 		typedWrong = r?.kind === 'wrong';
+		// An anagram of the question is taken, right or wrong, and shown under the input.
+		if (r?.kind === 'found' || r?.kind === 'already' || r?.kind === 'wrong') {
+			lastEntry = { text: text.trim().toUpperCase(), correct: r.kind !== 'wrong' };
+		}
 	}
 
 	async function write(op: NewOp) {
@@ -353,22 +372,29 @@
 		await player?.load(true);
 	}
 
-	async function setPref(field: keyof PreferencesRow, value: unknown) {
-		// Definitions or hooks change what an answer holds: the cards in memory go first.
-		if (field === 'anagram_show_definitions' || field === 'anagram_show_hooks') player?.prefsChanged();
-		await write({ type: 'set_preferences', [field]: value } as NewOp);
-	}
-
-	/** Flashcard or typed, for this cascade alone; switching mid-card resets its typed entries. */
-	async function setAnswerMode(mode: AnswerMode) {
+	/**
+	 * Changes this cascade's settings, for it alone, then offers to use the same
+	 * values for every cascade (§ Settings → One cascade, or all of them).
+	 * `key` names the offer: one per setting, or one for the new levels' options.
+	 */
+	async function setCascade(fields: CascadeSettings, key: string = Object.keys(fields)[0]) {
 		const c = v?.cascade;
-		if (!c || mode === c.answer_mode) return;
-		await write({ type: 'set_cascade_options', cascade_id: c.id, answer_mode: mode });
-		await player?.modeChanged();
-		await offer('mode', { answer_mode: mode });
+		if (!c || !Object.keys(fields).length) return;
+		// Definitions or hooks change what an answer holds: the cards in memory go first.
+		if (fields.show_definitions !== undefined || fields.show_hooks !== undefined) player?.settingsChanged();
+		await write({ type: 'set_cascade_options', cascade_id: c.id, ...fields } as NewOp);
+		// Switching mode mid-card resets its typed entries.
+		if (fields.answer_mode !== undefined) await player?.modeChanged();
+		await offer(key, fields);
 	}
 
-	/** Preferences: what is read fresh each time it opens, then the dialog. */
+	/** Flashcard or typed, for this cascade alone. */
+	async function setAnswerMode(mode: AnswerMode) {
+		if (!v?.cascade || mode === v.cascade.answer_mode) return;
+		await setCascade({ answer_mode: mode });
+	}
+
+	/** Settings: what is read fresh each time it opens, then the dialog. */
 	async function openSettings() {
 		const q = v?.quiz;
 		quizOptions = q ? { segment_size: q.segment_size, progression: q.progression, require_alphabetical: q.require_alphabetical } : null;
@@ -378,65 +404,67 @@
 			: null;
 		cascadeError = null;
 		offers = {};
-		if (db) atLimit = (await allCascades(db)).length >= session.cascadeLimit;
+		levelSaved = 0;
+		copied = null;
+		copyFrom = '';
+		if (db) {
+			const all = await allCascades(db);
+			atLimit = all.length >= session.cascadeLimit;
+			sources = c ? await copySources(db, c) : [];
+		}
 		settingsOpen = true;
 	}
 
-	/** Brings a section of Preferences into view, from the dialog's index. */
-	function jump(section: string) {
-		document.getElementById(section)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-	}
-
-	async function saveQuizOptions() {
+	/** The level being studied: its options change as soon as one is changed, from the current card. */
+	async function saveQuizOptions(o: QuizOptions) {
 		const q = v?.quiz;
-		if (!q || !quizOptions) return;
+		if (!q) return;
 		const op: Record<string, unknown> = { type: 'set_quiz_options', quiz_id: q.id };
-		if (quizOptions.segment_size !== q.segment_size) op.segment_size = quizOptions.segment_size;
-		if (quizOptions.progression !== q.progression) op.progression = quizOptions.progression;
-		if (quizOptions.require_alphabetical !== q.require_alphabetical) op.require_alphabetical = quizOptions.require_alphabetical;
-		if (Object.keys(op).length > 2) await write(op as unknown as NewOp);
-		settingsOpen = false;
+		if (o.segment_size !== q.segment_size) op.segment_size = o.segment_size;
+		if (o.progression !== q.progression) op.progression = o.progression;
+		if (o.require_alphabetical !== q.require_alphabetical) op.require_alphabetical = o.require_alphabetical;
+		if (Object.keys(op).length <= 2) return;
+		await write(op as unknown as NewOp);
+		levelSaved++;
 	}
 
-	/** After a change to this cascade alone, the offer to use it more widely (§ Where a setting applies). */
-	async function offer(group: keyof typeof offers, fields: CascadeFields) {
+	/** The options the cascade's new levels start with: saved as soon as one is changed, like its other settings. */
+	async function saveCascadeOptions(o: QuizOptions) {
+		const c = v?.cascade;
+		if (!c) return;
+		const fields: CascadeSettings = {};
+		if (o.segment_size !== c.segment_size) fields.segment_size = o.segment_size;
+		if (o.progression !== c.progression) fields.progression = o.progression;
+		if (o.require_alphabetical !== c.require_alphabetical) fields.require_alphabetical = o.require_alphabetical;
+		await setCascade(fields, 'levels');
+	}
+
+	/** After a change to this cascade alone, the offer to use it for every cascade. */
+	async function offer(key: string, fields: CascadeSettings) {
 		if (!db || !Object.keys(fields).length) return;
 		const reach = (await reachable(db, fields)).length;
-		offers = { ...offers, [group]: { fields, reach, serial: ++offerSerial } };
+		offers = { ...offers, [key]: { fields, reach, serial: ++offerSerial } };
 	}
 
-	/** New cascades, and when there are others, every cascade (which takes in new ones too). */
-	function widenings(o: Offer, kind: string): Widening[] {
+	/** "all 12 cascades" (or anagram cascades, for a setting only they have), when there are others. */
+	function widenings(o: Offer): Widening[] {
 		const d = db;
-		if (!d) return [];
-		const list: Widening[] = [
+		if (!d || o.reach < 2) return [];
+		const only = kindOf(o.fields);
+		const kind = only ? `${{ anagram: 'anagram', leave_value: 'leave value', definition: 'definition' }[only]} cascades` : 'cascades';
+		return [
 			{
-				key: 'new',
-				label: 'new cascades',
-				done: 'Used for new cascades',
-				run: async () => {
-					await applyAsDefault(d, o.fields);
-					afterLocalWrite();
-					await refreshSide();
-				}
-			}
-		];
-		if (o.reach > 1) {
-			list.push({
 				key: 'all',
-				label: `all ${o.reach} ${kind}s and new ones`,
-				done: `Used for all ${o.reach} ${kind}s and new ones`,
-				includes: ['new'],
+				label: `all ${o.reach} ${kind}`,
+				done: `Used for all ${o.reach} ${kind}`,
 				run: async () => {
-					await applyAsDefault(d, o.fields);
 					await applyToAll(d, o.fields);
 					afterLocalWrite();
 					await refreshSide();
 					await player?.load(true);
 				}
-			});
-		}
-		return list;
+			}
+		];
 	}
 
 	/**
@@ -452,21 +480,28 @@
 			return;
 		}
 		if (n === c.clear_threshold) return;
-		await write({ type: 'set_cascade_options', cascade_id: c.id, clear_threshold: n });
-		await offer('threshold', { clear_threshold: n });
+		await setCascade({ clear_threshold: n });
 	}
 
-	async function saveCascadeOptions() {
+	/** Gives this cascade every setting of the one chosen that applies to it, in one change. */
+	async function copySettingsFrom() {
 		const c = v?.cascade;
-		if (!c || !cascadeOptions) return;
-		const fields: CascadeFields = {};
-		if (cascadeOptions.segment_size !== c.segment_size) fields.segment_size = cascadeOptions.segment_size;
-		if (cascadeOptions.progression !== c.progression) fields.progression = cascadeOptions.progression;
-		if (cascadeOptions.require_alphabetical !== c.require_alphabetical) fields.require_alphabetical = cascadeOptions.require_alphabetical;
-		if (!Object.keys(fields).length) return;
-		await write({ type: 'set_cascade_options', cascade_id: c.id, ...fields });
-		// The dialog stays open, with the offer to use these for new cascades or every cascade too.
-		await offer('levels', fields);
+		const from = sources.find((o) => o.id === copyFrom);
+		if (!db || !c || !from) return;
+		player?.settingsChanged();
+		const n = await copySettings(db, from, c);
+		afterLocalWrite();
+		await refreshSide();
+		// The cascade first, then its card, which may now be typed or hold more.
+		await player?.load(true);
+		await player?.modeChanged();
+		// The forms show what the cascade has now.
+		cascadeOptions = v?.cascade
+			? { segment_size: clampPrefill(v.cascade.segment_size, maxQuiz), progression: v.cascade.progression, require_alphabetical: v.cascade.require_alphabetical }
+			: cascadeOptions;
+		offers = {};
+		formKey++;
+		copied = n ? `Copied ${n} setting${n === 1 ? '' : 's'} from “${from.name}”.` : `“${from.name}” already has the same settings.`;
 	}
 
 	async function restore() {
@@ -547,7 +582,7 @@
 						<AnswerView
 							quizType={v.cascade!.quiz_type}
 							answer={card.answer}
-							{prefs}
+							settings={v.cascade!}
 							found={card.typed?.found ?? null}
 							font={dsp.answer_font}
 							size={dsp.answer_size_px}
@@ -560,7 +595,7 @@
 					<AnswerView
 						quizType={v.cascade!.quiz_type}
 						answer={card.answer}
-						{prefs}
+						settings={v.cascade!}
 						typing={card.typed.found}
 						font={dsp.answer_font}
 						size={dsp.answer_size_px}
@@ -646,7 +681,15 @@
 					autocapitalize="characters"
 					spellcheck="false"
 				/>
-				<!-- Kept when empty, so a note appearing never moves the input. -->
+				<!-- The last entry the card took, green if right and red if wrong; then any note.
+				     Both kept when empty, so neither appearing ever moves the input. -->
+				<p
+					class="min-h-6 text-center font-semibold tracking-wide {lastEntry?.correct ? 'text-green-600' : 'text-red-600'}"
+					data-last-entry={lastEntry ? (lastEntry.correct ? 'correct' : 'wrong') : undefined}
+					aria-live="polite"
+				>
+					{#if lastEntry}<span class="sr-only">{lastEntry.correct ? 'Right:' : 'Wrong:'}</span> {lastEntry.text}{/if}
+				</p>
 				<p class="min-h-4 text-center text-xs text-muted-foreground" role="status">{card.note ?? ''}</p>
 			</div>
 		</div>
@@ -661,12 +704,9 @@
 					<a href="/cascades" class="font-semibold">Acrodont</a>
 					<button class="rounded px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => (menuOpen = false)} aria-label="Hide menu" title="Hide menu">«</button>
 				</div>
-				<a class="rounded px-2 py-1 hover:bg-muted" href="/cascades">Cascades</a>
-				<a class="rounded px-2 py-1 hover:bg-muted" href="/cascades/new">New cascade</a>
-				<a class="rounded px-2 py-1 hover:bg-muted" href="/trash">Trash</a>
 				{#if session.isAdmin}<a class="rounded px-2 py-1 hover:bg-muted" href="/admin">Admin</a>{/if}
 				<a class="rounded px-2 py-1 hover:bg-muted" href="/account">Account</a>
-				<button class="rounded px-2 py-1 text-left hover:bg-muted" onclick={openSettings}>Preferences</button>
+				<button class="rounded px-2 py-1 text-left hover:bg-muted" onclick={openSettings}>Settings</button>
 			</nav>
 		{/if}
 		<div class="relative flex min-w-0 flex-1 flex-col">
@@ -752,7 +792,7 @@
 				{/if}
 			</span>
 			<span class="flex items-center gap-3">
-				<button onclick={openSettings} aria-label="Preferences" title="Preferences">⚙</button>
+				<button onclick={openSettings} aria-label="Settings" title="Settings">⚙</button>
 			</span>
 		</header>
 		{#if v?.status === 'ready'}
@@ -781,60 +821,62 @@
 	</div>
 {/if}
 
-{#snippet widen(o: Offer | undefined, kind: string)}
+{#snippet widen(key: string)}
+	{@const o = offers[key]}
 	{#if o}
 		<!-- Keyed by the change, so a second change starts a fresh offer. -->
-		{#key o.serial}<ApplyWider saved="Saved for this cascade" offers={widenings(o, kind)} />{/key}
+		{#key o.serial}<ApplyWider saved="Saved for this cascade" offers={widenings(o)} />{/key}
 	{/if}
 {/snippet}
 
 {#snippet scopeHead(id: string, title: string, badge: string, text: string)}
-	<div class="space-y-1 border-b pb-2">
+	<!-- Each of the two sections opens with a bar of its own, so they read as separate. -->
+	<div class="-mx-6 space-y-1 border-y bg-muted/60 px-6 py-3">
 		<div class="flex flex-wrap items-center gap-2">
-			<h3 {id} class="text-base font-semibold">{title}</h3>
-			<span class="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">{badge}</span>
+			<h3 {id} class="text-lg font-semibold tracking-tight">{title}</h3>
+			<span class="rounded-full border bg-background px-2 py-0.5 text-xs text-muted-foreground">{badge}</span>
 		</div>
 		<p class="text-xs text-muted-foreground">{text}</p>
 	</div>
 {/snippet}
 
+{#snippet subHead(id: string, title: string, text: string | null = null)}
+	<div class="pt-2">
+		<h4 {id} class="text-sm font-semibold">{title}</h4>
+		{#if text}<p class="text-xs text-muted-foreground">{text}</p>{/if}
+	</div>
+{/snippet}
+
 {#if settingsOpen}
 	<div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" role="presentation" onclick={() => (settingsOpen = false)}>
-		<!-- Everything that can be set from the player, in one place, grouped by
-		     where it applies; each group says so above its settings (SCOPE). -->
+		<!-- Every setting there is, in one place, in its two groups: this cascade's
+		     and this device's. Each group says above its settings where they apply
+		     (SCOPE), and each setting is saved as soon as it is changed. -->
 		<div
 			class="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-lg border bg-background shadow-lg"
 			role="dialog"
-			aria-label="Preferences"
+			aria-label="Settings"
 			tabindex="-1"
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.key === 'Escape' && (settingsOpen = false)}
 		>
-			<div class="space-y-2 border-b px-6 pt-5 pb-3">
+			<div class="border-b px-6 pt-5 pb-3">
 				<div class="flex items-center justify-between gap-4">
-					<h2 class="text-lg font-semibold">Preferences</h2>
+					<h2 class="text-lg font-semibold">Settings</h2>
 					<Button variant="outline" size="sm" onclick={() => (settingsOpen = false)}>Close</Button>
 				</div>
-				<nav class="flex flex-wrap gap-1 text-xs" aria-label="Preferences sections">
-					{#each [
-						...(v?.cascade && v.quiz ? [['prefs-cascade', 'This cascade']] : []),
-						['prefs-every', 'Every cascade'],
-						['prefs-device', 'This device']
-					] as [target, label] (target)}
-						<button class="rounded-full border px-2.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => jump(target)}>{label}</button>
-					{/each}
-				</nav>
 			</div>
-			<div class="space-y-8 overflow-y-auto px-6 py-5">
+			<div class="space-y-10 overflow-y-auto px-6 pb-6">
 				{#if v?.cascade && v.quiz}
 					{@const c = v.cascade}
-					<section class="space-y-4" aria-labelledby="prefs-cascade">
-						{@render scopeHead('prefs-cascade', 'This cascade', 'Synced', SCOPE.cascade)}
+					{@const q = v.quiz}
+					<section class="space-y-4" aria-labelledby="settings-cascade">
+						{@render scopeHead('settings-cascade', 'Cascade Settings', 'Synced', SCOPE.cascade)}
 						<p class="text-sm text-muted-foreground">
 							A level clears when a pass ends with at least <span class="font-medium text-foreground">{c.clear_threshold}%</span> correct.
 						</p>
 						<div class="overflow-x-auto"><CascadeLadder {rows} onExport={(r) => goto(`/cascades/${id}/export?quiz=${r.quiz.id}`)} /></div>
-						<SettingRow label="Clear threshold (%)" info={INFO.clear_threshold} for="cascade-threshold" hint="For every level, the pass in progress included">
+						<SettingRow label="Clear threshold (%)" info={INFO.clear_threshold} for="cascade-threshold">
 							<input
 								id="cascade-threshold"
 								class="w-24 rounded-md border bg-background px-2 py-1"
@@ -846,55 +888,119 @@
 								onchange={(e) => setThreshold(e.currentTarget)}
 							/>
 						</SettingRow>
-						{@render widen(offers.threshold, 'cascade')}
+						{@render widen('clear_threshold')}
 						{#if c.quiz_type === 'anagram'}
 							<!-- Typing answers is for anagram quizzes only, and each cascade keeps its own mode. -->
-							<SettingRow label="Answer mode for this cascade" info={INFO.answer_mode} for="player-mode">
+							<SettingRow label="Answer mode" info={INFO.answer_mode} for="player-mode">
 								<select id="player-mode" class="rounded border bg-background px-2 py-1" value={c.answer_mode} onchange={(e) => setAnswerMode(e.currentTarget.value as AnswerMode)}>
 									<option value="flashcard">Flashcard</option>
 									<option value="typed">Typed</option>
 								</select>
 							</SettingRow>
-							{@render widen(offers.mode, 'anagram cascade')}
+							{@render widen('answer_mode')}
 						{/if}
-						{#if v.quiz && quizOptions}
-							<div class="space-y-3 rounded-md border p-4" role="group" aria-labelledby="prefs-level">
-								<h4 id="prefs-level" class="text-sm font-semibold">Level {v.quiz.level}, the level you are studying</h4>
-								<QuizOptionsForm
-									bind:options={quizOptions}
-									idPrefix="quiz-"
-									questionCount={v.quiz.question_count}
-									maxQuizQuestions={maxQuiz}
-									editing="quiz"
-									segmentChain={v.quiz.segment_chain}
-									source={v.quiz.origin === 'source'}
-									showAlphabetical={c.quiz_type === 'anagram'}
+						<SettingRow label="When an answer is revealed, mark it" info={INFO.reveal_correct} for="cascade-reveal">
+							<select
+								id="cascade-reveal"
+								class="rounded border bg-background px-2 py-1"
+								value={c.reveal_correct === false ? 'missed' : 'correct'}
+								onchange={(e) => setCascade({ reveal_correct: e.currentTarget.value === 'correct' })}
+							>
+								<option value="correct">Correct</option>
+								<option value="missed">Missed</option>
+							</select>
+						</SettingRow>
+						{@render widen('reveal_correct')}
+						{#if c.quiz_type === 'anagram'}
+							<SettingRow label="Show definitions" info={INFO.show_definitions} for="cascade-definitions">
+								<input
+									id="cascade-definitions"
+									type="checkbox"
+									checked={c.show_definitions !== false}
+									onchange={(e) => setCascade({ show_definitions: e.currentTarget.checked })}
 								/>
-								<Button size="sm" onclick={saveQuizOptions}>Save this level’s options</Button>
-							</div>
+							</SettingRow>
+							{@render widen('show_definitions')}
+							<SettingRow label="Show hooks" info={INFO.show_hooks} for="cascade-hooks">
+								<input id="cascade-hooks" type="checkbox" checked={c.show_hooks !== false} onchange={(e) => setCascade({ show_hooks: e.currentTarget.checked })} />
+							</SettingRow>
+							{@render widen('show_hooks')}
 						{/if}
-						{#if cascadeOptions}
-							<div class="space-y-3 rounded-md border p-4" role="group" aria-labelledby="prefs-new-levels">
-								<div>
-									<h4 id="prefs-new-levels" class="text-sm font-semibold">Levels made from now on</h4>
-									<p class="text-xs text-muted-foreground">
-										Each new level this cascade makes from your misses starts with these. Levels it already has keep their own.
-									</p>
+						{#if c.quiz_type === 'leave_value'}
+							<SettingRow label="Round leave values to (decimal places)" info={INFO.leave_value_decimals} for="cascade-decimals">
+								<select
+									id="cascade-decimals"
+									class="rounded border bg-background px-2 py-1"
+									value={String(c.leave_value_decimals ?? 1)}
+									onchange={(e) => setCascade({ leave_value_decimals: Number(e.currentTarget.value) })}
+								>
+									{#each [0, 1, 2, 3] as d (d)}<option value={String(d)}>{d}</option>{/each}
+								</select>
+							</SettingRow>
+							{@render widen('leave_value_decimals')}
+						{/if}
+						{#key formKey}
+							{#if quizOptions}
+								<div class="space-y-3" role="group" aria-labelledby="settings-level">
+									{@render subHead('settings-level', `Level ${q.level}, the level you are studying`)}
+									<QuizOptionsForm
+										bind:options={quizOptions}
+										idPrefix="quiz-"
+										questionCount={q.question_count}
+										maxQuizQuestions={maxQuiz}
+										editing="quiz"
+										segmentChain={q.segment_chain}
+										source={q.origin === 'source'}
+										showAlphabetical={c.quiz_type === 'anagram'}
+										onchange={saveQuizOptions}
+									/>
+									{#if levelSaved}
+										{#key levelSaved}
+											<p class="text-right text-xs text-green-700 dark:text-green-500" role="status" data-level-saved>✓ Saved for this level</p>
+										{/key}
+									{/if}
 								</div>
-								<QuizOptionsForm
-									bind:options={cascadeOptions}
-									idPrefix="cascade-"
-									questionCount={c.question_count}
-									maxQuizQuestions={maxQuiz}
-									editing="cascade"
-									showAlphabetical={c.quiz_type === 'anagram'}
-								/>
-								<Button size="sm" onclick={saveCascadeOptions}>Save options for new levels</Button>
-								{@render widen(offers.levels, 'cascade')}
+							{/if}
+							{#if cascadeOptions}
+								<div class="space-y-3" role="group" aria-labelledby="settings-new-levels">
+									{@render subHead(
+										'settings-new-levels',
+										'Levels made from now on',
+										'Each new level this cascade makes from your misses starts with these. Levels it already has keep their own.'
+									)}
+									<QuizOptionsForm
+										bind:options={cascadeOptions}
+										idPrefix="cascade-"
+										questionCount={c.question_count}
+										maxQuizQuestions={maxQuiz}
+										editing="cascade"
+										showAlphabetical={c.quiz_type === 'anagram'}
+										onchange={saveCascadeOptions}
+									/>
+									{@render widen('levels')}
+								</div>
+							{/if}
+						{/key}
+						{#if sources.length}
+							<div class="space-y-3" role="group" aria-labelledby="settings-copy">
+								{@render subHead(
+									'settings-copy',
+									'Copy another cascade’s settings',
+									'Gives this cascade every setting above that the other one has too. The level you are studying keeps its own options.'
+								)}
+								<div class="flex flex-wrap items-center justify-end gap-2 text-sm">
+									<label for="copy-from" class="sr-only">Cascade to copy from</label>
+									<select id="copy-from" class="max-w-full min-w-0 flex-1 rounded border bg-background px-2 py-1 sm:max-w-xs" bind:value={copyFrom}>
+										<option value="" disabled>Choose a cascade</option>
+										{#each sources as o (o.id)}<option value={o.id}>{o.name}</option>{/each}
+									</select>
+									<Button size="sm" variant="outline" disabled={!copyFrom} onclick={copySettingsFrom}>Copy settings</Button>
+								</div>
+								{#if copied}<p class="text-right text-xs text-green-700 dark:text-green-500" role="status" data-copied>✓ {copied}</p>{/if}
 							</div>
 						{/if}
 						{#if cascadeError}<p class="text-sm text-destructive" role="alert">{cascadeError}</p>{/if}
-						<div class="flex flex-wrap gap-2">
+						<div class="flex flex-wrap gap-2 pt-2">
 							<Button
 								variant="outline"
 								disabled={atLimit}
@@ -905,18 +1011,12 @@
 						</div>
 					</section>
 				{/if}
-				<section class="space-y-4" aria-labelledby="prefs-every">
-					{@render scopeHead('prefs-every', 'Every cascade', 'Account · synced', SCOPE.every)}
-					<AccountPreferences {prefs} {maxQuiz} part="every" save={setPref} />
-				</section>
-				<section class="space-y-4" aria-labelledby="prefs-device">
-					{@render scopeHead('prefs-device', 'This device', 'Not synced', SCOPE.device)}
+				<section class="space-y-4" aria-labelledby="settings-device">
+					{@render scopeHead('settings-device', 'Device Settings', 'Not synced', SCOPE.device)}
 					<DisplaySettings />
+					{@render subHead('settings-controls', 'Controls', 'The keys, mouse buttons and wheel directions for each action.')}
+					<ControlsEditor />
 				</section>
-				<p class="text-sm text-muted-foreground">
-					The defaults for new cascades and this device’s controls (keys, mouse and wheel) are on the
-					<a class="underline" href="/preferences">Preferences page</a>.
-				</p>
 			</div>
 		</div>
 	</div>

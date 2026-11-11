@@ -13,8 +13,8 @@ import { questionsHash } from '$lib/cascade/order';
 import type { UserDb } from '$lib/local/db';
 import { getMeta, readMeta, writeMeta } from '$lib/local/meta';
 import type { CardRow, CascadeRow, QuestionRow, QuizRow, WordHooks } from '$lib/local/rows';
-import { preferencesView } from '$lib/local/preferences';
-import type { RwTx } from '$lib/local/view';
+import * as view from '$lib/local/view';
+import type { AnyTx, RwTx } from '$lib/local/view';
 import { ANSWER_STORAGE_SOFT_LIMIT_BYTES, ROW_STORAGE_BUDGET } from './config';
 import { policy, type Policy } from './policy';
 import { withPositions } from './rebase';
@@ -72,11 +72,16 @@ export type WireCard = { idx: number; key: string; answer: unknown; word?: WordH
 
 /**
  * Whether a cascade's cards are fetched with hooks: an Anagram cascade's when
- * the preference asks, and always a Definition cascade's, whose answer shows
- * its word with hooks above the definition.
+ * its setting asks, and always a Definition cascade's, whose answer shows its
+ * word with hooks above the definition.
  */
-export function wantsHooks(quizType: string, prefs: { anagram_show_hooks: boolean }): boolean {
-	return quizType === 'definition' || (quizType === 'anagram' && prefs.anagram_show_hooks);
+export function wantsHooks(c: Pick<CascadeRow, 'quiz_type' | 'show_hooks'>): boolean {
+	return c.quiz_type === 'definition' || (c.quiz_type === 'anagram' && c.show_hooks !== false);
+}
+
+/** Whether a cascade's cards are fetched with definitions: an Anagram cascade's when its setting asks. */
+export function wantsDefinitions(c: Pick<CascadeRow, 'quiz_type' | 'show_definitions'>): boolean {
+	return c.quiz_type === 'anagram' && c.show_definitions !== false;
 }
 
 /** The server's cap on cards named with `idx=`. */
@@ -424,13 +429,18 @@ export class DownloadManager {
 		}
 	}
 
+	/** The cascade as the device sees it, a setting changed a moment ago and not yet sent included. */
+	private async cascadeView(cascadeId: string): Promise<CascadeRow | undefined> {
+		const tx = this.db.transaction(['cascades', 'overlay_cascades']);
+		return view.cascade(tx as unknown as AnyTx, cascadeId);
+	}
+
 	private async cards(cascadeId: string) {
-		const c = await this.db.get('cascades', cascadeId);
+		const c = await this.cascadeView(cascadeId);
 		if (!c) return;
-		const prefs = await preferencesView(this.db);
-		const hooks = wantsHooks(c.quiz_type, prefs);
-		const definitions = c.quiz_type === 'anagram' && prefs.anagram_show_definitions;
-		// Cards record which extras they hold; a preference asking for more refetches them.
+		const hooks = wantsHooks(c);
+		const definitions = wantsDefinitions(c);
+		// Cards record which extras they hold; a setting asking for more refetches them.
 		let froms = await this.missingRanges('cards', c, CARDS_PAGE);
 		if (hooks || definitions) {
 			const lacking = new Set(froms);
@@ -467,11 +477,10 @@ export class DownloadManager {
 	}
 
 	async fetchForPlayer(cascadeId: string, idx: number, ahead: number[] = []): Promise<void> {
-		const c = await this.db.get('cascades', cascadeId);
+		const c = await this.cascadeView(cascadeId);
 		if (!c) return;
-		const prefs = await preferencesView(this.db);
-		const hooks = wantsHooks(c.quiz_type, prefs);
-		const definitions = c.quiz_type === 'anagram' && prefs.anagram_show_definitions;
+		const hooks = wantsHooks(c);
+		const definitions = wantsDefinitions(c);
 		if (this.api.cardsByIdx) {
 			const want = [idx, ...(await this.missingCards(c.id, ahead))].slice(0, MAX_CARDS_BY_IDX);
 			const cards = await this.forPlayer(() => this.api.cardsByIdx!(c.id, want, hooks, definitions));
@@ -490,13 +499,12 @@ export class DownloadManager {
 	 */
 	async fetchAhead(cascadeId: string, idx: number[]): Promise<void> {
 		if (!this.api.cardsByIdx || idx.length === 0) return;
-		const c = await this.db.get('cascades', cascadeId);
+		const c = await this.cascadeView(cascadeId);
 		if (!c) return;
 		const want = (await this.missingCards(c.id, idx)).slice(0, MAX_CARDS_BY_IDX);
 		if (want.length === 0) return;
-		const prefs = await preferencesView(this.db);
-		const hooks = wantsHooks(c.quiz_type, prefs);
-		const definitions = c.quiz_type === 'anagram' && prefs.anagram_show_definitions;
+		const hooks = wantsHooks(c);
+		const definitions = wantsDefinitions(c);
 		const cards = await this.forPlayer(() => this.api.cardsByIdx!(c.id, want, hooks, definitions));
 		await this.writeCards(c, cards, hooks, definitions);
 	}

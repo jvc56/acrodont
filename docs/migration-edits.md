@@ -42,3 +42,19 @@ bumped by preference changes alone. Nothing is deployed, so the edit is in
 place.
 
 A database made by the earlier file no longer matches: `./scripts/dev.py --reset`.
+
+## 2026-11-11: no account-level preferences; display settings are the cascade's
+
+Settings are now either a cascade's own (synced on its `cascades` row) or a
+device's own (never synced); nothing applies to the whole account. So the
+`user_preferences` table went, with `'set_preferences'` from `sync_op_type`,
+and with it the defaults for new cascades it held (`default_clear_threshold`,
+`anagram_answer_mode`, `default_segment_size`, `default_progression`,
+`default_require_alphabetical`): a new cascade takes the request's values or
+the column defaults. Its four remaining settings moved onto `cascades`, set by
+`set_cascade_options` and copied by Start over: `show_definitions` and
+`show_hooks` (were `anagram_show_definitions` and `anagram_show_hooks`),
+`reveal_correct`, and `leave_value_decimals`, with the same defaults and
+range. Nothing is deployed, so the edit is in place.
+
+A database made by the earlier file no longer matches: `./scripts/dev.py --reset`.

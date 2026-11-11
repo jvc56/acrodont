@@ -7,10 +7,9 @@ use serde_json::Value;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use super::prefs;
 use super::{Effects, IncomingOp};
 use crate::cascade::order::{from_i64, questions_hash, shuffle, to_i64};
-use crate::cascade::rows::{Origin, Progression, QuizStatus};
+use crate::cascade::rows::{AnswerMode, Origin, Progression, QuizStatus};
 use crate::cascade::rules::{self, CascadeState, FinishResult, Grade, NewQuiz, Opts, QuizState, Reason, SegmentResult};
 
 pub enum OpError {
@@ -307,7 +306,6 @@ pub async fn apply(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpRes
         "purge_cascade" => purge_cascade(conn, ctx, op).await,
         "set_cascade_options" => set_cascade_options(conn, ctx, op).await,
         "set_quiz_options" => set_quiz_options(conn, ctx, op).await,
-        "set_preferences" => set_preferences(conn, ctx, op).await,
         _ => Err(OpError::Rejected(Reason::Invalid)),
     }
 }
@@ -800,9 +798,21 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         Some(v) => Some(rules::check_clear_threshold(v.as_i64().ok_or(Reason::Invalid)?)?),
     };
     // Flashcard or typed, the cascade's alone like the threshold.
-    let answer_mode: Option<prefs::AnswerMode> = match op.body.get("answer_mode") {
+    let answer_mode: Option<AnswerMode> = match op.body.get("answer_mode") {
         None => None,
         Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| OpError::Rejected(Reason::Invalid))?),
+    };
+    // What a card shows and what a reveal marks (PLAN.md § Settings), the cascade's alone too.
+    let flag = |k: &str| match op.body.get(k) {
+        None => Ok(None),
+        Some(v) => v.as_bool().map(Some).ok_or(OpError::Rejected(Reason::Invalid)),
+    };
+    let show_definitions = flag("show_definitions")?;
+    let show_hooks = flag("show_hooks")?;
+    let reveal_correct = flag("reveal_correct")?;
+    let leave_value_decimals = match op.body.get("leave_value_decimals") {
+        None => None,
+        Some(v) => Some(v.as_i64().filter(|n| (0..=3).contains(n)).ok_or(Reason::Invalid)? as i16),
     };
     let at = clamp(ctx, at);
     if !options_win(ctx, op, c.options_device_id, c.options_seq, c.options_changed_at, at) {
@@ -813,7 +823,11 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
                              require_alphabetical = coalesce($4, require_alphabetical), options_changed_at = $5,
                              options_seq = $6, options_device_id = $7, updated_seq = $6,
                              clear_threshold = coalesce($8, clear_threshold),
-                             answer_mode = coalesce($9, answer_mode)
+                             answer_mode = coalesce($9, answer_mode),
+                             show_definitions = coalesce($10, show_definitions),
+                             show_hooks = coalesce($11, show_hooks),
+                             reveal_correct = coalesce($12, reveal_correct),
+                             leave_value_decimals = coalesce($13, leave_value_decimals)
          WHERE id = $1",
         id,
         f.segment_size.map(|s| s as i32),
@@ -823,7 +837,11 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         ctx.seq,
         ctx.device,
         threshold.map(|t| t as i16),
-        answer_mode as Option<prefs::AnswerMode>,
+        answer_mode as Option<AnswerMode>,
+        show_definitions,
+        show_hooks,
+        reveal_correct,
+        leave_value_decimals,
     )
     .execute(conn)
     .await?;
@@ -853,56 +871,6 @@ async fn set_quiz_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -
         at,
         ctx.seq,
         ctx.device,
-    )
-    .execute(conn)
-    .await?;
-    Ok(Effects::default())
-}
-
-async fn set_preferences(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult {
-    let at = at_of(op)?;
-    let mut fields = op.body.as_object().cloned().unwrap_or_default();
-    for k in ["id", "device_seq", "seen_seq", "at", "type"] {
-        fields.remove(k);
-    }
-    let p = prefs::parse_preferences(&fields, ctx.cap)?;
-    let row = sqlx::query!(
-        "SELECT changed_at, changed_by_device_id, updated_seq FROM user_preferences WHERE user_id = $1 FOR UPDATE",
-        ctx.user
-    )
-    .fetch_one(&mut *conn)
-    .await?;
-    let at = clamp(ctx, at);
-    let wins = row.changed_by_device_id == Some(ctx.device) || row.updated_seq <= op.seen_seq || at > row.changed_at;
-    if !wins {
-        return Err(OpError::Rejected(Reason::Stale));
-    }
-    sqlx::query!(
-        "UPDATE user_preferences SET
-            default_clear_threshold = coalesce($2, default_clear_threshold),
-            leave_value_decimals = coalesce($3, leave_value_decimals),
-            anagram_show_definitions = coalesce($4, anagram_show_definitions),
-            anagram_show_hooks = coalesce($5, anagram_show_hooks),
-            anagram_answer_mode = coalesce($6, anagram_answer_mode),
-            default_segment_size = coalesce($7, default_segment_size),
-            default_progression = coalesce($8, default_progression),
-            default_require_alphabetical = coalesce($9, default_require_alphabetical),
-            changed_at = $10, changed_by_device_id = $11, updated_seq = $12,
-            reveal_correct = coalesce($13, reveal_correct)
-         WHERE user_id = $1",
-        ctx.user,
-        p.default_clear_threshold,
-        p.leave_value_decimals,
-        p.anagram_show_definitions,
-        p.anagram_show_hooks,
-        p.anagram_answer_mode as Option<prefs::AnswerMode>,
-        p.default_segment_size,
-        p.default_progression as Option<Progression>,
-        p.default_require_alphabetical,
-        at,
-        ctx.device,
-        ctx.seq,
-        p.reveal_correct,
     )
     .execute(conn)
     .await?;

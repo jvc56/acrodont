@@ -32,7 +32,6 @@ export interface Changes {
 	quizzes: WireRow[];
 	quiz_attempts: WireRow[];
 	quiz_questions: QuestionGroup[];
-	preferences?: WireRow;
 	tombstones: Tombstone[];
 }
 

@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { PROJECT } from '../stack';
-import { createCascade, idb, login, newUser, outboxCount, playLevel, playerPref, press } from './support';
+import { apiCascade, apiSettings, createCascade, idb, lengths, login, newUser, outboxCount, playLevel, playerSetting, press } from './support';
 
 // PLAN.md § End-to-end tests: answers gone with questions kept, a download
 // stopped part way, Trash and export offline, and export through the server.
@@ -32,7 +32,7 @@ test('answers gone, questions kept; a download stopped part way', async ({ page,
 	const player = await createCascade(page, { name: 'Evicted' });
 	await availableOffline(page, 'Evicted');
 	await page.goto(player);
-	await playerPref(page, 'Answer mode for this cascade', 'typed');
+	await playerSetting(page, 'Answer mode', 'typed');
 	await evictAnswers(page);
 	await context.setOffline(true);
 	await page.goto(player);
@@ -72,7 +72,7 @@ test('answers gone, questions kept; a download stopped part way', async ({ page,
 	await page.goto(partial);
 	await expect(page.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
 	// Flashcards again: in typed mode Space would type into the answer rather than move on.
-	await playerPref(page, 'Answer mode for this cascade', 'flashcard');
+	await playerSetting(page, 'Answer mode', 'flashcard');
 	for (let i = 0; i < 2; i++) {
 		await press(page, 'Space');
 		await press(page, 'Space');
@@ -130,10 +130,14 @@ test('export: counts, offline files, the definitions fallback, and one file thro
 	await newUser(page, 'exp');
 	// Definitions are on by default: off before the cascade downloads, so its
 	// cards never hold them and the definitions fallback below has a cause.
-	await page.goto('/preferences');
-	await page.getByLabel('Show definitions with anagrams').uncheck();
-	await expect(page.getByLabel('Show definitions with anagrams')).not.toBeChecked();
-	const player = await createCascade(page, { name: 'Export journey' });
+	const player = await apiCascade(page, { name: 'Export journey', filters: lengths(7, 7) });
+	await apiSettings(page, player, { show_definitions: false });
+	// Open it, and let it download before playing: a press that lands in the
+	// refresh a first download brings is lost.
+	await page.goto(player);
+	await expect(page.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
+	await availableOffline(page, 'Export journey');
+	await page.goto(player);
 	expect(await playLevel(page, (i) => i < 3)).toMatch(/^Level 1/);
 	// Level 2 part played: its first card missed, its second correct. A cascade
 	// export's grades are the active quizzes' current attempts (§ Exporting words),

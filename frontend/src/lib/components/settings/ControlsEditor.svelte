@@ -69,6 +69,8 @@
 
 	function onKey(e: KeyboardEvent) {
 		e.preventDefault();
+		// The key is the binding's alone: Escape cancels the capture, not the Settings around it.
+		e.stopPropagation();
 		if (e.code === 'Escape') {
 			capturing = null;
 			return;
@@ -127,6 +129,6 @@
 				action: 'Reset to defaults'
 			});
 			if (ok) await save(DEFAULT_BINDINGS);
-		}}>Reset to defaults</Button
+		}}>Reset controls to defaults</Button
 	>
 </div>

@@ -35,7 +35,7 @@ async fn expire_codes(app: &TestApp, email: &str) {
 // ---------------------------------------------------------------------------
 
 #[sqlx::test]
-async fn register_creates_user_and_preferences(pool: sqlx::PgPool) {
+async fn register_creates_the_user(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
     let mut c = app.client();
     let r = c
@@ -46,15 +46,12 @@ async fn register_creates_user_and_preferences(pool: sqlx::PgPool) {
     let code = app.latest_code("alice@example.com").await;
     assert_eq!(code.len(), 43, "32 random bytes, base64url");
 
-    // The first sync sequence is taken and stamped on the preferences row.
-    let (sync_seq, prefs_seq): (i64, i64) = sqlx::query_as(
-        "SELECT u.sync_seq, p.updated_seq FROM users u JOIN user_preferences p ON p.user_id = u.id
-         WHERE u.username = 'alice'",
-    )
-    .fetch_one(app.db())
-    .await
-    .unwrap();
-    assert_eq!((sync_seq, prefs_seq), (1, 1));
+    // No sync sequence is taken yet: there are no account-level rows to stamp.
+    let sync_seq: i64 = sqlx::query_scalar("SELECT sync_seq FROM users WHERE username = 'alice'")
+        .fetch_one(app.db())
+        .await
+        .unwrap();
+    assert_eq!(sync_seq, 0);
     // Only the SHA-256 of the code is stored, with a 24-hour expiry.
     let (hash_len, hours): (i32, f64) = sqlx::query_as(
         "SELECT octet_length(code_hash), extract(epoch FROM expires_at - created_at)::float8 / 3600
@@ -735,7 +732,6 @@ async fn delete_account_cascades_and_clears_cookies(pool: sqlx::PgPool) {
     );
     for table in [
         "users",
-        "user_preferences",
         "email_confirmations",
     ] {
         let n: i64 =

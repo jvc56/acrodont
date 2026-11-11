@@ -32,7 +32,7 @@ That gives you:
 | "Studying: CSW24 2–7" (the 20 most probable of each length): Level 1 finished with misses, Level 2 half graded | `/cascades` |
 | "Finished: CSW24 sevens" (the 25 most probable) | `/cascades` |
 | "Segments: CSW24 2–5 in fives" | `/cascades` |
-| "Trashed: CSW24 eights" | `/trash` |
+| "Trashed: CSW24 eights" | the Trash, under the cascades on `/cascades` |
 | Three saved searches | the builder's Load dialog |
 | Filler cascades up to the limit warning (18 of 20) | `/cascades` |
 
@@ -44,8 +44,8 @@ as a link (`[mail] confirm …`).
 
 ## Part 1: visitors
 
-- [ ] **V-1** **Do** open `/` signed out (`./scripts/dev.py --no-login`). **Expect** the log-in page, with Create an account; there is no landing page.
-- [ ] **V-9** **Do** log in. **Expect** the Cascades page. The header shows Cascades, New cascade, Trash, Admin (admins only), the sync status and your name; Acrodont leads back to Cascades.
+- [ ] **V-1** **Do** open `/` signed out (`./scripts/dev.py --no-login`). **Expect** the log-in page, with Create an account; there is no public landing page.
+- [ ] **V-9** **Do** log in. **Expect** the Cascades page, the landing page, with New cascade at the top and the Trash below the cascades. The header shows Acrodont, Admin (admins only), the sync status and your name, and nothing else; Acrodont leads back to the Cascades page. An old link to `/trash` lands on the Cascades page, scrolled to the Trash.
 - [ ] **V-2** **Do** register a new account. **Expect** "check your email"; dev.py prints a `[mail] confirm` link; following it confirms the account, and you can log in.
 - [ ] **V-3** **Do** register with a taken username. **Expect** "That username is taken." under the field, and no mail.
 - [ ] **V-4** **Do** register with an address that already has an account. **Expect** the same "check your email" page; dev.py prints a mail saying the address already has an account.
@@ -57,28 +57,30 @@ as a link (`[mail] confirm …`).
 ## Part 2: studying
 
 - [ ] **S-1** **Do** open "Studying". **Expect** the player at Level 2, halfway through, the ladder showing Level 1 finished.
-- [ ] **S-2** **Do** reveal, grade and advance with the mouse, then the keys (Space, X, Backspace). **Expect** each action's binding as on `/preferences` (This device → Controls).
+- [ ] **S-2** **Do** reveal, grade and advance with the mouse, then the keys (Space, X, Backspace). **Expect** each action's binding as listed in the player's Settings (Device Settings → Controls).
 - [ ] **S-3** **Do** finish Level 2 with a miss. **Expect** a new level, with the banner saying how many questions it has.
 - [ ] **S-4** **Do** open "Finished". **Expect** the completion screen: Keep studying, Start over, Move to Trash.
 - [ ] **S-5** **Do** open "Segments" and finish the second run of five. **Expect** a chain quiz of its misses, and the run counter moving on.
-- [ ] **S-6** **Do** `--scenario typed`, then open "Typed". **Expect** a text box; typing the anagrams grades them; a word that isn't an anagram of the question stays in the box with "Not an anagram of the question"; an anagram that isn't a word turns the box red and is never shown.
+- [ ] **S-6** **Do** `--scenario typed`, then open "Typed". **Expect** a text box; typing the anagrams grades them; a word that isn't an anagram of the question stays in the box with "Not an anagram of the question"; an anagram that isn't a word turns the box red until the next keystroke and shows in red under the box as the last entry; a found word shows there in green, and is the green one among the found words in the answer space; the last entry clears on the next card.
 - [ ] **S-7** **Do** go offline (DevTools Offline, or `docker compose stop backend`) and keep studying, then reload. **Expect** the app still loads and studies; SyncStatus says changes are waiting; back online, it says "Synced".
 - [ ] **S-8** **Do** `./scripts/dev.py --two-devices`, grade in one profile, then switch to the other. **Expect** the grades arrive within the sync interval (about 30 s) or at once on focus.
 - [ ] **S-9** **Do** the same quiz on both devices offline, then bring both online. **Expect** a notice naming what wasn't kept, never a silent loss.
 
 ## Part 3: cascades, Trash, export, account
 
-- [ ] **C-1** **Do** build a cascade: Anagram, CSW24, Length 7–8, then preview. **Expect** a count and a sample; Create opens it.
+- [ ] **C-1** **Do** build a cascade: Anagram, CSW24, Length 7–8, then preview. **Expect** a count and a sample, no settings on the page (no threshold, answer mode or segments), and a note that the cascade's settings can be changed in its Settings once it is created; Create opens it, clearing at 80%, with flashcards.
 - [ ] **C-2** **Do** look at the header on `/cascades`. **Expect** "18 of 20 cascades" (or your count), with the warning in the builder.
-- [ ] **C-3** **Do** create two more cascades. **Expect** "20 of 20"; Create and Start over are disabled, with a link to the Trash.
-- [ ] **C-4** **Do** restore "Trashed" from `/trash`. **Expect** it back on `/cascades`; restoring never counts as a new cascade.
+- [ ] **C-3** **Do** create two more cascades. **Expect** "20 of 20"; Create and Start over are disabled, with a link to the Trash on the Cascades page.
+- [ ] **C-4** **Do** restore "Trashed" from the Trash on `/cascades`. **Expect** it back among the cascades above at once; restoring never counts as a new cascade. Moving a cascade to the Trash there shows it in the Trash below at once.
 - [ ] **C-5** **Do** Delete forever a trashed cascade. **Expect** a slot freed.
 - [ ] **C-6** **Do** load each saved search in the builder. **Expect** its filters, the name, and a preview.
 - [ ] **C-7** **Do** export "Studying" as text and as CSV, all and missed only. **Expect** downloads whose names say what is in them; offline, the export still works from the device.
-- [ ] **C-8** **Do** change preferences and a binding on `/preferences` (in the header), then reload. **Expect** both persist; the preferences reach the other device, the binding does not (controls are per device).
+- [ ] **C-8** **Do** in a cascade's Settings (⚙ in the player, Settings in the desktop menu, beside Acrodont, Admin for admins, and Account), see each setting's explanation written under its name, then change a setting under Cascade Settings and a binding under Device Settings, then reload. **Expect** both persist, each saved as soon as it changed, with no Save button; the cascade's setting reaches the other device, the binding does not (controls are per device). The header has no settings link, and the Account page says settings are in a cascade's Settings.
 - [ ] **C-9** **Do** Sign out everywhere, then use the other device. **Expect** "Log in to sync"; studying still works.
 - [ ] **C-10** **Do** delete an account. **Expect** the log-in page; logging in again fails.
-- [ ] **C-11** **Do** change a cascade's clear threshold in its Preferences, then press "all N cascades and new ones". **Expect** "✓ Saved for this cascade", then every cascade on the Cascades page clears at the new value, and the default on `/preferences` matches.
+- [ ] **C-11** **Do** change a cascade's clear threshold in its Settings, then press "all N cascades". **Expect** "✓ Saved for this cascade · Also use for: all N cascades" before, "✓ Used for all N cascades" after, and every cascade on the Cascades page clears at the new value. Turning off Show hooks offers "all N anagram cascades" instead; with only one cascade of the kind, no offer appears.
+- [ ] **C-12** **Do** in one cascade's Settings, choose another cascade under "Copy another cascade's settings" and press Copy settings, then press it again. **Expect** "✓ Copied N settings from “…”." and the settings above changing to match, then "✓ “…” already has the same settings."; the level being studied keeps its own options.
+- [ ] **C-13** **Do** in a cascade's Settings, change the level being studied's segment size (leave the field or press Enter), and turn on Study in segments for levels made from now on without typing a size. **Expect** "✓ Saved for this level" after the first; nothing saved by the second until a size is entered; on a cascade large enough, a size that would make more than 2,000 levels is warned about once typed, before it is saved.
 
 ## Part 4: admins
 

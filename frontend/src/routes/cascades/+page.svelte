@@ -3,13 +3,15 @@
 	// row each for a glance — its options in short form, a compact ladder with
 	// the current level's progress, whether it is on this device, and Move to
 	// Trash; the rest (quiz options, Export…, Start over) is in the player.
-	// The header shows the cascade limit. Everything reads the local stores and
-	// works offline.
+	// The header shows the cascade limit. The Trash is under the cascades, so
+	// they are seen together. Everything reads the local stores and works offline.
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
 	import { session } from '$lib/auth/session.svelte';
 	import TrashIcon from '@lucide/svelte/icons/trash';
 	import { Button } from '$lib/components/ui/button';
+	import TrashList from '$lib/components/TrashList.svelte';
+	import { tick } from 'svelte';
 	import { allCascades, cascadeSummaries, ladderText, type CascadeSummary } from '$lib/cascades/summary';
 	import { applyLocally, type NewOp } from '$lib/local/apply';
 	import { confirmAction } from '$lib/confirm.svelte';
@@ -24,6 +26,8 @@
 	/** No lexicon on the server: known only online, and asked only while there are no cascades. */
 	let noCatalog = $state(false);
 	let retentionDays = $state(30);
+	/** Bumped when a cascade goes to the Trash here, so the Trash below shows it. */
+	let trashVersion = $state(0);
 
 	async function refresh() {
 		if (!db) return;
@@ -37,6 +41,11 @@
 			if (!session.userId) return;
 			db = await userDb(session.userId, session.username);
 			await refresh();
+			// A link to the Trash (/trash, or #trash) lands on it once it is drawn.
+			if (location.hash === '#trash') {
+				await tick();
+				document.getElementById('trash')?.scrollIntoView({ block: 'start' });
+			}
 			if (list.length === 0 && navigator.onLine) {
 				api
 					.get<unknown[]>('/api/lexicons', { bindUser: false })
@@ -65,6 +74,7 @@
 		await applyLocally(db, op);
 		afterLocalWrite();
 		await refresh();
+		trashVersion++;
 	}
 
 	async function trash(s: CascadeSummary) {
@@ -98,7 +108,7 @@
 		</div>
 		<div class="flex items-center gap-4">
 			{#if count >= session.cascadeLimit}
-				<span class="text-sm">At the limit — <a class="underline" href="/trash">Trash</a></span>
+				<span class="text-sm">At the limit — empty the <a class="underline" href="#trash">Trash</a></span>
 			{:else}
 				<Button href="/cascades/new">New cascade</Button>
 			{/if}
@@ -142,5 +152,8 @@
 				</li>
 			{/each}
 		</ul>
+	{/if}
+	{#if db}
+		<div class="mt-10"><TrashList {db} version={trashVersion} onchange={refresh} /></div>
 	{/if}
 </main>

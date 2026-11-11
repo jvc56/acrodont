@@ -276,31 +276,21 @@ async fn insert_confirmation(
     Ok(())
 }
 
-/// The user and its preferences row stamped with the account's first sync
-/// sequence, in one transaction.
+/// The user row.
 async fn create_user(
     tx: &mut sqlx::PgConnection,
     username: &str,
     email: &str,
     hash: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    let user = sqlx::query!(
-        "INSERT INTO users (username, email, password_hash, sync_seq)
-         VALUES ($1, $2, $3, 1) RETURNING id, sync_seq",
+    sqlx::query_scalar!(
+        "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
         username as &str,
         email as &str,
         hash,
     )
-    .fetch_one(&mut *tx)
-    .await?;
-    sqlx::query!(
-        "INSERT INTO user_preferences (user_id, updated_seq) VALUES ($1, $2)",
-        user.id,
-        user.sync_seq,
-    )
-    .execute(&mut *tx)
-    .await?;
-    Ok(user.id)
+    .fetch_one(tx)
+    .await
 }
 
 // ---------------------------------------------------------------------------

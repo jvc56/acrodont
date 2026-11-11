@@ -1,7 +1,6 @@
 <script lang="ts">
 	// The cascade builder (PLAN.md § Creating a cascade), laid out like
 	// Zyzzyva's Search tab. Needs a connection: searching runs on the server.
-	import { INFO } from '$lib/settings-info';
 	import { confirmAction } from '$lib/confirm.svelte';
 	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
 	import { onDestroy, onMount } from 'svelte';
@@ -12,8 +11,6 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import FilterGroup from '$lib/components/builder/FilterGroup.svelte';
-	import QuizOptionsForm from '$lib/components/QuizOptionsForm.svelte';
-	import SettingRow from '$lib/components/SettingRow.svelte';
 	import TileText from '$lib/components/TileText.svelte';
 	import { api, ApiError } from '$lib/api';
 	import { session } from '$lib/auth/session.svelte';
@@ -42,10 +39,9 @@
 	} from '$lib/filters';
 	import { storeCreated, type Created } from '$lib/local/created';
 	import { getMeta } from '$lib/local/meta';
-	import { preferencesView } from '$lib/local/preferences';
+	import { CASCADE_SETTING_DEFAULTS } from '$lib/local/rows';
 	import { allCascades, cascadeWarning } from '$lib/cascades/summary';
 	import { userDb } from '$lib/local/open';
-	import { DEFAULT_OPTIONS, clampPrefill, type QuizOptions } from '$lib/options';
 	import { PREVIEW_MANUAL_ENTRIES } from '$lib/sync/config';
 	import type { Distribution } from '$lib/tiles';
 
@@ -56,11 +52,7 @@
 	let lexicon = $state('');
 	let dist = $state<Distribution | null>(null);
 	let root = $state<GroupState>(newGroup('and', [newRow('length', 'anagram', null)]));
-	let threshold = $state(80);
-	/** Flashcard or typed: the cascade's own, prefilled from the account default. */
-	let answerMode = $state<'flashcard' | 'typed'>('flashcard');
 	let cascadeCount = $state(0);
-	let options = $state<QuizOptions>({ ...DEFAULT_OPTIONS });
 	let name = $state('');
 	let nameEdited = $state(false);
 	let preview = $state<PreviewState | null>(null);
@@ -98,21 +90,9 @@
 
 	onMount(async () => {
 		if (session.userId) {
-			// The threshold and options are prefilled from the preferences view, the
-			// segment size clamped to the cap in `meta` (§ Creating a cascade, § Quiz options).
 			const db = await userDb(session.userId, session.username);
-			const p = await preferencesView(db);
-			const metaCap = (await getMeta(db, 'server')).max_quiz_questions;
-			threshold = p.default_clear_threshold;
-			answerMode = p.anagram_answer_mode;
-			options = {
-				segment_size: clampPrefill(p.default_segment_size, metaCap),
-				progression: p.default_progression,
-				require_alphabetical: p.default_require_alphabetical
-			};
 			cascadeCount = (await allCascades(db)).length;
 		}
-		options.segment_size = clampPrefill(options.segment_size, cap);
 		try {
 			lexicons = await loadLexicons();
 			lexicon = lexicons[0]?.name ?? '';
@@ -170,11 +150,12 @@
 			name,
 			lexicon,
 			quiz_type: quizType,
-			clear_threshold: threshold,
-			segment_size: options.segment_size,
-			progression: options.progression,
-			require_alphabetical: options.require_alphabetical,
-			answer_mode: answerMode,
+			// Every new cascade starts with the same settings; they are changed in its Settings (§ Settings).
+			clear_threshold: CASCADE_SETTING_DEFAULTS.clear_threshold,
+			segment_size: CASCADE_SETTING_DEFAULTS.segment_size,
+			progression: CASCADE_SETTING_DEFAULTS.progression,
+			require_alphabetical: CASCADE_SETTING_DEFAULTS.require_alphabetical,
+			answer_mode: CASCADE_SETTING_DEFAULTS.answer_mode,
 			filters: wire.tree
 		};
 		try {
@@ -365,30 +346,17 @@
 
 	<Card.Root>
 		<Card.Content class="grid gap-4 pt-6">
-			<SettingRow label="Clear threshold (%)" info={INFO.clear_threshold} for="threshold" hint="Score at least this much on a quiz to clear it.">
-				<Input id="threshold" class="h-8 w-24" type="number" min="1" max="100" bind:value={threshold} />
-			</SettingRow>
-			{#if quizType === 'anagram'}
-				<SettingRow label="Answer mode" info={INFO.answer_mode} for="answer-mode">
-					<select id="answer-mode" class="rounded border bg-background px-2 py-1" bind:value={answerMode}>
-						<option value="flashcard">Flashcard</option>
-						<option value="typed">Typed</option>
-					</select>
-				</SettingRow>
-			{/if}
-			<QuizOptionsForm
-				bind:options
-				questionCount={preview?.count ?? null}
-				maxQuizQuestions={cap}
-				showAlphabetical={quizType === 'anagram'}
-			/>
 			<div class="grid gap-1">
 				<Label for="name">Cascade name</Label>
 				<Input id="name" bind:value={name} maxlength={200} oninput={() => (nameEdited = true)} />
 			</div>
+			<p class="text-sm text-muted-foreground" data-settings-note>
+				You can change this cascade’s settings, such as its clear threshold, answer mode and segments, in its Settings once it is
+				created. Every new cascade starts with the same ones.
+			</p>
 			{#if createError}<p class="text-sm text-destructive">{createError}</p>{/if}
 			{#if cascadeCount >= session.cascadeLimit}
-				<p class="text-sm">You have {cascadeCount} of {session.cascadeLimit} cascades. <a class="underline" href="/trash">Empty the Trash</a> to make room.</p>
+				<p class="text-sm">You have {cascadeCount} of {session.cascadeLimit} cascades. <a class="underline" href="/cascades#trash">Empty the Trash</a> to make room.</p>
 			{:else if cascadeCount >= cascadeWarning(session.cascadeLimit)}
 				<p class="text-sm text-muted-foreground">{cascadeCount} of {session.cascadeLimit} cascades used.</p>
 			{/if}
@@ -396,7 +364,7 @@
 				<Button
 					type="button"
 					onclick={create}
-					disabled={creating || cascadeCount >= session.cascadeLimit || !lexicon || !dist || wire.errors.size > 0 || !name.trim() || threshold < 1 || threshold > 100}
+					disabled={creating || cascadeCount >= session.cascadeLimit || !lexicon || !dist || wire.errors.size > 0 || !name.trim()}
 				>
 					{busy ? 'the server is busy' : creating ? 'Creating…' : 'Create Cascade'}
 				</Button>

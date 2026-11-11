@@ -28,8 +28,7 @@ function rowsIn(p: SyncResponse): number {
 		(c.quizzes?.length ?? 0) +
 		(c.quiz_attempts?.length ?? 0) +
 		(c.quiz_questions ?? []).reduce((n, g) => n + g.question_idx.length, 0) +
-		(c.tombstones?.length ?? 0) +
-		(c.preferences ? 1 : 0)
+		(c.tombstones?.length ?? 0)
 	);
 }
 

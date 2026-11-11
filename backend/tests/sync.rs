@@ -260,7 +260,7 @@ async fn app_versions_and_simple_rejections(pool: sqlx::PgPool) {
     assert_eq!(result(&d.sync(vec![p]).await, 0)["reason"], "not_found");
 }
 
-/// Invalid option and preference values are `invalid` before any
+/// Invalid option and setting values are `invalid` before any
 /// write: the row unchanged and nothing recorded as `error`.
 #[sqlx::test]
 async fn out_of_range_values_are_invalid_never_error(pool: sqlx::PgPool) {
@@ -272,21 +272,26 @@ async fn out_of_range_values_are_invalid_never_error(pool: sqlx::PgPool) {
         d.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 300001 })),
         d.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 1 })),
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "progression": "spiral" })),
-        d.op("set_preferences", json!({ "default_clear_threshold": 0 })),
-        d.op("set_preferences", json!({ "leave_value_decimals": 4 })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "leave_value_decimals": 4 })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "leave_value_decimals": -1 })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "leave_value_decimals": "2" })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "leave_value_decimals": 1.5 })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "show_definitions": "no" })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "show_hooks": 0 })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "reveal_correct": "missed" })),
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "answer_mode": "spoken" })),
     ];
     let r = d.sync(ops).await;
     for x in r.json()["results"].as_array().unwrap() {
         assert_eq!(x["reason"], "invalid", "{x}");
     }
-    let (seg, thr): (i32, i16) = sqlx::query_as(
-        "SELECT c.segment_size, p.default_clear_threshold FROM cascades c JOIN user_preferences p ON p.user_id = c.user_id",
+    let (seg, decimals, defs, hooks, reveal): (i32, i16, bool, bool, bool) = sqlx::query_as(
+        "SELECT segment_size, leave_value_decimals, show_definitions, show_hooks, reveal_correct FROM cascades",
     )
     .fetch_one(app.db())
     .await
     .unwrap();
-    assert_eq!((seg, thr), (0, 80));
+    assert_eq!((seg, decimals, defs, hooks, reveal), (0, 1, true, true, true));
     let errors: i64 = sqlx::query_scalar("SELECT count(*) FROM sync_operations WHERE reason = 'error'").fetch_one(app.db()).await.unwrap();
     assert_eq!(errors, 0);
     // The schema refuses such a row directly.
@@ -296,7 +301,7 @@ async fn out_of_range_values_are_invalid_never_error(pool: sqlx::PgPool) {
 
 /// An operation type the server does not know is `invalid`, not recorded, and
 /// does not stop the batch. Controls are the device's own, so `set_bindings`
-/// is one of these.
+/// is one of these, and no setting is the account's, so `set_preferences` is too.
 #[sqlx::test]
 async fn an_unknown_operation_type_is_invalid(pool: sqlx::PgPool) {
     let app = app(pool).await;
@@ -305,12 +310,14 @@ async fn an_unknown_operation_type_is_invalid(pool: sqlx::PgPool) {
     let ops = vec![
         d.op("set_bindings", json!({ "bindings": [{ "action": "show_next", "kind": "key", "code": "Space" }] })),
         d.op("teleport", json!({})),
+        d.op("set_preferences", json!({ "reveal_correct": false })),
         d.op("trash_cascade", json!({ "cascade_id": s.cascade_id })),
     ];
     let r = d.sync(ops).await;
     assert_eq!(result(&r, 0)["reason"], "invalid");
     assert_eq!(result(&r, 1)["reason"], "invalid");
-    assert_eq!(result(&r, 2)["status"], "applied");
+    assert_eq!(result(&r, 2)["reason"], "invalid");
+    assert_eq!(result(&r, 3)["status"], "applied");
     let types: Vec<String> = sqlx::query_scalar("SELECT op_type::text FROM sync_operations").fetch_all(app.db()).await.unwrap();
     assert!(types.iter().all(|t| t == "trash_cascade"), "{types:?}");
 }
@@ -498,8 +505,9 @@ async fn finishes_across_devices(pool: sqlx::PgPool) {
     assert_eq!(result(&r, 0)["reason"], "stale_attempt");
 }
 
-/// "Options and preference operations resolve whole", timestamps and seen_seq,
-/// clamping, and a device's own changes never competing on timestamps.
+/// Options operations resolve whole, a cascade's settings with its options:
+/// timestamps and seen_seq, clamping, and a device's own changes never
+/// competing on timestamps.
 #[sqlx::test]
 async fn latest_wins_whole(pool: sqlx::PgPool) {
     let app = app(pool).await;
@@ -520,19 +528,21 @@ async fn latest_wins_whole(pool: sqlx::PgPool) {
     // Having seen it (seen_seq), an older timestamp still applies.
     let oa = a.op_at("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 5 }), t0);
     assert_eq!(result(&a.sync(vec![oa]).await, 0)["status"], "applied");
-    // Preferences likewise.
-    let pb = b.op_at("set_preferences", json!({ "default_clear_threshold": 60 }), t0 + Duration::seconds(5));
-    b.sync(vec![pb]).await;
-    let mut stale = a.op_at("set_preferences", json!({ "leave_value_decimals": 2 }), t0 + Duration::seconds(4));
+    // The cascade's settings likewise: one rule for everything set_cascade_options carries.
+    let pb = b.op_at("set_cascade_options", json!({ "cascade_id": s.cascade_id, "show_hooks": false }), t0 + Duration::seconds(5));
+    assert_eq!(result(&b.sync(vec![pb]).await, 0)["status"], "applied");
+    let mut stale = a.op_at("set_cascade_options", json!({ "cascade_id": s.cascade_id, "leave_value_decimals": 2 }), t0 + Duration::seconds(4));
     stale["seen_seq"] = json!(0);
     assert_eq!(result(&a.sync(vec![stale]).await, 0)["reason"], "stale");
+    let decimals: i16 = sqlx::query_scalar("SELECT leave_value_decimals FROM cascades").fetch_one(app.db()).await.unwrap();
+    assert_eq!(decimals, 1, "the stale change lost whole");
     // Two changes from one device with a clock a day ahead, in one batch: both applied.
     let mut fast = b.sibling(&app);
     fast.skew = Duration::days(1);
     let o1 = fast.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 5 }));
     let o2 = fast.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 6 }));
-    let p1 = fast.op("set_preferences", json!({ "default_clear_threshold": 70 }));
-    let p2 = fast.op("set_preferences", json!({ "default_clear_threshold": 71 }));
+    let p1 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "reveal_correct": false }));
+    let p2 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "leave_value_decimals": 3 }));
     let r = fast.sync(vec![o1, o2, p1, p2]).await;
     for i in 0..4 {
         assert_eq!(result(&r, i)["status"], "applied", "{i}");
@@ -733,19 +743,58 @@ async fn the_clear_threshold_changes_for_the_pass_in_progress(pool: sqlx::PgPool
     assert_eq!((thr, seg), (50, 0), "the threshold alone changed");
 }
 
-/// "`reveal_correct`": a flag (anything else is invalid), set like any other
-/// preference, and stored.
+/// A cascade's settings (PLAN.md § Settings): `show_definitions`,
+/// `show_hooks`, `reveal_correct` and `leave_value_decimals` start at their
+/// defaults, are set by `set_cascade_options`, any subset at a time, and pull
+/// back on the cascade's row; a quiz's options operation carrying one is a 400.
 #[sqlx::test]
-async fn the_reveal_grade_preference(pool: sqlx::PgPool) {
+async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
     let app = app(pool).await;
     let mut d = device(&app, "alice").await;
-    let o = d.op("set_preferences", json!({ "reveal_correct": "missed" }));
-    let r = d.sync(vec![o]).await;
-    assert_eq!(result(&r, 0)["reason"], "invalid");
-    let o = d.op("set_preferences", json!({ "reveal_correct": false }));
-    let r = d.sync(vec![o]).await;
-    assert_eq!(result(&r, 0)["status"], "applied");
-    let v: bool = sqlx::query_scalar("SELECT reveal_correct FROM user_preferences").fetch_one(app.db()).await.unwrap();
-    assert!(!v);
+    let s = cascade(&app, &mut d, Setup::new(5)).await;
+    let mut other = d.sibling(&app);
+    let (_, pages) = other.sync_all(vec![]).await;
+    let c = &rows(&pages, "cascades")[0];
+    assert_eq!(
+        (&c["show_definitions"], &c["show_hooks"], &c["reveal_correct"], &c["leave_value_decimals"]),
+        (&json!(true), &json!(true), &json!(true), &json!(1)),
+    );
+    let o = d.op(
+        "set_cascade_options",
+        json!({ "cascade_id": s.cascade_id, "show_definitions": false, "show_hooks": false,
+                "reveal_correct": false, "leave_value_decimals": 3 }),
+    );
+    assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
+    // One field alone leaves the others as they are.
+    let o = d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "show_hooks": true }));
+    assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
+    let (_, pages) = other.sync_all(vec![]).await;
+    let c = &rows(&pages, "cascades")[0];
+    assert_eq!(
+        (&c["show_definitions"], &c["show_hooks"], &c["reveal_correct"], &c["leave_value_decimals"]),
+        (&json!(false), &json!(true), &json!(false), &json!(3)),
+    );
+    // Out of range or the wrong type: invalid, and nothing changes.
+    let bad: Vec<Value> = [json!({ "leave_value_decimals": 4 }), json!({ "leave_value_decimals": "1" }), json!({ "show_hooks": "true" })]
+        .into_iter()
+        .map(|mut f| {
+            f["cascade_id"] = json!(s.cascade_id);
+            d.op("set_cascade_options", f)
+        })
+        .collect();
+    let r = d.sync(bad).await;
+    for x in r.json()["results"].as_array().unwrap() {
+        assert_eq!(x["reason"], "invalid", "{x}");
+    }
+    let decimals: i16 = sqlx::query_scalar("SELECT leave_value_decimals FROM cascades").fetch_one(app.db()).await.unwrap();
+    assert_eq!(decimals, 3);
+    // The settings are the cascade's alone: a quiz's options operation naming one is refused whole.
+    for field in ["show_definitions", "show_hooks", "reveal_correct", "leave_value_decimals"] {
+        let mut f = json!({ "quiz_id": s.source_id });
+        f[field] = if field == "leave_value_decimals" { json!(2) } else { json!(false) };
+        let o = d.op("set_quiz_options", f);
+        let body = json!({ "device_id": d.id, "app_version": 1, "cursor": d.cursor, "question_rows_for": [], "ops": [o] });
+        assert_eq!(d.raw_sync(body).await.status, StatusCode::BAD_REQUEST, "{field}");
+    }
 }
 

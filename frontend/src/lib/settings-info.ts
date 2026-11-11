@@ -1,41 +1,24 @@
-// What each setting does, for the ⓘ beside it (InfoTip). One place, so the
-// Preferences page and the player's Preferences explain a setting the same way.
+// What each setting does, written under its name (SettingRow), and where each of the
+// two groups of settings applies (PLAN.md § Settings), in one place.
 
-/**
- * Where a group of settings applies, said once above the group, in the same
- * words on the Preferences page and in the player's Preferences.
- */
+/** Where a group of settings applies, said once above the group in a cascade's Settings. */
 export const SCOPE = {
 	cascade:
-		'Saved with this cascade and synced to your other devices. Your other cascades keep their own; after a change you can use it for new cascades, or for every cascade, too.',
-	every: 'Synced to all your devices. A change applies to every cascade at once.',
-	defaults:
-		'Synced to all your devices. A new cascade is prefilled with these when you build it. After a change you can give the cascades you already have the same value, too.',
-	device: 'Kept on this device only and not synced, so your other devices keep their own.'
+		'Saved with this cascade and synced to your other devices. Your other cascades keep their own: after a change you can use it for every cascade too, or copy all of another cascade’s settings here.',
+	device: 'Kept on this device only and not synced, so your other devices keep their own. They apply to every cascade you study here.'
 } as const;
 
 export const INFO = {
-	// Preferences (synced to every device)
-	default_clear_threshold:
-		'The score a new cascade needs to clear a level, prefilled in the builder. Each cascade keeps its own, which you can change later in its Preferences.',
-	default_segment_size:
-		'Prefills “Study in segments” for new cascades. 0 studies each level in one pass; 40 studies 40 cards at a time and drills each run’s misses before moving on.',
-	default_progression:
-		'Prefills what a new cascade does with a pass below its clear threshold: Ladder keeps the level and sends the misses down a level; Drill replaces it with just the misses.',
-	default_alphabetical:
-		'Prefills whether typed answers must be entered in alphabetical order in new cascades.',
+	// A cascade's settings (synced)
 	leave_value_decimals:
 		'How many decimal places leave values show, rounded half away from zero: at one place, 1.25 shows as 1.3 and −8.35 as −8.4.',
-	anagram_show_definitions: 'Shows each anagram’s definition under it when the answer is revealed.',
-	anagram_show_hooks:
+	show_definitions: 'Shows each anagram’s definition under it when the answer is revealed.',
+	show_hooks:
 		'Shows the letters that can go before and after each anagram (its hooks), and a dot on a side where removing the end letter still leaves a word (its inner hooks).',
-	anagram_answer_mode:
-		'The answer mode new anagram cascades start with. Each cascade keeps its own, which you can change in its Preferences.',
 	answer_mode:
 		'Flashcard: reveal the answer and grade yourself. Typed (anagram cascades only): type each anagram, then press Enter on an empty box when you are finished; the card is correct only if you found them all and typed nothing else.',
 	reveal_correct:
 		'The grade a card gets when you reveal its answer, before you toggle it. “Correct” suits studying words you mostly know; “Missed” makes you mark the ones you got.',
-	// A cascade
 	clear_threshold:
 		'The score a pass needs to clear a level of this cascade. A change applies at once, to every level, including the pass you are in.',
 	// Quiz options

@@ -1,9 +1,9 @@
 <script lang="ts">
-	// The offer under a setting just changed (PLAN.md § Preferences → Where a
-	// setting applies): it says where the change was saved, then offers to use
-	// the same value more widely, one tap each. It stays until the page or
-	// dialog closes, so it is never gone before it is read.
-	import type { Widening } from '$lib/preferences/widen';
+	// The offer under a cascade's setting just changed (PLAN.md § Settings →
+	// One cascade, or all of them): it says the change was saved for this
+	// cascade, then offers to use the same value for every cascade, one tap.
+	// It stays until the dialog closes, so it is never gone before it is read.
+	import type { Widening } from '$lib/settings/cascade';
 
 	let { saved, offers }: { saved: string; offers: Widening[] } = $props();
 
@@ -16,7 +16,7 @@
 		error = null;
 		try {
 			await o.run();
-			done = [...done, o.key, ...(o.includes ?? [])];
+			done = [...done, o.key];
 		} catch (e) {
 			console.error('widening a setting failed', e);
 			error = 'That couldn’t be saved. Try again.';
@@ -26,7 +26,7 @@
 	}
 
 	const open = $derived(offers.filter((o) => !done.includes(o.key)));
-	const taken = $derived(offers.filter((o) => done.includes(o.key) && !offers.some((p) => p.key !== o.key && done.includes(p.key) && p.includes?.includes(o.key))));
+	const taken = $derived(offers.filter((o) => done.includes(o.key)));
 </script>
 
 <div class="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs" role="status" data-widen>

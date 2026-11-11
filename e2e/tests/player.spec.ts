@@ -71,8 +71,8 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	// A cascade opens with the menu hidden; ☰ shows it.
 	await expect(page.getByRole('navigation', { name: 'Player menu' })).toHaveCount(0);
 	await page.getByRole('button', { name: 'Show menu' }).click();
-	await page.getByRole('navigation', { name: 'Player menu' }).getByRole('button', { name: 'Preferences' }).click();
-	const settings = page.getByRole('dialog', { name: 'Preferences' });
+	await page.getByRole('navigation', { name: 'Player menu' }).getByRole('button', { name: 'Settings' }).click();
+	const settings = page.getByRole('dialog', { name: 'Settings' });
 	// The typeface is a choice; sizes are typed, and take effect when the field is left.
 	await settings.getByRole('group', { name: 'Answers' }).getByLabel('Font').selectOption('monospace');
 	await settings.getByRole('group', { name: 'Question' }).getByLabel('Size').fill('48');
@@ -91,21 +91,25 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await expect(page.getByRole('navigation', { name: 'Player menu' })).toHaveCount(0);
 	await page.getByRole('button', { name: 'Show menu' }).click();
 
-	// Preferences is the one dialog: the menu has no Levels, and the ladder is in Preferences' This cascade section,
-	// apart from the account's settings and this device's, each saying where it applies.
+	// Settings is the one dialog: the menu has no Levels, and the ladder is in its Cascade Settings,
+	// apart from the Device Settings, each saying where it applies. There are no other kinds, and no index of them.
 	const menu = page.getByRole('navigation', { name: 'Player menu' });
+	await expect(menu.getByRole('link')).toHaveText(['Acrodont', 'Account']);
 	await expect(menu.getByRole('button', { name: 'Levels' })).toHaveCount(0);
-	await menu.getByRole('button', { name: 'Preferences' }).click();
-	const prefs = page.getByRole('dialog', { name: 'Preferences' });
-	for (const name of ['This cascade', 'Every cascade', 'This device']) {
-		await expect(prefs.getByRole('region', { name })).toBeVisible();
+	await menu.getByRole('button', { name: 'Settings' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Settings' });
+	await expect(dialog.getByRole('navigation')).toHaveCount(0);
+	for (const name of ['Cascade Settings', 'Device Settings']) {
+		await expect(dialog.getByRole('region', { name })).toBeVisible();
 	}
-	// The defaults for new cascades are on the Preferences page, not here.
-	await expect(prefs.getByLabel('Default clear threshold (%)')).toHaveCount(0);
-	await expect(prefs.getByRole('link', { name: 'Preferences page' })).toBeVisible();
-	const levels = prefs.getByRole('region', { name: 'This cascade' });
+	await expect(dialog.getByRole('region')).toHaveCount(2);
+	// This device's controls are here too, and their reset says it is theirs alone.
+	const device = dialog.getByRole('region', { name: 'Device Settings' });
+	await expect(device.locator('#controls')).toBeVisible();
+	await expect(device.getByRole('button', { name: 'Reset controls to defaults' })).toBeVisible();
+	const levels = dialog.getByRole('region', { name: 'Cascade Settings' });
 	await expect(levels.getByText(/Your other cascades keep their own/)).toBeVisible();
-	await expect(prefs.getByRole('region', { name: 'This device' }).getByText(/not synced/)).toBeVisible();
+	await expect(device.getByText(/not synced/)).toBeVisible();
 	await expect(levels.getByRole('table', { name: 'Ladder' })).toBeVisible();
 	await expect(levels.getByRole('columnheader')).toHaveText(['Level', 'Questions', 'Pass', 'Last pass', 'Status', 'Actions']);
 	// The clear threshold changes there, for the pass in progress too; out of range is put back.
@@ -117,11 +121,11 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await threshold.fill('55');
 	await threshold.press('Tab');
 	await expect(levels.getByText(/at least\s+55%\s+correct/)).toBeVisible();
-	// Saved for this cascade alone, with the offer to use it for new cascades too, which is not taken here.
+	// Saved for this cascade alone; with no other cascade, there is no offer to use it for all of them.
 	await expect(levels.getByText('✓ Saved for this cascade')).toBeVisible();
-	await expect(levels.getByRole('button', { name: 'new cascades' })).toBeVisible();
-	await prefs.getByRole('button', { name: 'Close' }).click();
-	await expect(prefs).toHaveCount(0);
+	await expect(levels.getByText('Also use for:')).toHaveCount(0);
+	await dialog.getByRole('button', { name: 'Close' }).click();
+	await expect(dialog).toHaveCount(0);
 	// It syncs to another device.
 	await expect(page.getByText('Synced')).toBeVisible({ timeout: 30_000 });
 	const other = await browser.newContext({ baseURL });

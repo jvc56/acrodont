@@ -149,7 +149,9 @@
 		</Card.Content>
 	</Card.Root>
 
-	<p class="text-sm text-muted-foreground">Settings for your cascades and this device are on the <a class="underline" href="/preferences">Preferences</a> page.</p>
+	<p class="text-sm text-muted-foreground">
+		Each cascade’s settings, and this device’s display and controls, are in the cascade’s Settings: ⚙ in the player.
+	</p>
 
 	{#if db}
 		<StorageCard {db} />

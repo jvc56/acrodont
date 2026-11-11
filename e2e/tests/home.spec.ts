@@ -11,18 +11,20 @@ test('signed out, / is the log-in page, with the way to create an account', asyn
 	await expect(page).toHaveURL(/\/register$/);
 });
 
-test('signed in, / is the Cascades page, and the header leads everywhere, Admin only for admins', async ({ page }) => {
+test('signed in, / is the Cascades page, with New cascade and the Trash on it; the header has Admin only for admins', async ({ page }) => {
 	await newUser(page, 'home');
 	await page.goto('/');
 	await expect(page).toHaveURL(/\/cascades$/);
-	const nav = page.getByRole('navigation', { name: 'Main' });
-	for (const name of ['Cascades', 'New cascade', 'Trash']) {
-		await expect(nav.getByRole('link', { name, exact: true })).toBeVisible();
-	}
-	await expect(nav.getByRole('link', { name: 'Admin' })).toHaveCount(0);
-	await nav.getByRole('link', { name: 'Trash', exact: true }).click();
-	await expect(page).toHaveURL(/\/trash$/);
-	await expect(nav.getByRole('link', { name: 'Trash', exact: true })).toHaveAttribute('aria-current', 'page');
+	// The Cascades page is the landing page: New cascade and the Trash are on it, not in the header.
+	await expect(page.getByRole('link', { name: 'New cascade' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Trash' })).toBeVisible();
+	await expect(page.getByText('The Trash is empty.')).toBeVisible();
+	await expect(page.getByRole('navigation', { name: 'Main' })).toHaveCount(0);
+	// An old link to /trash lands on it.
+	await page.goto('/trash');
+	await expect(page).toHaveURL(/\/cascades#trash$/);
+	await expect(page.getByRole('heading', { name: 'Trash' })).toBeVisible();
+	await page.goto('/account');
 	await page.getByRole('link', { name: 'Acrodont', exact: true }).click();
 	await expect(page).toHaveURL(/\/cascades$/);
 

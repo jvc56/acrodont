@@ -190,7 +190,7 @@ async fn creation_is_idempotent_by_device_minted_ids(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test]
-async fn start_over_copies_the_spec_threshold_and_options(pool: sqlx::PgPool) {
+async fn start_over_copies_the_spec_threshold_options_and_settings(pool: sqlx::PgPool) {
     let app = TestApp::with(pool, &[("MAX_CASCADES_PER_USER", "2")]).await;
     let mut c = app.seed_fixture_catalog("root").await;
     let mut b = body("EN-FIX", "leave_value", json!({ "op": "and", "children": [
@@ -202,11 +202,28 @@ async fn start_over_copies_the_spec_threshold_and_options(pool: sqlx::PgPool) {
     b["progression"] = json!("drill");
     let r = c.post("/api/cascades", b.clone()).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    // A new cascade's settings take their defaults.
+    let o = r.json()["cascade"].clone();
+    assert_eq!(
+        (&o["show_definitions"], &o["show_hooks"], &o["reveal_correct"], &o["leave_value_decimals"]),
+        (&json!(true), &json!(true), &json!(true), &json!(1)),
+    );
+    sqlx::query(
+        "UPDATE cascades SET show_definitions = false, show_hooks = false, reveal_correct = false,
+                             leave_value_decimals = 3",
+    )
+    .execute(app.db())
+    .await
+    .unwrap();
     let so = json!({ "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
                      "at": "2026-01-01T00:00:00Z" });
     let r = c.post(&format!("/api/cascades/{}/start-over", b["id"].as_str().unwrap()), so).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
     let n = r.json()["cascade"].clone();
+    assert_eq!(
+        (&n["show_definitions"], &n["show_hooks"], &n["reveal_correct"], &n["leave_value_decimals"]),
+        (&json!(false), &json!(false), &json!(false), &json!(3)),
+    );
     assert_eq!(n["name"], "Blank leaves");
     assert_eq!(n["clear_threshold"], 90);
     assert_eq!(n["segment_size"], 5);

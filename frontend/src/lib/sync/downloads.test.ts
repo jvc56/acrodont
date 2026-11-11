@@ -11,7 +11,7 @@ import { openUserDb, type UserDb } from '$lib/local/db';
 import { getMeta, initMeta, recordOpen, writeMeta } from '$lib/local/meta';
 import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
-import { DownloadManager, ROW_BYTES, type DownloadApi, wantsHooks } from './downloads';
+import { DownloadManager, ROW_BYTES, type DownloadApi, wantsDefinitions, wantsHooks } from './downloads';
 import { SyncEngine } from './engine';
 import { policy } from './policy';
 import { FakeServer } from './testing/fake-server';
@@ -30,7 +30,7 @@ interface Call {
 	cascade: string;
 	quiz?: string;
 	from: number;
-	/** A cards page asked with definitions (the default, anagram_show_definitions on). */
+	/** A cards page asked with definitions (the default, show_definitions on). */
 	definitions?: boolean;
 }
 
@@ -463,11 +463,14 @@ describe('the download manager', () => {
 		expect(kinds(b)).toContain('cards');
 	});
 
-	it('a Definition cascade always fetches its hooks; an Anagram one when the preference asks', () => {
-		expect(wantsHooks('definition', { anagram_show_hooks: false })).toBe(true);
-		expect(wantsHooks('anagram', { anagram_show_hooks: true })).toBe(true);
-		expect(wantsHooks('anagram', { anagram_show_hooks: false })).toBe(false);
-		expect(wantsHooks('leave_value', { anagram_show_hooks: true })).toBe(false);
+	it('a Definition cascade always fetches its hooks; an Anagram one when its setting asks', () => {
+		expect(wantsHooks({ quiz_type: 'definition', show_hooks: false })).toBe(true);
+		expect(wantsHooks({ quiz_type: 'anagram', show_hooks: true })).toBe(true);
+		expect(wantsHooks({ quiz_type: 'anagram', show_hooks: false })).toBe(false);
+		expect(wantsHooks({ quiz_type: 'leave_value', show_hooks: true })).toBe(false);
+		expect(wantsDefinitions({ quiz_type: 'anagram', show_definitions: true })).toBe(true);
+		expect(wantsDefinitions({ quiz_type: 'anagram', show_definitions: false })).toBe(false);
+		expect(wantsDefinitions({ quiz_type: 'definition', show_definitions: true })).toBe(false);
 	});
 
 	it('cards fetched with hooks before inner hooks were sent are fetched again', async () => {
@@ -486,16 +489,17 @@ describe('the download manager', () => {
 		expect((await b.db.get('cards', [C1, 0]))!.inner).toBe(true);
 	});
 
-	it('cards fetched without definitions are refetched with them once the preference asks', async () => {
+	it('cards fetched without definitions are refetched with them once the cascade’s setting asks, before it is sent', async () => {
 		const server = new FakeServer();
 		server.create({ id: C1, source_id: Q1, count: 3 });
-		const b = await Dev.make(server);
 		// Definitions are on by default: off first, so the first download has none.
-		await applyLocally(b.db, { type: 'set_preferences', anagram_show_definitions: false });
+		server.cascades.get(C1)!.settings.show_definitions = false;
+		const b = await Dev.make(server);
 		await b.open(C1);
 		await b.sync();
 		expect((await b.db.get('cards', [C1, 0]))!.definitions).toBe(false);
-		await applyLocally(b.db, { type: 'set_preferences', anagram_show_definitions: true });
+		// Still pending in the outbox: the download reads the cascade as the device sees it.
+		await applyLocally(b.db, { type: 'set_cascade_options', cascade_id: C1, show_definitions: true });
 		await b.dl.run();
 		expect(b.calls.some((c) => c.kind === 'cards' && c.definitions)).toBe(true);
 		expect((await b.db.get('cards', [C1, 0]))!.definitions).toBe(true);

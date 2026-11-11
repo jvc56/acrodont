@@ -308,3 +308,81 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   a long history, and the user accepted it. The drop pass runs as many
   cascades as an account may hold (20) at 56,000 questions each against a
   tenth of the budget.
+
+## PQ-020 — Two kinds of settings, no defaults for new cascades (decided)
+
+- **Plan:** User Experience → Preferences, as it stood before this decision:
+  four scopes (this cascade, every cascade, new cascades, this device), an
+  account-level `user_preferences` row changed by `set_preferences` and pulled
+  as `preferences`, a Preferences page at `/preferences`, a builder prefilled
+  from the `Default …` preferences, and a change to a cascade's setting
+  offering "new cascades" or "all N cascades and new ones".
+- **Issue:** The four scopes overlapped: an answer mode or threshold lived on
+  each cascade and again as a default for new ones, and definitions, hooks,
+  the reveal grade and leave rounding applied to every cascade at once with no
+  way to set them for one. A user changing a setting had to know which of
+  four places held it, and the builder carried settings most users never
+  changed at creation.
+- **Decision (2026-11-11):**
+  - There are two kinds of settings, which do not overlap: **a cascade's**
+    (synced, on the `cascades` row) and **this device's** (display and
+    controls, in `meta`, never synced). They are called **settings**
+    everywhere a user sees them; "preferences" is gone.
+  - No account-level settings: `user_preferences`, `set_preferences`, the
+    pull's `preferences` object and the IndexedDB `preferences` store are
+    removed. Definitions, hooks, the reveal grade and leave rounding move onto
+    each cascade (`show_definitions`, `show_hooks`, `reveal_correct`,
+    `leave_value_decimals`), carried by `set_cascade_options`. A
+    `set_preferences` from an old build is `invalid`, and the device's
+    version-3 migration drops any still queued.
+  - No defaults for new cascades: every new cascade starts with the same
+    fixed settings (`CASCADE_SETTING_DEFAULTS`), and the builder shows none,
+    only a note that they are changed in the cascade's Settings.
+  - All settings are edited in one place, the cascade's Settings dialog in the
+    player, each saved as soon as it is changed. A change offers "all N
+    cascades" (of the kind the setting applies to) when there are at least
+    two; **Copy another cascade's settings** gives this cascade, in one
+    `set_cascade_options`, every setting of a chosen cascade that applies to
+    it. Both are ordinary `set_cascade_options`, so they work offline and
+    resolve latest-wins like any options change.
+  - PLAN.md § Settings, § Creating a cascade, § Desktop layout, § Operations,
+    § Conflicts, § On the device and § Schema describe the result.
+
+## PQ-021 — Explanations inline, the Trash on the Cascades page, a smaller header (decided)
+
+- **Plan:** User Experience, as it stood before this decision: each setting's
+  explanation behind an ⓘ beside its name (`InfoTip`), shown on hover or
+  focus; the Trash its own page at `/trash`; the site header and the player's
+  menu linking to Cascades, New cascade and Trash; and the player's Settings
+  opening with a row of buttons jumping to its sections, "This cascade" and
+  "This device", and Controls.
+- **Issue:** An explanation behind a hover is missed on a phone and unread on
+  a desktop, and the ⓘ added an extra target to every row. The Trash on a
+  page of its own split the cascades from what had been trashed of them,
+  though it is where a user at the cascade limit has to go. With New cascade
+  and the Trash on the Cascades page, the header's links repeated what that
+  page already holds. In Settings, the section names read as ordinary prose
+  and the two sections ran together, and the jump row took space in a dialog
+  with only two sections.
+- **Decision (2026-11-11):**
+  - Every setting's explanation (`INFO` in `lib/settings-info.ts`) is written
+    in muted text directly under its name by `SettingRow`, followed by any
+    hint. `InfoTip` is removed; nothing is hidden behind an icon. The clear
+    threshold's hint "For every level, the pass in progress included" is
+    dropped, since its explanation says the same.
+  - The Trash is a section of the Cascades page, below the cascades
+    (`TrashList`, `id="trash"`), with the same grouping, paging and actions.
+    `/trash` only redirects to `/cascades#trash`. Links to the Trash at the
+    cascade limit go there.
+  - The site header holds Acrodont (to the Cascades page, the landing page),
+    Admin for admins only, the sync status and the account link; a regular
+    user's header has no Main nav. The player's menu holds Acrodont, Admin
+    for admins, Account and Settings.
+  - The Settings dialog's header is "Settings" and Close, with no jump row.
+    Its sections are **Cascade Settings** (Synced) and **Device Settings**
+    (Not synced), each opening with a full-width shaded bar and a larger
+    heading; Controls stays a subheading of Device Settings, and its reset
+    reads **Reset controls to defaults**.
+  - PLAN.md § Settings, § Cascade limit, § Cascades page, § Trash, § Desktop
+    layout, § Controls, § Exporting words, § Frontend and § End-to-end tests
+    describe the result.

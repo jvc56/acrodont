@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS \"progression: Progression\",\n                  c.require_alphabetical, c.answer_mode AS \"answer_mode: AnswerMode\", l.name AS lexicon\n           FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2",
+  "query": "SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS \"progression: Progression\",\n                  c.require_alphabetical, c.answer_mode AS \"answer_mode: AnswerMode\", c.show_definitions,\n                  c.show_hooks, c.reveal_correct, c.leave_value_decimals, l.name AS lexicon\n           FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2",
   "describe": {
     "columns": [
       {
@@ -102,6 +102,50 @@
       },
       {
         "ordinal": 7,
+        "name": "show_definitions",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "cascades",
+            "name": "show_definitions"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "show_hooks",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "cascades",
+            "name": "show_hooks"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "reveal_correct",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "cascades",
+            "name": "reveal_correct"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "leave_value_decimals",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "cascades",
+            "name": "leave_value_decimals"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
         "name": "lexicon",
         "type_info": "Text",
         "origin": {
@@ -126,8 +170,12 @@
       false,
       false,
       false,
+      false,
+      false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "02d0a85cad28c5a6c773c8bcee849224c013ab06621aa91e2c972829d52b4fde"
+  "hash": "8b542965dbf54b41b99f25f5aec0ebddcb9c5ed3a31edec816f040815b998389"
 }

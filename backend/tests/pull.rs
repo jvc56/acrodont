@@ -28,7 +28,7 @@ fn page_rows(p: &Value) -> usize {
     let c = &p["changes"];
     let n = |t: &str| c[t].as_array().map_or(0, Vec::len);
     let q: usize = c["quiz_questions"].as_array().map_or(0, |g| g.iter().map(|g| g["question_idx"].as_array().unwrap().len()).sum());
-    n("cascades") + n("quizzes") + n("quiz_attempts") + q + n("tombstones") + usize::from(c.get("preferences").is_some_and(|p| !p.is_null()))
+    n("cascades") + n("quizzes") + n("quiz_attempts") + q + n("tombstones")
 }
 
 fn page_request(d: &Device<'_>, token: &Value, qrf: Value) -> Value {
@@ -289,8 +289,8 @@ async fn resync_required_cases(pool: sqlx::PgPool) {
 }
 
 /// "a cursor: null request carrying 200 grades from a device that created its
-/// cascade and never synced applies them and returns every row"; and a new
-/// device's first pull carries the preferences of an account that never changed them.
+/// cascade and never synced applies them and returns every row"; the cascade
+/// row carries its settings, at their defaults, and nothing is the account's.
 #[sqlx::test]
 async fn first_syncs(pool: sqlx::PgPool) {
     let app = app(pool).await;
@@ -312,12 +312,10 @@ async fn first_syncs(pool: sqlx::PgPool) {
     assert_eq!(rows(&pages, "cascades").len(), 1);
     assert_eq!(rows(&pages, "quizzes").len(), 1);
     assert_eq!(rows(&pages, "quiz_questions")[0]["question_idx"].as_array().unwrap().len(), 200);
-    let prefs = &pages[0]["changes"]["preferences"];
-    assert_eq!(prefs["default_clear_threshold"], 80);
-    assert_eq!(prefs["reveal_correct"], true, "a reveal marks a card correct by default");
-    for gone in ["bindings", "bindings_changed_at", "bindings_device_id"] {
-        assert!(prefs.get(gone).is_none(), "controls are the device's own, never pulled: {gone}");
-    }
+    let c = &rows(&pages, "cascades")[0];
+    assert_eq!(c["reveal_correct"], true, "a reveal marks a card correct by default");
+    assert_eq!((&c["show_definitions"], &c["show_hooks"], &c["leave_value_decimals"]), (&json!(true), &json!(true), &json!(1)));
+    assert!(pages.iter().all(|p| p["changes"].get("preferences").is_none()), "no account-level settings");
 }
 
 /// "The grades endpoint returns a quiz's graded rows in pages with its attempt
@@ -431,6 +429,6 @@ async fn pull_contents_and_the_questions_endpoint(pool: sqlx::PgPool) {
     let groups = rows(&pages, "quiz_questions");
     assert!(groups.iter().all(|g| g["quiz_id"] != json!(l2)), "no cleared quiz's rows");
     let keys: Vec<&str> = pages[0]["changes"].as_object().unwrap().keys().map(String::as_str).collect();
-    assert_eq!(keys, ["cascades", "quizzes", "quiz_attempts", "quiz_questions", "preferences", "tombstones"]);
+    assert_eq!(keys, ["cascades", "quizzes", "quiz_attempts", "quiz_questions", "tombstones"]);
     assert_eq!(d.client.get(&q(0, 2)).await.body, before.body, "the same bytes for the quiz's life");
 }

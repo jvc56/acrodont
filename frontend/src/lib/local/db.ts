@@ -10,12 +10,11 @@ import type {
 	CascadeRow,
 	DistributionRow,
 	OutboxEntry,
-	PreferencesRow,
 	QuestionKey,
 	QuestionRow,
 	QuizRow
 } from './rows';
-import { touchesOf } from './rows';
+import { CASCADE_SETTING_DEFAULTS, touchesOf } from './rows';
 
 type QuestionKeyPath = [string, number];
 
@@ -32,7 +31,6 @@ interface RowStores {
 
 export interface UserSchema extends DBSchema {
 	meta: { key: string; value: unknown };
-	preferences: { key: string; value: PreferencesRow };
 	distributions: { key: string; value: DistributionRow };
 	cascades: RowStores['cascades'];
 	quizzes: RowStores['quizzes'];
@@ -73,11 +71,18 @@ function rowStores(db: IDBPDatabase<UserSchema>, [c, q, qq, qa]: readonly [strin
 	attempts.createIndex('cascade_id', 'cascade_id');
 }
 
-/** Versioned migrations; index i upgrades from version i to i + 1, inside the upgrade transaction. */
-export const MIGRATIONS: Array<(db: IDBPDatabase<UserSchema>, tx: IDBPTransaction<UserSchema, StoreName[], 'versionchange'>) => void> = [
+/**
+ * Versioned migrations; index i upgrades from version i to i + 1, inside the
+ * upgrade transaction. One that rewrites rows returns when it is done, and the
+ * next starts only then (`upgradeFrom`), so two never walk the same store at once.
+ */
+export const MIGRATIONS: Array<
+	(db: IDBPDatabase<UserSchema>, tx: IDBPTransaction<UserSchema, StoreName[], 'versionchange'>) => void | Promise<void>
+> = [
 	(db) => {
 		db.createObjectStore('meta');
-		db.createObjectStore('preferences');
+		// The account's preferences, until version 3 moved them onto each cascade.
+		(db as unknown as IDBPDatabase).createObjectStore('preferences');
 		db.createObjectStore('distributions', { keyPath: 'name' });
 		rowStores(db, BASE);
 		rowStores(db, OVERLAY);
@@ -90,18 +95,50 @@ export const MIGRATIONS: Array<(db: IDBPDatabase<UserSchema>, tx: IDBPTransactio
 	},
 	// 2: what each pending operation touches, for the rebase's fast path; the
 	// entries already queued are given theirs.
-	(_db, tx) => {
+	async (_db, tx) => {
 		const outbox = tx.objectStore('outbox');
 		outbox.createIndex('touches', 'touches', { multiEntry: true });
-		void (async () => {
-			let cursor = await outbox.openCursor();
-			while (cursor) {
-				await cursor.update({ ...cursor.value, touches: touchesOf(cursor.value.op) });
-				cursor = await cursor.continue();
+		let cursor = await outbox.openCursor();
+		while (cursor) {
+			await cursor.update({ ...cursor.value, touches: touchesOf(cursor.value.op) });
+			cursor = await cursor.continue();
+		}
+	},
+	// 3: no account preferences (PLAN.md § Settings): their store goes, with any
+	// change to them still waiting to be sent, and each cascade the device holds
+	// takes the per-cascade settings at their defaults until its next pull.
+	async (db, tx) => {
+		(db as unknown as IDBPDatabase).deleteObjectStore('preferences');
+		let entry = await tx.objectStore('outbox').openCursor();
+		while (entry) {
+			if (entry.value.op.type === 'set_preferences') await entry.delete();
+			entry = await entry.continue();
+		}
+		for (const store of [BASE[0], OVERLAY[0], STAGING[0]]) {
+			let row = await tx.objectStore(store).openCursor();
+			while (row) {
+				await row.update({ ...CASCADE_SETTING_DEFAULTS, ...row.value });
+				row = await row.continue();
 			}
-		})();
+		}
 	}
 ];
+
+/**
+ * Runs the migrations from `from` up to `to` one after another in the upgrade
+ * transaction. Each starts in a callback of the last one's final request, so
+ * the transaction is still active for its schema changes.
+ */
+export function upgradeFrom(
+	db: IDBPDatabase<UserSchema>,
+	tx: IDBPTransaction<UserSchema, StoreName[], 'versionchange'>,
+	from: number,
+	to = MIGRATIONS.length
+): Promise<void> {
+	let chain: Promise<void> = Promise.resolve();
+	for (let v = from; v < to; v++) chain = chain.then(() => MIGRATIONS[v](db, tx));
+	return chain;
+}
 export const USER_DB_VERSION = MIGRATIONS.length;
 
 /**
@@ -113,7 +150,7 @@ export const USER_DB_VERSION = MIGRATIONS.length;
 export async function openUserDb(userId: string, onVersionChange?: () => void): Promise<UserDb> {
 	const db = await openDB<UserSchema>(userDbName(userId), USER_DB_VERSION, {
 		upgrade(db, oldVersion, _newVersion, transaction) {
-			for (let v = oldVersion; v < USER_DB_VERSION; v++) MIGRATIONS[v](db, transaction);
+			void upgradeFrom(db, transaction, oldVersion);
 		}
 	});
 	db.addEventListener('versionchange', () => {
