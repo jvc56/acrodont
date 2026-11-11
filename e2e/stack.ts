@@ -18,8 +18,16 @@ export function stack(cmd: 'up' | 'seed' | 'reset' | 'down', args: string[] = []
 	).trim();
 }
 
-/** Extra configuration for the suite's stack, through the same --env flag a developer uses. */
+/**
+ * Every suite stack's configuration: the per-IP limits raised, because every
+ * browser of every worker comes from 127.0.0.1, so four workers registering
+ * users trip the 30-a-minute auth limit meant for one person. No journey
+ * asserts these limits; backend/tests/auth.rs and catalog.rs do.
+ */
+const SUITE_ENV = ['AUTH_RATE_PER_IP_PER_MINUTE=100000', 'CATALOG_RATE_PER_MINUTE=100000'];
+
+/** The suite's stack configuration, then E2E_ENV's, through the same --env flag a developer uses; a later value wins. */
 export function e2eEnv(): string[] {
 	const extra = (process.env.E2E_ENV ?? '').split(/\s+/).filter(Boolean);
-	return extra.flatMap((kv) => ['--env', kv]);
+	return [...SUITE_ENV, ...extra].flatMap((kv) => ['--env', kv]);
 }

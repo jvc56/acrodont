@@ -48,6 +48,17 @@ function code(email: string): string {
 	}
 }
 
+/**
+ * Runs SQL against the stack's own Postgres, for a state no endpoint makes:
+ * an account's own storage limit, or rows a long history would leave. Not
+ * against an existing instance (BASE_URL), which has no such container.
+ */
+export function sql(query: string): string {
+	return execFileSync('docker', ['compose', '-p', PROJECT, 'exec', '-T', 'postgres', 'psql', '-U', 'acrodont', '-d', 'acrodont', '-v', 'ON_ERROR_STOP=1', '-At', '-c', query], {
+		encoding: 'utf8'
+	});
+}
+
 /** A new confirmed user, logged in on `page`. */
 export async function newUser(page: Page, prefix = 'e2e'): Promise<{ username: string; email: string }> {
 	const tag = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
@@ -230,6 +241,19 @@ export async function idb<T>(page: Page, fn: string, arg?: unknown): Promise<T> 
 /** Operations of a kind waiting in the outbox. */
 export async function outboxCount(page: Page, type?: string): Promise<number> {
 	return idb(page, `const all = await req(db.transaction('outbox').objectStore('outbox').getAll()); return all.filter((e) => !arg || e.op.type === arg).length;`, type);
+}
+
+/**
+ * Waits until the cursor move to the card at `shown` (as the progress reads
+ * it, `shown / n`) is saved in the outbox. The player moves the screen before
+ * its writes are saved (they queue in order, the grade first), so a journey
+ * that reloads or leaves right after a press waits for this first, or the
+ * navigation can drop them. Offline only: online, the move may sync away.
+ */
+export async function cursorSaved(page: Page, shown: number) {
+	const saved = () =>
+		idb<boolean>(page, `const all = await req(db.transaction('outbox').objectStore('outbox').getAll()); return all.some((e) => e.op.type === 'move_cursor' && e.op.position === arg);`, shown - 1);
+	await expect.poll(saved, { timeout: 10_000 }).toBe(true);
 }
 
 /** A key press at a person's pace: the same action twice within the repeat guard (50 ms by default) counts once. */

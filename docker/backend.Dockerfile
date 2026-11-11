@@ -4,6 +4,15 @@
 #                     Postgres 16 (server and client), python3 + boto3, and
 #                     scripts/backup.py, restore.py, drill.py and
 #                     acrodont-master-psql. Never serves traffic.
+#   --target backend-prebuilt  the end-to-end stacks' server (PLAN.md § Running
+#                     the tests): a release binary built on the host
+#                     (`make e2e-binary`, CI's e2e jobs) copied into a thin
+#                     image, so a test run does not compile the backend again
+#                     inside Docker. Ubuntu 24.04, because CI builds that binary
+#                     on ubuntu-24.04 and bookworm's older glibc cannot run it.
+#                     Never deployed. Selected through compose's
+#                     ACRODONT_BACKEND_TARGET; .dockerignore lets in this one
+#                     file of backend/target.
 #   --target backend  (the default, last) the server alone on debian-slim.
 # Base images are pinned by digest, so a moved or vanished tag cannot change a
 # build (birdtest's nightly died for weeks on a deleted image). To update one:
@@ -41,6 +50,15 @@ ENV PATH=/usr/lib/postgresql/16/bin:$PATH
 COPY scripts/backup.py scripts/restore.py scripts/drill.py scripts/ops_master_psql.py /opt/acrodont/scripts/
 RUN ln -s /opt/acrodont/scripts/ops_master_psql.py /usr/local/bin/acrodont-master-psql \
     && chmod 0755 /opt/acrodont/scripts/*.py
+
+FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 AS backend-prebuilt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY backend/target/release/acrodont /usr/local/bin/acrodont
+USER nobody
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/acrodont"]
 
 FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS backend
 # curl for the container health check; nothing else.

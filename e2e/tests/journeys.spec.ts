@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { PROJECT } from '../stack';
-import { apiCascade, apiSettings, createCascade, idb, lengths, login, newUser, outboxCount, playLevel, playerSetting, press } from './support';
+import { apiCascade, apiSettings, createCascade, cursorSaved, idb, lengths, login, newUser, outboxCount, playLevel, playerSetting, press } from './support';
 
 // PLAN.md § End-to-end tests: answers gone with questions kept, a download
 // stopped part way, Trash and export offline, and export through the server.
@@ -43,6 +43,7 @@ test('answers gone, questions kept; a download stopped part way', async ({ page,
 	await expect(page.getByText('Answer needs a connection.')).toBeVisible();
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	await press(page, 'Space');
+	await cursorSaved(page, 2);
 	await context.setOffline(false);
 	await page.goto('/cascades');
 	await expect(page.getByText('Synced')).toBeVisible({ timeout: 60_000 });
@@ -125,7 +126,8 @@ test('trash: export a cleared quiz’s missed words offline, see purge dates, re
 	await expect(page.getByText('1 / 5')).toBeVisible();
 });
 
-test('export: counts, offline files, the definitions fallback, and one file through the server', async ({ page, context }) => {
+// @serial: it stops the backend under every other journey on the stack.
+test('export: counts, offline files, the definitions fallback, and one file through the server @serial', async ({ page, context }) => {
 	test.setTimeout(240_000);
 	await newUser(page, 'exp');
 	// Definitions are on by default: off before the cascade downloads, so its

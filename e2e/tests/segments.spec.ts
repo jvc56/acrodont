@@ -57,7 +57,10 @@ test('segments and progression', async ({ page }) => {
 	// Finish the quiz: the run's misses still count.
 	for (let i = 6; i <= 18; i++) {
 		await expect(page.getByText(`${i} / 18`)).toBeVisible();
+		// Ready once it shows unrevealed (as playLevel waits): the progress can change a moment before.
+		await expect(page.locator('[data-grade="correct"], [data-grade="missed"]')).toHaveCount(0);
 		await press(page, 'Space');
+		await expect(page.locator('[data-grade="correct"], [data-grade="missed"]')).toBeVisible();
 		await press(page, 'Space');
 	}
 	await expect(page.getByText('Level 1: 88%. Reshuffled, and its 2 missed questions are now Level 2.')).toBeVisible();

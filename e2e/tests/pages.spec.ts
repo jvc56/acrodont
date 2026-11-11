@@ -1,16 +1,13 @@
 import { test, expect } from '@playwright/test';
-import { confirm } from './support';
+import { confirm, newUser } from './support';
 
 // PLAN.md § Cascades page, § Trash page: a cascade is listed with its
 // options, ladder and offline badge; Move to Trash takes it to the Trash
 // grouped under its name; Restore brings it back.
 test('the Cascades page lists a cascade, the Trash takes it and gives it back', async ({ page }) => {
 	const name = `Eights ${Date.now()}`;
-	await page.goto('/login');
-	await page.getByLabel('Username').fill('dev');
-	await page.getByLabel('Password').fill('correct-tile-rack-bingo');
-	await page.getByRole('button', { name: 'Log in' }).click();
-	await expect(page).toHaveURL(/\/cascades$/);
+	// Its own account rather than the seeded admin: the journeys run side by side.
+	await newUser(page, 'pages');
 	await page.goto('/cascades/new');
 	await page.getByLabel('Lexicon').selectOption('EN-FIX');
 	await page.getByLabel('Minimum').first().fill('8');

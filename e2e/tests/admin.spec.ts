@@ -11,6 +11,9 @@ import { PASSWORD, apiCascade, login, openPlayerSettings } from './support';
 // create more than 2,000 levels and see the warning naming the count, on the
 // builder and in a quiz's settings menu" — on a generated 11,000-word lexicon,
 // since the fixture catalog is far too small for that.
+//
+// @serial: it changes the catalog every journey reads, and works as the seeded
+// `dev` admin.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.resolve(here, '../../fixtures/catalog');
@@ -38,7 +41,7 @@ async function upload(page: Page, url: string, fill: () => Promise<void>, name: 
 	await page.getByRole('button', { name: 'Upload' }).click();
 }
 
-test('admin uploads, a broken file, a Leave Value cascade from the new set, deletion refused, and the level warning', async ({ page }) => {
+test('admin uploads, a broken file, a Leave Value cascade from the new set, deletion refused, and the level warning @serial', async ({ page }) => {
 	test.setTimeout(420_000);
 	await login(page, 'dev');
 	void PASSWORD;

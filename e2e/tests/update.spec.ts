@@ -2,19 +2,24 @@ import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PORT, PROJECT } from '../stack';
+import { PORT, PROJECT, e2eEnv } from '../stack';
 import { createCascade, newUser, press } from './support';
 
 // PLAN.md § End-to-end tests → Updating the app: a second build deployed under
 // an open card, "a new version is ready", MIN_APP_VERSION raised past the old
 // build ("reload to keep syncing", which a plain reload does not clear and its
 // own reload does), and a second tab that keeps its revealed card.
+//
+// @serial: it rebuilds the frontend and restarts the stack under every other
+// journey. @full: only in the full suite (`make test-e2e`, CI's Main tier),
+// where it runs on a stack of its own (the Makefile's e2e-pass-full).
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
 
+/** The stack again, with the suite's configuration and `env` on top of it. */
 function stackUp(env: string[]) {
-	execFileSync('python3', [path.join(root, 'scripts/stack.py'), 'up', '--project', PROJECT, '--port', String(PORT), '--no-build', ...env.flatMap((e) => ['--env', e])], { stdio: 'inherit' });
+	execFileSync('python3', [path.join(root, 'scripts/stack.py'), 'up', '--project', PROJECT, '--port', String(PORT), '--no-build', ...e2eEnv(), ...env.flatMap((e) => ['--env', e])], { stdio: 'inherit' });
 }
 
 /** The build the page runs; NaN while a reload is under way (the poll then tries again). */
@@ -22,7 +27,7 @@ async function build(page: Page) {
 	return Number(await page.evaluate(() => document.documentElement.dataset.build).catch(() => NaN));
 }
 
-test('updating the app', async ({ context }) => {
+test('updating the app @serial @full', async ({ context }) => {
 	test.setTimeout(600_000);
 	const a = await context.newPage();
 	await newUser(a, 'upd');

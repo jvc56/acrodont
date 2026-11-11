@@ -23,8 +23,10 @@ export SQLX_OFFLINE := true
 # (birdtest); CI raises it.
 export CARGO_BUILD_JOBS ?= 2
 
-.PHONY: infra-validate ops-check test test-unit test-integration test-e2e test-scale test-parity \
-        frontend-deps sqlx-db sqlx-prepare
+.PHONY: infra-validate ops-check test test-quick test-unit test-unit-backend test-unit-frontend \
+        test-integration test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-scale test-parity \
+        frontend-deps e2e-deps e2e-binary e2e-pass-full e2e-pass-ttl e2e-pass-purge e2e-pass-answers \
+        e2e-pass-budget sqlx-db sqlx-prepare
 
 test: test-unit test-integration test-e2e
 
@@ -32,11 +34,24 @@ frontend-deps:
 	cd frontend && { [ -d node_modules ] || npm ci; }
 
 ## cargo test --lib, npm run check, Vitest. No services.
-test-unit: frontend-deps
-	cd backend && cargo test --lib
-	cd ../frontend && npm run check && npx vitest run --passWithNoTests
+test-unit: test-unit-backend test-unit-frontend
 
-## cargo test --test '*' against a throwaway Postgres it starts itself.
+test-unit-backend:
+	cd backend && cargo test --lib
+
+test-unit-frontend: frontend-deps
+	cd frontend && npm run check && npx vitest run --passWithNoTests
+
+## The unit layer, its backend and frontend halves side by side: the first
+## check of a change (PLAN.md § Running the tests).
+test-quick:
+	$(MAKE) --no-print-directory -j2 --output-sync=target test-unit-backend test-unit-frontend
+
+## Every integration test binary's tests in one pool (cargo-nextest), against
+## a throwaway Postgres it starts itself. Each test has its own database
+## (#[sqlx::test]); 16 at a time keep well inside max_connections=400.
+## Without nextest, cargo test runs the binaries one after another.
+NEXTEST_THREADS ?= 16
 test-integration:
 	cid=$$(docker run -d --rm -e POSTGRES_PASSWORD=acrodont -p 127.0.0.1::5432 \
 	  --tmpfs /var/lib/postgresql/data postgres:16 \
@@ -50,20 +65,97 @@ test-integration:
 	cd backend
 	export TEST_DATABASE_URL=postgres://postgres:acrodont@127.0.0.1:$$port/postgres
 	# #[sqlx::test] reads DATABASE_URL; each test gets its own database.
-	DATABASE_URL=$$TEST_DATABASE_URL cargo test --test '*'
+	export DATABASE_URL=$$TEST_DATABASE_URL
+	if cargo nextest --version >/dev/null 2>&1; then
+	  cargo nextest run --locked --test '*' --test-threads $(NEXTEST_THREADS)
+	else
+	  echo "cargo-nextest not installed (cargo install cargo-nextest --locked): running the binaries one after another" >&2
+	  cargo test --locked --test '*'
+	fi
 
-## stack.up, stack.seed, Playwright, stack.down.
-test-e2e: frontend-deps
+## End-to-end (PLAN.md § End-to-end tests). Each pass on a stack runs the
+## journeys side by side (Playwright project `parallel`, E2E_WORKERS of them),
+## then the @serial ones alone (project `serial`), and takes the stack down
+## after both unless E2E_KEEP_STACK is set; a kept stack is reused by the next
+## run, whose `up` rebuilds only what changed. The backend image copies in the
+## release binary built here (docker/backend.Dockerfile, backend-prebuilt);
+## ACRODONT_BACKEND_TARGET=backend builds it inside Docker instead.
+##
+##   make test-e2e-core          every journey on one stack: CI's Push tier
+##   make test-e2e-main          update.spec and the @env passes, each on its
+##                               own stack, side by side: CI's Main tier adds it
+##   make test-e2e               both: the whole suite
+##   make test-e2e SPEC=typed    one spec file (or any Playwright file filter)
+##                               on the suite's stack; not the @env journeys
+##   make test-e2e-seeding       seeding under a two-a-minute upload limit
+E2E_WORKERS ?= 4
+export E2E_WORKERS
+test-e2e test-e2e-core test-e2e-main test-e2e-seeding e2e-binary: export ACRODONT_BACKEND_TARGET ?= backend-prebuilt
+
+e2e-deps: frontend-deps
 	cd e2e && { [ -d node_modules ] || npm ci; } && npx playwright install chromium >/dev/null
-	npx playwright test --grep-invert @env
-	# The journeys that need the stack configured differently, each on its own stack
-	# (PLAN.md § End-to-end tests: "through the same --env flag a developer would use").
-	E2E_PROJECT=acrodont-e2e-ttl E2E_PORT=5181 E2E_ENV='SESSION_TTL_SECONDS=20' E2E_TTL_WAIT_MS=25000 npx playwright test --grep @ttl
-	E2E_PROJECT=acrodont-e2e-purge E2E_PORT=5182 E2E_ENV='TRASH_RETENTION_DAYS=0 PURGE_INTERVAL_SECONDS=3' npx playwright test --grep @purge
-	E2E_PROJECT=acrodont-e2e-limits E2E_PORT=5183 E2E_ENV='MAX_STORAGE_BYTES_PER_USER=20000' E2E_STORAGE_LIMIT=20000 npx playwright test --grep @limits
-	# The storage journeys, on a frontend built with lowered client limits ("lowered with a test constant").
-	E2E_PROJECT=acrodont-e2e-answers E2E_PORT=5184 ACRODONT_TEST_LIMITS='{"AUTO_KEEP_OFFLINE_ROWS":30,"ANSWER_STORAGE_SOFT_LIMIT_BYTES":2000}' npx playwright test --grep @answers
-	E2E_PROJECT=acrodont-e2e-budget E2E_PORT=5185 ACRODONT_TEST_LIMITS='{"AUTO_KEEP_OFFLINE_ROWS":30,"ROW_STORAGE_BUDGET":5000}' npx playwright test --grep @budget
+
+e2e-binary:
+	if [ "$$ACRODONT_BACKEND_TARGET" = backend-prebuilt ]; then
+	  cd backend && cargo build --release --locked --bin acrodont
+	fi
+
+# One stack's two passes; $(1) is the Playwright filter. The second runs even
+# when the first fails, so the stack still comes down and every failure shows.
+define e2e_passes
+	cd e2e
+	status=0
+	E2E_KEEP_STACK=1 npx playwright test $(1) --project parallel || status=$$?
+	E2E_STACK_READY=1 npx playwright test $(1) --project serial --no-deps --output test-results/serial || status=$$?
+	exit $$status
+endef
+
+test-e2e-core: e2e-deps e2e-binary
+	$(call e2e_passes,--grep-invert '@env|@full')
+
+test-e2e-main: e2e-deps e2e-binary
+	$(MAKE) --no-print-directory -k -j5 --output-sync=target \
+	  e2e-pass-full e2e-pass-ttl e2e-pass-purge e2e-pass-answers e2e-pass-budget
+
+ifdef SPEC
+test-e2e: e2e-deps e2e-binary
+	cd e2e && npx playwright test --list --grep-invert @env $(SPEC) >/dev/null
+	cd ..
+	$(call e2e_passes,--grep-invert @env --pass-with-no-tests $(SPEC))
+else
+test-e2e: e2e-deps e2e-binary
+	$(MAKE) --no-print-directory test-e2e-core
+	$(MAKE) --no-print-directory test-e2e-main
+endif
+
+# test-e2e-main's passes, each on its own stack and port, run side by side.
+# update.spec restarts its stack, so it has one of its own.
+e2e-pass-full:
+	cd e2e && E2E_PROJECT=acrodont-e2e-update E2E_PORT=5186 \
+	  npx playwright test --project serial --no-deps --grep @full --output test-results/full
+# The journeys that need the stack configured differently (PLAN.md § End-to-end
+# tests: "through the same --env flag a developer would use").
+e2e-pass-ttl:
+	cd e2e && E2E_PROJECT=acrodont-e2e-ttl E2E_PORT=5181 E2E_ENV='SESSION_TTL_SECONDS=20' E2E_TTL_WAIT_MS=25000 \
+	  npx playwright test --project parallel --grep @ttl --output test-results/ttl
+e2e-pass-purge:
+	cd e2e && E2E_PROJECT=acrodont-e2e-purge E2E_PORT=5182 E2E_ENV='TRASH_RETENTION_DAYS=0 PURGE_INTERVAL_SECONDS=3' \
+	  npx playwright test --project parallel --grep @purge --output test-results/purge
+# The storage journeys, on a frontend built with lowered client limits ("lowered with a test constant").
+e2e-pass-answers:
+	cd e2e && E2E_PROJECT=acrodont-e2e-answers E2E_PORT=5184 ACRODONT_TEST_LIMITS='{"AUTO_KEEP_OFFLINE_ROWS":30,"ANSWER_STORAGE_SOFT_LIMIT_BYTES":2000}' \
+	  npx playwright test --project parallel --grep @answers --output test-results/answers
+e2e-pass-budget:
+	cd e2e && E2E_PROJECT=acrodont-e2e-budget E2E_PORT=5185 ACRODONT_TEST_LIMITS='{"AUTO_KEEP_OFFLINE_ROWS":30,"ROW_STORAGE_BUDGET":5000}' \
+	  npx playwright test --project parallel --grep @budget --output test-results/budget
+
+## PLAN.md § End-to-end tests → What the tests reuse: seeding once more with
+## ADMIN_UPLOAD_RATE_PER_MINUTE=2, where it must wait out 429s and still finish.
+## CI runs it on main, nightly, and when scripts/ change.
+test-e2e-seeding: e2e-binary
+	trap 'python3 scripts/stack.py down --project acrodont-ci-seed --volumes' EXIT
+	python3 scripts/stack.py up --project acrodont-ci-seed --port 5190 --env ADMIN_UPLOAD_RATE_PER_MINUTE=2
+	python3 scripts/stack.py seed --project acrodont-ci-seed --port 5190
 
 ## The 300,000-question budgets (PLAN.md § Scale tests): the server's half
 ## against a throwaway Postgres with production durability settings, in

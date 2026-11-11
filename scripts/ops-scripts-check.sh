@@ -315,7 +315,7 @@ fresh "$A" "$A" "$B"
 answers y
 FAKE_CI_SCHEDULED="completed failure" run deploy.sh || fail "a red scheduled run refused the deploy"
 said "WARNING: the latest scheduled CI run on main is failure" || fail "a red scheduled run did not warn"
-called "gh run list --workflow ci.yml --commit $(git -C "$R" rev-parse HEAD)" || fail "CI was not checked on the exact commit"
+called "gh run list --workflow ci.yml --branch main --commit $(git -C "$R" rev-parse HEAD)" || fail "CI was not checked on main's run of the exact commit"
 echo dirty >> "$R/README.md"
 fresh "$A" "$A" "$B"
 if run deploy.sh; then fail "deploy.sh deployed a dirty tree"; fi

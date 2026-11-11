@@ -557,6 +557,31 @@ STORAGE_LIMIT_PLAN.md, decisions D1–D5 (PQ-023).
   section that leaned on the old limits or the 130,000 ceiling; JOURNEYS.md
   C-2 to C-5 and C-14 to C-17; PQ-023.
 
+### Phase 8d — Faster tests ✅
+
+TEST_TIME_PLAN.md, as decided (T1–T5 yes, T3 = C1, T6 no):
+- **CI tiers** (`.github/workflows/ci.yml`): Push (lint, `unit-backend`,
+  `unit-frontend`, integration, `e2e-core`, terraform, scripts) on every push;
+  Main adds `e2e-main` and `seeding` on `main` and manual runs; Nightly adds
+  scale. `seeding` also runs when a push changes `scripts/` (dorny/paths-filter).
+  A failed nightly, in any job, opens the issue. `scripts/deploy.sh` reads CI's
+  run on `main` for the commit (`--branch main`).
+- **End-to-end:** four workers (`E2E_WORKERS`) on one stack, project
+  `parallel`, then project `serial` (`@serial`: admin, the export journey,
+  update) one at a time. Suite stacks raise the per-IP auth and catalog
+  limits. `builder`, `pages` and `player` register their own users. `@limits`
+  is gone: `storage.spec.ts` sets the account's `users.storage_limit_bytes`
+  with SQL on the main stack. update.spec (`@full`) and the four `@env` passes
+  run side by side on stacks of their own (`make test-e2e-main`).
+- **Images:** `backend-prebuilt` (ubuntu:24.04) copies in the release binary
+  built on the host (`make e2e-binary`); compose picks it through
+  `ACRODONT_BACKEND_TARGET`; production's `backend` target is unchanged.
+- **Integration:** `cargo nextest run`, 16 threads (falls back to cargo test
+  without nextest).
+- **Local targets:** `test-quick`, `test-unit-backend`, `test-unit-frontend`,
+  `test-e2e-core`, `test-e2e-main`, `test-e2e SPEC=…`, `test-e2e-seeding`;
+  the local-verification rule is in PLAN.md § Running the tests.
+
 ## Next
 
 Phase 8 — what needs the user (nothing below can be done without credentials,

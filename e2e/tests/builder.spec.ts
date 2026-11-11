@@ -1,13 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { newUser } from './support';
 
 // A smoke run of the builder against the seeded fixture catalog (PLAN.md §
 // Creating a cascade): preview as filters change, then Create Cascade.
 test('the builder previews and creates a cascade', async ({ page }) => {
-	await page.goto('/login');
-	await page.getByLabel('Username').fill('dev');
-	await page.getByLabel('Password').fill('correct-tile-rack-bingo');
-	await page.getByRole('button', { name: 'Log in' }).click();
-	await expect(page).toHaveURL(/\/cascades$/);
+	// Its own account rather than the seeded admin: the journeys run side by side.
+	await newUser(page, 'builder');
 	await page.goto('/cascades/new');
 	await page.getByLabel('Lexicon').selectOption('EN-FIX');
 	await page.getByLabel('Minimum').first().fill('7');

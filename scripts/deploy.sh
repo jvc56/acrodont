@@ -5,8 +5,9 @@
 #   scripts/deploy.sh [--all] [--skip-ci-check] [--set KEY=VALUE]...
 #
 # In order, stopping at the first thing wrong:
-#   1. the checkout: clean, HEAD on origin/main, CI green on this exact commit
-#      (--skip-ci-check for an emergency); a red scheduled CI run on main warns;
+#   1. the checkout: clean, HEAD on origin/main, CI's run on main green on this
+#      exact commit (--skip-ci-check for an emergency); a red scheduled CI run
+#      on main warns;
 #   2. login, Terraform outputs, prod.tfvars from the state bucket;
 #   3. what is live: the backend image tag of the service's PRIMARY deployment,
 #      which must equal prod.tfvars' image_tag (else ECS rolled back: run
@@ -62,10 +63,12 @@ tag=$(git rev-parse --short=12 HEAD)
 if ((skip_ci)); then
   ops_say "WARNING: CI not checked (--skip-ci-check)"
 else
-  ci=$(gh run list --workflow ci.yml --commit "$commit" --limit 1 --json status,conclusion,url) \
+  # On main: a branch's run of the same commit is only the Push tier
+  # (.github/workflows/ci.yml), which must never clear a deploy alone.
+  ci=$(gh run list --workflow ci.yml --branch main --commit "$commit" --limit 1 --json status,conclusion,url) \
     || ops_die "gh could not list CI runs (gh auth status?)"
   ci=$(jq -r '.[0] // empty | "\(.status) \(.conclusion // "") \(.url)"' <<<"$ci")
-  [[ -n "$ci" ]] || ops_die "no CI run for $tag yet: wait for it, or --skip-ci-check in an emergency"
+  [[ -n "$ci" ]] || ops_die "no CI run on main for $tag yet: wait for it, or --skip-ci-check in an emergency"
   read -r ci_status ci_conclusion ci_url <<<"$ci"
   [[ "$ci_status" == completed && "$ci_conclusion" == success ]] \
     || ops_die "CI for $tag is $ci_status/${ci_conclusion:-pending}: $ci_url"

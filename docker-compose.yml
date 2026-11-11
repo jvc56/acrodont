@@ -19,7 +19,9 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
-      target: backend
+      # backend-prebuilt for the end-to-end stacks: the binary built on the host
+      # (make e2e-binary), copied in. Everything else builds it here.
+      target: ${ACRODONT_BACKEND_TARGET:-backend}
       args:
         CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-2}
     env_file:

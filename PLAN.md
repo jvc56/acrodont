@@ -5194,7 +5194,9 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
 - **Deploys** run from the operator's machine: `scripts/deploy.sh`, with
   Terraform as the only deployer, so its state always says what is running.
   - It refuses a dirty tree, a commit not on `origin/main`, a commit whose CI
-    run is not green, and a change to an applied migration.
+    run on `main` is not green (a branch's run of the same commit is only the
+    Push tier, see [Running the tests](#running-the-tests)), and a change to
+    an applied migration.
   - It builds only the images ECR lacks: backend, ops and frontend, tagged with
     the commit.
   - It sets `image_tag` in `prod.tfvars` (kept in the state bucket), then plans
@@ -6395,17 +6397,38 @@ same `scripts/stack.py` entry points that
 |---|---|
 | `stack.up` | Project `acrodont-e2e` and a port from the environment, so a suite can run beside a development stack without disturbing it |
 | The production-style frontend build | Not differently at all — the offline journeys need the real service worker, which is exactly why `dev.py` serves that build too |
-| `stack.seed`, through the admin API | Seeds only [the fixture catalog](#the-fixture-catalog); licensed files are never available to CI. Every run therefore registers and confirms the `dev` account through the real endpoints, so a passphrase the strength check refused, or a registration side effect seeding skipped, fails the suite at its first step; and CI runs it once more with `ADMIN_UPLOAD_RATE_PER_MINUTE=2`, where seeding must wait out `429`s and still finish |
+| `stack.seed`, through the admin API | Seeds only [the fixture catalog](#the-fixture-catalog); licensed files are never available to CI. Every run therefore registers and confirms the `dev` account through the real endpoints, so a passphrase the strength check refused, or a registration side effect seeding skipped, fails the suite at its first step; and `make test-e2e-seeding` runs it once more with `ADMIN_UPLOAD_RATE_PER_MINUTE=2`, where seeding must wait out `429`s and still finish (CI's Main tier, and any push that changes `scripts/`) |
 | `stack.reset` | Called between suites rather than by hand. Most specs don't need it, because each one registers its own user |
 | `stack.down` | With `--volumes` at the end of a CI run |
 
 Everything the tests need that a developer wouldn't goes through the same
 `--env` flag a developer would use, so there is **no test-only code path in the
-server**: `SESSION_TTL_SECONDS=2` for the expired-session journey,
-`TRASH_RETENTION_DAYS=0` with a short `PURGE_INTERVAL_SECONDS` for the purge
-journey, `MAX_STORAGE_BYTES_PER_USER=20000` for the storage-limit journey (the
-`@limits` pass), and `MAIL_BACKEND=console` so the confirmation link can be read out of
-the backend's logs — which is also how a developer confirms an account locally.
+server**: `SESSION_TTL_SECONDS` short for the expired-session journey (the
+`@ttl` pass), `TRASH_RETENTION_DAYS=0` with a short `PURGE_INTERVAL_SECONDS`
+for the purge journey (`@purge`), and `MAIL_BACKEND=file` so the confirmation
+code can be read out of the stack's mail outbox (or `console`, out of the
+backend's logs — which is also how a developer confirms an account locally).
+Every suite stack also raises the per-IP auth and catalog limits
+(`AUTH_RATE_PER_IP_PER_MINUTE`, `CATALOG_RATE_PER_MINUTE`), because every
+browser of every Playwright worker comes from `127.0.0.1`; no journey asserts
+those limits, and the integration tests do. A state that only data can make,
+such as one account's own storage limit (`users.storage_limit_bytes`, for
+the storage-limit journey) or 5,000 cleared chain quizzes, is written with SQL
+into the stack's Postgres for the journey's own account, so it needs no stack
+of its own.
+
+The journeys run side by side, four Playwright workers against one stack
+(`E2E_WORKERS`): each registers its own user. The few that change what every
+other journey stands on are tagged `@serial` and run after the rest, one at a
+time: the admin journey (it changes the catalog, as the seeded `dev` admin),
+the export journey (it stops the backend) and the update journey (it rebuilds
+the frontend and restarts the stack). A journey that needs the server or the
+frontend built differently is tagged `@env` plus its pass (`@ttl`, `@purge`,
+`@answers`, `@budget`) and runs on a stack of its own; `make test-e2e-main`
+brings those stacks up side by side, with the update journey (`@full`) on one
+more. The backend image of every suite stack is the release binary built on
+the host and copied into a thin image (`backend-prebuilt` in
+`docker/backend.Dockerfile`), not compiled again inside Docker.
 
 What the sharing buys: a broken compose file, a missed `/health` condition, a
 changed seeding step or a renamed environment variable fails `./scripts/dev.py`
@@ -6587,8 +6610,8 @@ through the ordinary endpoints, so there is still no test-only path.
   the Trash within the suite's budget, showing one collapsed group with its count
   and earliest purge date, and expands to a first page of 100 behind **Show
   more**.
-- With `MAX_STORAGE_BYTES_PER_USER` lowered to 20,000 bytes (the `@limits`
-  pass), create cascades until the builder says the next "won't fit" and
+- With the account's own storage limit (`users.storage_limit_bytes`) set to
+  20,000 bytes, create cascades until the builder says the next "won't fit" and
   Create Cascade is disabled; study two passes of one, missing everything, and
   see the account go over its limit (studying is never refused), the Cascades
   page say "Over your storage by …" with New cascade disabled; move that
@@ -6821,17 +6844,47 @@ where PQ-019 runs a case at a tenth.
 
 | Command | What it runs |
 |---|---|
-| `make test-unit` | `cargo test --lib`, `npm run check`, Vitest. No services. Seconds. |
-| `make test-integration` | `cargo test --test '*'` against a throwaway Postgres it starts itself |
-| `make test-e2e` | `stack.up`, `stack.seed`, Playwright, `stack.down` |
+| `make test-quick` | `make test-unit`'s backend and frontend halves side by side. About 2 minutes |
+| `make test-unit` | `cargo test --lib`, `npm run check`, Vitest. No services |
+| `make test-integration` | Every integration test binary's tests in one pool (`cargo nextest run`, 16 at a time) against a throwaway Postgres it starts itself |
+| `make test-e2e-core` | Every end-to-end journey on one stack, four side by side, then the `@serial` ones; not the update journey or the `@env` passes |
+| `make test-e2e SPEC=<file>` | One spec file (any Playwright file filter) on the suite's stack |
+| `make test-e2e-main` | The update journey and the `@env` passes, each on a stack of its own, side by side |
+| `make test-e2e` | `test-e2e-core`, then `test-e2e-main`: the whole end-to-end suite |
+| `make test-e2e-seeding` | Seeding under a two-a-minute upload limit |
 | `make test-scale` | The 300,000-question budgets |
 | `make test-parity` | Zyzzyva comparison; skipped with a notice unless the licensed files are present |
 | `make test` | Unit, integration and end-to-end |
 
-CI runs `make test` on every push and `make test-scale` nightly. Parity never
-runs in CI, because the data cannot be committed. Every layer is runnable with
-one command and no arguments, for the same reason the development stack is: a
-test that is hard to start is a test that stops being run.
+`E2E_KEEP_STACK=1` keeps the end-to-end stack after a run, and the next run
+reuses it, rebuilding only what changed.
+
+**Checking a change locally:**
+- run `make test-quick`, `make test-integration`, and `make test-e2e
+  SPEC=<file>` for each spec the change touches (`make test-e2e-core` when it
+  touches many);
+- push, and let CI's tiers run the rest;
+- never run `make test-scale` locally, except to investigate a scale failure.
+  To check a branch at scale before it merges, run CI by hand on it
+  (`workflow_dispatch`) and keep working.
+
+CI (`.github/workflows/ci.yml`) runs three tiers, each a superset of the last:
+
+| Tier | When | What |
+|---|---|---|
+| **Push** | Every push, every branch | Clippy, the unit tests (a backend and a frontend job), `make test-integration`, `make test-e2e-core`, `make infra-validate`, `make ops-check`. About 5 minutes |
+| **Main** | A push to `main`, and a manual run on any branch | The Push tier, plus `make test-e2e-main` and `make test-e2e-seeding` |
+| **Nightly** | 04:30 UTC on `main` | The Main tier, plus `make test-scale`. A failure opens (or comments on) one issue |
+
+The seeding check also runs on a push that changes `scripts/`. A branch can be
+green and still fail on `main`; deploys come from `main`, and
+`scripts/deploy.sh` reads CI's run on `main` for the commit, so the deploy gate
+is the full tier.
+
+Parity never runs in CI, because the data cannot be committed. Every layer is
+runnable with one command and no arguments, for the same reason the
+development stack is: a test that is hard to start is a test that stops being
+run.
 
 ---
 

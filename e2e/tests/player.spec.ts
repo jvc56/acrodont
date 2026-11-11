@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createCascade, login, newUser } from './support';
+import { createCascade, cursorSaved, login, newUser } from './support';
 
 // PLAN.md § Taking a quiz, § Saving progress, § Offline and Sync: study a new
 // cascade with the default keys, go offline, keep studying, reload with no
@@ -12,11 +12,8 @@ async function press(page: Page, key: string) {
 }
 
 test('the player studies with the default keys, offline too', async ({ page, context }) => {
-	await page.goto('/login');
-	await page.getByLabel('Username').fill('dev');
-	await page.getByLabel('Password').fill('correct-tile-rack-bingo');
-	await page.getByRole('button', { name: 'Log in' }).click();
-	await expect(page).toHaveURL(/\/cascades$/);
+	// Its own account rather than the seeded admin: the journeys run side by side.
+	await newUser(page, 'player');
 	await page.goto('/cascades/new');
 	await page.getByLabel('Lexicon').selectOption('EN-FIX');
 	await page.getByLabel('Minimum').first().fill('7');
@@ -44,6 +41,7 @@ test('the player studies with the default keys, offline too', async ({ page, con
 	await press(page, 'Space');
 	await press(page, 'Space');
 	await expect(page.getByText('3 / 18')).toBeVisible();
+	await cursorSaved(page, 3);
 	await page.goto(url);
 	await expect(page.getByText('3 / 18')).toBeVisible({ timeout: 20_000 });
 	await expect(page.getByText('1 ✓ 1 ✗')).toBeVisible();
@@ -65,9 +63,16 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	expect(await question.boundingBox()).toEqual(before);
 
-	// Answers are drawn like the question by default; each can be changed.
+	// Answers are drawn like the question by default; each can be changed. An
+	// answer too tall for the screen is scaled by the player's --fit factor (the
+	// cascade's shuffle can put AEINRST's nine anagrams first), so compare at it.
 	const answer = area.locator('[data-answer]').first();
-	expect(await answer.evaluate((e) => getComputedStyle(e).fontSize)).toBe(await question.evaluate((e) => getComputedStyle(e).fontSize));
+	const drawn = await answer.evaluate((e) => {
+		const s = getComputedStyle(e);
+		return { size: parseFloat(s.fontSize), fit: Number(s.getPropertyValue('--fit') || 1) };
+	});
+	const questionSize = parseFloat(await question.evaluate((e) => getComputedStyle(e).fontSize));
+	expect(drawn.size).toBeCloseTo(questionSize * drawn.fit, 1);
 	// A cascade opens with the menu hidden; ☰ shows it.
 	await expect(page.getByRole('navigation', { name: 'Player menu' })).toHaveCount(0);
 	await page.getByRole('button', { name: 'Show menu' }).click();
