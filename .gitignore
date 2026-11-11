@@ -22,3 +22,6 @@ __pycache__/
 /infra/backend.tf
 # dev.py: snapshots and the per-project lock and browser profiles.
 /.dev/
+
+# Personal notes, kept out of the repo
+todo.txt
