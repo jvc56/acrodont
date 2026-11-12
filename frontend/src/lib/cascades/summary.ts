@@ -186,7 +186,7 @@ export async function trashGroups(db: UserDb): Promise<TrashGroup[]> {
 				outcome: last?.outcome ?? null,
 				purgesAt: provisional || trashed ? null : plus(q.cleared_at!, days),
 				provisional: provisional && !trashed,
-				bytes: levelBytes(q.question_count)
+				bytes: levelBytes(q.question_count, q.origin === 'source')
 			});
 		}
 		if (!entries.length) continue;

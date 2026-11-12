@@ -105,7 +105,7 @@ def check(dump: Path, schema: Optional[Path]) -> List[str]:
         if missing:
             raise DrillFailed(f"tables missing after the restore: {sorted(missing)}")
         found.append(f"{len(wanted)} tables, as the schema-only dump names")
-    for t in ("users", "cascades", "cascade_questions", "_sqlx_migrations"):
+    for t in ("users", "cascades", "quiz_cards", "_sqlx_migrations"):
         if t not in tables:
             raise DrillFailed(f"table {t} missing after the restore")
     migrations = int(psql("SELECT count(*) FROM _sqlx_migrations WHERE success"))
@@ -113,8 +113,8 @@ def check(dump: Path, schema: Optional[Path]) -> List[str]:
         raise DrillFailed("no applied migration recorded")
     users = int(psql("SELECT count(*) FROM users"))
     cascades = int(psql("SELECT count(*) FROM cascades"))
-    empty = int(psql("SELECT count(*) FROM cascades c WHERE NOT EXISTS "
-                     "(SELECT 1 FROM cascade_questions q WHERE q.cascade_id = c.id)"))
+    empty = int(psql("SELECT count(*) FROM cascades c WHERE c.question_keys = '' OR NOT EXISTS "
+                     "(SELECT 1 FROM quizzes z JOIN quiz_cards k ON k.quiz_id = z.id WHERE z.cascade_id = c.id)"))
     if empty:
         raise DrillFailed(f"{empty} cascades have no questions after the restore")
     found.append(f"{migrations} migrations, {users} users, {cascades} cascades")

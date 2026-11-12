@@ -19,6 +19,24 @@ from typing import Callable, Dict, List, Optional
 
 import stack
 
+_MASK = (1 << 64) - 1
+
+
+def shuffle(idx: List[int], seed: int) -> List[int]:
+    """PLAN.md § Deterministic shuffles: SplitMix64 and Fisher–Yates, as in
+    contract-fixtures/tools/reference.py. The indexes in position order."""
+    v = sorted(idx)
+    state = seed & _MASK
+    for i in range(len(v) - 1, 0, -1):
+        state = (state + 0x9E3779B97F4A7C15) & _MASK
+        z = state
+        z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & _MASK
+        z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & _MASK
+        z ^= z >> 31
+        j = z % (i + 1)
+        v[i], v[j] = v[j], v[i]
+    return v
+
 # The scenarios run on the stack's lexicon: CSW24 from the licensed catalog
 # when it is there, else the fixture catalog's EN-FIX (154 words). Each is a
 # length range capped by Probability Order, so its size is the same small one
@@ -79,8 +97,11 @@ class Seeder:
 
     def quiz(self, quiz: str) -> dict:
         attempt, seed = self.sql(f"SELECT attempt, shuffle_seed FROM quizzes WHERE id = '{quiz}'")[0]
-        positions = [int(r[0]) for r in self.sql(
-            f"SELECT question_idx FROM quiz_questions WHERE quiz_id = '{quiz}' ORDER BY position")]
+        # Positions are never stored: the attempt's order is its questions
+        # shuffled with its seed, as every device and the server compute it.
+        members = [int(r[0]) for r in self.sql(
+            f"SELECT question_idx FROM quiz_questions WHERE quiz_id = '{quiz}' ORDER BY question_idx")]
+        positions = shuffle(members, int(seed) % 2 ** 64)
         # Seeds travel as unsigned decimal text; Postgres stores them signed.
         return {"attempt": int(attempt), "seed": str(int(seed) % 2 ** 64), "positions": positions}
 

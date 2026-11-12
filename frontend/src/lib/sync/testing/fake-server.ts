@@ -142,8 +142,8 @@ export class FakeServer {
 			// The server's count, from the same per-row costs: the questions and each level's rows.
 			storage_bytes: String(
 				STORAGE_COSTS.cascade_row +
-					[...e.sim.quizzes.values()].reduce((n, q) => n + levelBytes(q.state.question_count), 0) +
-					count * STORAGE_COSTS.question_row
+					[...e.sim.quizzes.values()].reduce((n, q) => n + levelBytes(q.state.question_count, q.state.origin === 'source'), 0) +
+					count * STORAGE_COSTS.question
 			),
 			options_changed_at: e.options_at,
 			options_seq: String(e.options_seq),

@@ -9,13 +9,18 @@
 
 export const STORAGE_COSTS = {
 	cascade_row: 380,
-	question_row: 94,
+	question: 1,
 	quiz_row: 420,
-	quiz_question_row: 188,
+	chunk_row: 160,
+	card: 10,
+	card_idx: 4,
 	attempt_row: 176,
 	spec_row: 380,
 	spec_word_row: 100
 };
+
+/** Questions per stored chunk of a level (the server's `quiz_cards` rows). */
+export const CHUNK = 256;
 
 /** MAX_STORAGE_BYTES_PER_USER's default, used until the server has reported the account's own. */
 export const DEFAULT_STORAGE_LIMIT = 100_000_000;
@@ -23,9 +28,14 @@ export const DEFAULT_STORAGE_LIMIT = 100_000_000;
 /** From this share of the limit, the page says the account is almost full. */
 export const ALMOST_FULL = 0.9;
 
-/** What one level of `questionCount` questions holds: its quiz row and one row per question. */
-export function levelBytes(questionCount: number): number {
-	return STORAGE_COSTS.quiz_row + questionCount * STORAGE_COSTS.quiz_question_row;
+/**
+ * What one level of `questionCount` questions holds: its quiz row, its chunks,
+ * and each question's grade, with its index unless it is the Source quiz.
+ */
+export function levelBytes(questionCount: number, source: boolean): number {
+	const c = STORAGE_COSTS;
+	const chunks = Math.ceil(questionCount / CHUNK);
+	return c.quiz_row + chunks * c.chunk_row + questionCount * (c.card + (source ? 0 : c.card_idx));
 }
 
 export type StorageState = 'ok' | 'almost' | 'over';

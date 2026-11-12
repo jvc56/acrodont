@@ -423,6 +423,10 @@ CREATE TABLE cascades (
                                                      -- its own next change always applies
 
     question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 300000),
+    question_keys     TEXT COMPRESSION lz4 NOT NULL,
+                          -- the cascade's questions in search order, one key per
+                          -- line (alphagram, word or canonical leave, in MAGPIE
+                          -- notation); a question's idx is its line. Immutable.
     depth             INTEGER NOT NULL CHECK (depth >= 1),
                           -- number of active levels; Level 1 is always the Source quiz
     peak_depth        INTEGER NOT NULL DEFAULT 1 CHECK (peak_depth >= depth),
@@ -453,15 +457,6 @@ CREATE INDEX cascades_trashed_at ON cascades (trashed_at) WHERE trashed_at IS NO
 CREATE INDEX cascades_spec_id ON cascades (spec_id);
 CREATE INDEX cascades_lexicon_id ON cascades (lexicon_id);
 CREATE INDEX cascades_leave_set_id ON cascades (leave_set_id) WHERE leave_set_id IS NOT NULL;
-
--- The cascade's questions, in search order. Immutable.
-CREATE TABLE cascade_questions (
-    cascade_id    UUID NOT NULL REFERENCES cascades (id) ON DELETE CASCADE,
-    idx           INTEGER NOT NULL CHECK (idx BETWEEN 0 AND 299999),
-    question_key  TEXT NOT NULL CHECK (char_length(question_key) BETWEEN 1 AND 300),
-                      -- alphagram, word or canonical leave, in MAGPIE notation
-    PRIMARY KEY (cascade_id, idx)
-);
 
 CREATE TABLE quizzes (
     id                UUID PRIMARY KEY,           -- device-generated, the Source quiz included
@@ -542,22 +537,52 @@ CREATE UNIQUE INDEX quizzes_one_per_segment
     ON quizzes (origin_quiz_id, origin_attempt, origin_segment_end)
     WHERE origin = 'segment';
 
-CREATE TABLE quiz_questions (
-    quiz_id       UUID NOT NULL REFERENCES quizzes (id) ON DELETE CASCADE,
-    question_idx  INTEGER NOT NULL CHECK (question_idx BETWEEN 0 AND 299999),
-                      -- index into cascade_questions
-    position      INTEGER NOT NULL CHECK (position BETWEEN 0 AND 299999),
-    grade         grade,
-    graded_at     TIMESTAMPTZ,                    -- device time, for latest-wins between devices
-    graded_by_device_id UUID,                     -- a device's own regrade always applies
-    updated_seq   BIGINT NOT NULL,
-    PRIMARY KEY (quiz_id, question_idx),
-    CONSTRAINT quiz_questions_position_unique
-        UNIQUE (quiz_id, position) DEFERRABLE INITIALLY DEFERRED,
-    CHECK ((grade IS NULL) = (graded_at IS NULL)),
-    CHECK ((grade IS NULL) = (graded_by_device_id IS NULL))
+-- A level's questions and their grades, packed: one row per run of up to 256
+-- of its questions in idx order (a chunk), each question's state at the same
+-- place in the chunk's arrays. A question's position in the attempt is never
+-- stored: it is computed from the quiz's shuffle_seed (Deterministic shuffles).
+-- See Storage limit for what a chunk costs.
+CREATE TABLE quiz_cards (
+    quiz_id      UUID NOT NULL REFERENCES quizzes (id) ON DELETE CASCADE,
+    first_idx    INTEGER NOT NULL CHECK (first_idx BETWEEN 0 AND 299999),
+                     -- the chunk's first question; the chunks of a quiz in
+                     -- first_idx order are its questions in idx order
+    idxs         INT4[] COMPRESSION lz4,
+                     -- the chunk's questions, ascending; NULL for the Source
+                     -- quiz, whose chunk holds first_idx, first_idx + 1, …
+    grades       BYTEA COMPRESSION lz4 NOT NULL,
+                     -- one byte per question: 0 ungraded, 1 correct, 2 missed
+    graded_at    TIMESTAMPTZ[] COMPRESSION lz4 NOT NULL,
+                     -- device time, for latest-wins between devices; NULL when ungraded
+    graded_seq   INT8[] COMPRESSION lz4 NOT NULL,
+                     -- the sync sequence of the grade, for seen_seq and pulls
+    graded_by    INT2[] COMPRESSION lz4 NOT NULL,
+                     -- the device that set it, as a 1-based index into devices,
+                     -- so a device's own regrade always applies
+    devices      UUID[] NOT NULL DEFAULT '{}',
+    updated_seq  BIGINT NOT NULL,
+                     -- the latest graded_seq here (the creation's at first), so a
+                     -- pull reads only the chunks that changed
+    PRIMARY KEY (quiz_id, first_idx),
+    CHECK (octet_length(grades) BETWEEN 1 AND 256),
+    CHECK (cardinality(graded_at) = octet_length(grades)
+           AND cardinality(graded_seq) = octet_length(grades)
+           AND cardinality(graded_by) = octet_length(grades)),
+    CHECK (idxs IS NULL OR (cardinality(idxs) = octet_length(grades) AND idxs[1] = first_idx))
 );
-CREATE INDEX quiz_questions_quiz_seq ON quiz_questions (quiz_id, updated_seq);
+
+-- The chunks as one row per question, as the table was before it was packed:
+-- for reading in tests, scripts and support queries, never by the server's
+-- hot paths. question_idx is an index into cascades.question_keys.
+CREATE VIEW quiz_questions AS
+SELECT c.quiz_id,
+       coalesce(c.idxs[s.i], c.first_idx + s.i - 1) AS question_idx,
+       CASE get_byte(c.grades, s.i - 1) WHEN 1 THEN 'correct'::grade WHEN 2 THEN 'missed'::grade END AS grade,
+       c.graded_at[s.i] AS graded_at,
+       c.devices[c.graded_by[s.i]] AS graded_by_device_id,
+       c.graded_seq[s.i] AS updated_seq
+FROM quiz_cards c
+CROSS JOIN LATERAL generate_series(1, octet_length(c.grades)) AS s (i);
 
 -- One row per finished attempt. Immutable.
 CREATE TABLE quiz_attempts (
@@ -625,7 +650,7 @@ CREATE TABLE sync_devices (
     PRIMARY KEY (user_id, device_id)
 );
 
--- Records of purged cascades and quizzes, so other devices remove them. Pruned after 90 days.
+-- Records of purged cascades and quizzes, so other devices remove them. Pruned after 30 days.
 CREATE TABLE sync_tombstones (
     user_id     UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     entity      sync_entity NOT NULL,

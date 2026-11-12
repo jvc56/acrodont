@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT q.cascade_id,\n                  sum($2::int8 + q.question_count::int8 * $3::int8\n                      + $4::int8 * (SELECT count(*) FROM quiz_attempts a WHERE a.quiz_id = q.id))::int8 AS \"bytes!\"\n           FROM quizzes q WHERE q.id = ANY($1) GROUP BY q.cascade_id",
+  "query": "SELECT q.cascade_id,\n                  sum($2::int8 + ((q.question_count::int8 + 255) / 256) * $3::int8\n                      + q.question_count::int8 * ($4::int8 + CASE WHEN q.origin = 'source' THEN 0 ELSE $5::int8 END)\n                      + $6::int8 * (SELECT count(*) FROM quiz_attempts a WHERE a.quiz_id = q.id))::int8 AS \"bytes!\"\n           FROM quizzes q WHERE q.id = ANY($1) GROUP BY q.cascade_id",
   "describe": {
     "columns": [
       {
@@ -26,6 +26,8 @@
         "UuidArray",
         "Int8",
         "Int8",
+        "Int8",
+        "Int8",
         "Int8"
       ]
     },
@@ -34,5 +36,5 @@
       null
     ]
   },
-  "hash": "81a6b646e08e4eeca5cb43229947f4404f466d3886626792070eab6332bb72e1"
+  "hash": "8b014ff0bac3fa6625f6be323daec29f5e3ca01591144398c17fc6aef2392a9e"
 }

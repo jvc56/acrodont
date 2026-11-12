@@ -566,14 +566,11 @@ async fn questions(
     if origin == "source" {
         return Err(ApiError::NotFound);
     }
-    let idx: Vec<i32> = sqlx::query_scalar!(
-        "SELECT question_idx FROM quiz_questions WHERE quiz_id = $1 ORDER BY question_idx OFFSET $2 LIMIT $3",
-        quiz,
-        from,
-        limit
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let mut conn = state.db.acquire().await?;
+    let all = crate::cards::members(&mut conn, quiz).await?;
+    let start = (from.max(0) as usize).min(all.len());
+    let end = start.saturating_add(limit.max(0) as usize).min(all.len());
+    let idx: Vec<i32> = all[start..end].iter().map(|&i| i as i32).collect();
     let mut resp = Json(idx).into_response();
     resp.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=31536000, immutable"));
@@ -600,22 +597,23 @@ async fn grades(
     .await?
     .ok_or(ApiError::NotFound)?;
     let end = (from + limit).min(i64::from(i32::MAX));
-    let rows = sqlx::query!(
-        r#"SELECT question_idx, grade AS "grade!: Grade", graded_at AS "graded_at!" FROM quiz_questions
-           WHERE quiz_id = $1 AND grade IS NOT NULL AND question_idx >= $2 AND question_idx < $3
-           ORDER BY question_idx"#,
-        quiz,
-        from.min(i64::from(i32::MAX)) as i32,
-        end as i32
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let start = from.min(i64::from(i32::MAX)) as i32;
+    let mut conn = state.db.acquire().await?;
+    let chunks = crate::cards::load_range(&mut conn, quiz, start, end as i32).await?;
+    let rows: Vec<(i32, Grade, DateTime<Utc>)> = chunks
+        .iter()
+        .flat_map(|c| c.cards().collect::<Vec<_>>())
+        .filter_map(|c| {
+            let i = c.idx as i32;
+            (i >= start && i < end as i32).then_some((i, c.grade?, c.graded_at?))
+        })
+        .collect();
     let body = json!({
         "attempt": row.attempt,
         "shuffle_seed": from_i64(row.shuffle_seed).to_string(),
-        "question_idx": rows.iter().map(|r| r.question_idx).collect::<Vec<_>>(),
-        "grade": rows.iter().map(|r| r.grade).collect::<Vec<_>>(),
-        "graded_at": rows.iter().map(|r| r.graded_at).collect::<Vec<_>>(),
+        "question_idx": rows.iter().map(|r| r.0).collect::<Vec<_>>(),
+        "grade": rows.iter().map(|r| r.1).collect::<Vec<_>>(),
+        "graded_at": rows.iter().map(|r| r.2).collect::<Vec<_>>(),
     });
     let mut resp = Json(body).into_response();
     resp.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, no-store"));

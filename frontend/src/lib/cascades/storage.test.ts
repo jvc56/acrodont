@@ -9,8 +9,12 @@ describe('storage', () => {
 		expect(STORAGE_COSTS).toEqual(costs);
 	});
 
-	it('a level costs its quiz row and a row per question', () => {
-		expect(levelBytes(1000)).toBe(STORAGE_COSTS.quiz_row + 1000 * STORAGE_COSTS.quiz_question_row);
+	it('a level costs its quiz row, a chunk per 256 questions and each question, with its index past the Source quiz', () => {
+		const c = STORAGE_COSTS;
+		expect(levelBytes(1000, true)).toBe(c.quiz_row + 4 * c.chunk_row + 1000 * c.card);
+		expect(levelBytes(1000, false)).toBe(c.quiz_row + 4 * c.chunk_row + 1000 * (c.card + c.card_idx));
+		expect(levelBytes(256, false)).toBe(c.quiz_row + c.chunk_row + 256 * (c.card + c.card_idx));
+		expect(levelBytes(0, false)).toBe(c.quiz_row);
 	});
 
 	it('is ok, almost full from 90%, and over past the limit', () => {

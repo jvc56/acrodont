@@ -130,7 +130,7 @@
 
 	/** What a cascade's figure is made of: its levels, from the same per-row costs, and the rest. */
 	function sizeTitle(s: CascadeSummary): string {
-		const levels = s.levels.reduce((n, r) => n + levelBytes(r.quiz.question_count), 0);
+		const levels = s.levels.reduce((n, r) => n + levelBytes(r.quiz.question_count, r.quiz.origin === 'source'), 0);
 		const rest = Math.max(0, (s.cascade.storage_bytes ?? 0) - levels);
 		return `Storage: ${formatBytes(s.cascade.storage_bytes ?? 0)} — questions and filters ${formatBytes(rest)}, levels ${formatBytes(levels)}`;
 	}

@@ -1,12 +1,11 @@
-//! An account's server storage (STORAGE_LIMIT_PLAN.md § S1, § S2): what a
-//! cascade or a saved search holds, computed from row counts with fixed
-//! per-row sizes, and the one per-account limit checked when something new is
-//! made.
+//! An account's server storage (PLAN.md § Storage limit): what a cascade or a
+//! saved search holds, computed from counts with fixed sizes, and the one
+//! per-account limit checked when something new is made.
 //!
-//! The per-row sizes are `contract-fixtures/storage.json`, shared with the
-//! device's estimate. They are constants here too, so the backend image builds
-//! from `backend/` alone; a unit test keeps the two equal, and the integration
-//! test `tests/storage.rs` keeps them within ±20% of what Postgres measures.
+//! The sizes are `contract-fixtures/storage.json`, shared with the device's
+//! estimate. They are constants here too, so the backend image builds from
+//! `backend/` alone; a unit test keeps the two equal, and the integration test
+//! `tests/storage.rs` checks them against what Postgres measures.
 
 use serde::Deserialize;
 use serde_json::json;
@@ -16,17 +15,22 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::search::wire::{Params, WireGroup, WireNode};
 
-/// Bytes per live row, index and tuple overhead included.
+/// Bytes per live row or packed entry, index and tuple overhead included.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RowBytes {
     pub cascade_row: i64,
-    /// A `cascade_questions` row; its key's bytes are added on top.
-    pub question_row: i64,
+    /// A question in `cascades.question_keys`: its line break; its key's
+    /// bytes are added on top.
+    pub question: i64,
     pub quiz_row: i64,
-    /// A `quiz_questions` row, at its graded size, so a level's figure does
-    /// not grow as it is studied.
-    pub quiz_question_row: i64,
+    /// A `quiz_cards` row (a chunk of up to 256 questions), without its questions.
+    pub chunk_row: i64,
+    /// One question of a level in its chunk, at its graded size, so a level's
+    /// figure does not grow as it is studied.
+    pub card: i64,
+    /// A level's question index, stored for every level but the Source quiz.
+    pub card_idx: i64,
     pub attempt_row: i64,
     /// A spec's `search_specs` row with its group and condition rows.
     pub spec_row: i64,
@@ -36,17 +40,22 @@ pub struct RowBytes {
 
 pub const ROW_BYTES: RowBytes = RowBytes {
     cascade_row: 380,
-    question_row: 94,
+    question: 1,
     quiz_row: 420,
-    quiz_question_row: 188,
+    chunk_row: 160,
+    card: 10,
+    card_idx: 4,
     attempt_row: 176,
     spec_row: 380,
     spec_word_row: 100,
 };
 
-/// A level (a quiz) of `question_count` questions.
-pub fn level_bytes(question_count: i64) -> i64 {
-    ROW_BYTES.quiz_row + question_count * ROW_BYTES.quiz_question_row
+/// A level (a quiz) of `question_count` questions; `source` for the Source
+/// quiz, whose question indexes are implied.
+pub fn level_bytes(question_count: i64, source: bool) -> i64 {
+    let b = ROW_BYTES;
+    let chunks = (question_count + crate::cards::CHUNK as i64 - 1) / crate::cards::CHUNK as i64;
+    b.quiz_row + chunks * b.chunk_row + question_count * (b.card + if source { 0 } else { b.card_idx })
 }
 
 /// One finished attempt's row.
@@ -80,7 +89,7 @@ pub fn spec_bytes(tree: &WireGroup) -> i64 {
 /// A cascade as created: its row, its questions with their keys' bytes, the
 /// Source quiz as one level, and its spec.
 pub fn new_cascade_bytes(question_count: i64, key_bytes: i64, spec_bytes: i64) -> i64 {
-    ROW_BYTES.cascade_row + question_count * ROW_BYTES.question_row + key_bytes + level_bytes(question_count) + spec_bytes
+    ROW_BYTES.cascade_row + question_count * ROW_BYTES.question + key_bytes + level_bytes(question_count, true) + spec_bytes
 }
 
 /// The account's figure and its effective limit, for `/api/auth/me`, every
@@ -152,12 +161,15 @@ pub async fn add_to_user(conn: &mut PgConnection, user: Uuid, delta: i64) -> Res
 pub async fn quizzes_bytes(conn: &mut PgConnection, quizzes: &[Uuid]) -> Result<Vec<(Uuid, i64)>, sqlx::Error> {
     let rows = sqlx::query!(
         r#"SELECT q.cascade_id,
-                  sum($2::int8 + q.question_count::int8 * $3::int8
-                      + $4::int8 * (SELECT count(*) FROM quiz_attempts a WHERE a.quiz_id = q.id))::int8 AS "bytes!"
+                  sum($2::int8 + ((q.question_count::int8 + 255) / 256) * $3::int8
+                      + q.question_count::int8 * ($4::int8 + CASE WHEN q.origin = 'source' THEN 0 ELSE $5::int8 END)
+                      + $6::int8 * (SELECT count(*) FROM quiz_attempts a WHERE a.quiz_id = q.id))::int8 AS "bytes!"
            FROM quizzes q WHERE q.id = ANY($1) GROUP BY q.cascade_id"#,
         quizzes,
         ROW_BYTES.quiz_row,
-        ROW_BYTES.quiz_question_row,
+        ROW_BYTES.chunk_row,
+        ROW_BYTES.card,
+        ROW_BYTES.card_idx,
         ROW_BYTES.attempt_row,
     )
     .fetch_all(conn)
@@ -184,12 +196,14 @@ pub async fn measure_spec(conn: &mut PgConnection, spec: Uuid) -> Result<i64, sq
 pub async fn measure_cascade(conn: &mut PgConnection, cascade: Uuid) -> Result<i64, sqlx::Error> {
     let r = sqlx::query!(
         r#"SELECT c.spec_id,
-                  (SELECT count(*) FROM cascade_questions WHERE cascade_id = c.id) AS "questions!",
-                  (SELECT coalesce(sum(octet_length(question_key)), 0)::int8 FROM cascade_questions
-                    WHERE cascade_id = c.id) AS "key_bytes!",
+                  octet_length(c.question_keys)::int8 AS "keys_and_breaks!",
                   (SELECT count(*) FROM quizzes WHERE cascade_id = c.id) AS "quizzes!",
-                  (SELECT count(*) FROM quiz_questions qq JOIN quizzes q ON q.id = qq.quiz_id
-                    WHERE q.cascade_id = c.id) AS "quiz_questions!",
+                  (SELECT count(*) FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id
+                    WHERE q.cascade_id = c.id) AS "chunks!",
+                  (SELECT coalesce(sum(octet_length(k.grades)), 0)::int8 FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id
+                    WHERE q.cascade_id = c.id) AS "cards!",
+                  (SELECT coalesce(sum(cardinality(k.idxs)), 0)::int8 FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id
+                    WHERE q.cascade_id = c.id) AS "indexed!",
                   (SELECT count(*) FROM quiz_attempts a JOIN quizzes q ON q.id = a.quiz_id
                     WHERE q.cascade_id = c.id) AS "attempts!"
            FROM cascades c WHERE c.id = $1"#,
@@ -198,11 +212,14 @@ pub async fn measure_cascade(conn: &mut PgConnection, cascade: Uuid) -> Result<i
     .fetch_one(&mut *conn)
     .await?;
     let b = ROW_BYTES;
+    // Each key ends with its line break, so the text's length is the keys'
+    // bytes plus one `question` per question.
     Ok(b.cascade_row
-        + r.questions * b.question_row
-        + r.key_bytes
+        + r.keys_and_breaks
         + r.quizzes * b.quiz_row
-        + r.quiz_questions * b.quiz_question_row
+        + r.chunks * b.chunk_row
+        + r.cards * b.card
+        + r.indexed * b.card_idx
         + r.attempts * b.attempt_row
         + measure_spec(conn, r.spec_id).await?)
 }
@@ -260,12 +277,16 @@ mod tests {
     #[test]
     fn the_formula_against_hand_computed_rows() {
         let b = ROW_BYTES;
-        assert_eq!(level_bytes(0), b.quiz_row);
-        assert_eq!(level_bytes(1000), b.quiz_row + 1000 * b.quiz_question_row);
+        assert_eq!(level_bytes(0, false), b.quiz_row);
+        // 1,000 questions are four chunks.
+        assert_eq!(level_bytes(1000, true), b.quiz_row + 4 * b.chunk_row + 1000 * b.card);
+        assert_eq!(level_bytes(1000, false), b.quiz_row + 4 * b.chunk_row + 1000 * (b.card + b.card_idx));
+        assert_eq!(level_bytes(256, false) - b.quiz_row, b.chunk_row + 256 * (b.card + b.card_idx));
+        assert_eq!(level_bytes(257, true) - b.quiz_row, 2 * b.chunk_row + 257 * b.card);
         // 1,000 questions of 7-byte keys and a spec with no word list.
         assert_eq!(
             new_cascade_bytes(1000, 7000, b.spec_row),
-            b.cascade_row + 1000 * (b.question_row + 7) + b.quiz_row + 1000 * b.quiz_question_row + b.spec_row
+            b.cascade_row + 1000 * (b.question + 7) + b.quiz_row + 4 * b.chunk_row + 1000 * b.card + b.spec_row
         );
         // A length condition costs nothing past the spec's row; word-list
         // entries are counted once each, duplicates dropped, keys by byte.

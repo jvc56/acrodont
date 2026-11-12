@@ -12,7 +12,6 @@ use common::sync::{assert_storage_consistent, insert_cascade, Device, Setup};
 use common::TestApp;
 use serde_json::{json, Value};
 use uuid::Uuid;
-use acrodont::cascade::order::shuffle;
 
 fn fixture() -> Value {
     let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract-fixtures/cascade/rules.json");
@@ -56,23 +55,19 @@ async fn db_state(app: &TestApp, cascade: Uuid) -> Value {
         .unwrap();
     let mut out = Vec::new();
     for q in quizzes {
-        let rows: Vec<(i32, i32, Option<String>)> = sqlx::query_as(
-            "SELECT question_idx, position, grade::text FROM quiz_questions WHERE quiz_id = $1 ORDER BY question_idx",
+        let rows: Vec<(i32, Option<String>)> = sqlx::query_as(
+            "SELECT question_idx, grade::text FROM quiz_questions WHERE quiz_id = $1 ORDER BY question_idx",
         )
         .bind(q.0)
         .fetch_all(app.db())
         .await
         .unwrap();
         let questions: Vec<u32> = rows.iter().map(|r| r.0 as u32).collect();
-        // Invariants: the counters match the grades, and the positions come
-        // from the seed through the shared shuffle.
-        let correct = rows.iter().filter(|r| r.2.as_deref() == Some("correct")).count() as i32;
-        let missed = rows.iter().filter(|r| r.2.as_deref() == Some("missed")).count() as i32;
+        // Invariant: the counters match the grades. Positions are never
+        // stored; every side computes them from the seed.
+        let correct = rows.iter().filter(|r| r.1.as_deref() == Some("correct")).count() as i32;
+        let missed = rows.iter().filter(|r| r.1.as_deref() == Some("missed")).count() as i32;
         assert_eq!((q.15, q.16), (correct, missed), "counters match grades");
-        let mut by_pos = rows.clone();
-        by_pos.sort_by_key(|r| r.1);
-        let order: Vec<u32> = by_pos.iter().map(|r| r.0 as u32).collect();
-        assert_eq!(order, shuffle(&questions, q.12 as u64), "positions come from the seed");
         out.push(json!({
             "id": q.0.to_string(), "level": q.1, "status": q.2, "origin": q.3,
             "origin_quiz_id": q.4.map(|u| u.to_string()), "origin_attempt": q.5, "origin_segment_end": q.6,

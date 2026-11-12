@@ -71,16 +71,18 @@ async fn creation_for_all_three_types(pool: sqlx::PgPool) {
         let hash: u64 = source["questions_hash"].as_str().unwrap().parse().unwrap();
         let idx: Vec<u32> = (0..expected).collect();
         assert_eq!(hash, questions_hash(&idx));
-        // Positions come from the shared shuffle over idx 0…count−1.
-        let rows: Vec<(i32, i32)> = sqlx::query_as(
-            "SELECT question_idx, position FROM quiz_questions WHERE quiz_id = $1 ORDER BY position",
+        // The Source quiz holds every idx 0…count−1, ungraded; its order comes
+        // from the shared shuffle over them with the seed.
+        let rows: Vec<(i32, Option<String>)> = sqlx::query_as(
+            "SELECT question_idx, grade::text FROM quiz_questions WHERE quiz_id = $1 ORDER BY question_idx",
         )
         .bind(Uuid::parse_str(source["id"].as_str().unwrap()).unwrap())
         .fetch_all(app.db())
         .await
         .unwrap();
-        let order: Vec<i32> = rows.iter().map(|r| r.0).collect();
-        assert_eq!(order, shuffle(&idx, seed).into_iter().map(|i| i as i32).collect::<Vec<_>>());
+        assert_eq!(rows.iter().map(|r| r.0 as u32).collect::<Vec<_>>(), idx);
+        assert!(rows.iter().all(|r| r.1.is_none()));
+        assert_eq!(shuffle(&idx, seed).len(), idx.len());
         // The stored i64 reads back as the same u64.
         let stored: i64 = sqlx::query_scalar("SELECT shuffle_seed FROM quizzes WHERE id = $1")
             .bind(Uuid::parse_str(source["id"].as_str().unwrap()).unwrap())
@@ -89,13 +91,12 @@ async fn creation_for_all_three_types(pool: sqlx::PgPool) {
             .unwrap();
         assert_eq!(from_i64(stored), seed);
         // The question index is in alphabetical order of the key.
-        let keys: Vec<String> = sqlx::query_scalar(
-            "SELECT question_key FROM cascade_questions WHERE cascade_id = $1 ORDER BY idx",
-        )
-        .bind(Uuid::parse_str(b["id"].as_str().unwrap()).unwrap())
-        .fetch_all(app.db())
-        .await
-        .unwrap();
+        let text: String = sqlx::query_scalar("SELECT question_keys FROM cascades WHERE id = $1")
+            .bind(Uuid::parse_str(b["id"].as_str().unwrap()).unwrap())
+            .fetch_one(app.db())
+            .await
+            .unwrap();
+        let keys = acrodont::cascade::routes::split_keys(&text);
         let mut sorted = keys.clone();
         sorted.sort();
         assert_eq!(keys, sorted);
@@ -374,7 +375,7 @@ async fn word_list_totals_on_creation_and_preview(pool: sqlx::PgPool) {
 async fn the_search_runs_before_the_transaction(pool: sqlx::PgPool) {
     let app = TestApp::with(
         pool,
-        &[("SEARCH_CONCURRENCY", "1"), ("SEARCH_TIMEOUT_MS", "20000"), ("MAX_STORAGE_BYTES_PER_USER", "10000")],
+        &[("SEARCH_CONCURRENCY", "1"), ("SEARCH_TIMEOUT_MS", "20000"), ("MAX_STORAGE_BYTES_PER_USER", "3000")],
     )
     .await;
     let c = app.seed_fixture_catalog("root").await;

@@ -12,7 +12,7 @@ import { confirm, createCascade, newUser, playLevel, sql } from './support';
 test('the storage limit: creation stops at it, studying goes past it, deleting forever makes room', async ({ page }) => {
 	test.setTimeout(300_000);
 	const { username } = await newUser(page, 'limits');
-	const limit = 20_000;
+	const limit = 12_000;
 	sql(`UPDATE users SET storage_limit_bytes = ${limit} WHERE username = '${username}'`);
 	// The device learns the account's limit from the server's next answer.
 	await page.goto('/cascades');
