@@ -1,6 +1,6 @@
 <script lang="ts">
-	// Segment size, progression and alphabetical order, with their inline
-	// explanations (PLAN.md § Quiz options, § Frontend → QuizOptionsForm), for
+	// Segment size, progression and alphabetical order, each explained behind
+	// its ⓘ (PLAN.md § Quiz options, § Frontend → QuizOptionsForm), for
 	// the level being studied and for the levels a cascade makes from now on,
 	// both in a cascade's Settings. Each option is a row with its control on the
 	// right, like every other setting, and is saved as soon as it is changed:
@@ -16,7 +16,6 @@
 		options = $bindable(),
 		questionCount = null,
 		maxQuizQuestions = 300_000,
-		editing = 'cascade',
 		segmentChain = false,
 		source = false,
 		showAlphabetical = true,
@@ -27,7 +26,6 @@
 		/** The cascade's count in the builder and options dialog, the quiz's own in its menu. */
 		questionCount?: number | null;
 		maxQuizQuestions?: number;
-		editing?: 'cascade' | 'quiz';
 		segmentChain?: boolean;
 		source?: boolean;
 		showAlphabetical?: boolean;
@@ -42,11 +40,6 @@
 	let error = $derived(segmented ? segmentSizeError(Number(sizeText), maxQuizQuestions) : null);
 	/** The drill levels one pass could make at the size in the field, warned about before it is saved. */
 	let levels = $derived(questionCount && segmented && !error ? chainBound(questionCount, Number(sizeText)) : 0);
-
-	const PROGRESSIONS = {
-		ladder: 'Keep the quiz and go down a level with the misses; come back up to clear it.',
-		drill: 'Replace the quiz with its misses and keep going until nothing is missed.'
-	} as const;
 
 	/** Saves the segment size the field holds, when it is one; turned on with none yet, it waits for one. */
 	function commitSize() {
@@ -74,7 +67,6 @@
 		<SettingRow
 			label="Study in segments" info={INFO.segmented}
 			for={`${idPrefix}segmented`}
-			hint="A segment of 40 means you study 40 at a time and drill what you missed before going on."
 		>
 			<Checkbox id={`${idPrefix}segmented`} checked={segmented} onCheckedChange={(v) => setSegmented(v === true)} />
 		</SettingRow>
@@ -100,7 +92,7 @@
 			</p>
 		{/if}
 		{#if !source}
-			<SettingRow label="When a quiz is finished below the clear threshold" info={INFO.progression} for={`${idPrefix}progression`} hint={PROGRESSIONS[options.progression]}>
+			<SettingRow label="When a quiz is finished below the clear threshold" info={INFO.progression} for={`${idPrefix}progression`}>
 				<select
 					id={`${idPrefix}progression`}
 					class="rounded border bg-background px-2 py-1"
@@ -127,8 +119,5 @@
 				}}
 			/>
 		</SettingRow>
-	{/if}
-	{#if editing === 'quiz' && !segmentChain}
-		<p class="text-xs text-muted-foreground">Changes apply to this quiz only, from the current card.</p>
 	{/if}
 </div>

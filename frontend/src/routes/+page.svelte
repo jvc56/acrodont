@@ -8,6 +8,7 @@
 	// its one limit (PLAN.md § Storage limit). The Trash is under the cascades, so
 	// they are seen together. Everything reads the local stores and works offline.
 	import { onMount } from 'svelte';
+	import { QUIZ_TYPE_LABELS } from '$lib/filters';
 	import { api } from '$lib/api';
 	import { session } from '$lib/auth/session.svelte';
 	import TrashIcon from '@lucide/svelte/icons/trash';
@@ -211,14 +212,17 @@
 		     this device, and Move to Trash. Everything else is in the player. -->
 		<ul class="divide-y rounded-lg border">
 			{#each list as s (s.cascade.id)}
-				<!-- Just the name; its options and ladder are its tooltip. On a phone the size, badge
-				     and Trash wrap below the name, so the name keeps the width. -->
+				<!-- The name and its quiz type; its other options and ladder are its tooltip. On a
+				     phone the size, badge and Trash wrap below the name, so the name keeps the width. -->
 				<li class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5">
-					<a
-						class="min-w-0 flex-1 basis-full font-medium break-words underline-offset-2 hover:underline sm:basis-0 sm:truncate"
-						href={`/cascades/${s.cascade.id}`}
-						title={details(s)}>{s.cascade.name}</a
-					>
+					<div class="flex min-w-0 flex-1 basis-full items-baseline gap-x-2 sm:basis-0">
+						<a
+							class="min-w-0 font-medium break-words underline-offset-2 hover:underline sm:truncate"
+							href={`/cascades/${s.cascade.id}`}
+							title={details(s)}>{s.cascade.name}</a
+						>
+						<span class="shrink-0 text-sm text-muted-foreground" data-quiz-type>{QUIZ_TYPE_LABELS[s.cascade.quiz_type]}</span>
+					</div>
 					<div class="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:shrink-0">
 						<span class="shrink-0 text-xs text-muted-foreground tabular-nums" title={sizeTitle(s)} data-cascade-storage>{formatBytes(s.cascade.storage_bytes ?? 0)}</span>
 						{#if s.offline !== 'checking'}<span class="min-w-0 rounded bg-muted px-2 py-0.5 text-xs">{badge(s)}</span>{/if}
