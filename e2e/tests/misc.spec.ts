@@ -70,16 +70,19 @@ test('a word row is probability, front hooks, word, back hooks, definition; each
 	expect(d.x).toBeGreaterThanOrEqual(b.x + b.width);
 	expect(d.y).toBeLessThan(w.y + w.height);
 	// The word stays in the middle of the quiz area, whatever sits either side of it.
-	const area = (await page.locator('[data-fit-area]').first().boundingBox())!;
-	expect(Math.abs(w.x + w.width / 2 - (area.x + area.width / 2))).toBeLessThan(3);
+	// (Measured afresh each time: opening Settings shows the menu, which narrows the area.)
+	const offCentre = async () => {
+		const [word_, area] = [await box(word), (await page.locator('[data-fit-area]').first().boundingBox())!];
+		return Math.abs(word_.x + word_.width / 2 - (area.x + area.width / 2));
+	};
+	expect(await offCentre()).toBeLessThan(3);
 	// No probability order until asked for; then it sits before the front hooks.
 	await expect(probability).toHaveText('');
 	await playerSetting(page, 'Show each word’s probability order', true);
 	await expect(probability).toHaveText(/^\s*\d+\s*$/);
 	const [p, f] = [await box(probability), await box(frontHooks)];
 	expect(p.x + p.width).toBeLessThanOrEqual(f.x);
-	w = await box(word);
-	expect(Math.abs(w.x + w.width / 2 - (area.x + area.width / 2))).toBeLessThan(3);
+	expect(await offCentre()).toBeLessThan(3);
 	// Turned off, the definition is centred under the word.
 	await playerSetting(page, 'Definitions in their own column', false);
 	[w, d] = [await box(word), await box(definition)];
@@ -94,7 +97,7 @@ test('a word row is probability, front hooks, word, back hooks, definition; each
 	await expect(dialog.getByText('Synced', { exact: true })).toHaveCount(0);
 	await dialog.getByRole('button', { name: 'Close' }).click();
 	// The sync status shows by default; hiding the status bar hides it too, and it has a setting of its own.
-	const synced = page.getByRole('status').filter({ hasText: /^Synced$/ });
+	const synced = page.getByText('Synced', { exact: true });
 	await expect(synced).toBeVisible({ timeout: 30_000 });
 	await page.getByRole('button', { name: 'Hide status bar' }).click();
 	await expect(synced).toHaveCount(0);
