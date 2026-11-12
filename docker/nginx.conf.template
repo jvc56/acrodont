@@ -74,6 +74,15 @@ server {
         add_header Cache-Control "no-cache" always;
     }
 
+    # The app's manifest (PLAN.md § On the device → Installing the app): the
+    # image's mime.types has no .webmanifest, and a browser wants this type.
+    location = /manifest.webmanifest {
+        include /etc/nginx/conf.d/acrodont-headers.inc;
+        types { }
+        default_type application/manifest+json;
+        add_header Cache-Control "no-cache" always;
+    }
+
     location = /index.html {
         include /etc/nginx/conf.d/acrodont-headers.inc;
         add_header Cache-Control "no-cache" always;

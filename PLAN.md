@@ -2509,6 +2509,46 @@ running the old build closes them and shows "Acrodont was updated in another tab
 — reload to continue", so the new build's upgrade is never **blocked** by an
 old tab holding the previous version open.
 
+**Installing the app.** The worker lets a closed tab come back with no
+connection, but only for someone who can find the site again and whose browser
+has kept its data, so the app is installable and asks to keep that data:
+
+- **A web app manifest** (`static/manifest.webmanifest`, linked from `app.html`
+  with a theme colour and an `apple-touch-icon`): name, `start_url` `/`,
+  `display: standalone`, and icons at 192 and 512 px, a maskable one and an SVG,
+  drawn in `static/icons/*.svg` and rendered by `frontend/scripts/icons.mjs`: a
+  cream letter tile with a dark A. The browser tab's icon is a cream A on the
+  dark ground (`favicon.svg`, with a 32 px `/favicon.ico` for a browser that
+  shows no SVG icon).
+  Chrome, Edge and Android then offer to install it; on an iPhone or iPad it is
+  Share → Add to Home Screen. Installed, it opens from its own icon, with or
+  without a connection, straight from the worker's cache. The manifest and icons
+  are among the worker's precached `files`. Nginx serves the manifest as
+  `application/manifest+json` (the image's `mime.types` has no `.webmanifest`).
+- **Keeping the data**: once an account is signed in, the app calls
+  `navigator.storage.persist()` (once per page load, after
+  `persisted()` says it is not already kept), and again after an accepted
+  install. Unasked, a browser may clear a site's IndexedDB and caches when the
+  device runs low on space, and Safari clears a site's script-written data after
+  seven days of use without a visit to it, unless it is on the Home Screen. Synced
+  work comes back with the next download; anything still in the outbox would be
+  lost.
+- **The header's offline status** (`OfflineStatus`, beside SyncStatus): an icon,
+  green when an active worker has the app stored and the browser keeps the data,
+  amber when the data is not kept or the browser has no service worker, pulsing
+  while the worker installs. Hovering, tapping or clicking it says which, in
+  words (`lib/sw/install.ts`), and offers Install where the browser can.
+- **Install**: Chrome's and Edge's `beforeinstallprompt` is held back from the
+  browser's own mini-infobar and shown as an **Install** button in the header
+  (icon only on a phone) and in the offline status; pressing it opens the
+  browser's install dialog. It goes once used or installed (`appinstalled`), and
+  is never shown inside the installed app.
+- **On an iPhone or iPad**, which never offers to install, a one-time tip under
+  the header (`InstallTip`) says "To study with no connection, add Acrodont to
+  your Home Screen: tap Share, then Add to Home Screen." Dismiss hides it for
+  good on that browser (a `localStorage` flag; with no storage, it shows again
+  next visit). It does not show inside the installed app or in the player.
+
 **IndexedDB stores**: one database per user id, so two accounts on one device
 never mix, plus one **unscoped** database holding two things: an `accounts`
 table with one row per account that has data here, and a single `signed_in`
@@ -6670,7 +6710,14 @@ through the ordinary endpoints, so there is still no test-only path.
   that the policy is **present**: the `index.html` the service worker serves
   carries the `<meta>` policy, its `script-src` holds `'self'` and a hash but
   not `'unsafe-inline'`, and an inline script the test injects into the page
-  is refused with a violation. Then stop the backend between the token request and the download,
+  is refused with a violation. **Installing** (`shell.spec.ts`): the manifest is
+  served as `application/manifest+json` with its icons; once a cascade is
+  available offline the header's status says Acrodont opens with no connection
+  and the browser has been asked to keep the data; a `beforeinstallprompt` the
+  test dispatches becomes an Install button that calls its `prompt()` and goes;
+  a tab closed with no connection and a new one opened on the cascade shows its
+  first card; and as an iPhone the tip shows, and stays gone once dismissed and
+  reloaded. Then stop the backend between the token request and the download,
   so the download meets the proxy's error page, and see the app stay on screen
   with no file and the dialog offering to try again. With
   the cascade's answers evicted, export its questions offline and see a
