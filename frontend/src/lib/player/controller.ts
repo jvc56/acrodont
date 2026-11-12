@@ -57,11 +57,13 @@ export interface PlayerView {
 	distributionMissing: boolean;
 	/** The card to show is being fetched: the player shows that, not the card before. */
 	fetchingCard: boolean;
+	/** A first open's share done, 0 to 1, while the status is `downloading`; null when not known. */
+	downloadProgress: number | null;
 }
 
 export interface PlayerOptions {
 	/** Runs the full fetch sequence for the cascade (first open). */
-	ensure: (cascadeId: string) => Promise<void>;
+	ensure: (cascadeId: string, progress?: (fraction: number) => void) => Promise<void>;
 	afterWrite?: () => void;
 	/** Fetches the card `idx`, with the cards `ahead` the device lacks, ahead of any download (online only). */
 	fetchCard?: (cascadeId: string, idx: number, ahead: number[]) => Promise<void>;
@@ -106,7 +108,8 @@ export class Player {
 		storage: false,
 		completion: null,
 		distributionMissing: false,
-		fetchingCard: false
+		fetchingCard: false,
+		downloadProgress: null
 	};
 	/** Keys and answers of the cards around the current one, by idx: Next and Previous draw from here. */
 	private cache = new Map<number, { key: string; answer: unknown; word: WordHooks | null }>();
@@ -235,13 +238,21 @@ export class Player {
 		if (quiz.pending || rows.length !== quiz.question_count || rows.some((r) => r.position === null)) {
 			this.v.status = 'downloading';
 			this.v.quiz = quiz;
+			this.v.downloadProgress = null;
 			this.emit();
 			try {
-				await this.opts.ensure(this.cascadeId);
+				await this.opts.ensure(this.cascadeId, (f) => {
+					// Shown to the whole percent: a change smaller than that is not drawn.
+					if (this.v.status !== 'downloading' || Math.floor(f * 100) === Math.floor((this.v.downloadProgress ?? -1) * 100)) return;
+					this.v.downloadProgress = f;
+					this.emit();
+				});
 			} catch {
 				this.v.status = 'needs_connection';
+				this.v.downloadProgress = null;
 				return this.emit();
 			}
+			this.v.downloadProgress = null;
 			const again = this.tx();
 			const q2 = await view.quiz(again, quiz.id);
 			rows = await view.questionsOf(again, quiz.id);

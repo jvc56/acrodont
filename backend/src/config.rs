@@ -36,7 +36,6 @@ pub struct Config {
     pub mail_max_per_second: u32,
     pub public_url: String,
     pub max_quiz_questions: u32,
-    pub max_accounts: u32,
     /// An account's server storage in bytes (STORAGE_LIMIT_PLAN.md § S2);
     /// `users.storage_limit_bytes` replaces it for one account.
     pub max_storage_bytes_per_user: u64,
@@ -134,7 +133,6 @@ impl Config {
             mail_max_per_second: r.parse_rate("MAIL_MAX_PER_SECOND", 1)?,
             public_url: r.string("PUBLIC_URL", "http://localhost:5173"),
             max_quiz_questions,
-            max_accounts: r.parse("MAX_ACCOUNTS", 50)?,
             max_storage_bytes_per_user,
             search_timeout_ms: r.parse("SEARCH_TIMEOUT_MS", 2000)?,
             search_concurrency,
@@ -247,7 +245,6 @@ mod tests {
         assert_eq!(c.session_ttl_seconds, 2_592_000);
         assert_eq!(c.max_quiz_questions, 300_000);
         assert_eq!(c.max_storage_bytes_per_user, 100_000_000);
-        assert_eq!(c.max_accounts, 50);
         assert_eq!(c.export_concurrency, 2);
         assert!(!c.dev_login);
         assert_eq!(c.search_concurrency, 2);

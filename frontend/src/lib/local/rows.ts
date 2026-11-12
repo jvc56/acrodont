@@ -27,6 +27,8 @@ export interface CascadeRow {
 	show_hooks: boolean;
 	/** Whether showing an answer marks it correct (else missed) until toggled. */
 	reveal_correct: boolean;
+	/** An Anagram cascade's: typed mode's "3 of 9 found" shows in the status bar (off by default: it hints). */
+	show_found_count: boolean;
 	/** A Leave Value cascade's: the decimal places leave values are rounded to, 0 to 3. */
 	leave_value_decimals: number;
 	/** What the cascade holds on the server, in bytes, as the server last counted it (PLAN.md § Storage limit). */
@@ -50,7 +52,7 @@ export interface CascadeRow {
 
 /** The per-cascade settings every new cascade starts with (PLAN.md § Settings). */
 export const CASCADE_SETTING_DEFAULTS = {
-	clear_threshold: 80,
+	clear_threshold: 90,
 	segment_size: 0,
 	progression: 'ladder',
 	require_alphabetical: false,
@@ -58,6 +60,7 @@ export const CASCADE_SETTING_DEFAULTS = {
 	show_definitions: true,
 	show_hooks: true,
 	reveal_correct: true,
+	show_found_count: false,
 	leave_value_decimals: 1
 } as const satisfies Partial<CascadeRow>;
 

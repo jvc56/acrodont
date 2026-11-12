@@ -33,6 +33,10 @@ export const CARDS_PAGE = 10_000;
  * (`whilePlayerActs`), so an action waits for one chunk at most.
  */
 export const WRITE_CHUNK = 250;
+/** A card's weight in a first open's progress, against a row placed or a key fetched: cards are the larger. */
+const CARD_UNITS = 3;
+/** A first open hears the rows of one quiz's transaction in steps this size. */
+const METER_STEP = 2_000;
 /**
  * Bytes a base question row with its position costs, for the budget: the
  * middle of PLAN.md's "roughly 100–200 bytes per question per level", which
@@ -118,7 +122,7 @@ export interface DownloadOptions {
 	/** ROW_STORAGE_BUDGET and the answer soft limit; tests shrink them. */
 	rowBudget?: number;
 	answerLimit?: number;
-	/** Figures for the Account page's storage line. */
+	/** The device's totals, kept on the account's `accounts` row. */
 	onTotals?: (t: { rows: number; keys: number; answer_bytes: number }) => void;
 }
 
@@ -133,6 +137,8 @@ export class DownloadManager {
 	private readonly rowBudget: number;
 	private readonly answerLimit: number;
 	private running: Promise<void> | null = null;
+	/** A first open's progress, per cascade: each step reports the units it finished (ensureCascade). */
+	private readonly meters = new Map<string, (units: number) => void>();
 	noRoom = false;
 
 	constructor(
@@ -257,11 +263,78 @@ export class DownloadManager {
 	}
 
 	/** Everything one cascade needs, now: a first open, a restore (§ Downloads). */
-	async ensureCascade(cascadeId: string): Promise<void> {
-		await this.distributionFor(cascadeId);
-		await this.questionRows(cascadeId);
-		await this.keys(cascadeId);
-		await this.cards(cascadeId);
+	/**
+	 * A first open's wait (PLAN.md § Downloads): the distribution, and each
+	 * active quiz's index list, graded rows and positions — what the player
+	 * needs to know the level's order. Its keys and cards then come in the
+	 * background, while the player fetches the cards it shows, and the 200
+	 * after each, on demand. `progress` hears the share of the rows placed, 0 to 1.
+	 */
+	async ensureLevel(cascadeId: string, progress?: (fraction: number) => void): Promise<void> {
+		if (progress) {
+			const total = Math.max(1, await this.rowsLeft(cascadeId));
+			let done = 0;
+			this.meters.set(cascadeId, (units) => {
+				done += units;
+				progress(Math.min(1, done / total));
+			});
+			progress(0);
+		}
+		try {
+			await this.distributionFor(cascadeId);
+			await this.questionRows(cascadeId);
+		} finally {
+			this.meters.delete(cascadeId);
+		}
+	}
+
+	/** Whether a download pass is running now: a run() asked for then joins it. */
+	get busy(): boolean {
+		return this.running !== null;
+	}
+
+	/** The question rows a cascade's active quizzes still have to place. */
+	private async rowsLeft(cascadeId: string): Promise<number> {
+		let units = 0;
+		for (const quiz of await this.activeQuizzes(cascadeId)) if (!(await this.complete(quiz))) units += quiz.question_count;
+		return units;
+	}
+
+	/**
+	 * Everything a cascade needs to study it offline, in one go: its rows, then
+	 * its keys and cards. `progress` hears the share done, 0 to 1: the work is
+	 * counted up front in rows to place, keys to fetch and cards to fetch (a
+	 * card weighs CARD_UNITS, being larger), and each step reports what it finished.
+	 */
+	async ensureCascade(cascadeId: string, progress?: (fraction: number) => void): Promise<void> {
+		if (progress) {
+			const total = Math.max(1, await this.workLeft(cascadeId));
+			let done = 0;
+			this.meters.set(cascadeId, (units) => {
+				done += units;
+				progress(Math.min(1, done / total));
+			});
+			progress(0);
+		}
+		try {
+			await this.distributionFor(cascadeId);
+			await this.questionRows(cascadeId);
+			await this.keys(cascadeId);
+			await this.cards(cascadeId);
+		} finally {
+			this.meters.delete(cascadeId);
+		}
+	}
+
+	/** The units of work ensureCascade has left for a cascade: rows to place, keys and cards to fetch. */
+	private async workLeft(cascadeId: string): Promise<number> {
+		const c = await this.cascadeView(cascadeId);
+		if (!c) return 0;
+		let units = await this.rowsLeft(cascadeId);
+		const span = (froms: number[], size: number) => froms.reduce((n, from) => n + Math.min(size, c.question_count - from), 0);
+		units += span(await this.missingRanges('questions', c, KEYS_PAGE), KEYS_PAGE);
+		units += span((await this.cardRanges(c)).froms, CARDS_PAGE) * CARD_UNITS;
+		return units;
 	}
 
 	// -------------------------------------------------------------------------
@@ -383,7 +456,17 @@ export class DownloadManager {
 				});
 			}
 			rows = withPositions(rows, row.shuffle_seed);
-			await Promise.all(rows.map((r) => store.put(r)));
+			// A first open hears the rows go in, a few thousand at a time, as the one transaction runs.
+			const meter = this.meters.get(cascade.id);
+			let put = 0;
+			await Promise.all(
+				rows.map((r) =>
+					store.put(r).then(() => {
+						if (meter && ++put % METER_STEP === 0) meter(METER_STEP);
+					})
+				)
+			);
+			meter?.(put % METER_STEP);
 			const next = { ...row };
 			delete next.pending;
 			await tx.objectStore('quizzes').put(next);
@@ -424,6 +507,7 @@ export class DownloadManager {
 					await addSize(tx as unknown as RwTx, c.id, bytes, 0);
 					await tx.done;
 				});
+				this.meters.get(c.id)?.(part.length);
 			}
 			this.opts.onProgress?.(cascadeId);
 		}
@@ -435,9 +519,8 @@ export class DownloadManager {
 		return view.cascade(tx as unknown as AnyTx, cascadeId);
 	}
 
-	private async cards(cascadeId: string) {
-		const c = await this.cascadeView(cascadeId);
-		if (!c) return;
+	/** The card pages a cascade lacks, with the extras its settings ask for. */
+	private async cardRanges(c: CascadeRow): Promise<{ froms: number[]; hooks: boolean; definitions: boolean }> {
 		const hooks = wantsHooks(c);
 		const definitions = wantsDefinitions(c);
 		// Cards record which extras they hold; a setting asking for more refetches them.
@@ -451,9 +534,17 @@ export class DownloadManager {
 			}
 			froms = [...lacking].sort((a, b) => a - b);
 		}
+		return { froms, hooks, definitions };
+	}
+
+	private async cards(cascadeId: string) {
+		const c = await this.cascadeView(cascadeId);
+		if (!c) return;
+		const { froms, hooks, definitions } = await this.cardRanges(c);
 		for (const from of froms) {
 			const page = await this.page(() => this.api.cards(c.id, from, CARDS_PAGE, hooks, definitions));
 			await this.writeCards(c, page, hooks, definitions, true);
+			this.meters.get(c.id)?.(page.length * CARD_UNITS);
 			this.opts.onProgress?.(cascadeId);
 		}
 	}

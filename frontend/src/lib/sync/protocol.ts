@@ -43,6 +43,8 @@ export interface SyncResponse {
 	resync_required?: boolean;
 	/** The account's storage and its limit, in bytes, on every response (PLAN.md § Storage limit). */
 	storage?: { used: number; limit: number };
+	/** The account's shared device settings, on every response (lib/settings/device). */
+	device_settings?: Record<string, { value: unknown; at: string }>;
 }
 
 export interface SyncRequest {
@@ -52,6 +54,8 @@ export interface SyncRequest {
 	page_token?: string;
 	question_rows_for: string[];
 	ops?: unknown[];
+	/** Device settings shared on this device and not yet sent (lib/settings/device). */
+	device_settings?: Record<string, { value: unknown; at: string }>;
 }
 
 /** One HTTP exchange: the status, the parsed body and any Retry-After. */

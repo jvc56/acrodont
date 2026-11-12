@@ -597,7 +597,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     who = args.login_as or user.username
     url = base_url if args.no_login else (
-        f"{base_url}/dev-login?username={urllib.parse.quote(who)}&next=/cascades")
+        f"{base_url}/dev-login?username={urllib.parse.quote(who)}&next=/")
     if not args.no_browser:
         if args.two_devices:
             open_two_devices(args, url)

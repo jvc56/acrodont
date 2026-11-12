@@ -4,7 +4,7 @@
  * visible ASCII, so a tab or newline cannot smuggle a host in (birdtest's dev
  * login let `/<tab>/host` through). Anything else becomes `fallback`.
  */
-export function sameSitePath(next: string | null | undefined, fallback = '/cascades'): string {
+export function sameSitePath(next: string | null | undefined, fallback = '/'): string {
 	if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/\\')) return fallback;
 	for (let i = 0; i < next.length; i++) {
 		const c = next.charCodeAt(i);

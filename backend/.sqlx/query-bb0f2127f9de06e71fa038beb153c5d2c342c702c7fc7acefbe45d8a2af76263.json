@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE cascades SET show_definitions = $2, show_hooks = $3, reveal_correct = $4, leave_value_decimals = $5,\n                                 show_found_count = $6\n             WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Int2",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bb0f2127f9de06e71fa038beb153c5d2c342c702c7fc7acefbe45d8a2af76263"
+}

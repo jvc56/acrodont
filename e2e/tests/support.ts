@@ -72,13 +72,16 @@ export async function newUser(page: Page, prefix = 'e2e'): Promise<{ username: s
 	return { username, email };
 }
 
+/** The site's root, the Cascades page: the origin and `/`, nothing after. */
+export const ROOT_URL = /^https?:\/\/[^/]+\/$/;
+
 export async function login(page: Page, username: string) {
 	await page.goto('/login');
 	await page.getByLabel('Username').fill(username);
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Log in' }).click();
-	// Logging in lands on the Cascades page.
-	await expect(page).toHaveURL(/\/cascades$/);
+	// Logging in lands on the Cascades page, the site's root.
+	await expect(page).toHaveURL(ROOT_URL);
 }
 
 /** A cascade through the builder, with the settings every new cascade starts with; returns its player path. */
@@ -236,6 +239,23 @@ export async function idb<T>(page: Page, fn: string, arg?: unknown): Promise<T> 
 		}
 	})(${JSON.stringify(arg ?? null)})`;
 	return page.evaluate(source) as Promise<T>;
+}
+
+/** The usernames of the accounts with data in this browser, from the shared `accounts` store. */
+export async function deviceAccounts(page: Page): Promise<string[]> {
+	return page.evaluate(async () => {
+		const db = await new Promise<IDBDatabase>((res, rej) => {
+			const r = indexedDB.open('acrodont');
+			r.onsuccess = () => res(r.result);
+			r.onerror = () => rej(r.error);
+		});
+		const rows = await new Promise<{ username: string }[]>((res) => {
+			const r = db.transaction('accounts').objectStore('accounts').getAll();
+			r.onsuccess = () => res(r.result);
+		});
+		db.close();
+		return rows.map((r) => r.username).sort();
+	});
 }
 
 /** Operations of a kind waiting in the outbox. */

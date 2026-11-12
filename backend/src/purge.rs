@@ -83,6 +83,8 @@ pub async fn purge_trash(state: &AppState) -> anyhow::Result<()> {
         let seq = sqlx::query_scalar!("UPDATE users SET sync_seq = sync_seq + 1 WHERE id = $1 RETURNING sync_seq", user)
             .fetch_one(&mut *tx)
             .await?;
+        // The account's devices drop what was purged at once (sync::notify).
+        crate::sync::notify::changed(&mut tx, user, None).await?;
         let quizzes: Vec<Uuid> = sqlx::query_scalar!(
             "SELECT q.id FROM quizzes q JOIN cascades c ON c.id = q.cascade_id
              WHERE q.user_id = $1 AND q.status = 'cleared' AND c.trashed_at IS NULL

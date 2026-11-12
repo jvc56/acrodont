@@ -81,3 +81,18 @@ per-account storage limit, and raises the question ceiling (decisions D1–D5):
 
 Nothing is deployed, so the edit is in place. A database made by the earlier
 file no longer matches: `./scripts/dev.py --reset`.
+
+## 2026-11-11: the found count is a cascade setting; shared device settings
+
+- `cascades.show_found_count BOOLEAN NOT NULL DEFAULT false`: typed mode's
+  "3 of 9 found", which was a display setting on each device, is now one of an
+  anagram cascade's settings, set by `set_cascade_options` and copied by Start
+  over like `show_hooks`.
+- `users.device_settings JSONB NOT NULL DEFAULT '{}'` (`CHECK` an object): the
+  device settings shared with all of the account's devices, setting name to
+  `{value, at}`, merged by each sync request's `device_settings` (the later
+  `at` wins) and returned on every sync response (PLAN.md § Settings → This
+  device, or all of them).
+
+Nothing is deployed, so the edit is in place. A database made by the earlier
+file no longer matches: `./scripts/dev.py --reset`.

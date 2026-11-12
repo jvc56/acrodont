@@ -9,8 +9,8 @@ describe('display settings', () => {
 		expect([d.question_spacing, d.answer_spacing]).toEqual([0, 0]);
 		expect([d.question_top_px, d.border_px, d.repeat_guard_ms]).toEqual([8, 10, 0]);
 		expect(d.status_bar_hidden).toBe(false);
-		// Typed mode's found count hints at how many are left: off unless asked for.
-		expect(d.show_found_count).toBe(false);
+		// Columns on a phone; rows, when chosen, 64 px each.
+		expect([d.mobile_buttons, d.mobile_row_px]).toEqual(['columns', 64]);
 		// A missed answer shows its red border; a correct one shows none.
 		expect([d.border_correct, d.border_missed]).toEqual([false, true]);
 	});
@@ -23,6 +23,7 @@ describe('display settings', () => {
 		expect(clampSetting('border_px', -3)).toBe(0);
 		expect(clampSetting('repeat_guard_ms', 'abc')).toBe(0);
 		expect(clampSetting('spacing_em', '0.1')).toBe(0.1);
+		expect([normalizeDisplay({ mobile_row_px: 90 }).mobile_row_px, clampSetting('mobile_row_px', 5)]).toEqual([90, 32]);
 	});
 
 	it("follows the repeat guard's new default, and keeps a value the user chose", () => {

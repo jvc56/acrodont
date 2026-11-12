@@ -391,6 +391,21 @@ impl<'a> Client<'a> {
         resp
     }
 
+    /// A GET whose body is handed over unread, for a stream that does not end
+    /// (`/api/sync/events`): the client's cookies, no `X-Acrodont-User`, as
+    /// `EventSource` sends it.
+    pub async fn open_stream(&self, path: &str) -> (StatusCode, Body) {
+        let cookie = self.cookies.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("; ");
+        let mut req = Request::get(path)
+            .header("x-forwarded-for", &self.ip)
+            .header(header::COOKIE, cookie)
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 40000))));
+        let resp = self.app.router.clone().oneshot(req).await.expect("router");
+        (resp.status(), resp.into_body())
+    }
+
     /// Keeps cookies as a browser would.
     pub fn absorb(&mut self, resp: &TestResponse) {
         for sc in resp.set_cookies() {

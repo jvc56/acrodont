@@ -12,11 +12,8 @@
 	import { describe } from '$lib/auth/errors';
 	import { forgetSession, logout, session } from '$lib/auth/session.svelte';
 	import { removeAccountData } from '$lib/local/accounts';
-	import { closeUserDb, userDb } from '$lib/local/open';
-	import { onMount } from 'svelte';
-	import StorageCard from '$lib/components/account/StorageCard.svelte';
+	import { closeUserDb } from '$lib/local/open';
 	import SettingRow from '$lib/components/SettingRow.svelte';
-	import type { UserDb } from '$lib/local/db';
 	import { syncNow, syncState } from '$lib/sync/runtime.svelte';
 
 
@@ -29,15 +26,6 @@
 	let deleteError = $state<string | null>(null);
 
 	let removeData = $state(false);
-
-	let db = $state<UserDb | null>(null);
-
-	onMount(() => {
-		void (async () => {
-			if (!session.userId) return;
-			db = await userDb(session.userId, session.username);
-		})();
-	});
 
 	function fieldErrorsOr(e: unknown, set: (f: FieldError[]) => void): string | null {
 		if (e instanceof ApiError && e.fieldErrors.length) {
@@ -131,13 +119,9 @@
 		</Card.Content>
 	</Card.Root>
 
-	<p class="text-sm text-muted-foreground">
-		Each cascade’s settings, and this device’s display and controls, are in the cascade’s Settings: ⚙ in the player.
-	</p>
 
-	{#if db}
-		<StorageCard {db} />
-	{/if}
+
+
 
 	<Card.Root>
 		<Card.Header>

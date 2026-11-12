@@ -59,8 +59,8 @@ test('a cascade’s settings: for it alone, for all cascades, or copied from ano
 	await expect(here.getByRole('button', { name: 'new cascades' })).toHaveCount(0);
 	await closeSettings(page);
 	await page.goto('/cascades');
-	await expect(page.getByText(/clear at 60%/)).toHaveCount(1);
-	await expect(page.getByText(/clear at 80%/)).toHaveCount(1);
+	await expect(page.getByTitle(/clear at 60%/)).toHaveCount(1);
+	await expect(page.getByTitle(/clear at 80%/)).toHaveCount(1);
 
 	// Every cascade, one tap.
 	await openPlayer(page, alpha);
@@ -69,7 +69,7 @@ test('a cascade’s settings: for it alone, for all cascades, or copied from ano
 	await expect(again.getByText('✓ Used for all 2 cascades')).toBeVisible();
 	await closeSettings(page);
 	await page.goto('/cascades');
-	await expect(page.getByText(/clear at 70%/)).toHaveCount(2);
+	await expect(page.getByTitle(/clear at 70%/)).toHaveCount(2);
 
 	// A setting only anagram cascades have offers the anagram cascades.
 	await openPlayer(page, alpha);

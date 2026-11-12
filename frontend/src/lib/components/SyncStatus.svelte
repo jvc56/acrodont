@@ -31,8 +31,9 @@
 	});
 </script>
 
-<!-- Flush right in a fixed box: "Synced" stays in the corner, and a longer label grows to the left. -->
-<div class="flex w-40 shrink-0 items-center justify-end gap-2 text-sm whitespace-nowrap" role="status" title={text}>
+<!-- Flush right in a fixed box: "Synced" stays in the corner, and a longer label grows to the left.
+     On a phone the box fits its label, so the header stays on one line. -->
+<div class="flex max-w-40 min-w-0 items-center sm:w-40 sm:shrink-0 justify-end gap-2 text-sm whitespace-nowrap" role="status" title={text}>
 	<span class="inline-block h-2 w-2 shrink-0 rounded-full" class:bg-green-600={text === 'Synced'} class:bg-muted-foreground={text !== 'Synced'}></span>
 	{#if syncState.status === 'reload'}
 		<button class="truncate underline" onclick={applyUpdate}>{text}</button>

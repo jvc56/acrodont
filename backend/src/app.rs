@@ -36,6 +36,8 @@ pub struct AppState {
     pub catalog_ready: Arc<AtomicBool>,
     /// Argon2 verifies run by login, for the log and the rate-limit tests.
     pub argon2_verifies: Arc<AtomicU64>,
+    /// This instance's change listener and the event streams it feeds (sync::notify).
+    pub changes: crate::sync::notify::Hub,
 }
 
 impl AppState {
@@ -54,6 +56,7 @@ impl AppState {
             config: Arc::new(config),
             catalog_ready: Arc::new(AtomicBool::new(false)),
             argon2_verifies: Arc::new(AtomicU64::new(0)),
+            changes: crate::sync::notify::Hub::default(),
         }
     }
 
@@ -129,12 +132,17 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         tracing::info!(load_ms, "catalog loaded; ready");
     });
     crate::purge::spawn(state.clone());
+    let changes = state.changes.clone();
 
     axum::serve(
         listener,
         build_router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown(async move {
+        shutdown_signal().await;
+        // Open event streams would hold the shutdown for minutes (sync::notify).
+        changes.close();
+    })
     .await?;
     Ok(())
 }

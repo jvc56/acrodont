@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { newUser } from './support';
+import { newUser, ROOT_URL } from './support';
 
 // PLAN.md § Development → One command: ./scripts/dev.py opens the browser at
 // /dev-login, which signs in through POST /api/dev/login (DEV_LOGIN, local
@@ -18,7 +18,7 @@ test('dev sign-in adopts the session and refuses an off-site next', async ({ pag
 	await expect(tab.getByText(username).first()).toBeVisible();
 	// A next that a browser could read as another host lands on the Cascades page.
 	await tab.goto(`/dev-login?username=${username}&next=//evil.example/`);
-	await expect(tab).toHaveURL(/\/cascades$/);
+	await expect(tab).toHaveURL(ROOT_URL);
 	await fresh.close();
 });
 

@@ -3,5 +3,5 @@
 import { redirect } from '@sveltejs/kit';
 
 export function load() {
-	redirect(307, '/cascades#trash');
+	redirect(307, '/#trash');
 }

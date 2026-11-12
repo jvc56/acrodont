@@ -13,6 +13,7 @@ use axum::http::{Request, StatusCode, header};
 use common::{Client, PASSWORD, TestApp};
 use serde_json::json;
 use acrodont::auth::mail::MailKind;
+use acrodont::auth::routes::MAX_ACCOUNTS;
 
 fn reg(username: &str, email: &str) -> serde_json::Value {
     json!({ "username": username, "email": email, "password": PASSWORD })
@@ -1110,12 +1111,31 @@ async fn purge_deletes_stale_unconfirmed_accounts(pool: sqlx::PgPool) {
 #[allow(dead_code)]
 fn _unused(_: Client) {}
 
+/// Adds `n` confirmed accounts straight to the table (no Argon2, no mail), so
+/// a test reaches MAX_ACCOUNTS quickly.
+async fn fill_accounts(app: &TestApp, n: i64) {
+    sqlx::query(
+        "INSERT INTO users (username, email, password_hash, email_confirmed_at)
+         SELECT 'filler' || g, 'filler' || g || '@example.com', 'x', now()
+         FROM generate_series(1, $1) g",
+    )
+    .bind(n)
+    .execute(app.db())
+    .await
+    .unwrap();
+}
+
+async fn account_count(app: &TestApp) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM users").fetch_one(app.db()).await.unwrap()
+}
+
 /// MAX_ACCOUNTS: once the site holds that many accounts, every registration
 /// is refused alike, a new address and a known one, so a closed site reveals
 /// nothing about which addresses have accounts.
 #[sqlx::test]
 async fn registration_closes_at_max_accounts(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("MAX_ACCOUNTS", "2")]).await;
+    let app = TestApp::new(pool).await;
+    fill_accounts(&app, MAX_ACCOUNTS - 2).await;
     app.signed_in("first").await;
     let mut c = app.client();
     let r = c.post("/api/auth/register", reg("second", "second@example.com")).await;
@@ -1126,15 +1146,47 @@ async fn registration_closes_at_max_accounts(pool: sqlx::PgPool) {
         assert_eq!(r.json()["error"], "registration_closed");
     }
     assert!(app.settled_mail_to("third@example.com").await.is_empty());
-    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM users").fetch_one(app.db()).await.unwrap();
-    assert_eq!(n, 2);
+    assert_eq!(account_count(&app).await, MAX_ACCOUNTS);
+}
+
+/// Registrations at the limit take turns under the registration lock, so of
+/// several arriving together for the last place exactly one gets it.
+#[sqlx::test]
+async fn concurrent_registrations_cannot_pass_max_accounts(pool: sqlx::PgPool) {
+    let app = TestApp::new(pool).await;
+    fill_accounts(&app, MAX_ACCOUNTS - 1).await;
+    let (mut a, mut b, mut c) = (
+        app.client_from("203.0.113.11"),
+        app.client_from("203.0.113.12"),
+        app.client_from("203.0.113.13"),
+    );
+    let (ra, rb, rc) = tokio::join!(
+        a.post("/api/auth/register", reg("racer_a", "a@example.com")),
+        b.post("/api/auth/register", reg("racer_b", "b@example.com")),
+        c.post("/api/auth/register", reg("racer_c", "c@example.com")),
+    );
+    let mut statuses = [ra.status, rb.status, rc.status];
+    statuses.sort();
+    assert_eq!(statuses, [StatusCode::ACCEPTED, StatusCode::FORBIDDEN, StatusCode::FORBIDDEN]);
+    assert_eq!(account_count(&app).await, MAX_ACCOUNTS);
+}
+
+/// A local stack (DEV_LOGIN on) does not close: the end-to-end journeys
+/// register an account per spec on a stack kept between runs.
+#[sqlx::test]
+async fn a_dev_login_stack_does_not_close_registration(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("DEV_LOGIN", "true")]).await;
+    fill_accounts(&app, MAX_ACCOUNTS).await;
+    let r = app.client().post("/api/auth/register", reg("extra", "extra@example.com")).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
 }
 
 /// Unconfirmed accounts whose codes have all expired give their place back:
 /// they are deleted before the count, as they are for their username.
 #[sqlx::test]
 async fn an_expired_unconfirmed_account_does_not_hold_a_place(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("MAX_ACCOUNTS", "1")]).await;
+    let app = TestApp::new(pool).await;
+    fill_accounts(&app, MAX_ACCOUNTS - 1).await;
     let mut c = app.client();
     assert_eq!(c.post("/api/auth/register", reg("stale", "stale@example.com")).await.status, StatusCode::ACCEPTED);
     assert_eq!(c.post("/api/auth/register", reg("fresh", "fresh@example.com")).await.status, StatusCode::FORBIDDEN);

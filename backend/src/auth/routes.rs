@@ -115,6 +115,13 @@ pub struct RegisterBody {
 /// The advisory lock registrations take in turn (an arbitrary constant).
 const REGISTER_LOCK: i64 = 0x5746_5245_4749_5354;
 
+/// Registration closes once this many accounts hold a place (PLAN.md §
+/// Authentication). Fixed here on purpose, not configured: raising it is a
+/// release. A stack with `DEV_LOGIN` on (local only; production refuses it)
+/// does not apply it, since the end-to-end journeys register an account per
+/// spec on a stack that is kept between runs.
+pub const MAX_ACCOUNTS: i64 = 100;
+
 /// The same answer for a new account and an address already in use.
 fn registered() -> Response {
     (StatusCode::ACCEPTED, Json(json!({}))).into_response()
@@ -187,7 +194,7 @@ async fn register(
     )
     .fetch_one(&mut *tx)
     .await?;
-    if accounts >= i64::from(state.config.max_accounts) {
+    if accounts >= MAX_ACCOUNTS && !state.config.dev_login {
         return Err(ApiError::Forbidden("registration_closed"));
     }
 

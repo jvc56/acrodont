@@ -14,8 +14,8 @@
 	let { children } = $props();
 
 	// Every page except these requires a logged-in user (PLAN.md § Accounts).
+	// The root is the Cascades page: signed out, it goes to the log-in page.
 	const PUBLIC = [
-		'/',
 		'/login',
 		// Signs in itself (local stacks only); it must not be sent to /login first.
 		'/dev-login',
@@ -30,7 +30,7 @@
 	// the player, which keeps the whole screen for the quiz.
 	const PLAYER = /^\/cascades\/[0-9a-f-]{36}$/;
 	const showHeader = $derived(
-		!!session.userId && (page.url.pathname === '/' || !PUBLIC.includes(page.url.pathname)) && !PLAYER.test(page.url.pathname)
+		!!session.userId && !PUBLIC.includes(page.url.pathname) && !PLAYER.test(page.url.pathname)
 	);
 
 	onMount(() => {

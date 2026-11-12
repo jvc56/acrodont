@@ -60,6 +60,7 @@ async function seed(db: UserDb, s: Setup) {
 		show_definitions: true,
 		show_hooks: true,
 		reveal_correct: true,
+		show_found_count: false,
 		leave_value_decimals: 1,
 		storage_bytes: 0,
 		lexicon: 'EN-FIX',

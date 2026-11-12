@@ -120,17 +120,13 @@ test('deleting the account', async ({ browser, baseURL }) => {
 	expect(dbs).toEqual([other.username]);
 	await page.reload();
 	await expect(page.getByText('Doomed')).toHaveCount(0);
-	// The other account's storage line lists only itself.
-	await login(page, other.username);
-	await page.goto('/account');
-	await expect(page.getByText(new RegExp(`^${other.username}: rows and keys`))).toBeVisible();
-	await expect(page.getByText(new RegExp(`^${doomed.username}: rows and keys`))).toHaveCount(0);
+
 	// The second browser: its next sync answers 401; Log in to sync, cascades still readable.
 	await p2.reload();
 	await expect(p2.getByText('Log in to sync')).toBeVisible({ timeout: 60_000 });
 	await expect(p2.getByText('Doomed')).toBeVisible();
 	await p2.goto('/account');
-	await expect(p2.getByRole('button', { name: "Remove this account's data from this device" }).first()).toBeVisible();
+	await expect(p2.getByLabel("Remove this account's data from this device")).toBeVisible();
 	await ctx.close();
 	await ctx2.close();
 });

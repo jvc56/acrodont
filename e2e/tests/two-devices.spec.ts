@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createCascade, login, newUser, playLevel } from './support';
+import { createCascade, login, newUser, playLevel, press } from './support';
 
 // PLAN.md § End-to-end tests → Two devices: "finish the same level offline in
 // two browser contexts, reconnect both, and see the second device's notice and
@@ -46,6 +46,37 @@ test('two devices finish the same level offline', async ({ browser, baseURL }) =
 		await expect(page.getByText('Level 2 of 2')).toBeVisible({ timeout: 30_000 });
 		await expect(page.getByText('1 / 2')).toBeVisible();
 	}
+	await a.close();
+	await b.close();
+});
+
+// PLAN.md § The sync cycle → Telling the other devices: a change one device
+// syncs reaches the other device's open player in seconds, without a reload
+// and well inside the 30-second sync it would otherwise wait for.
+test('a second device sees the first one’s answers at once', async ({ browser, baseURL }) => {
+	test.setTimeout(120_000);
+	const a = await browser.newContext({ baseURL });
+	const b = await browser.newContext({ baseURL });
+	const pa = await a.newPage();
+	const pb = await b.newPage();
+	const { username } = await newUser(pa, 'push');
+	const player = await createCascade(pa, { name: 'Pushed' });
+	await login(pb, username);
+	await pb.goto(player);
+	await expect(pb.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
+	await expect(pb.getByText('Synced', { exact: true })).toBeVisible({ timeout: 30_000 });
+	await expect(pa.getByText('Synced', { exact: true })).toBeVisible({ timeout: 30_000 });
+	// Three cards answered on A: reveal, then next.
+	for (let i = 0; i < 3; i++) {
+		await expect(pa.getByText(`${i + 1} / 18`, { exact: true })).toBeVisible({ timeout: 15_000 });
+		await press(pa, 'Space');
+		await expect(pa.locator('[data-grade="correct"]')).toBeVisible();
+		await press(pa, 'Space');
+	}
+	await expect(pa.getByText('4 / 18', { exact: true })).toBeVisible({ timeout: 15_000 });
+	// B follows, untouched.
+	await expect(pb.getByText('3 ✓ 0 ✗')).toBeVisible({ timeout: 10_000 });
+	await expect(pb.getByText('4 / 18', { exact: true })).toBeVisible({ timeout: 10_000 });
 	await a.close();
 	await b.close();
 });

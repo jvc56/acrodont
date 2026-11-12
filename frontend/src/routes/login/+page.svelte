@@ -24,7 +24,7 @@
 			// syncs). Logging back in as the same account after a 401 starts no new
 			// engine, so ask the running one; a new account's engine syncs as it starts.
 			void syncNow().catch(() => undefined);
-			await goto('/cascades');
+			await goto('/');
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 401) error = 'Wrong username or password.';
 			else if (err instanceof ApiError && err.status === 403)

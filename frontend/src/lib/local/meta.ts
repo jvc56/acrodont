@@ -21,11 +21,17 @@ export interface MetaValues {
 	/** When this device last opened each cascade (ISO time). */
 	opens: Record<string, string>;
 	budget_dropped: string[];
+	/**
+	 * Device settings used for all of the account's devices (lib/settings/device):
+	 * when this device last took each shared value, and the values it shared and
+	 * has not yet sent.
+	 */
+	shared_device: { applied: Record<string, string>; pending: Record<string, { value: unknown; at: string }> };
 	/** Bytes of each cascade's question keys and answers, measured as they were written. */
 	sizes: Record<string, { key_bytes: number; answer_bytes: number }>;
-	/** The player's controls on this device (lib/player/controls.svelte.ts); never synced. */
+	/** The player's controls on this device (lib/player/controls.svelte.ts); shared with other devices only when asked (shared_device). */
 	bindings: Binding[];
-	/** How the player looks and responds on this device (lib/player/display.svelte.ts); never synced. */
+	/** How the player looks and responds on this device (lib/player/display.svelte.ts); shared with other devices only when asked (shared_device). */
 	display: {
 		/** One of lib/player/display's FONTS; Inter by default. */
 		question_font: string;
@@ -48,10 +54,12 @@ export interface MetaValues {
 		/** Whether the grade border shows for a correct answer (off by default) and for a missed one (on). */
 		border_correct: boolean;
 		border_missed: boolean;
-		/** The desktop player's status bar along the bottom is hidden. */
+		/** The player's status bar along the bottom is hidden. */
 		status_bar_hidden: boolean;
-		/** Typed mode's "3 of 9 found" count shows in the status bar (off by default: it hints). */
-		show_found_count: boolean;
+		/** On a phone, the three actions' tap zones: three columns (the default) or three rows. */
+		mobile_buttons: 'columns' | 'rows';
+		/** In the rows layout, each row's height, in px. */
+		mobile_row_px: number;
 		/** Which defaults the stored values were saved under (lib/player/display DISPLAY_VERSION). */
 		version: number;
 	};
@@ -65,6 +73,7 @@ export const META_DEFAULTS: { [K in MetaKey]: () => MetaValues[K] } = {
 	server: () => ({ trash_retention_days: 30, max_quiz_questions: 300_000 }),
 	opens: () => ({}),
 	budget_dropped: () => [],
+	shared_device: () => ({ applied: {}, pending: {} }),
 	sizes: () => ({}),
 	bindings: () => DEFAULT_BINDINGS.map((b) => ({ ...b })),
 	display: () => ({
@@ -83,7 +92,8 @@ export const META_DEFAULTS: { [K in MetaKey]: () => MetaValues[K] } = {
 		border_correct: false,
 		border_missed: true,
 		status_bar_hidden: false,
-		show_found_count: false,
+		mobile_buttons: 'columns',
+		mobile_row_px: 64,
 		version: 2
 	})
 };

@@ -89,10 +89,10 @@
 		return ri ? runIndicatorText(ri) : null;
 	});
 	let dsp = $derived(display.value);
-	/** Typed mode's "3 of 9 found", when the display setting asks for it and the card is still being typed. */
+/** Typed mode's "3 of 9 found", when the cascade's setting asks for it and the card is still being typed. */
 	let foundCount = $derived.by(() => {
 		const card = v?.card;
-		if (!dsp.show_found_count || !card?.typed || card.revealed || !player) return null;
+		if (!v?.cascade?.show_found_count || !card?.typed || card.revealed || !player) return null;
 		return `${card.typed.found.length} of ${player.words(card).length} found`;
 	});
 	/** How far through the pass the current card is, for the status bar's line. */
@@ -175,7 +175,7 @@
 			}
 			syncState.openCascade = id;
 			const p = new Player(d, id, {
-				ensure: (cid) => ensureCascade(d, cid),
+ensure: (cid, progress) => ensureCascade(d, cid, progress),
 				fetchCard: (cid, idx, ahead) => fetchCard(d, cid, idx, ahead),
 				fetchAhead: (cid, idx) => fetchAhead(d, cid, idx),
 				fetchDistribution: (cid) => fetchDistribution(d, cid),
@@ -234,7 +234,7 @@
 			typedText = '';
 			typedWrong = false;
 		}
-		if (a === 'toggle_grade') navigator.vibrate?.(15);
+
 		// Background downloads start no chunk while the action and its writes run.
 		void playerActs(async () => {
 			if (a === 'show_next') await p.showNext();
@@ -243,6 +243,14 @@
 		}).catch((e) => console.error('player action failed', e));
 	}
 
+
+	/** The column layout on a phone: a tap in the quiz area acts by its third, Previous, Toggle or Show / Next. */
+	function tapColumn(e: MouseEvent) {
+		if ((e.target as HTMLElement).closest('input,button,a')) return;
+		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const third = Math.min(2, Math.max(0, Math.floor(((e.clientX - r.left) / Math.max(1, r.width)) * 3)));
+		act((['previous', 'toggle_grade', 'show_next'] as const)[third]);
+	}
 
 	function onKey(e: KeyboardEvent) {
 		// A confirmation owns the keyboard: Space or Enter there must not also act on the quiz.
@@ -283,7 +291,7 @@
 
 	/**
 	 * Fits the answer, definitions included, on the screen: when the quiz area
-	 * would scroll, its sizes are scaled down (the --fit factor AnswerView reads)
+	 * would scroll, down or across, its sizes are scaled down (the --fit factor AnswerView reads)
 	 * as far as needed, to a floor of FIT_MIN. Runs before the browser paints,
 	 * so the answer never shows at a size that scrolls.
 	 */
@@ -292,7 +300,8 @@
 		const area = fitArea;
 		const box = answerBox;
 		if (!area || !box) return;
-		const fits = () => area.scrollHeight <= area.clientHeight + 1;
+		// Too tall, or too wide: a long line of hooks on a phone runs past the edge otherwise.
+		const fits = () => area.scrollHeight <= area.clientHeight + 1 && area.scrollWidth <= area.clientWidth + 1;
 		box.style.setProperty('--fit', '1');
 		if (fits()) return;
 		let lo = FIT_MIN;
@@ -520,7 +529,7 @@
 		});
 		if (!ok) return;
 		await write({ type: 'trash_cascade', cascade_id: id });
-		await goto('/cascades');
+		await goto('/');
 	}
 
 	let starting = $state<{ stage: 'server' | 'device'; progress: number; count: number | null } | null>(null);
@@ -625,8 +634,8 @@
 		{/if}
 		{#if v.storage}
 			<div class="mt-2 text-center text-sm">
-				Free space by removing another account’s data on the
-				<a class="underline" href="/account">Account page</a>.
+				This device is full. Free space by deleting cascades you no longer need, or by logging in to
+				another account used here and logging out with its data removed.
 				<Button size="sm" variant="outline" onclick={() => player?.retryStorage()}>Try again</Button>
 			</div>
 		{/if}
@@ -637,12 +646,32 @@
 	{#if !v || v.status === 'loading'}
 		{@render waiting('Loading…')}
 	{:else if v.status === 'downloading'}
-		{@render waiting('Getting this level ready…', 'Its questions are downloading to this device. You can start as soon as they are here.')}
+<div class="mx-auto flex max-w-sm flex-col items-center gap-3 text-muted-foreground" role="status" aria-busy="true">
+			<p class="text-foreground">Getting this level ready…</p>
+			<!-- A first open's share done (PLAN.md § Downloads: "behind a short progress indicator"). -->
+			<div
+				class="h-2 w-64 max-w-full overflow-hidden rounded-full bg-muted"
+				role="progressbar"
+				aria-label="Getting this level ready"
+				aria-valuemin={0}
+				aria-valuemax={100}
+				aria-valuenow={v.downloadProgress === null ? undefined : Math.round(v.downloadProgress * 100)}
+				data-download-progress
+			>
+				{#if v.downloadProgress === null}
+					<div class="h-full w-1/3 animate-pulse rounded-full bg-foreground/40"></div>
+				{:else}
+					<div class="h-full bg-foreground/60 transition-[width]" style={`width: ${v.downloadProgress * 100}%`}></div>
+				{/if}
+			</div>
+			<p class="min-h-5 text-sm tabular-nums">{v.downloadProgress === null ? '' : `${Math.floor(v.downloadProgress * 100)}%`}</p>
+			<p class="text-center text-sm">Its questions are downloading to this device. You can start as soon as they are here.</p>
+		</div>
 	{:else if v.status === 'needs_connection'}
 		<p class="text-muted-foreground">This cascade needs a connection to download.</p>
 	{:else if v.status === 'gone'}
 		<p class="text-muted-foreground">This cascade is not on this device.</p>
-		<Button href="/cascades" variant="outline" class="mt-4">Cascades</Button>
+		<Button href="/" variant="outline" class="mt-4">Cascades</Button>
 	{:else if v.status === 'trashed'}
 		<p>This cascade is in the Trash.</p>
 		<Button class="mt-4" onclick={restore}>Restore</Button>
@@ -700,18 +729,81 @@
 	{/if}
 {/snippet}
 
+{#snippet menuItems()}
+	<!-- The player's menu: on the desktop a panel beside the quiz, on a phone a sheet over it. -->
+	<div class="mb-2 flex items-center justify-between">
+		<a href="/" class="font-semibold">Acrodont</a>
+		<button class="rounded px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => (menuOpen = false)} aria-label="Hide menu" title="Hide menu">«</button>
+	</div>
+	{#if session.isAdmin}<a class="rounded px-2 py-1 hover:bg-muted max-sm:py-2" href="/admin">Admin</a>{/if}
+	<a class="rounded px-2 py-1 hover:bg-muted max-sm:py-2" href="/account">Account</a>
+	<button
+		class="rounded px-2 py-1 text-left hover:bg-muted max-sm:py-2"
+		onclick={() => {
+			if (!desktop) menuOpen = false;
+			void openSettings();
+		}}>Settings</button
+	>
+{/snippet}
+
+{#snippet statusBar()}
+	<!-- The status bar keeps its place when hidden, with only its Show button and the
+	     sync status, so hiding it never changes the quiz area or its grade border. -->
+	<footer class="shrink-0 border-t text-sm" class:border-transparent={dsp.status_bar_hidden}>
+		<div class="h-0.5" class:bg-muted={!dsp.status_bar_hidden} aria-hidden="true">
+			{#if !dsp.status_bar_hidden}<div class="h-full bg-foreground/50" style={`width: ${progress}%`}></div>{/if}
+		</div>
+		<!-- The Show / Hide button, then the rest, which on a phone wraps to a second line
+		     rather than leave anything out; that line starts under the first item, not under
+		     the button. -->
+		<div class="flex min-h-11 items-start gap-x-5 py-2 pr-6 pl-3 max-sm:gap-x-2 max-sm:pr-3 max-sm:pl-1">
+			{#if dsp.status_bar_hidden}
+				<button
+					class="mt-0.5 shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+					onclick={() => display.set({ status_bar_hidden: false })}
+					aria-label="Show status bar"
+					title="Show status bar"><PanelBottomOpenIcon class="size-4" /></button
+				>
+			{:else}
+				<button
+					class="mt-0.5 shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+					onclick={() => display.set({ status_bar_hidden: true })}
+					aria-label="Hide status bar"
+					title="Hide status bar"><PanelBottomCloseIcon class="size-4" /></button
+				>
+			{/if}
+			<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 leading-7 max-sm:gap-x-3">
+				{#if !dsp.status_bar_hidden && v?.quiz && v.cascade}
+					<p class="font-medium">Level {v.quiz.level} of {v.cascade.depth}</p>
+					<p class="text-muted-foreground">Pass {v.quiz.attempt}</p>
+					<p title="The card shown, and the share of the level graded in this pass">
+						<!-- The count in its own element, apart from its percentage: it is read on its own. -->
+						<span>{(v.card?.pos ?? v.quiz.cursor) + 1} / {v.quiz.question_count}</span>
+						<span class="text-muted-foreground">({pct(gradedPct)})</span>
+					</p>
+					<p title={`Correct and missed in this pass, and the share correct: the level clears at ${v.cascade.clear_threshold}%`}>
+						<span>{v.quiz.correct_count} ✓ {v.quiz.missed_count} ✗</span>
+						{#if correctPct !== null}
+							<span class:text-green-600={onTrack} class:text-red-600={onTrack === false} data-on-track={onTrack}>({pct(correctPct)})</span>
+						{/if}
+					</p>
+					{#if run}<p class="text-muted-foreground">{run}</p>{/if}
+					{#if foundCount}<p>{foundCount}</p>{/if}
+				{/if}
+				<div class="ml-auto"><SyncStatus /></div>
+			</div>
+		</div>
+	</footer>
+{/snippet}
+
+{#snippet showMenu(cls: string)}
+	<button class="{cls} z-10 rounded px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => (menuOpen = true)} aria-label="Show menu" title="Show menu">☰</button>
+{/snippet}
+
 {#if desktop}
 	<div class="flex h-screen">
 		{#if menuOpen}
-			<nav class="flex w-48 shrink-0 flex-col gap-1 border-r p-4 text-sm" aria-label="Player menu">
-				<div class="mb-2 flex items-center justify-between">
-					<a href="/cascades" class="font-semibold">Acrodont</a>
-					<button class="rounded px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => (menuOpen = false)} aria-label="Hide menu" title="Hide menu">«</button>
-				</div>
-				{#if session.isAdmin}<a class="rounded px-2 py-1 hover:bg-muted" href="/admin">Admin</a>{/if}
-				<a class="rounded px-2 py-1 hover:bg-muted" href="/account">Account</a>
-				<button class="rounded px-2 py-1 text-left hover:bg-muted" onclick={openSettings}>Settings</button>
-			</nav>
+			<nav class="flex w-48 shrink-0 flex-col gap-1 border-r p-4 text-sm" aria-label="Player menu">{@render menuItems()}</nav>
 		{/if}
 		<div class="relative flex min-w-0 flex-1 flex-col">
 			<!-- The quiz area: the only place mouse controls act; no selection, no context menu.
@@ -729,9 +821,7 @@
 				onauxclick={(e) => e.preventDefault()}
 				onwheel={onWheel}
 			>
-				{#if !menuOpen}
-					<button class="absolute top-3 left-3 z-10 rounded px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => (menuOpen = true)} aria-label="Show menu" title="Show menu">☰</button>
-				{/if}
+				{#if !menuOpen}{@render showMenu('absolute top-3 left-3')}{/if}
 				<div class="relative flex min-h-0 flex-1 flex-col items-center">
 					<div bind:this={fitArea} data-fit-area class="flex flex-1 flex-col items-center self-stretch overflow-y-auto px-8 pb-8" style={`padding-top: ${dsp.question_top_px}px;`}>
 						<div class="w-full max-w-4xl">
@@ -742,87 +832,82 @@
 				</div>
 				{@render typedBar(false)}
 			</div>
-			<!-- The status bar keeps its place when hidden, with only its Show button and the
-			     sync status, so hiding it never changes the quiz area or its grade border. -->
-			<footer class="shrink-0 border-t text-sm" class:border-transparent={dsp.status_bar_hidden}>
-				<div class="h-0.5" class:bg-muted={!dsp.status_bar_hidden} aria-hidden="true">
-					{#if !dsp.status_bar_hidden}<div class="h-full bg-foreground/50" style={`width: ${progress}%`}></div>{/if}
-				</div>
-				<div class="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-1 py-2 pr-6 pl-3">
-					{#if dsp.status_bar_hidden}
-						<button
-							class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-							onclick={() => display.set({ status_bar_hidden: false })}
-							aria-label="Show status bar"
-							title="Show status bar"><PanelBottomOpenIcon class="size-4" /></button
-						>
-					{:else}
-						<button
-							class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-							onclick={() => display.set({ status_bar_hidden: true })}
-							aria-label="Hide status bar"
-							title="Hide status bar"><PanelBottomCloseIcon class="size-4" /></button
-						>
-						{#if v?.quiz && v.cascade}
-							<p class="font-medium">Level {v.quiz.level} of {v.cascade.depth}</p>
-							<p class="text-muted-foreground">Pass {v.quiz.attempt}</p>
-							<p title="The card shown, and the share of the level graded in this pass">
-								<!-- The count in its own element, apart from its percentage: it is read on its own. -->
-								<span>{(v.card?.pos ?? v.quiz.cursor) + 1} / {v.quiz.question_count}</span>
-								<span class="text-muted-foreground">({pct(gradedPct)})</span>
-							</p>
-							<p title={`Correct and missed in this pass, and the share correct: the level clears at ${v.cascade.clear_threshold}%`}>
-								<span>{v.quiz.correct_count} ✓ {v.quiz.missed_count} ✗</span>
-								{#if correctPct !== null}
-									<span class:text-green-600={onTrack} class:text-red-600={onTrack === false} data-on-track={onTrack}>({pct(correctPct)})</span>
-								{/if}
-							</p>
-							{#if run}<p class="text-muted-foreground">{run}</p>{/if}
-							{#if foundCount}<p>{foundCount}</p>{/if}
-						{/if}
-					{/if}
-					<div class="ml-auto"><SyncStatus /></div>
-				</div>
-			</footer>
+			{@render statusBar()}
 		</div>
 	</div>
 {:else}
+	<!-- A phone or tablet: the quiz, then typed mode's input, then the status bar, as on the
+	     desktop. The three actions are tap zones (display.mobile_buttons): by default three
+	     columns, Previous, Toggle and Show / Next, each tapped anywhere in its third of the quiz
+	     area, with its label at the bottom; or the question, then three rows of buttons
+	     under it, Previous, Toggle and Show / Next, the last nearest the thumb. ☰ opens
+	     the menu, Settings with it. -->
 	<div class="flex h-dvh flex-col">
-		<header class="flex items-center justify-between border-b px-3 py-2 text-sm">
-			<a href="/cascades" aria-label="Menu">☰</a>
-			<span>
-				{#if v?.quiz && v.cascade}
-					L{v.quiz.level} · {(v.card?.pos ?? v.quiz.cursor) + 1}/{v.quiz.question_count} · {v.cascade.clear_threshold}%{#if run} · {run}{/if}{#if foundCount} · {foundCount}{/if}
-				{/if}
-			</span>
-			<span class="flex items-center gap-3">
-				<button onclick={openSettings} aria-label="Settings" title="Settings">⚙</button>
-			</span>
-		</header>
 		{#if v?.status === 'ready'}
-			<div class="relative flex min-h-0 flex-1 select-none" class:flex-col={!landscape} style="touch-action: manipulation">
-				{#if v.banner}<p class="absolute top-2 left-2 right-2 z-10 rounded-md bg-muted px-3 py-2 text-sm" role="status">{v.banner}</p>{/if}
-				<button class="text-muted-foreground" style={landscape ? 'width:20%' : 'height:15%'} onclick={() => act('previous')}>↶ Previous</button>
-				<div
-					bind:this={fitArea}
-					data-fit-area
-					class="overflow-y-auto p-4 {gradeBorder}"
-					style={`${landscape ? 'width:55%' : 'height:60%'}; border-width: ${dsp.border_px}px; border-style: solid;`}
-					data-grade={gradeState ?? undefined}
-					role="button"
-					tabindex="0"
-					onclick={(e) => !(e.target as HTMLElement).closest('input,button,a') && act('show_next')}
-					onkeydown={() => undefined}
-				>
-					{@render question()}
+			{#if dsp.mobile_buttons === 'rows'}
+				<div class="relative flex min-h-0 flex-1 select-none" class:flex-col={!landscape} style="touch-action: manipulation">
+					{@render showMenu('absolute top-1 left-1')}
+					{#if v.banner}<p class="absolute top-2 right-2 left-12 z-10 rounded-md bg-muted px-3 py-2 text-sm" role="status">{v.banner}</p>{/if}
+					<div
+						bind:this={fitArea}
+						data-fit-area
+						class="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 {gradeBorder}"
+						style={`padding-top: ${Math.max(dsp.question_top_px, 40)}px; border-width: ${dsp.border_px}px; border-style: solid;`}
+						data-grade={gradeState ?? undefined}
+					>
+						{@render question()}
+					</div>
+					<!-- Show / Next at the bottom, nearest the thumb; in landscape the rows stand at
+					     the bottom of a column on the right. Each row is display.mobile_row_px tall. -->
+					<div class="flex shrink-0 flex-col text-muted-foreground {landscape ? 'w-2/5 justify-end' : ''}" data-zone="rows">
+						<button class="shrink-0 active:bg-muted/60" style={`height: ${dsp.mobile_row_px}px`} onclick={() => act('previous')}>↶ Previous</button>
+						<button class="shrink-0 active:bg-muted/60" style={`height: ${dsp.mobile_row_px}px`} onclick={() => act('toggle_grade')}>✓ ⇄ ✗ Toggle</button>
+						<button class="shrink-0 active:bg-muted/60" style={`height: ${dsp.mobile_row_px}px`} onclick={() => act('show_next')}>Show / Next ▸</button>
+					</div>
 				</div>
-				<button class="text-muted-foreground" style={landscape ? 'width:25%' : 'height:25%'} onclick={() => act('toggle_grade')}>✓ ⇄ ✗ Toggle</button>
-			</div>
+			{:else}
+				<div
+					class="relative flex min-h-0 flex-1 flex-col select-none {gradeBorder}"
+					style={`border-width: ${dsp.border_px}px; border-style: solid; touch-action: manipulation;`}
+					data-grade={gradeState ?? undefined}
+				>
+					{@render showMenu('absolute top-1 left-1')}
+					{#if v.banner}<p class="absolute top-2 right-2 left-12 z-10 rounded-md bg-muted px-3 py-2 text-sm" role="status">{v.banner}</p>{/if}
+					<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+					<div
+						bind:this={fitArea}
+						data-fit-area
+						data-zone="columns"
+						class="relative min-h-0 flex-1 overflow-y-auto px-4 pb-4"
+						style={`padding-top: ${Math.max(dsp.question_top_px, 40)}px;`}
+						onclick={tapColumn}
+					>
+						{@render question()}
+					</div>
+					<div class="relative grid shrink-0 grid-cols-3 text-sm text-muted-foreground">
+						<button class="h-14 active:bg-muted/60" onclick={() => act('previous')}>↶ Previous</button>
+						<button class="h-14 active:bg-muted/60" onclick={() => act('toggle_grade')}>✓ ⇄ ✗ Toggle</button>
+						<button class="h-14 active:bg-muted/60" onclick={() => act('show_next')}>Show / Next ▸</button>
+					</div>
+				</div>
+			{/if}
 			{@render typedBar(true)}
 		{:else}
-			<div class="p-6">{@render status()}</div>
+			<div class="relative min-h-0 flex-1 p-6">
+				{@render showMenu('absolute top-1 left-1')}
+				<div class="pt-8">{@render status()}</div>
+			</div>
 		{/if}
+		{@render statusBar()}
 	</div>
+	{#if menuOpen}
+		<div class="fixed inset-0 z-40 bg-black/40" role="presentation" onclick={() => (menuOpen = false)}>
+			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+			<nav class="flex h-full w-64 max-w-[80%] flex-col gap-1 border-r bg-background p-4 text-sm" aria-label="Player menu" onclick={(e) => e.stopPropagation()}>
+				{@render menuItems()}
+			</nav>
+		</div>
+	{/if}
 {/if}
 
 {#snippet widen(key: string)}
@@ -929,6 +1014,15 @@
 								<input id="cascade-hooks" type="checkbox" checked={c.show_hooks !== false} onchange={(e) => setCascade({ show_hooks: e.currentTarget.checked })} />
 							</SettingRow>
 							{@render widen('show_hooks')}
+							<SettingRow label="Show how many anagrams are found in typed mode" info={INFO.found_count} for="cascade-found-count">
+								<input
+									id="cascade-found-count"
+									type="checkbox"
+									checked={c.show_found_count === true}
+									onchange={(e) => setCascade({ show_found_count: e.currentTarget.checked })}
+								/>
+							</SettingRow>
+							{@render widen('show_found_count')}
 						{/if}
 						{#if c.quiz_type === 'leave_value'}
 							<SettingRow label="Round leave values to (decimal places)" info={INFO.leave_value_decimals} for="cascade-decimals">

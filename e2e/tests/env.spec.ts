@@ -34,7 +34,7 @@ test('@env @ttl session expiry while offline', async ({ page, context }) => {
 	await login(page, username);
 	await expect(page.getByText('Synced')).toBeVisible({ timeout: 60_000 });
 	// The work reached the server: a fresh browser sees it.
-	const fresh = await page.context().browser()!.newContext({ baseURL: page.url().split('/cascades')[0] });
+	const fresh = await page.context().browser()!.newContext({ baseURL: new URL(page.url()).origin });
 	const p2 = await fresh.newPage();
 	await login(p2, username);
 	await p2.goto(player);

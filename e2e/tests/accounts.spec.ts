@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { confirm, createCascade, login, newUser, outboxCount, press } from './support';
+import { createCascade, deviceAccounts, login, newUser, outboxCount, press } from './support';
 
 // PLAN.md § End-to-end tests → Logging out; § Authentication while offline.
 
@@ -81,25 +81,15 @@ test('logging out, online and offline, and a second account on the same browser'
 		if (r.url().endsWith('/api/auth/logout')) sent.push(r.url());
 	});
 	await expect(page.getByText('Alice cascade')).toHaveCount(0);
-	await page.goto('/account');
-	await expect(page.getByText(/^alice\w+: rows and keys/)).toBeVisible();
-	await expect(page.getByText(new RegExp(`^${bob.username}: rows and keys`))).toBeVisible();
+	expect(await deviceAccounts(page)).toEqual([alice.username, bob.username].sort());
 	await page.waitForTimeout(2000);
 	expect(sent).toEqual([]);
 	// Bob's sync still succeeds.
 	await page.goto('/cascades');
 	await expect(page.getByText('Synced')).toBeVisible({ timeout: 30_000 });
-	// Removing Alice's data leaves Bob's.
-	await page.goto('/account');
-	await page.getByRole('listitem').filter({ hasText: /^alice/ }).getByRole('button', { name: "Remove this account's data from this device" }).click();
-	await confirm(page, 'Remove data');
-	await expect(page.getByText(/^alice\w+: rows and keys/)).toHaveCount(0);
-	await expect(page.getByText(new RegExp(`^${bob.username}: rows and keys`))).toBeVisible();
-	// Removing his own clears the pointer and lands on the login page.
-	await page.getByRole('listitem').filter({ hasText: new RegExp(`^${bob.username}`) }).getByRole('button', { name: "Remove this account's data from this device" }).click();
-	await confirm(page, 'Remove data');
-	await expect(page).toHaveURL(/\/login$/);
-	// Alice's unsent grades went with her data; logging in again she starts from the server.
+	// Logging out with his data removed leaves Alice's.
+	await logOut(page, true);
+	expect(await deviceAccounts(page)).toEqual([alice.username]);
 	await login(page, alice.username);
 	await expect(page.getByText('Alice cascade')).toBeVisible({ timeout: 30_000 });
 });

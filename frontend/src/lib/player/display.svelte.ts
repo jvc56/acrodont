@@ -1,7 +1,7 @@
 // How the player looks and responds on this device: the question's and the
 // answers' typefaces, sizes and letter spacing, how far down the question
 // sits, the grade border's width, whether the desktop player's menu and status
-// bar are hidden, whether typed mode's found count shows, and the repeat guard against an accidental double press.
+// bar are hidden, a phone's tap zones (columns or rows), and the repeat guard against an accidental double press.
 // Kept in the user's `meta` store, per device and user like the other `meta`
 // values, and never synced: what suits a laptop is wrong on a phone.
 //
@@ -11,6 +11,7 @@
 // hidden.
 import type { UserDb } from '$lib/local/db';
 import { getMeta, type MetaValues } from '$lib/local/meta';
+import { shareSettings } from '$lib/settings/device';
 
 /** The typefaces offered: Inter is bundled, and the rest are the device's own, so all work offline. */
 export const FONTS: { value: string; label: string }[] = [
@@ -28,6 +29,7 @@ export const LIMITS = {
 	spacing_em: { min: -0.2, max: 2, step: 0.01, default: 0 },
 	question_top_px: { min: 0, max: 800, step: 1, default: 8 },
 	border_px: { min: 0, max: 40, step: 1, default: 10 },
+	mobile_row_px: { min: 32, max: 200, step: 1, default: 64 },
 	repeat_guard_ms: { min: 0, max: 1000, step: 5, default: 0 }
 } as const;
 export type LimitKey = keyof typeof LIMITS;
@@ -51,7 +53,8 @@ export function defaultDisplay(): Display {
 		border_correct: false,
 		border_missed: true,
 		status_bar_hidden: false,
-		show_found_count: false,
+		mobile_buttons: 'columns',
+		mobile_row_px: LIMITS.mobile_row_px.default,
 		version: DISPLAY_VERSION
 	};
 }
@@ -111,7 +114,8 @@ export function normalizeDisplay(stored: Stored | undefined): Display {
 		border_correct: d.border_correct === undefined ? false : !!d.border_correct,
 		border_missed: d.border_missed === undefined ? true : !!d.border_missed,
 		status_bar_hidden: !!d.status_bar_hidden,
-		show_found_count: !!d.show_found_count,
+		mobile_buttons: d.mobile_buttons === 'rows' ? 'rows' : 'columns',
+		mobile_row_px: clampSetting('mobile_row_px', d.mobile_row_px),
 		version: DISPLAY_VERSION
 	};
 }
@@ -138,6 +142,17 @@ class DisplayState {
 	async load(db: UserDb) {
 		this.#db = db;
 		this.value = normalizeDisplay((await getMeta(db, 'display')) as Stored);
+	}
+
+	/** Reads the stored settings again, after a sync took shared ones (lib/settings/device). */
+	async reload() {
+		if (this.#db) await this.load(this.#db);
+	}
+
+	/** Uses these settings, which this device already has, for all of the account's devices. */
+	async share(fields: (keyof Display)[]) {
+		if (!this.#db) return;
+		await shareSettings(this.#db, Object.fromEntries(fields.map((f) => [f, $state.snapshot(this.value[f])])));
 	}
 
 	async set(patch: Partial<Display>) {

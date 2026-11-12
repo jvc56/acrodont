@@ -21,9 +21,9 @@
 </script>
 
 <header class="border-b bg-background">
-	<div class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 md:px-6">
-		<a href="/cascades" class="text-lg font-semibold tracking-tight">Acrodont</a>
-		{#if links.length}<nav aria-label="Main" class="order-last flex w-full gap-1 overflow-x-auto text-sm md:order-none md:w-auto">
+	<div class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-2 px-4 sm:gap-x-6 py-3 md:px-6">
+		<a href="/" class="text-lg font-semibold tracking-tight">Acrodont</a>
+		{#if links.length}<nav aria-label="Main" class="flex gap-1 text-sm">
 			{#each links as l (l.href)}
 				<a
 					href={l.href}
@@ -34,7 +34,7 @@
 				</a>
 			{/each}
 		</nav>{/if}
-		<div class="ml-auto flex items-center gap-4">
+		<div class="ml-auto flex items-center gap-3 sm:gap-4">
 			<SyncStatus />
 			<a
 				href="/account"
