@@ -8,6 +8,14 @@ export const SCOPE = {
 	device: 'Kept on this device only and not synced, so your other devices keep their own. They apply to every cascade you study here.'
 } as const;
 
+/** What each part of a cascade's Settings is for, behind an ⓘ beside its heading. */
+export const SECTION = {
+	level: 'These options belong to the level you are studying. Changes apply to this quiz only, from the current card.',
+	new_levels: 'Each new level this cascade makes from your misses starts with these. Levels it already has keep their own.',
+	copy: 'Gives this cascade every setting above that the other one has too. The level you are studying keeps its own options.',
+	controls: 'The keys, mouse buttons and wheel directions for each action.'
+} as const;
+
 export const INFO = {
 	// A cascade's settings (synced)
 	leave_value_decimals:
@@ -25,10 +33,10 @@ export const INFO = {
 		'The score a pass needs to clear a level of this cascade. A change applies at once, to every level, including the pass you are in.',
 	// Quiz options
 	segmented:
-		'Studies a level a run at a time. After each run, the cards you missed are drilled before the next run starts.',
+		'Studies a level a run at a time. After each run, the cards you missed are drilled before the next run starts: a segment of 40 means you study 40 at a time and drill what you missed before going on.',
 	segment_size: 'How many cards each run holds.',
 	progression:
-		'What a pass below the clear threshold does. Ladder keeps the level and sends its misses down to a new level; Drill replaces the level with just its misses until nothing is missed.',
+		'What a pass below the clear threshold does. Ladder: keep the quiz and go down a level with the misses; come back up to clear it. Drill: replace the quiz with its misses and keep going until nothing is missed.',
 	alphabetical: 'In typed mode, each anagram must be entered after the ones before it in alphabetical order. One typed out of order marks the card missed at once.',
 	// This device's display
 	font: 'The typeface. Inter is bundled and works offline; the others use what this device has.',
@@ -43,7 +51,7 @@ export const INFO = {
 		'On a phone or tablet. Columns: Previous, Toggle and Show / Next side by side, each a third of the screen, tapped anywhere in its column. Rows: the question, then Previous, Toggle and Show / Next in rows under it, Show / Next at the bottom, nearest your thumb.',
 	mobile_row_px: 'In the rows layout, how tall each of the three rows of buttons is.',
 	repeat_guard:
-		'Ignores the same action pressed again within this many milliseconds, to stop an accidental double press from skipping a card. 0 turns it off.',
+		'Ignores the same action pressed again within this many milliseconds. 0, the default, counts every press; raise it if a bouncing mouse button or an accidental double tap skips cards.',
 	// Account
 	remove_data:
 		'Deletes this account’s copy on this device only. Everything synced stays on the server and downloads again when you log in.'

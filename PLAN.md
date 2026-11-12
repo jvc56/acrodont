@@ -771,8 +771,9 @@ because searching runs on the server.
 first, one compact row each, for a glance, with **New cascade** at the top and
 the [Trash](#trash) below the list. Each cascade shows:
 
-- its name, alone on the left, so a phone has room for it (on a phone it
-  wraps rather than being cut short). Hovering it shows the rest, as a
+- its name on the left, then its quiz type (Anagram, Definition or Leave
+  Value) in muted text; on a phone the name wraps rather than being cut
+  short. Hovering the name shows the rest, as a
   tooltip of three lines: the name; quiz type, lexicon and clear threshold,
   its [quiz options](#quiz-options) in short form (e.g. `segments of 40 ·
   drill`, nothing when all are at their defaults), and "complete" with the
@@ -912,11 +913,10 @@ as the term of the data model and the API.
   Settings is the one settings dialog there is: every
   [setting](#settings), in its two sections, under a header that holds only
   "Settings" and Close. Each section opens with a full-width shaded bar — a
-  larger heading, a badge saying whether it syncs, and one line saying what it
+  larger heading, a badge saying whether it syncs, and an ⓘ saying what it
   reaches (`SCOPE` in `settings-info.ts`) — so the two read as separate. Every
   setting is saved as soon as it is changed:
-  - **Cascade Settings** (synced; other cascades keep their own), in order: "a
-    level clears when a pass ends with at least 90% correct", the ladder as a
+  - **Cascade Settings** (synced; other cascades keep their own), in order: the ladder as a
     table whose columns line up — level, questions, pass, last pass's score,
     status — with each level's Export…; the clear threshold (a number, taking
     effect when the field is left, for the pass in progress too); the answer
@@ -994,16 +994,20 @@ as the term of the data model and the API.
 - **Every setting is a row with its control at the right end**: a checkbox,
   a choice or a number, in the player's Settings and in the quiz options
   alike (`SettingRow`), so the place to click is
-  always the same. Progression is a choice (Ladder or Drill) with the chosen
-  one's explanation beneath, not a pair of radio buttons.
+  always the same. Progression is a choice (Ladder or Drill), not a pair of
+  radio buttons; its ⓘ explains both.
 - **Every setting explains itself**: an ⓘ beside its name (`InfoTip`) shows
   what it does — on hover with a mouse, and on a tap or click, which keeps it
   open until a tap elsewhere, so a phone has it too — in a cascade's
   settings, the quiz options and this device's display settings. Written out
   under every name, the explanations crowded the dialog on a phone and a
-  desktop alike. A hint (such as the chosen progression's) stays visible
-  under the name. The texts live in one module (`lib/settings-info`), with
-  the line each group of settings says about where it applies (`SCOPE`).
+  desktop alike, so nothing is written under a setting: an example (a
+  segment of 40) or a default (0 counts every press) is in the same ⓘ. The
+  section headings work the same way: Cascade Settings and Device Settings
+  say where they apply (`SCOPE`), and the level being studied, levels made
+  from now on, copying another cascade's settings and Controls say what they
+  hold (`SECTION`), each behind an ⓘ ("About these settings") beside the
+  heading. The texts live in one module (`lib/settings-info`).
 - **Sensitive actions ask first** (`ConfirmDialog`, one per app, in the root
   layout): Move to Trash, Delete forever, Start over, removing an account's
   data from the device, deleting the account, resetting the controls,
@@ -4561,6 +4565,10 @@ The flows are the conventional ones, built directly on Axum:
     and CSRF cookies as well, and the page forgets any session it holds and
     goes to `/login` with no message: signing in with the new password is the
     confirmation.
+- **Reset password** is on `/account` too: a card asking for the account's
+  address, which sends the same request as the log-in page's link (the
+  reply is the same whatever address is typed), and the new password is set
+  from the mail's link as above. There is still no signed-in password change.
 - **Sign out everywhere** and **delete account** (each with password
   re-entry) are on `/account`. Sign out everywhere bumps `session_generation`,
   which signs out every other session, and issues a new session to the current
@@ -4900,7 +4908,7 @@ SvelteKit static SPA. The routes:
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, name, preview with what the cascade will use against the account's storage), with no settings: a note says a new cascade's settings are changed in its Settings once it is created |
 | `/cascades/:id` | Player for the cascade's deepest level, whose Settings dialog holds the ladder and every [setting](#settings), the cascade's and this device's |
 | `/trash` | No page of its own: redirects to `/#trash`, so an old link lands on the Cascades page scrolled to the Trash |
-| `/account` | Log out (with **Remove this account's data from this device**), sync status, sign out everywhere, delete account. Nothing about storage: the Cascades page has the account's. No password change: a new password comes only from a [reset](#authentication). No settings: those are in a cascade's Settings (☰ → Settings in the player) |
+| `/account` | Log out (with **Remove this account's data from this device**), sync status, sign out everywhere, delete account. Reset password (sends the reset link). Nothing about storage: the Cascades page has the account's. No password change: a new password comes only from a [reset](#authentication). No settings: those are in a cascade's Settings (☰ → Settings in the player) |
 | `/admin` | Catalog overview with delete actions (admins only; others get a not-found page): a card per kind (letter distributions, lexicons, leave values), each with its **Upload** button, its items a table on a wide screen and a list of entries, figures under each name, on a phone, so nothing scrolls sideways |
 | `/admin/letter-distributions/new`, `/admin/lexicons/new`, `/admin/leave-sets/new` | Upload forms with validation error lists |
 
@@ -4971,8 +4979,8 @@ Components:
   is short. The compact ladder on the [Cascades page](#cascades-page) shortens
   the same way, keeping Level 1 and the deepest level with `+N more` between
   them.
-- **`QuizOptionsForm`**: segment size, progression and alphabetical order, with
-  their inline explanations, and the warning when `question_count / segment_size`
+- **`QuizOptionsForm`**: segment size, progression and alphabetical order, each
+  explained behind its ⓘ, and the warning when `question_count / segment_size`
   is above 2,000 for the size in the field, before it is saved (see
   [Quiz options](#quiz-options)). It serves the player's Settings twice (the
   level being studied, and levels made from now on, apart by `idPrefix`); it
@@ -5049,9 +5057,9 @@ Components:
   [Desktop layout](#desktop-layout)). A cascade setting is applied locally
   through a `set_cascade_options` operation, a level option through
   `set_quiz_options`, and either updates the current card straight away.
-- **`SettingRow`**: one setting: its name, what it does (from `INFO` in
-  `lib/settings-info.ts`) in muted text directly under the name, then any
-  hint, and the control at the row's right end.
+- **`SettingRow`**: one setting: its name with an ⓘ (`InfoTip`) beside it
+  saying what it does (from `INFO` in `lib/settings-info.ts`), nothing under
+  the name, and the control at the row's right end.
 - **`TrashList`**: the [Trash](#trash) section of the Cascades page: groups by
   cascade, Show more paging, Restore, Export… and Delete forever, and
   provisional dates, with the Trash's total storage, each group's, and what
@@ -6645,6 +6653,9 @@ through the ordinary endpoints, so there is still no test-only path.
   see only that tab reload, the second keep its revealed card, show that the app
   was updated in another tab, finish that card from the old build's cache, and
   report the update rather than block the new build's IndexedDB upgrade.
+- **Asking for a reset link** from `/account` (`accounts.spec.ts`): the
+  card says a link is on its way. The same spec sees a Cascades row's quiz
+  type after its name.
 - **Deleting the account** from `/account`, with a second account's data also on
   the browser, lands on the log-in page, leaves no per-user database or
   `accounts` row for the deleted account — so the browser's accounts list holds only the second — and a reload offers the login page rather than the deleted
@@ -6831,7 +6842,8 @@ through the ordinary endpoints, so there is still no test-only path.
   controls to defaults** button.
 - **Every setting explains itself** (`misc.spec.ts`): a setting's explanation
   is hidden until its ⓘ ("About this setting") is hovered, goes when the
-  mouse leaves, and stays open after a click.
+  mouse leaves, and stays open after a click; the examples and the section
+  headings' texts are behind ⓘs too, never written out.
 - **Signed in, `/` is the Cascades page** (`home.spec.ts`): New cascade and
   the Trash ("The Trash is empty.") are on it, a regular user's header has no
   Main nav, Admin appears only for admins, and an old link to `/trash`

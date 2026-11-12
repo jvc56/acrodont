@@ -8,7 +8,7 @@
 	// cascade too, and another cascade's can be copied) and this device's
 	// (its display and controls, never synced); banners, the completion
 	// screen, and a trashed cascade's Restore.
-	import { INFO, SCOPE } from '$lib/settings-info';
+	import { INFO, SCOPE, SECTION } from '$lib/settings-info';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -24,6 +24,7 @@
 	import ControlsEditor from '$lib/components/settings/ControlsEditor.svelte';
 	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
 	import SettingRow from '$lib/components/SettingRow.svelte';
+	import InfoTip from '$lib/components/InfoTip.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { display, textStyle } from '$lib/player/display.svelte';
 	import { controls } from '$lib/player/controls.svelte';
@@ -924,15 +925,15 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		<div class="flex flex-wrap items-center gap-2">
 			<h3 {id} class="text-lg font-semibold tracking-tight">{title}</h3>
 			<span class="rounded-full border bg-background px-2 py-0.5 text-xs text-muted-foreground">{badge}</span>
+			<InfoTip {text} label="About these settings" />
 		</div>
-		<p class="text-xs text-muted-foreground">{text}</p>
 	</div>
 {/snippet}
 
 {#snippet subHead(id: string, title: string, text: string | null = null)}
-	<div class="pt-2">
+	<div class="flex items-center gap-1 pt-2">
 		<h4 {id} class="text-sm font-semibold">{title}</h4>
-		{#if text}<p class="text-xs text-muted-foreground">{text}</p>{/if}
+		{#if text}<InfoTip {text} label="About these settings" />{/if}
 	</div>
 {/snippet}
 
@@ -961,9 +962,6 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 					{@const q = v.quiz}
 					<section class="space-y-4" aria-labelledby="settings-cascade">
 						{@render scopeHead('settings-cascade', 'Cascade Settings', 'Synced', SCOPE.cascade)}
-						<p class="text-sm text-muted-foreground">
-							A level clears when a pass ends with at least <span class="font-medium text-foreground">{c.clear_threshold}%</span> correct.
-						</p>
 						<div class="overflow-x-auto"><CascadeLadder {rows} onExport={(r) => goto(`/cascades/${id}/export?quiz=${r.quiz.id}`)} /></div>
 						<SettingRow label="Clear threshold (%)" info={INFO.clear_threshold} for="cascade-threshold">
 							<input
@@ -1040,13 +1038,12 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 						{#key formKey}
 							{#if quizOptions}
 								<div class="space-y-3" role="group" aria-labelledby="settings-level">
-									{@render subHead('settings-level', `Level ${q.level}, the level you are studying`)}
+									{@render subHead('settings-level', `Level ${q.level}, the level you are studying`, q.segment_chain ? null : SECTION.level)}
 									<QuizOptionsForm
 										bind:options={quizOptions}
 										idPrefix="quiz-"
 										questionCount={q.question_count}
 										maxQuizQuestions={maxQuiz}
-										editing="quiz"
 										segmentChain={q.segment_chain}
 										source={q.origin === 'source'}
 										showAlphabetical={c.quiz_type === 'anagram'}
@@ -1064,14 +1061,13 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 									{@render subHead(
 										'settings-new-levels',
 										'Levels made from now on',
-										'Each new level this cascade makes from your misses starts with these. Levels it already has keep their own.'
+										SECTION.new_levels
 									)}
 									<QuizOptionsForm
 										bind:options={cascadeOptions}
 										idPrefix="cascade-"
 										questionCount={c.question_count}
 										maxQuizQuestions={maxQuiz}
-										editing="cascade"
 										showAlphabetical={c.quiz_type === 'anagram'}
 										onchange={saveCascadeOptions}
 									/>
@@ -1084,7 +1080,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 								{@render subHead(
 									'settings-copy',
 									'Copy another cascade’s settings',
-									'Gives this cascade every setting above that the other one has too. The level you are studying keeps its own options.'
+									SECTION.copy
 								)}
 								<div class="flex flex-wrap items-center justify-end gap-2 text-sm">
 									<label for="copy-from" class="sr-only">Cascade to copy from</label>
@@ -1112,7 +1108,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 				<section class="space-y-4" aria-labelledby="settings-device">
 					{@render scopeHead('settings-device', 'Device Settings', 'Not synced', SCOPE.device)}
 					<DisplaySettings />
-					{@render subHead('settings-controls', 'Controls', 'The keys, mouse buttons and wheel directions for each action.')}
+					{@render subHead('settings-controls', 'Controls', SECTION.controls)}
 					<ControlsEditor />
 				</section>
 			</div>

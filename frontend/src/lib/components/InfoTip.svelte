@@ -6,14 +6,14 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import InfoIcon from '@lucide/svelte/icons/info';
 
-	let { text }: { text: string } = $props();
+	let { text, label = 'About this setting' }: { text: string; label?: string } = $props();
 </script>
 
 <Popover.Root>
 	<Popover.Trigger
 		type="button"
 		class="inline-flex shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-		aria-label="About this setting"
+		aria-label={label}
 		data-info={text}
 		openOnHover
 		openDelay={100}

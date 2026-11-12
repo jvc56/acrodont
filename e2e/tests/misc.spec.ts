@@ -192,5 +192,10 @@ test('a reveal marks the card correct by default, or missed when set; settings e
 	await tip.click();
 	await settings.getByRole('heading', { name: 'Settings', exact: true }).hover();
 	await expect(page.getByRole('tooltip')).toContainText(text);
+	// Nothing else is written under a setting or a heading: the rest is behind ⓘs too.
+	for (const more of ['drill what you missed before going on', 'come back up to clear it', 'Levels it already has keep their own']) {
+		await expect(settings.getByText(more, { exact: false })).toHaveCount(0);
+		await expect(settings.locator(`[data-info*="${more}"]`).first()).toBeAttached();
+	}
 });
 

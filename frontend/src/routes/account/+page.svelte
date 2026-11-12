@@ -16,6 +16,11 @@
 	import SettingRow from '$lib/components/SettingRow.svelte';
 	import { syncNow, syncState } from '$lib/sync/runtime.svelte';
 
+	// A password is only ever set by a reset (PLAN.md § Accounts): this card asks
+	// for one, the same as the log-in page's "Forgot your password?".
+	let resetEmail = $state('');
+	let resetSent = $state(false);
+	let resetError = $state<string | null>(null);
 
 	let everywherePw = $state('');
 	let everywhereErrors = $state<FieldError[]>([]);
@@ -33,6 +38,17 @@
 			return null;
 		}
 		return describe(e);
+	}
+
+	async function requestReset(e: SubmitEvent) {
+		e.preventDefault();
+		resetError = null;
+		try {
+			await authApi.requestReset(resetEmail);
+			resetSent = true;
+		} catch (err) {
+			resetError = describe(err);
+		}
 	}
 
 	async function signOutEverywhere(e: SubmitEvent) {
@@ -119,9 +135,27 @@
 		</Card.Content>
 	</Card.Root>
 
-
-
-
+	<Card.Root>
+		<Card.Header>
+			<Card.Title>Reset password</Card.Title>
+			<Card.Description>
+				Emails a link for setting a new password. Setting it signs this account out everywhere, this device too.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content>
+			{#if resetSent}
+				<p class="text-sm" role="status">
+					If that is this account's address, a reset link is on its way. The link expires in 30 minutes.
+				</p>
+			{:else}
+				<form class="grid gap-4" onsubmit={requestReset}>
+					<FormError message={resetError} />
+					<Field id="reset_email" label="This account's email" type="email" bind:value={resetEmail} autocomplete="email" />
+					<Button type="submit" variant="outline">Send reset link</Button>
+				</form>
+			{/if}
+		</Card.Content>
+	</Card.Root>
 
 	<Card.Root>
 		<Card.Header>

@@ -113,8 +113,10 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await expect(device.locator('#controls')).toBeVisible();
 	await expect(device.getByRole('button', { name: 'Reset controls to defaults' })).toBeVisible();
 	const levels = dialog.getByRole('region', { name: 'Cascade Settings' });
-	await expect(levels.getByText(/Your other cascades keep their own/)).toBeVisible();
-	await expect(device.getByText(/not synced/)).toBeVisible();
+	// Each section says where it applies, behind the ⓘ beside its heading.
+	await expect(levels.getByText(/Your other cascades keep their own/)).toHaveCount(0);
+	await expect(levels.locator('[data-info*="Your other cascades keep their own"]')).toBeVisible();
+	await expect(device.locator('[data-info*="and not synced"]')).toBeVisible();
 	await expect(levels.getByRole('table', { name: 'Ladder' })).toBeVisible();
 	await expect(levels.getByRole('columnheader')).toHaveText(['Level', 'Questions', 'Pass', 'Last pass', 'Status', 'Actions']);
 	// The clear threshold changes there, for the pass in progress too; out of range is put back.
@@ -125,7 +127,7 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await expect(threshold).toHaveValue('90');
 	await threshold.fill('55');
 	await threshold.press('Tab');
-	await expect(levels.getByText(/at least\s+55%\s+correct/)).toBeVisible();
+	await expect(threshold).toHaveValue('55');
 	// Saved for this cascade alone; with no other cascade, there is no offer to use it for all of them.
 	await expect(levels.getByText('✓ Saved for this cascade')).toBeVisible();
 	await expect(levels.getByText('Also use for:')).toHaveCount(0);
