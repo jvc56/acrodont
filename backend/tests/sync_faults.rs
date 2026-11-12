@@ -82,7 +82,7 @@ async fn a_serialization_failure_is_503_and_the_resend_applies(pool: sqlx::PgPoo
            END IF;
            RETURN NEW;
          END $$ LANGUAGE plpgsql;
-         CREATE TRIGGER wf_fault BEFORE UPDATE ON quiz_questions FOR EACH ROW EXECUTE FUNCTION wf_fault();",
+         CREATE TRIGGER wf_fault BEFORE UPDATE ON quiz_cards FOR EACH ROW EXECUTE FUNCTION wf_fault();",
     )
     .execute(app.db())
     .await
