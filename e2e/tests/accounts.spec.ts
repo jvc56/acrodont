@@ -22,7 +22,15 @@ test('logging out, online and offline, and a second account on the same browser'
 	await createCascade(page, { name: 'Alice cascade' });
 	await page.goto('/cascades');
 	await expect(page.getByText('Available offline')).toBeVisible({ timeout: 60_000 });
+	// Its row: the name, then the quiz type.
+	await expect(page.locator('li', { hasText: 'Alice cascade' }).locator('[data-quiz-type]')).toHaveText('Anagram');
 	await ready(page);
+
+	// The Account page asks for a password reset link, as the log-in page does.
+	await page.goto('/account');
+	await page.getByLabel("This account's email").fill(alice.email);
+	await page.getByRole('button', { name: 'Send reset link' }).click();
+	await expect(page.getByText('a reset link is on its way')).toBeVisible();
 
 	// Nothing unsent: the login page, and it stays there through an offline reload.
 	await logOut(page);

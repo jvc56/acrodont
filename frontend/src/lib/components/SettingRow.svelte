@@ -1,6 +1,7 @@
 <script lang="ts">
 	// One setting: what it is on the left, with an ⓘ beside its name that says
-	// what it does, and the control on the right. Every settings form uses it,
+	// what it does (and nothing else under the name, so a form stays short), and
+	// the control on the right. Every settings form uses it,
 	// so whatever the setting — a checkbox, a choice, a number — the place to
 	// click is always the row's right end.
 	import type { Snippet } from 'svelte';
@@ -9,14 +10,12 @@
 	let {
 		label,
 		for: forId,
-		hint = null,
 		info = null,
 		children
 	}: {
 		label: string;
 		/** The control's id, so the label names it and a click on it reaches it. */
 		for: string;
-		hint?: string | null;
 		/** What the setting does, behind an ⓘ beside its name. */
 		info?: string | null;
 		children: Snippet;
@@ -29,7 +28,6 @@
 			<label for={forId} class="text-sm">{label}</label>
 			{#if info}<InfoTip text={info} />{/if}
 		</div>
-		{#if hint}<p class="text-xs text-muted-foreground">{hint}</p>{/if}
 	</div>
 	<div class="flex shrink-0 items-center gap-2 text-sm">{@render children()}</div>
 </div>

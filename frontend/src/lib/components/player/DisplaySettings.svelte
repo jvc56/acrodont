@@ -64,9 +64,9 @@
 	{@render widen(field)}
 {/snippet}
 
-{#snippet number(label: string, unit: string, field: keyof Display, limit: LimitKey, info: string, hint: string | null = null)}
+{#snippet number(label: string, unit: string, field: keyof Display, limit: LimitKey, info: string)}
 	{@const l = LIMITS[limit]}
-	<SettingRow {label} for={`display-${field}`} {hint} {info}>
+	<SettingRow {label} for={`display-${field}`} {info}>
 		<input
 			id={`display-${field}`}
 			class={inputClass}
@@ -148,8 +148,7 @@
 			'ms',
 			'repeat_guard_ms',
 			'repeat_guard_ms',
-			INFO.repeat_guard,
-			'0, the default, counts every press. Raise it if a bouncing mouse button or an accidental double tap skips cards.'
+			INFO.repeat_guard
 		)}
 	</fieldset>
 </div>
