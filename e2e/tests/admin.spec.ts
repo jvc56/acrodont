@@ -11,6 +11,9 @@ import { PASSWORD, apiCascade, login, openPlayerSettings } from './support';
 // create more than 2,000 levels and see the warning naming the count, on the
 // builder and in a quiz's settings menu" — on a generated 11,000-word lexicon,
 // since the fixture catalog is far too small for that.
+//
+// @serial: it changes the catalog every journey reads, and works as the seeded
+// `dev` admin.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.resolve(here, '../../fixtures/catalog');
@@ -38,7 +41,7 @@ async function upload(page: Page, url: string, fill: () => Promise<void>, name: 
 	await page.getByRole('button', { name: 'Upload' }).click();
 }
 
-test('admin uploads, a broken file, a Leave Value cascade from the new set, deletion refused, and the level warning', async ({ page }) => {
+test('admin uploads, a broken file, a Leave Value cascade from the new set, deletion refused, and the level warning @serial', async ({ page }) => {
 	test.setTimeout(420_000);
 	await login(page, 'dev');
 	void PASSWORD;
@@ -92,23 +95,18 @@ test('admin uploads, a broken file, a Leave Value cascade from the new set, dele
 	await expect(row.getByRole('button', { name: 'Delete' })).toBeDisabled({ timeout: 30_000 });
 	await expect(row.getByText('In use: it has leave values and 1 cascade uses it.')).toBeVisible();
 
-	// More than 2,000 levels: warned about in the builder …
+	// More than 2,000 levels: warned about in a level's options, in Settings.
 	await page.goto('/cascades/new');
 	await page.getByLabel('Lexicon').selectOption(lex);
 	await page.getByLabel('Minimum').first().fill('7');
 	await page.getByLabel('Maximum').first().fill('7');
 	await expect(page.getByText('11,000 questions').or(page.getByText('11000 questions')).first()).toBeVisible({ timeout: 60_000 });
-	await page.getByLabel('Study in segments').check();
-	await page.getByLabel('Segment size').fill('5');
-	await expect(page.getByText('One pass could create up to 2,200 drill levels, one for each segment with a miss.')).toBeVisible();
-	// … and in a quiz's settings menu.
-	await page.getByLabel('Study in segments').uncheck();
 	await page.getByLabel('Cascade name').fill('Big');
 	await page.getByRole('button', { name: 'Create Cascade' }).click();
 	await expect(page).toHaveURL(/\/cascades\/[0-9a-f-]{36}$/, { timeout: 60_000 });
 	await expect(page.getByText(/^1 \/ 11000$/)).toBeVisible({ timeout: 60_000 });
 	await openPlayerSettings(page);
-	const d = page.getByRole('dialog', { name: 'Preferences' }).getByRole('group', { name: /the level you are studying/ });
+	const d = page.getByRole('dialog', { name: 'Settings' }).getByRole('group', { name: /the level you are studying/ });
 	await d.getByLabel('Study in segments').check();
 	await d.getByLabel('Segment size', { exact: true }).fill('5');
 	await expect(d.getByText('One pass could create up to 2,200 drill levels, one for each segment with a miss.')).toBeVisible();

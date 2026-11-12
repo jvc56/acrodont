@@ -1,14 +1,13 @@
 <script lang="ts">
-	// The signed-in site header: where everything is, from every page but the
-	// player, which keeps the whole screen for the quiz and has its own rail.
+	// The signed-in site header, on every page but the player, which keeps the
+	// whole screen for the quiz and has its own rail. Acrodont goes to the
+	// Cascades page, the landing page, which holds New cascade and the Trash;
+	// an admin also has Admin.
 	import { page } from '$app/state';
 	import { session } from '$lib/auth/session.svelte';
 	import SyncStatus from '$lib/components/SyncStatus.svelte';
 
 	const links = $derived([
-		{ href: '/cascades', label: 'Cascades' },
-		{ href: '/cascades/new', label: 'New cascade' },
-		{ href: '/trash', label: 'Trash' },
 		...(session.isAdmin ? [{ href: '/admin', label: 'Admin' }] : [])
 	]);
 
@@ -24,7 +23,7 @@
 <header class="border-b bg-background">
 	<div class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 md:px-6">
 		<a href="/cascades" class="text-lg font-semibold tracking-tight">Acrodont</a>
-		<nav aria-label="Main" class="order-last flex w-full gap-1 overflow-x-auto text-sm md:order-none md:w-auto">
+		{#if links.length}<nav aria-label="Main" class="order-last flex w-full gap-1 overflow-x-auto text-sm md:order-none md:w-auto">
 			{#each links as l (l.href)}
 				<a
 					href={l.href}
@@ -34,14 +33,14 @@
 					{l.label}
 				</a>
 			{/each}
-		</nav>
+		</nav>{/if}
 		<div class="ml-auto flex items-center gap-4">
 			<SyncStatus />
 			<a
 				href="/account"
 				aria-current={page.url.pathname === '/account' ? 'page' : undefined}
 				class="rounded-md border px-3 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted"
-				title="Account: preferences, controls, password, log out"
+				title="Account: log out, storage on this device, password"
 			>
 				{session.username || 'Account'}
 			</a>

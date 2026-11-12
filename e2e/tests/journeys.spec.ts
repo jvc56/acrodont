@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { PROJECT } from '../stack';
-import { createCascade, idb, login, newUser, outboxCount, playLevel, playerPref, press } from './support';
+import { apiCascade, apiSettings, createCascade, cursorSaved, idb, lengths, login, newUser, outboxCount, playLevel, playerSetting, press } from './support';
 
 // PLAN.md § End-to-end tests: answers gone with questions kept, a download
 // stopped part way, Trash and export offline, and export through the server.
@@ -32,7 +32,7 @@ test('answers gone, questions kept; a download stopped part way', async ({ page,
 	const player = await createCascade(page, { name: 'Evicted' });
 	await availableOffline(page, 'Evicted');
 	await page.goto(player);
-	await playerPref(page, 'Answer mode for this cascade', 'typed');
+	await playerSetting(page, 'Answer mode', 'typed');
 	await evictAnswers(page);
 	await context.setOffline(true);
 	await page.goto(player);
@@ -43,6 +43,7 @@ test('answers gone, questions kept; a download stopped part way', async ({ page,
 	await expect(page.getByText('Answer needs a connection.')).toBeVisible();
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	await press(page, 'Space');
+	await cursorSaved(page, 2);
 	await context.setOffline(false);
 	await page.goto('/cascades');
 	await expect(page.getByText('Synced')).toBeVisible({ timeout: 60_000 });
@@ -72,7 +73,7 @@ test('answers gone, questions kept; a download stopped part way', async ({ page,
 	await page.goto(partial);
 	await expect(page.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
 	// Flashcards again: in typed mode Space would type into the answer rather than move on.
-	await playerPref(page, 'Answer mode for this cascade', 'flashcard');
+	await playerSetting(page, 'Answer mode', 'flashcard');
 	for (let i = 0; i < 2; i++) {
 		await press(page, 'Space');
 		await press(page, 'Space');
@@ -97,6 +98,9 @@ test('trash: export a cleared quiz’s missed words offline, see purge dates, re
 	expect(await playLevel(page, (i) => i < 5)).toMatch(/^Level 1/);
 	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2 cleared with 80%. Its 1 missed questions are now Level 2.');
 	await availableOffline(page, 'Trash journey');
+	// The clear must have synced: until the server's cleared time arrives, the
+	// Trash says "deleted forever 30 days after this syncs" instead of a date.
+	await expect(page.getByText('Synced')).toBeVisible({ timeout: 60_000 });
 	await context.setOffline(true);
 	await page.goto('/trash');
 	await expect(page.getByText(/^deleted forever on \d/).first()).toBeVisible();
@@ -122,27 +126,38 @@ test('trash: export a cleared quiz’s missed words offline, see purge dates, re
 	await expect(page.getByText('1 / 5')).toBeVisible();
 });
 
-test('export: counts, offline files, the definitions fallback, and one file through the server', async ({ page, context }) => {
+// @serial: it stops the backend under every other journey on the stack.
+test('export: counts, offline files, the definitions fallback, and one file through the server @serial', async ({ page, context }) => {
 	test.setTimeout(240_000);
 	await newUser(page, 'exp');
 	// Definitions are on by default: off before the cascade downloads, so its
 	// cards never hold them and the definitions fallback below has a cause.
-	await page.goto('/account');
-	await page.getByLabel('Show definitions with anagrams').uncheck();
-	await expect(page.getByLabel('Show definitions with anagrams')).not.toBeChecked();
-	const player = await createCascade(page, { name: 'Export journey' });
+	const player = await apiCascade(page, { name: 'Export journey', filters: lengths(7, 7) });
+	await apiSettings(page, player, { show_definitions: false });
+	// Open it, and let it download before playing: a press that lands in the
+	// refresh a first download brings is lost.
+	await page.goto(player);
+	await expect(page.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
+	await availableOffline(page, 'Export journey');
+	await page.goto(player);
 	expect(await playLevel(page, (i) => i < 3)).toMatch(/^Level 1/);
 	// Level 2 part played: its first card missed, its second correct. A cascade
 	// export's grades are the active quizzes' current attempts (§ Exporting words),
 	// and the finished Level 1 attempt is behind the Source quiz's reset.
 	await expect(page.getByText('1 / 3')).toBeVisible();
+	// As playLevel does: the finish syncs first, since a press that lands in the
+	// refresh its rebase brings is lost.
+	await expect(page.getByText('Synced', { exact: true })).toBeVisible({ timeout: 15_000 });
 	await press(page, 'Space');
 	await press(page, 'KeyX');
+	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
 	await press(page, 'Space');
 	await expect(page.getByText('2 / 3')).toBeVisible();
 	await press(page, 'Space');
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	await press(page, 'Space');
 	await expect(page.getByText('3 / 3')).toBeVisible();
+	await expect(page.getByText('1 ✓ 1 ✗')).toBeVisible();
 	await availableOffline(page, 'Export journey');
 	const exportPage = `${player}/export`;
 	// With the cards complete, the question count and the entry count.

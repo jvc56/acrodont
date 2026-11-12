@@ -434,4 +434,5 @@ async fn cursor_moves_on_two_devices(pool: sqlx::PgPool) {
     assert_eq!(one(&mut b, o).await, "applied");
 }
 
-// Row: preferences changed on two devices — tests/sync.rs latest_wins_whole.
+// Row: a cascade's settings changed on two devices — set by set_cascade_options, so
+// tests/sync.rs latest_wins_whole.

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { confirm, createCascade, login, newUser, press } from './support';
+import { confirm, createCascade, login, newUser, outboxCount, press } from './support';
 
 // PLAN.md § End-to-end tests → Logging out; § Authentication while offline.
 
@@ -59,8 +59,10 @@ test('logging out, online and offline, and a second account on the same browser'
 	await expect(page.getByText(/^\d+ \/ \d+$/).first()).toBeVisible({ timeout: 20_000 });
 	await press(page, 'Space');
 	await press(page, 'Space');
-	// The grade and the cursor move are written once the next card shows.
+	// The screen moves before the grade and the cursor move are saved: leave
+	// only once both are in the outbox, or the navigation can drop one.
 	await expect(page.getByText(/^2 \/ \d+$/).first()).toBeVisible();
+	await expect.poll(() => outboxCount(page), { timeout: 10_000 }).toBe(2);
 	await page.goto('/account');
 	await expect(page.getByText('2 changes haven’t synced yet. They will sync the next time you log in on this device.')).toBeVisible();
 	await context.setOffline(false);

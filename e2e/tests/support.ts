@@ -48,6 +48,17 @@ function code(email: string): string {
 	}
 }
 
+/**
+ * Runs SQL against the stack's own Postgres, for a state no endpoint makes:
+ * an account's own storage limit, or rows a long history would leave. Not
+ * against an existing instance (BASE_URL), which has no such container.
+ */
+export function sql(query: string): string {
+	return execFileSync('docker', ['compose', '-p', PROJECT, 'exec', '-T', 'postgres', 'psql', '-U', 'acrodont', '-d', 'acrodont', '-v', 'ON_ERROR_STOP=1', '-At', '-c', query], {
+		encoding: 'utf8'
+	});
+}
+
 /** A new confirmed user, logged in on `page`. */
 export async function newUser(page: Page, prefix = 'e2e'): Promise<{ username: string; email: string }> {
 	const tag = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
@@ -70,22 +81,13 @@ export async function login(page: Page, username: string) {
 	await expect(page).toHaveURL(/\/cascades$/);
 }
 
-/** A cascade through the builder; returns its player path. */
-export async function createCascade(
-	page: Page,
-	o: { name: string; min?: number; max?: number; segment?: number; threshold?: number; answerMode?: 'flashcard' | 'typed' } = { name: 'x' }
-): Promise<string> {
+/** A cascade through the builder, with the settings every new cascade starts with; returns its player path. */
+export async function createCascade(page: Page, o: { name: string; min?: number; max?: number } = { name: 'x' }): Promise<string> {
 	await page.goto('/cascades/new');
 	await page.getByLabel('Lexicon').selectOption('EN-FIX');
 	await page.getByLabel('Minimum').first().fill(String(o.min ?? 7));
 	await page.getByLabel('Maximum').first().fill(String(o.max ?? 7));
 	await expect(page.getByText(/\d+ questions/).first()).toBeVisible({ timeout: 15_000 });
-	if (o.segment !== undefined) {
-		await page.getByLabel('Study in segments').check();
-		await page.getByLabel('Segment size').fill(String(o.segment));
-	}
-	if (o.threshold !== undefined) await page.getByLabel('Clear threshold (%)').fill(String(o.threshold));
-	if (o.answerMode !== undefined) await page.getByLabel('Answer mode').selectOption(o.answerMode);
 	await page.getByLabel('Cascade name').fill(o.name);
 	await page.getByRole('button', { name: 'Create Cascade' }).click();
 	await expect(page).toHaveURL(/\/cascades\/[0-9a-f-]{36}$/);
@@ -139,33 +141,68 @@ export async function apiCascade(
 export const AEINRST = { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'A E I N R S T' }] };
 export const AEINRST_WORDS = ['ANESTRI', 'ANTSIER', 'NASTIER', 'RATINES', 'RETAINS', 'RETINAS', 'RETSINA', 'STAINER', 'STEARIN'];
 
-/** Sets a preference in the player's settings menu. */
+/** A length filter's wire form: words of `min` to `max` letters. */
+export const lengths = (min: number, max: number) => ({ op: 'and', children: [{ type: 'length', negated: false, min, max }] });
+
 /**
- * Hooks and definitions off, from the Account page: they are on by default, and
- * the journeys sized in answer bytes were measured on answers without them.
+ * Changes a cascade's settings on the server, as another device would, with a
+ * `set_cascade_options` through the sync endpoint. Used on a cascade made with
+ * `apiCascade` before this device has seen it, so it downloads with them.
  */
-export async function plainAnswers(page: Page) {
-	await page.goto('/account');
-	for (const label of ['Show definitions with anagrams', 'Show hooks with anagrams']) {
-		await page.getByLabel(label).uncheck();
-		await expect(page.getByLabel(label)).not.toBeChecked();
-	}
+export async function apiSettings(page: Page, path: string, fields: Record<string, unknown>) {
+	const csrf = (await page.context().cookies()).find((c) => c.name === 'acrodont_csrf')!.value;
+	const me = await (await page.request.get('/api/auth/me')).json();
+	const r = await page.request.post('/api/sync', {
+		headers: { 'X-CSRF-Token': csrf, 'X-Acrodont-User': me.user_id },
+		data: {
+			device_id: crypto.randomUUID(),
+			app_version: 2 ** 31,
+			cursor: null,
+			question_rows_for: [],
+			ops: [
+				{
+					id: crypto.randomUUID(),
+					device_seq: 1,
+					seen_seq: 0,
+					at: new Date().toISOString(),
+					type: 'set_cascade_options',
+					cascade_id: path.split('/').pop(),
+					...fields
+				}
+			]
+		}
+	});
+	expect(r.status(), await r.text()).toBe(200);
+	expect((await r.json()).results[0].status).toBe('applied');
 }
 
-/** Opens the player's Preferences: on the desktop, through the menu, which a cascade opens with hidden. */
+/**
+ * A cascade whose answers have no hooks or definitions, which are on by
+ * default: the journeys sized in answer bytes were measured on such answers.
+ * Made through the API and set before this device sees it, so it never
+ * downloads them; returns its player path.
+ */
+export async function plainCascade(page: Page, name: string, min = 7, max = 7): Promise<string> {
+	const path = await apiCascade(page, { name, filters: lengths(min, max) });
+	await apiSettings(page, path, { show_definitions: false, show_hooks: false });
+	return path;
+}
+
+/** Opens a cascade's Settings in the player: on the desktop, through the menu, which a cascade opens with hidden. */
 export async function openPlayerSettings(page: Page) {
 	const show = page.getByRole('button', { name: 'Show menu' });
-	await expect(show.or(page.getByRole('button', { name: 'Preferences' })).first()).toBeVisible({ timeout: 30_000 });
+	await expect(show.or(page.getByRole('button', { name: 'Settings' })).first()).toBeVisible({ timeout: 30_000 });
 	if (await show.isVisible()) await show.click();
-	await page.getByRole('button', { name: 'Preferences' }).first().click();
+	await page.getByRole('button', { name: 'Settings' }).first().click();
 }
 
-export async function playerPref(page: Page, label: string, value: string | boolean) {
+/** Sets one setting in the player's Settings, then closes them. */
+export async function playerSetting(page: Page, label: string, value: string | boolean) {
 	await openPlayerSettings(page);
-	const control = page.getByRole('dialog', { name: 'Preferences' }).getByLabel(label);
+	const control = page.getByRole('dialog', { name: 'Settings' }).getByLabel(label, { exact: true });
 	if (typeof value === 'boolean') await control.setChecked(value);
 	else await control.selectOption(value);
-	await page.getByRole('dialog', { name: 'Preferences' }).getByRole('button', { name: 'Close' }).click();
+	await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close' }).click();
 }
 
 /**
@@ -204,6 +241,19 @@ export async function idb<T>(page: Page, fn: string, arg?: unknown): Promise<T> 
 /** Operations of a kind waiting in the outbox. */
 export async function outboxCount(page: Page, type?: string): Promise<number> {
 	return idb(page, `const all = await req(db.transaction('outbox').objectStore('outbox').getAll()); return all.filter((e) => !arg || e.op.type === arg).length;`, type);
+}
+
+/**
+ * Waits until the cursor move to the card at `shown` (as the progress reads
+ * it, `shown / n`) is saved in the outbox. The player moves the screen before
+ * its writes are saved (they queue in order, the grade first), so a journey
+ * that reloads or leaves right after a press waits for this first, or the
+ * navigation can drop them. Offline only: online, the move may sync away.
+ */
+export async function cursorSaved(page: Page, shown: number) {
+	const saved = () =>
+		idb<boolean>(page, `const all = await req(db.transaction('outbox').objectStore('outbox').getAll()); return all.some((e) => e.op.type === 'move_cursor' && e.op.position === arg);`, shown - 1);
+	await expect.poll(saved, { timeout: 10_000 }).toBe(true);
 }
 
 /** A key press at a person's pace: the same action twice within the repeat guard (50 ms by default) counts once. */

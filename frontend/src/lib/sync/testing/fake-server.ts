@@ -4,6 +4,7 @@
 // server does, and pulls exactly the rows changed since the cursor, in table
 // order, paged by total rows with the ceiling fixed by the first page
 // (PLAN.md § The sync cycle). The server itself is tested in backend/tests.
+import { levelBytes, STORAGE_COSTS } from '$lib/cascades/storage';
 import { questionsHash, toI64, fromI64 } from '$lib/cascade/order';
 import { Rejected, type Grade, type Progression } from '$lib/cascade/rules';
 import { positionsOf, SimCascade, type Op, type SimQuiz } from '$lib/cascade/sim';
@@ -56,6 +57,8 @@ interface CascadeEntry {
 	options_seq: number;
 	options_device: string;
 	answer_mode: 'flashcard' | 'typed';
+	/** The per-cascade settings the cascade rules never read. */
+	settings: { show_definitions: boolean; show_hooks: boolean; reveal_correct: boolean; leave_value_decimals: number };
 	quizzes: Map<string, QuizMeta>;
 }
 
@@ -80,10 +83,6 @@ export class FakeServer {
 	attempts: AttemptMeta[] = [];
 	tombstones: (Tombstone & { seqn: number })[] = [];
 	records = new Map<string, SyncResult>();
-	prefsSeq = 1;
-	prefsAt = T0;
-	prefsDevice = '';
-	prefs: Record<string, unknown> = {};
 	/** Every request, for assertions. */
 	log: SyncRequest[] = [];
 	/** Replies to force before normal handling, e.g. a 503. */
@@ -113,6 +112,7 @@ export class FakeServer {
 			options_seq: seq,
 			options_device: 'server',
 			answer_mode: 'flashcard',
+			settings: { show_definitions: true, show_hooks: true, reveal_correct: true, leave_value_decimals: 1 },
 			quizzes: new Map()
 		};
 		this.cascades.set(c.id, e);
@@ -138,6 +138,13 @@ export class FakeServer {
 			progression: s.opts.progression,
 			require_alphabetical: s.opts.require_alphabetical,
 			answer_mode: e.answer_mode,
+			...e.settings,
+			// The server's count, from the same per-row costs: the questions and each level's rows.
+			storage_bytes: String(
+				STORAGE_COSTS.cascade_row +
+					[...e.sim.quizzes.values()].reduce((n, q) => n + levelBytes(q.state.question_count), 0) +
+					count * STORAGE_COSTS.question_row
+			),
 			options_changed_at: e.options_at,
 			options_seq: String(e.options_seq),
 			options_device_id: e.options_device,
@@ -194,7 +201,8 @@ export class FakeServer {
 
 	/** Stamps every row an operation changed with `seq`. */
 	private track(e: CascadeEntry, seq: number, at: string, device: string, only?: string) {
-		const snap = JSON.stringify({ ...e.sim.state, t: e.trashed_at });
+		// The cascade row changes with its rules state, the Trash, and the settings the rules never read.
+		const snap = JSON.stringify({ ...e.sim.state, t: e.trashed_at, m: e.answer_mode, s: e.settings });
 		if (snap !== e.snapshot) {
 			e.snapshot = snap;
 			e.updated_seq = seq;
@@ -259,8 +267,16 @@ export class FakeServer {
 		if (req.cursor !== null && req.cursor < this.floor) {
 			return { status: 200, body: { results, sync_seq: String(seq), resync_required: true }, retryAfter: null };
 		}
-		const body = { ...this.page({ cur: req.cursor, ceil: seq, qrf: req.question_rows_for, after: 0 }), results };
+		const body = { ...this.page({ cur: req.cursor, ceil: seq, qrf: req.question_rows_for, after: 0 }), results, storage: this.storage() };
 		return { status: 200, body, retryAfter: null };
+	}
+
+	/** The account's storage as every response reports it: each cascade's figure, summed. */
+	storageLimit = 100_000_000;
+	storage() {
+		let used = 0;
+		for (const e of this.cascades.values()) used += Number(this.cascadeRow(e).storage_bytes);
+		return { used, limit: this.storageLimit };
 	}
 
 	private apply(w: Record<string, unknown>, device: string, seq: number): SyncResult {
@@ -287,17 +303,6 @@ export class FakeServer {
 
 	private applyOp(w: Record<string, unknown>, device: string, seq: number): Partial<SyncResult> {
 		const type = w.type as string;
-		if (type === 'set_preferences' || type === 'set_bindings') {
-			const seen = w.seen_seq as number;
-			if (this.prefsDevice !== device && this.prefsSeq > seen && !((w.at as string) > this.prefsAt)) {
-				throw new Rejected('stale');
-			}
-			Object.assign(this.prefs, w);
-			this.prefsSeq = seq;
-			this.prefsAt = w.at as string;
-			this.prefsDevice = device;
-			return {};
-		}
 		const e = this.entryOf(w);
 		const at = w.at as string;
 		const seen = w.seen_seq as number;
@@ -321,12 +326,19 @@ export class FakeServer {
 			this.cascades.delete(e.id);
 			return r as Partial<SyncResult>;
 		}
+		// A cascade's options: latest wins whole, as on the server (§ Conflicts).
+		if (type === 'set_cascade_options' && !(e.options_device === device || e.options_seq <= seen || at > e.options_at)) {
+			throw new Rejected('stale');
+		}
 		const before = new Set(e.sim.quizzes.keys());
 		const r = e.sim.apply(op as unknown as Op);
 		if (type === 'trash_cascade') e.trashed_at = at;
 		if (type === 'restore_cascade' || (type === 'restore_quiz' && !e.sim.state.trashed)) e.trashed_at = null;
 		if (type === 'set_cascade_options') {
 			if (w.answer_mode !== undefined) e.answer_mode = w.answer_mode as 'flashcard' | 'typed';
+			for (const k of Object.keys(e.settings) as (keyof CascadeEntry['settings'])[]) {
+				if (w[k] !== undefined) (e.settings as Record<string, unknown>)[k] = w[k];
+			}
 			e.options_at = at;
 			e.options_seq = seq;
 			e.options_device = device;
@@ -422,7 +434,6 @@ export class FakeServer {
 				items.push({ table: 'q', row: { quiz_id: q.id, idx, grade: g, graded_at: qm.graded_at, seq: qm.seq }, n: 1 });
 			}
 		}
-		if (inRange(this.prefsSeq)) items.push({ table: 'preferences', row: { updated_seq: String(this.prefsSeq) }, n: 1 });
 		if (t.cur !== null) {
 			for (const tb of this.tombstones) {
 				if (inRange(tb.seqn)) items.push({ table: 'tombstones', row: { entity: tb.entity, entity_id: tb.entity_id, seq: tb.seq }, n: 1 });
@@ -452,29 +463,6 @@ export class FakeServer {
 				g.grade.push(r.grade);
 				g.graded_at.push(r.graded_at);
 				if (r.seq < Number(g.min_updated_seq)) g.min_updated_seq = String(r.seq);
-			} else if (it.table === 'preferences') {
-				changes.preferences = {
-					default_clear_threshold: 80,
-					leave_value_decimals: 1,
-					anagram_show_definitions: true,
-					anagram_show_hooks: true,
-					anagram_answer_mode: 'flashcard',
-					default_segment_size: 0,
-					default_progression: 'ladder',
-					default_require_alphabetical: false,
-					reveal_correct: true,
-					...Object.fromEntries(
-						Object.entries(this.prefs).filter(
-							([k]) => k.startsWith('default_') || k.startsWith('leave_') || k.startsWith('anagram_') || k === 'reveal_correct'
-						)
-					),
-					changed_at: this.prefsAt,
-					changed_by_device_id: this.prefsDevice || null,
-					bindings_changed_at: T0,
-					bindings_device_id: null,
-					updated_seq: String(this.prefsSeq),
-					bindings: []
-				};
 			} else {
 				(changes[it.table] as WireRow[]).push(it.row);
 			}

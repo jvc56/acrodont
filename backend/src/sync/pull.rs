@@ -1,9 +1,8 @@
 //! The pull (PLAN.md § The sync cycle → Pull). Rows with `updated_seq` past
 //! the cursor and at most the ceiling, in table order — cascades, quizzes,
-//! quiz attempts, quiz questions, preferences with bindings, tombstones — each
-//! table by primary key, at most `PAGE_ROWS` rows of any kind per page. The
-//! page token fixes the ceiling and `question_rows_for`, so a paged pull is one
-//! snapshot.
+//! quiz attempts, quiz questions, tombstones — each table by primary key, at
+//! most `PAGE_ROWS` rows of any kind per page. The page token fixes the
+//! ceiling and `question_rows_for`, so a paged pull is one snapshot.
 
 use base64::Engine;
 use chrono::{DateTime, Utc};
@@ -11,13 +10,12 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use super::prefs::{AnswerMode, InputAction, InputKind};
 use super::PAGE_ROWS;
 use crate::cascade::order::from_i64;
-use crate::cascade::rows::{self, CascadeRow, Progression, QuizRow};
+use crate::cascade::rows::{self, CascadeRow, QuizRow};
 use crate::cascade::rules::{Grade, Outcome};
 
-pub const TABLES: [&str; 6] = ["cascades", "quizzes", "quiz_attempts", "quiz_questions", "preferences", "tombstones"];
+pub const TABLES: [&str; 5] = ["cascades", "quizzes", "quiz_attempts", "quiz_questions", "tombstones"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PageToken {
@@ -71,39 +69,6 @@ pub struct QuestionGroup {
     pub min_updated_seq: String,
 }
 
-#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
-pub struct BindingRow {
-    pub action: InputAction,
-    pub slot: i16,
-    pub kind: InputKind,
-    pub code: String,
-    pub ctrl: bool,
-    pub shift: bool,
-    pub alt: bool,
-    pub meta: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct PreferencesRow {
-    pub default_clear_threshold: i16,
-    pub leave_value_decimals: i16,
-    pub anagram_show_definitions: bool,
-    pub anagram_show_hooks: bool,
-    pub anagram_answer_mode: AnswerMode,
-    pub default_segment_size: i32,
-    pub default_progression: Progression,
-    pub default_require_alphabetical: bool,
-    /// Whether showing an answer marks it correct (else missed) until toggled.
-    pub reveal_correct: bool,
-    pub changed_at: DateTime<Utc>,
-    pub changed_by_device_id: Option<Uuid>,
-    pub bindings_changed_at: DateTime<Utc>,
-    pub bindings_device_id: Option<Uuid>,
-    #[serde(with = "rows::seq_text")]
-    pub updated_seq: i64,
-    pub bindings: Vec<BindingRow>,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct Tombstone {
     pub entity: String,
@@ -117,8 +82,6 @@ pub struct Changes {
     pub quizzes: Vec<QuizRow>,
     pub quiz_attempts: Vec<AttemptRow>,
     pub quiz_questions: Vec<QuestionGroup>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preferences: Option<PreferencesRow>,
     pub tombstones: Vec<Tombstone>,
 }
 
@@ -273,18 +236,6 @@ pub async fn page(conn: &mut PgConnection, start: &PageToken) -> Result<(Changes
                     return Ok((out, Some(next(key))));
                 }
             }
-            4 => {
-                if !after.is_empty() {
-                    continue;
-                }
-                if let Some(p) = preferences(conn, user, floor, ceil).await? {
-                    if left == 0 {
-                        return Ok((out, Some(next(vec![]))));
-                    }
-                    left -= 1;
-                    out.preferences = Some(p);
-                }
-            }
             _ => {
                 if start.cur.is_none() {
                     // A full pull carries no tombstones.
@@ -319,48 +270,6 @@ pub async fn page(conn: &mut PgConnection, start: &PageToken) -> Result<(Changes
         }
     }
     Ok((out, None))
-}
-
-async fn preferences(conn: &mut PgConnection, user: Uuid, floor: i64, ceil: i64) -> Result<Option<PreferencesRow>, sqlx::Error> {
-    let Some(p) = sqlx::query!(
-        r#"SELECT default_clear_threshold, leave_value_decimals, anagram_show_definitions, anagram_show_hooks,
-                  anagram_answer_mode AS "anagram_answer_mode: AnswerMode", default_segment_size,
-                  default_progression AS "default_progression: Progression", default_require_alphabetical,
-                  reveal_correct, changed_at, changed_by_device_id, bindings_changed_at, bindings_device_id, updated_seq
-           FROM user_preferences WHERE user_id = $1 AND updated_seq > $2 AND updated_seq <= $3"#,
-        user,
-        floor,
-        ceil
-    )
-    .fetch_optional(&mut *conn)
-    .await?
-    else {
-        return Ok(None);
-    };
-    let bindings: Vec<BindingRow> = sqlx::query_as(
-        "SELECT action, slot, kind, code, ctrl, shift, alt, meta FROM user_input_bindings WHERE user_id = $1
-         ORDER BY action, slot",
-    )
-    .bind(user)
-    .fetch_all(&mut *conn)
-    .await?;
-    Ok(Some(PreferencesRow {
-        default_clear_threshold: p.default_clear_threshold,
-        leave_value_decimals: p.leave_value_decimals,
-        anagram_show_definitions: p.anagram_show_definitions,
-        anagram_show_hooks: p.anagram_show_hooks,
-        anagram_answer_mode: p.anagram_answer_mode,
-        default_segment_size: p.default_segment_size,
-        default_progression: p.default_progression,
-        default_require_alphabetical: p.default_require_alphabetical,
-        reveal_correct: p.reveal_correct,
-        changed_at: p.changed_at,
-        changed_by_device_id: p.changed_by_device_id,
-        bindings_changed_at: p.bindings_changed_at,
-        bindings_device_id: p.bindings_device_id,
-        updated_seq: p.updated_seq,
-        bindings,
-    }))
 }
 
 pub fn hash_text(v: i64) -> String {

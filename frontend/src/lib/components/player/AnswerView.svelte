@@ -12,7 +12,7 @@
 	import TileText from '$lib/components/TileText.svelte';
 	import { leaveValueText } from '$lib/cascade/leave';
 	import { textStyle } from '$lib/player/display.svelte';
-	import type { PreferencesRow } from '$lib/local/rows';
+	import type { CascadeRow } from '$lib/local/rows';
 
 	interface Word {
 		word: string;
@@ -27,7 +27,7 @@
 	let {
 		quizType,
 		answer,
-		prefs,
+		settings,
 		found = null,
 		font = 'Inter',
 		size = 36,
@@ -38,7 +38,8 @@
 	}: {
 		quizType: string;
 		answer: unknown;
-		prefs: PreferencesRow;
+		/** The cascade's settings for what an answer shows. */
+		settings: Pick<CascadeRow, 'show_definitions' | 'show_hooks' | 'leave_value_decimals'>;
 		/** Words found in typed mode; the others are highlighted. */
 		found?: string[] | null;
 		/** Any font name the device has. */
@@ -65,17 +66,25 @@
 
 	let all = $derived(Array.isArray(answer) ? (answer as Word[]) : []);
 	let words = $derived(typing ? all.filter((w) => typing.includes(w.word)) : all);
-	let hooks = $derived(!typing && prefs.anagram_show_hooks);
-	let definitions = $derived(!typing && prefs.anagram_show_definitions);
+	let hooks = $derived(!typing && settings.show_hooks !== false);
+	let definitions = $derived(!typing && settings.show_definitions !== false);
+	/** Typed mode: the word typed last, green among the others. */
+	let latest = $derived(typing?.at(-1) ?? null);
 	let missingDefinitions = $derived(quizType === 'anagram' && definitions && words.some((w) => w.definition === undefined));
 </script>
 
-{#snippet hooked(w: Word, hooks: boolean, missing = false)}
+{#snippet hooked(w: Word, hooks: boolean, missing = false, last = false)}
 	<!-- Front hooks right-aligned, the word with its inner-hook dots, back hooks left-aligned. -->
 	<span class="justify-self-end text-[0.75em] font-normal text-muted-foreground">
 		{#if hooks && w.front_hooks}<TileText text={w.front_hooks} lower />{/if}
 	</span>
-	<span data-answer class="justify-self-start font-semibold whitespace-nowrap" class:text-destructive={missing}>
+	<span
+		data-answer
+		data-latest={last || undefined}
+		class="justify-self-start font-semibold whitespace-nowrap"
+		class:text-destructive={missing}
+		class:text-green-600={last}
+	>
 		<span class:invisible={!(hooks && w.front_inner)} aria-hidden={!(hooks && w.front_inner)}>·</span><TileText text={w.word} /><span
 			class:invisible={!(hooks && w.back_inner)}
 			aria-hidden={!(hooks && w.back_inner)}>·</span
@@ -91,7 +100,7 @@
 	<div role="list" class="grid w-full items-baseline gap-x-3" style={`${columns} ${answerStyle} row-gap: calc(0.5rem * var(--fit, 1));`} data-typing={typing ? '' : undefined}>
 		{#each words as w (w.word)}
 			<div role="listitem" class="contents">
-				{@render hooked(w, hooks, !typing && found !== null && !found.includes(w.word))}
+				{@render hooked(w, hooks, !typing && found !== null && !found.includes(w.word), w.word === latest)}
 				{#if definitions && w.definition}
 					<div class="mx-auto max-w-2xl text-center font-normal text-muted-foreground" style={`grid-column: 1 / -1; ${definitionStyle}`}>
 						{w.definition}
@@ -112,5 +121,5 @@
 	{/if}
 	<p class="mx-auto max-w-2xl text-center" style={definitionStyle}>{String(answer)}</p>
 {:else}
-	<p class="text-center font-semibold" style={answerStyle}>{leaveValueText(Number(answer), prefs.leave_value_decimals)}</p>
+	<p class="text-center font-semibold" style={answerStyle}>{leaveValueText(Number(answer), settings.leave_value_decimals ?? 1)}</p>
 {/if}

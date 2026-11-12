@@ -11,7 +11,15 @@ use uuid::Uuid;
 
 use super::order::from_i64;
 use crate::search::wire::QuizType;
-use crate::sync::prefs::AnswerMode;
+
+/// Flashcard or typed: an Anagram cascade's own (PLAN.md § Typed mode).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "anagram_answer_mode", rename_all = "snake_case")]
+pub enum AnswerMode {
+    Flashcard,
+    Typed,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
@@ -49,7 +57,7 @@ pub mod u64_text {
     }
 }
 
-/// Serialises a sequence as decimal text.
+/// Serialises a sequence, or another 64-bit count, as decimal text.
 pub mod seq_text {
     use serde::Serializer;
 
@@ -71,6 +79,13 @@ pub struct CascadeRow {
     pub require_alphabetical: bool,
     /// Flashcard or typed: an Anagram cascade's own, inert in the other types.
     pub answer_mode: AnswerMode,
+    /// Anagram cascades: each anagram's definition, and its hooks, on reveal.
+    pub show_definitions: bool,
+    pub show_hooks: bool,
+    /// Whether a reveal marks the card correct (else missed) until toggled.
+    pub reveal_correct: bool,
+    /// Leave Value cascades: decimal places shown, 0–3.
+    pub leave_value_decimals: i16,
     pub options_changed_at: DateTime<Utc>,
     #[serde(with = "seq_text")]
     pub options_seq: i64,
@@ -83,6 +98,10 @@ pub struct CascadeRow {
     pub last_activity_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
     pub trashed_at: Option<DateTime<Utc>>,
+    /// The bytes the account holds because of this cascade (STORAGE_LIMIT_PLAN.md
+    /// § S1), as decimal text like every 64-bit value here.
+    #[serde(with = "seq_text")]
+    pub storage_bytes: i64,
     #[serde(with = "seq_text")]
     pub updated_seq: i64,
 }
@@ -129,9 +148,10 @@ pub struct QuizRow {
 pub const CASCADE_SELECT: &str = r#"
     SELECT c.id, c.name, c.quiz_type, l.name AS lexicon, d.name AS letter_distribution,
            c.clear_threshold, c.segment_size, c.progression, c.require_alphabetical, c.answer_mode,
+           c.show_definitions, c.show_hooks, c.reveal_correct, c.leave_value_decimals,
            c.options_changed_at, c.options_seq, c.options_device_id, c.question_count, c.depth,
            c.peak_depth, c.attempts_since_completion, c.created_at, c.last_activity_at,
-           c.completed_at, c.trashed_at, c.updated_seq
+           c.completed_at, c.trashed_at, c.storage_bytes, c.updated_seq
     FROM cascades c
     JOIN lexicons l ON l.id = c.lexicon_id
     JOIN letter_distributions d ON d.id = l.letter_distribution_id"#;

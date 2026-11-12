@@ -5,5 +5,7 @@ export interface Me {
 	is_admin: boolean;
 	trash_retention_days: number;
 	max_quiz_questions: number;
-	max_cascades_per_user: number;
+	/** The account's storage and its limit, in bytes (PLAN.md § Storage limit). */
+	storage_bytes: number;
+	max_storage_bytes: number;
 }

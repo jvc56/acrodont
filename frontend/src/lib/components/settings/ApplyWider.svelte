@@ -1,0 +1,45 @@
+<script lang="ts">
+	// The offer under a cascade's setting just changed (PLAN.md § Settings →
+	// One cascade, or all of them): it says the change was saved for this
+	// cascade, then offers to use the same value for every cascade, one tap.
+	// It stays until the dialog closes, so it is never gone before it is read.
+	import type { Widening } from '$lib/settings/cascade';
+
+	let { saved, offers }: { saved: string; offers: Widening[] } = $props();
+
+	let done = $state<string[]>([]);
+	let busy = $state<string | null>(null);
+	let error = $state<string | null>(null);
+
+	async function take(o: Widening) {
+		busy = o.key;
+		error = null;
+		try {
+			await o.run();
+			done = [...done, o.key];
+		} catch (e) {
+			console.error('widening a setting failed', e);
+			error = 'That couldn’t be saved. Try again.';
+		} finally {
+			busy = null;
+		}
+	}
+
+	const open = $derived(offers.filter((o) => !done.includes(o.key)));
+	const taken = $derived(offers.filter((o) => done.includes(o.key)));
+</script>
+
+<div class="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs" role="status" data-widen>
+	<span class="text-green-700 dark:text-green-500">✓ {saved}</span>
+	{#each taken as o (o.key)}
+		<span class="text-green-700 dark:text-green-500">· ✓ {o.done}</span>
+	{/each}
+	{#if open.length}
+		<span class="text-muted-foreground">· Also use for:</span>
+		{#each open as o, i (o.key)}
+			{#if i}<span class="text-muted-foreground" aria-hidden="true">·</span>{/if}
+			<button class="underline underline-offset-2 hover:text-foreground disabled:opacity-50" disabled={busy !== null} onclick={() => take(o)}>{o.label}</button>
+		{/each}
+	{/if}
+	{#if error}<span class="w-full text-right text-destructive">{error}</span>{/if}
+</div>

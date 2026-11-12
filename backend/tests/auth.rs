@@ -35,7 +35,7 @@ async fn expire_codes(app: &TestApp, email: &str) {
 // ---------------------------------------------------------------------------
 
 #[sqlx::test]
-async fn register_creates_user_preferences_and_bindings(pool: sqlx::PgPool) {
+async fn register_creates_the_user(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
     let mut c = app.client();
     let r = c
@@ -46,39 +46,12 @@ async fn register_creates_user_preferences_and_bindings(pool: sqlx::PgPool) {
     let code = app.latest_code("alice@example.com").await;
     assert_eq!(code.len(), 43, "32 random bytes, base64url");
 
-    // The first sync sequence is taken and stamped on the preferences row.
-    let (sync_seq, prefs_seq): (i64, i64) = sqlx::query_as(
-        "SELECT u.sync_seq, p.updated_seq FROM users u JOIN user_preferences p ON p.user_id = u.id
-         WHERE u.username = 'alice'",
-    )
-    .fetch_one(app.db())
-    .await
-    .unwrap();
-    assert_eq!((sync_seq, prefs_seq), (1, 1));
-    let bindings: Vec<(String, i16, String, String)> = sqlx::query_as(
-        "SELECT b.action::text, b.slot, b.kind::text, b.code FROM user_input_bindings b
-         JOIN users u ON u.id = b.user_id WHERE u.username = 'alice' ORDER BY 1, 2",
-    )
-    .fetch_all(app.db())
-    .await
-    .unwrap();
-    let expected = [
-        ("previous", 0, "mouse_button", "middle"),
-        ("previous", 1, "key", "Backspace"),
-        ("previous", 2, "key", "KeyJ"),
-        ("show_next", 0, "mouse_button", "left"),
-        ("show_next", 1, "key", "Space"),
-        ("show_next", 2, "key", "Comma"),
-        ("show_next", 3, "key", "Enter"),
-        ("toggle_grade", 0, "mouse_button", "right"),
-        ("toggle_grade", 1, "key", "KeyX"),
-        ("toggle_grade", 2, "key", "KeyM"),
-    ];
-    let got: Vec<_> = bindings
-        .iter()
-        .map(|(a, s, k, c)| (a.as_str(), *s, k.as_str(), c.as_str()))
-        .collect();
-    assert_eq!(got, expected);
+    // No sync sequence is taken yet: there are no account-level rows to stamp.
+    let sync_seq: i64 = sqlx::query_scalar("SELECT sync_seq FROM users WHERE username = 'alice'")
+        .fetch_one(app.db())
+        .await
+        .unwrap();
+    assert_eq!(sync_seq, 0);
     // Only the SHA-256 of the code is stored, with a 24-hour expiry.
     let (hash_len, hours): (i32, f64) = sqlx::query_as(
         "SELECT octet_length(code_hash), extract(epoch FROM expires_at - created_at)::float8 / 3600
@@ -231,7 +204,11 @@ async fn re_registering_an_unconfirmed_email(pool: sqlx::PgPool) {
 /// 24 hours, twenty per address in all.
 #[sqlx::test]
 async fn email_caps(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("AUTH_RATE_PER_IP_PER_MINUTE", "1000")]).await;
+    let app = TestApp::with(
+        pool,
+        &[("AUTH_RATE_PER_IP_PER_MINUTE", "1000"), ("RESET_RATE_PER_HOUR", "1000")],
+    )
+    .await;
     app.signed_in("erin").await; // one confirmation email from 203.0.113.1
     let mut c = app.client(); // same IP
     for _ in 0..2 {
@@ -439,8 +416,10 @@ async fn login_sets_session_and_csrf_cookies_with_one_ttl(pool: sqlx::PgPool) {
     assert_eq!(body["username"], "ivy");
     assert_eq!(body["is_admin"], false);
     assert_eq!(body["trash_retention_days"], 30);
-    assert_eq!(body["max_quiz_questions"], 130000);
-    assert_eq!(body["max_cascades_per_user"], 20);
+    assert_eq!(body["max_quiz_questions"], 300000);
+    assert_eq!(body["storage_bytes"], 0);
+    assert_eq!(body["max_storage_bytes"], 100_000_000);
+    assert!(body.get("max_cascades_per_user").is_none());
     let session = r.set_cookie("acrodont_session").unwrap();
     let csrf = r.set_cookie("acrodont_csrf").unwrap();
     assert!(session.contains("HttpOnly"));
@@ -691,53 +670,18 @@ async fn sign_out_everywhere(pool: sqlx::PgPool) {
     );
 }
 
+/// There is no signed-in password change, as in birdtest: a reset is the one way.
 #[sqlx::test]
-async fn change_password_reissues_this_session(pool: sqlx::PgPool) {
+async fn there_is_no_signed_in_password_change(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
     let mut here = app.signed_in("ozzy").await;
-    let mut there = app.client_from("198.51.100.4");
-    there.user_id = here.user_id;
-    there
-        .post(
-            "/api/auth/login",
-            json!({"username": "ozzy", "password": PASSWORD}),
-        )
-        .await;
-    let r = here
-        .post(
-            "/api/account/password",
-            json!({"current_password": "nope-nope", "new_password": "violet-harbor-lantern-quill"}),
-        )
-        .await;
-    assert_eq!(r.status, StatusCode::BAD_REQUEST);
-    assert_eq!(r.json()["errors"][0]["field"], "current_password");
-    let r = here
-        .post(
-            "/api/account/password",
-            json!({"current_password": PASSWORD, "new_password": "abc"}),
-        )
-        .await;
-    assert_eq!(r.json()["errors"][0]["field"], "new_password");
     let r = here
         .post(
             "/api/account/password",
             json!({"current_password": PASSWORD, "new_password": "violet-harbor-lantern-quill"}),
         )
         .await;
-    assert_eq!(r.status, StatusCode::NO_CONTENT);
-    assert_eq!(
-        there.get("/api/auth/me").await.status,
-        StatusCode::UNAUTHORIZED
-    );
-    assert_eq!(here.get("/api/auth/me").await.status, StatusCode::OK);
-    let mut fresh = app.client_from("198.51.100.5");
-    let r = fresh
-        .post(
-            "/api/auth/login",
-            json!({"username": "ozzy", "password": "violet-harbor-lantern-quill"}),
-        )
-        .await;
-    assert_eq!(r.status, StatusCode::OK);
+    assert!(matches!(r.status, StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED), "{}", r.status);
 }
 
 #[sqlx::test]
@@ -759,8 +703,6 @@ async fn delete_account_cascades_and_clears_cookies(pool: sqlx::PgPool) {
     );
     for table in [
         "users",
-        "user_preferences",
-        "user_input_bindings",
         "email_confirmations",
     ] {
         let n: i64 =
@@ -820,13 +762,14 @@ async fn password_reset(pool: sqlx::PgPool) {
     );
 
     let mails = app.mail_to("rae@example.com", 2).await;
-    let token = mails
+    let reset = mails
         .iter()
-        .find_map(|m| match &m.kind {
-            MailKind::PasswordReset { token } => Some(token.clone()),
-            _ => None,
-        })
+        .find(|m| matches!(m.kind, MailKind::PasswordReset { .. }))
         .unwrap();
+    // The username too: signing in asks for it.
+    assert!(reset.body.contains("Your Acrodont username is rae."), "{}", reset.body);
+    let MailKind::PasswordReset { token } = &reset.kind else { unreachable!() };
+    let token = token.clone();
     assert!(app.settled_mail_to("nobody@example.com").await.is_empty());
     // A second outstanding token.
     c.post(
@@ -843,6 +786,15 @@ async fn password_reset(pool: sqlx::PgPool) {
         )
         .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.json()["errors"][0]["field"], "password");
+    // Registration's rule: not the username, not the address. Refused, the link still works.
+    let r = c
+        .post(
+            "/api/auth/reset-password/confirm",
+            json!({"token": token, "password": "rae@example.com"}),
+        )
+        .await;
+    assert_eq!(r.json()["errors"][0]["field"], "password");
     let r = c
         .post(
             "/api/auth/reset-password/confirm",
@@ -850,6 +802,8 @@ async fn password_reset(pool: sqlx::PgPool) {
         )
         .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
+    // The browser that set it is signed out too: signing in is the confirmation.
+    assert!(r.set_cookie("acrodont_session").unwrap().contains("Max-Age=0"));
     // Every other outstanding token is spent, and every session signed out.
     let unused: i64 =
         sqlx::query_scalar("SELECT count(*) FROM password_reset_tokens WHERE used_at IS NULL")
@@ -875,6 +829,78 @@ async fn password_reset(pool: sqlx::PgPool) {
         )
         .await;
     assert_eq!(r.status, StatusCode::OK);
+}
+
+/// The reset's own limits, five an hour each: per caller and per address
+/// asked for, and per link set with; a wrong link is refused before any scoring.
+#[sqlx::test]
+async fn reset_limits(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("AUTH_RATE_PER_IP_PER_MINUTE", "1000")]).await;
+    app.signed_in("vic").await;
+    // Per address, whoever asks: the sixth in the hour is refused, for any address alike.
+    for i in 0..5 {
+        let r = app
+            .client_from(&format!("192.0.2.{i}"))
+            .post("/api/auth/reset-password", json!({ "email": "vic@example.com" }))
+            .await;
+        assert_eq!(r.status, StatusCode::ACCEPTED);
+    }
+    let r = app
+        .client_from("192.0.2.99")
+        .post("/api/auth/reset-password", json!({ "email": "VIC@example.com" }))
+        .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    // Per caller, whatever the address.
+    let mut one = app.client_from("198.51.100.20");
+    for i in 0..5 {
+        let r = one
+            .post("/api/auth/reset-password", json!({ "email": format!("n{i}@example.com") }))
+            .await;
+        assert_eq!(r.status, StatusCode::ACCEPTED);
+    }
+    let r = one
+        .post("/api/auth/reset-password", json!({ "email": "n9@example.com" }))
+        .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+
+    // A wrong link: refused as a link, not scored.
+    let mut c = app.client_from("198.51.100.21");
+    let r = c
+        .post(
+            "/api/auth/reset-password/confirm",
+            json!({"token": "nope", "password": "weak"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.json()["error"], "invalid_token");
+
+    // Per link: five tries an hour, weak passwords included, from any caller.
+    let token = app
+        .mail_to("vic@example.com", 2)
+        .await
+        .iter()
+        .find_map(|m| match &m.kind {
+            MailKind::PasswordReset { token } => Some(token.clone()),
+            _ => None,
+        })
+        .unwrap();
+    for i in 0..5 {
+        let r = app
+            .client_from(&format!("203.0.113.{}", 50 + i))
+            .post(
+                "/api/auth/reset-password/confirm",
+                json!({"token": token, "password": "weak-one"}),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    }
+    let r = c
+        .post(
+            "/api/auth/reset-password/confirm",
+            json!({"token": token, "password": "amber-cobalt-meadow-sprocket"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
 }
 
 #[sqlx::test]
@@ -1116,12 +1142,22 @@ async fn an_expired_unconfirmed_account_does_not_hold_a_place(pool: sqlx::PgPool
     assert_eq!(c.post("/api/auth/register", reg("fresh", "fresh@example.com")).await.status, StatusCode::ACCEPTED);
 }
 
-/// /api/auth/me reports the cascade limit, so the device shows the server's.
+/// /api/auth/me reports the account's storage and its effective limit, so the
+/// device shows the server's: the configured one, or the account's own
+/// override; and no cascade limit.
 #[sqlx::test]
-async fn me_reports_the_cascade_limit(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("MAX_CASCADES_PER_USER", "7")]).await;
+async fn me_reports_the_storage_limit(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("MAX_STORAGE_BYTES_PER_USER", "7000000")]).await;
     let mut c = app.signed_in("limits").await;
-    assert_eq!(c.get("/api/auth/me").await.json()["max_cascades_per_user"], 7);
+    let me = c.get("/api/auth/me").await.json();
+    assert_eq!((me["storage_bytes"].as_i64(), me["max_storage_bytes"].as_i64()), (Some(0), Some(7_000_000)));
+    assert!(me.get("max_cascades_per_user").is_none());
+    sqlx::query("UPDATE users SET storage_bytes = 1234, storage_limit_bytes = 9000000 WHERE username = 'limits'")
+        .execute(app.db())
+        .await
+        .unwrap();
+    let me = c.get("/api/auth/me").await.json();
+    assert_eq!((me["storage_bytes"].as_i64(), me["max_storage_bytes"].as_i64()), (Some(1234), Some(9_000_000)));
 }
 
 /// DEV_LOGIN: absent by default (404), and with it a confirmed account gets a

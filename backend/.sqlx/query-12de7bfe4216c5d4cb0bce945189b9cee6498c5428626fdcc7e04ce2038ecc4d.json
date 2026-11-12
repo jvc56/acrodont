@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT storage_bytes AS kept,\n                      (coalesce((SELECT sum(storage_bytes) FROM cascades WHERE user_id = $1), 0)\n                       + coalesce((SELECT sum(storage_bytes) FROM saved_searches WHERE user_id = $1), 0))::int8 AS \"counted!\"\n               FROM users WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kept",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "storage_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "counted!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "12de7bfe4216c5d4cb0bce945189b9cee6498c5428626fdcc7e04ce2038ecc4d"
+}

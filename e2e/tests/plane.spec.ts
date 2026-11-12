@@ -2,7 +2,7 @@ import { test, expect, chromium } from '@playwright/test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createCascade, login, newUser, playLevel, press } from './support';
+import { createCascade, idb, login, newUser, playLevel, press } from './support';
 
 // PLAN.md § End-to-end tests → The plane: Available offline, a reload offline,
 // the browser closed and reopened offline (the signed_in pointer), several
@@ -46,7 +46,14 @@ test('the plane', async ({ baseURL }) => {
 		await expect(page.getByText('Level 2 of 2')).toBeVisible({ timeout: 20_000 });
 		await press(page, 'Space');
 		await expect(page.locator('[data-grade="correct"]')).toBeVisible();
+		// The newest operation in the outbox (a cursor move replaces the pending one, so counts can stay put).
+		const newest = () =>
+			idb<number>(page, `const all = await req(db.transaction('outbox').objectStore('outbox').getAll()); return Math.max(0, ...all.filter((e) => e.op.type === 'move_cursor').map((e) => e.device_seq));`);
+		const before = await newest();
 		await press(page, 'Space');
+		// The screen moves before the write is saved: leave only once this cursor move is in the outbox.
+		await expect(page.getByText('2 / 2')).toBeVisible();
+		await expect.poll(newest, { timeout: 10_000 }).toBeGreaterThan(before);
 		// 6. Online again: Synced.
 		await context.setOffline(false);
 		await page.goto('/cascades');

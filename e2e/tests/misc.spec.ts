@@ -2,7 +2,7 @@ import { test, expect, chromium, type Page } from '@playwright/test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { apiCascade, confirm, createCascade, idb, login, newUser, playLevel, playerPref, press } from './support';
+import { apiCascade, confirm, createCascade, idb, login, newUser, openPlayerSettings, playLevel, playerSetting, press } from './support';
 
 // PLAN.md § End-to-end tests: the shorter journeys.
 
@@ -21,7 +21,7 @@ test('leave decimals at 3 render a leave answer to three places, with no plus si
 	});
 	await page.goto(player);
 	await expect(page.getByText(/^1 \/ \d+$/)).toBeVisible({ timeout: 30_000 });
-	await playerPref(page, 'Round leave values to (decimal places)', '3');
+	await playerSetting(page, 'Round leave values to (decimal places)', '3');
 	await press(page, 'Space');
 	// A positive value has no '+'.
 	await expect(page.getByText(/^\d+\.\d{3}$/)).toBeVisible();
@@ -32,8 +32,8 @@ test('hooks read Zyzzyva-style in lower case, and a Catalan multi-character hook
 	const port = await apiCascade(page, { name: 'Port', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'O P R T' }] } });
 	await page.goto(port);
 	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
-	await playerPref(page, 'Show hooks with anagrams', true);
-	await playerPref(page, 'Show definitions with anagrams', true);
+	await playerSetting(page, 'Show hooks', true);
+	await playerSetting(page, 'Show definitions', true);
 	await press(page, 'Space');
 	await expect(page.getByText('a harbour')).toBeVisible({ timeout: 30_000 });
 	const li = page.getByRole('listitem').filter({ hasText: /PORT/ });
@@ -61,7 +61,7 @@ test('a cascade trashed offline is listed in the Trash with "deleted forever 30 
 	await context.setOffline(true);
 	await page.getByRole('button', { name: 'Move to Trash' }).click();
 	await confirm(page, 'Move to Trash');
-	await expect(page.getByText('Offline trash')).toHaveCount(0);
+	await expect(page.getByRole('link', { name: 'Offline trash' })).toHaveCount(0);
 	await page.goto('/trash');
 	await expect(page.getByText('Offline trash (cascade in the Trash)')).toBeVisible();
 	await expect(page.getByText('deleted forever 30 days after this syncs')).toBeVisible();
@@ -173,15 +173,15 @@ test('a reveal marks the card correct by default, or missed when set; settings e
 	await expect(page.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
 	await press(page, 'Space');
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
-	await playerPref(page, 'When an answer is revealed, mark it', 'missed');
+	await playerSetting(page, 'When an answer is revealed, mark it', 'missed');
 	await press(page, 'Space');
 	await expect(page.getByText('2 / 18')).toBeVisible();
 	await press(page, 'Space');
 	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
-	// Each preference has an ⓘ that explains it on hover.
-	await page.goto('/account');
-	const row = page.getByText('Default clear threshold (%)', { exact: true }).locator('xpath=..');
-	await row.getByRole('button', { name: 'About this setting' }).hover();
-	await expect(page.getByRole('tooltip')).toContainText('The score a new cascade needs to clear a level');
+	// Each setting says what it does under its name, with no ⓘ to hover.
+	await openPlayerSettings(page);
+	const settings = page.getByRole('dialog', { name: 'Settings' });
+	await expect(settings.getByText('The score a pass needs to clear a level of this cascade', { exact: false })).toBeVisible();
+	await expect(settings.getByRole('button', { name: 'About this setting' })).toHaveCount(0);
 });
 

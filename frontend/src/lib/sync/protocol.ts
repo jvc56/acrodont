@@ -32,7 +32,6 @@ export interface Changes {
 	quizzes: WireRow[];
 	quiz_attempts: WireRow[];
 	quiz_questions: QuestionGroup[];
-	preferences?: WireRow;
 	tombstones: Tombstone[];
 }
 
@@ -42,6 +41,8 @@ export interface SyncResponse {
 	sync_seq: string;
 	next_page_token?: string;
 	resync_required?: boolean;
+	/** The account's storage and its limit, in bytes, on every response (PLAN.md § Storage limit). */
+	storage?: { used: number; limit: number };
 }
 
 export interface SyncRequest {

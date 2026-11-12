@@ -1,5 +1,5 @@
 //! PLAN.md § API → Catalog and search (saved searches) and § Integration tests
-//! (saved-search overwrite, round trip, retries, limits, validation).
+//! (saved-search overwrite, round trip, retries, storage, validation).
 
 mod common;
 
@@ -101,13 +101,18 @@ async fn overwrite_and_delete(pool: sqlx::PgPool) {
     assert_eq!(c.delete_empty(&format!("/api/searches/{second}")).await.status, StatusCode::NOT_FOUND);
 }
 
+/// What a saved search of `simple()` holds: a spec's row and no word list
+/// (`contract-fixtures/storage.json`).
+const SIMPLE_BYTES: i64 = acrodont::storage::ROW_BYTES.spec_row;
+
 /// A save whose response is lost, retried with the same id and body, returns
-/// the saved search rather than `name_taken`, and at one below the limit
-/// rather than `saved_search_limit`, with one row stored; an id held by
-/// another user is refused with 409.
+/// the saved search rather than `name_taken`, and with the account then at its
+/// storage limit rather than `storage_limit`, with one row stored and counted
+/// once; an id held by another user is refused with 409.
 #[sqlx::test]
 async fn a_retried_save_is_recognised_by_its_id(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("MAX_SAVED_SEARCHES_PER_USER", "2")]).await;
+    let limit = (2 * SIMPLE_BYTES).to_string();
+    let app = TestApp::with(pool, &[("MAX_STORAGE_BYTES_PER_USER", &limit)]).await;
     let mut c = app.signed_in("alice").await;
     assert_eq!(c.post("/api/searches", save_body(Uuid::new_v4(), "one", simple())).await.status, StatusCode::CREATED);
     let id = Uuid::new_v4();
@@ -118,31 +123,66 @@ async fn a_retried_save_is_recognised_by_its_id(pool: sqlx::PgPool) {
     assert_eq!(r.json()["id"], json!(id));
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM saved_searches").fetch_one(app.db()).await.unwrap();
     assert_eq!(n, 2);
+    let used: i64 = sqlx::query_scalar("SELECT storage_bytes FROM users WHERE username = 'alice'").fetch_one(app.db()).await.unwrap();
+    assert_eq!(used, 2 * SIMPLE_BYTES);
     let mut bob = app.signed_in("bob").await;
     let r = bob.post("/api/searches", save_body(id, "mine", simple())).await;
     assert_eq!(r.status, StatusCode::CONFLICT);
 }
 
+/// Saved searches count toward storage (STORAGE_LIMIT_PLAN.md D2): one that
+/// would not fit is refused with what it needs; an overwrite counts only the
+/// difference; deleting one frees what it held.
 #[sqlx::test]
-async fn the_saved_search_limit(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("MAX_SAVED_SEARCHES_PER_USER", "2")]).await;
+async fn saved_searches_count_toward_storage(pool: sqlx::PgPool) {
+    let limit = (2 * SIMPLE_BYTES).to_string();
+    let app = TestApp::with(pool, &[("MAX_STORAGE_BYTES_PER_USER", &limit)]).await;
     let mut c = app.signed_in("alice").await;
-    for name in ["a", "b"] {
-        assert_eq!(c.post("/api/searches", save_body(Uuid::new_v4(), name, simple())).await.status, StatusCode::CREATED);
+    let a = Uuid::new_v4();
+    for (id, name) in [(a, "a"), (Uuid::new_v4(), "b")] {
+        assert_eq!(c.post("/api/searches", save_body(id, name, simple())).await.status, StatusCode::CREATED);
     }
     let r = c.post("/api/searches", save_body(Uuid::new_v4(), "c", simple())).await;
     assert_eq!(r.status, StatusCode::CONFLICT);
-    assert_eq!(r.json(), json!({ "error": "saved_search_limit", "limit": 2, "count": 2 }));
-    // An overwrite of an existing name is accepted at the limit.
+    assert_eq!(
+        r.json(),
+        json!({ "error": "storage_limit", "used": 2 * SIMPLE_BYTES, "limit": 2 * SIMPLE_BYTES, "needed": SIMPLE_BYTES })
+    );
+    // An overwrite of an existing name with the same size adds nothing and is
+    // accepted at the limit; one with a word list needs what the list adds.
     let mut body = save_body(Uuid::new_v4(), "a", simple());
     body["overwrite"] = json!(true);
     assert_eq!(c.post("/api/searches", body).await.status, StatusCode::CREATED);
+    let listed = json!({ "op": "and", "children": [length(7, 7),
+        { "type": "in_word_list", "negated": false, "entries": ["QI", "ZA", "QI"] }] });
+    let mut body = save_body(Uuid::new_v4(), "a", listed);
+    body["overwrite"] = json!(true);
+    let r = c.post("/api/searches", body).await;
+    let words = 2 * (acrodont::storage::ROW_BYTES.spec_word_row + 2);
+    assert_eq!(r.json(), json!({ "error": "storage_limit", "used": 2 * SIMPLE_BYTES, "limit": 2 * SIMPLE_BYTES, "needed": words }));
+    // Deleting one frees its share, and then the list fits.
+    let b: Value = c.get("/api/searches").await.json();
+    let b_id = b.as_array().unwrap().iter().find(|s| s["name"] == "b").unwrap()["id"].as_str().unwrap().to_owned();
+    assert_eq!(c.delete_empty(&format!("/api/searches/{b_id}")).await.status, StatusCode::NO_CONTENT);
+    let mut body = save_body(Uuid::new_v4(), "a", json!({ "op": "and", "children": [length(7, 7),
+        { "type": "in_word_list", "negated": false, "entries": ["QI", "ZA", "QI"] }] }));
+    body["overwrite"] = json!(true);
+    assert_eq!(c.post("/api/searches", body).await.status, StatusCode::CREATED);
+    let (used, sum): (i64, i64) = sqlx::query_as(
+        "SELECT u.storage_bytes, (SELECT sum(storage_bytes)::int8 FROM saved_searches s WHERE s.user_id = u.id)
+         FROM users u WHERE username = 'alice'",
+    )
+    .fetch_one(app.db())
+    .await
+    .unwrap();
+    assert_eq!((used, sum), (SIMPLE_BYTES + words, SIMPLE_BYTES + words));
 }
 
-/// Two simultaneous saves compete for the last slot and only one takes it.
+/// Two simultaneous saves compete for the last space and only one takes it.
 #[sqlx::test]
-async fn two_saves_race_for_the_last_slot(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("MAX_SAVED_SEARCHES_PER_USER", "1")]).await;
+async fn two_saves_race_for_the_last_space(pool: sqlx::PgPool) {
+    let limit = SIMPLE_BYTES.to_string();
+    let app = TestApp::with(pool, &[("MAX_STORAGE_BYTES_PER_USER", &limit)]).await;
     let a = app.signed_in("alice").await;
     let mut b = common::Client::new(&app, "203.0.113.9");
     b.cookies = a.cookies.clone();

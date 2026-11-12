@@ -1,8 +1,6 @@
 <script lang="ts">
 	// The cascade builder (PLAN.md § Creating a cascade), laid out like
 	// Zyzzyva's Search tab. Needs a connection: searching runs on the server.
-	import InfoTip from '$lib/components/InfoTip.svelte';
-	import { INFO } from '$lib/settings-info';
 	import { confirmAction } from '$lib/confirm.svelte';
 	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
 	import { onDestroy, onMount } from 'svelte';
@@ -13,7 +11,6 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import FilterGroup from '$lib/components/builder/FilterGroup.svelte';
-	import QuizOptionsForm from '$lib/components/QuizOptionsForm.svelte';
 	import TileText from '$lib/components/TileText.svelte';
 	import { api, ApiError } from '$lib/api';
 	import { session } from '$lib/auth/session.svelte';
@@ -42,28 +39,27 @@
 	} from '$lib/filters';
 	import { storeCreated, type Created } from '$lib/local/created';
 	import { getMeta } from '$lib/local/meta';
-	import { preferencesView } from '$lib/local/preferences';
-	import { allCascades, cascadeWarning } from '$lib/cascades/summary';
+	import { CASCADE_SETTING_DEFAULTS } from '$lib/local/rows';
+	import { DEFAULT_STORAGE_LIMIT, formatBytes } from '$lib/cascades/storage';
 	import { userDb } from '$lib/local/open';
-	import { DEFAULT_OPTIONS, clampPrefill, type QuizOptions } from '$lib/options';
 	import { PREVIEW_MANUAL_ENTRIES } from '$lib/sync/config';
 	import type { Distribution } from '$lib/tiles';
 
-	const cap = $derived(session.me?.max_quiz_questions ?? 130_000);
+	const cap = $derived(session.me?.max_quiz_questions ?? 300_000);
 
 	let quizType = $state<QuizType>('anagram');
 	let lexicons = $state<LexiconInfo[]>([]);
 	let lexicon = $state('');
 	let dist = $state<Distribution | null>(null);
 	let root = $state<GroupState>(newGroup('and', [newRow('length', 'anagram', null)]));
-	let threshold = $state(80);
-	/** Flashcard or typed: the cascade's own, prefilled from the account default. */
-	let answerMode = $state<'flashcard' | 'typed'>('flashcard');
-	let cascadeCount = $state(0);
-	let options = $state<QuizOptions>({ ...DEFAULT_OPTIONS });
+	/** The account's storage and its limit, as the server last reported them (PLAN.md § Storage limit). */
+	let used = $state(0);
+	let limit = $state(DEFAULT_STORAGE_LIMIT);
 	let name = $state('');
 	let nameEdited = $state(false);
 	let preview = $state<PreviewState | null>(null);
+	/** The new cascade would not fit: the server would refuse it, so the button says so first. */
+	let wontFit = $derived(used >= limit || (preview?.storageBytes != null && used + preview.storageBytes > limit));
 	let creating = $state(false);
 	/** What the creation is doing, for the screen shown over the builder. */
 	let createStage = $state<'server' | 'device'>('server');
@@ -98,21 +94,11 @@
 
 	onMount(async () => {
 		if (session.userId) {
-			// The threshold and options are prefilled from the preferences view, the
-			// segment size clamped to the cap in `meta` (§ Creating a cascade, § Quiz options).
 			const db = await userDb(session.userId, session.username);
-			const p = await preferencesView(db);
-			const metaCap = (await getMeta(db, 'server')).max_quiz_questions;
-			threshold = p.default_clear_threshold;
-			answerMode = p.anagram_answer_mode;
-			options = {
-				segment_size: clampPrefill(p.default_segment_size, metaCap),
-				progression: p.default_progression,
-				require_alphabetical: p.default_require_alphabetical
-			};
-			cascadeCount = (await allCascades(db)).length;
+			const server = await getMeta(db, 'server');
+			used = server.storage_bytes ?? 0;
+			limit = server.max_storage_bytes ?? DEFAULT_STORAGE_LIMIT;
 		}
-		options.segment_size = clampPrefill(options.segment_size, cap);
 		try {
 			lexicons = await loadLexicons();
 			lexicon = lexicons[0]?.name ?? '';
@@ -170,11 +156,12 @@
 			name,
 			lexicon,
 			quiz_type: quizType,
-			clear_threshold: threshold,
-			segment_size: options.segment_size,
-			progression: options.progression,
-			require_alphabetical: options.require_alphabetical,
-			answer_mode: answerMode,
+			// Every new cascade starts with the same settings; they are changed in its Settings (§ Settings).
+			clear_threshold: CASCADE_SETTING_DEFAULTS.clear_threshold,
+			segment_size: CASCADE_SETTING_DEFAULTS.segment_size,
+			progression: CASCADE_SETTING_DEFAULTS.progression,
+			require_alphabetical: CASCADE_SETTING_DEFAULTS.require_alphabetical,
+			answer_mode: CASCADE_SETTING_DEFAULTS.answer_mode,
 			filters: wire.tree
 		};
 		try {
@@ -185,9 +172,11 @@
 			await storeCreated(await userDb(session.userId, session.username), created, new Date(), (f) => (createProgress = f));
 			await goto(`/cascades/${body.id}`);
 		} catch (e) {
-			if (e instanceof ApiError && e.code === 'cascade_limit') {
-				const b = e.body as { limit: number };
-				createError = `You have reached the limit of ${b.limit} cascades. Empty the Trash to make room.`;
+			if (e instanceof ApiError && e.code === 'storage_limit') {
+				const b = e.body as { used: number; limit: number; needed: number };
+				used = b.used;
+				limit = b.limit;
+				createError = `This cascade needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your ${formatBytes(b.limit)} is free. Empty the Trash or delete cascades to make room.`;
 			} else if (e instanceof ApiError && e.code === 'empty') createError = 'The search matched nothing.';
 			else if (e instanceof ApiError && e.code === 'over_cap')
 				createError = `The search matched ${(e.body as { count: number }).count.toLocaleString()} questions, more than ${cap.toLocaleString()}. Narrow it.`;
@@ -221,9 +210,9 @@
 					action: 'Replace'
 				});
 				if (ok) await save(true, id);
-			} else if (e instanceof ApiError && e.code === 'saved_search_limit') {
-				const b = e.body as { limit: number; count: number };
-				saveMessage = `You have ${b.count} of ${b.limit} saved searches, the most you can keep. Delete one first.`;
+			} else if (e instanceof ApiError && e.code === 'storage_limit') {
+				const b = e.body as { used: number; limit: number; needed: number };
+				saveMessage = `This search needs about ${formatBytes(b.needed)} of storage, and ${formatBytes(Math.max(0, b.limit - b.used))} is free. Make room by emptying the Trash or deleting cascades or saved searches.`;
 			} else if (e instanceof ApiError && e.status === 400) {
 				saveMessage = (e.body as { errors?: { message: string }[] })?.errors?.map((x) => x.message).join(' ') ?? 'Invalid.';
 			} else saveMessage = 'The search could not be saved.';
@@ -365,47 +354,26 @@
 
 	<Card.Root>
 		<Card.Content class="grid gap-4 pt-6">
-			<div class="grid max-w-xs gap-1">
-				<div class="flex items-center gap-1.5">
-					<Label for="threshold">Clear threshold (%)</Label>
-					<InfoTip text={INFO.clear_threshold} />
-				</div>
-				<Input id="threshold" type="number" min="1" max="100" bind:value={threshold} />
-				<p class="text-xs text-muted-foreground">Score at least this much on a quiz to clear it.</p>
-			</div>
-			{#if quizType === 'anagram'}
-				<div class="grid max-w-xs gap-1">
-					<div class="flex items-center gap-1.5">
-						<Label for="answer-mode">Answer mode</Label>
-						<InfoTip text={INFO.answer_mode} />
-					</div>
-					<select id="answer-mode" class="rounded border bg-background px-2 py-1" bind:value={answerMode}>
-						<option value="flashcard">Flashcard</option>
-						<option value="typed">Typed</option>
-					</select>
-				</div>
-			{/if}
-			<QuizOptionsForm
-				bind:options
-				questionCount={preview?.count ?? null}
-				maxQuizQuestions={cap}
-				showAlphabetical={quizType === 'anagram'}
-			/>
 			<div class="grid gap-1">
 				<Label for="name">Cascade name</Label>
 				<Input id="name" bind:value={name} maxlength={200} oninput={() => (nameEdited = true)} />
 			</div>
+			<p class="text-sm text-muted-foreground" data-settings-note>
+				You can change this cascade’s settings, such as its clear threshold, answer mode and segments, in its Settings once it is
+				created. Every new cascade starts with the same ones.
+			</p>
 			{#if createError}<p class="text-sm text-destructive">{createError}</p>{/if}
-			{#if cascadeCount >= session.cascadeLimit}
-				<p class="text-sm">You have {cascadeCount} of {session.cascadeLimit} cascades. <a class="underline" href="/trash">Empty the Trash</a> to make room.</p>
-			{:else if cascadeCount >= cascadeWarning(session.cascadeLimit)}
-				<p class="text-sm text-muted-foreground">{cascadeCount} of {session.cascadeLimit} cascades used.</p>
-			{/if}
+			<!-- What the new cascade will hold, against what is free: an estimate, labelled as one; the server decides. -->
+			<p class="text-sm {wontFit ? 'text-destructive' : 'text-muted-foreground'}" data-storage-estimate>
+				{#if preview?.storageBytes != null && !preview.overCap}This cascade will use about {formatBytes(preview.storageBytes)}.{/if}
+				{formatBytes(used)} of {formatBytes(limit)} used.
+				{#if wontFit}It won’t fit: <a class="underline" href="/cascades#trash">empty the Trash</a> or delete cascades to make room.{/if}
+			</p>
 			<div>
 				<Button
 					type="button"
 					onclick={create}
-					disabled={creating || cascadeCount >= session.cascadeLimit || !lexicon || !dist || wire.errors.size > 0 || !name.trim() || threshold < 1 || threshold > 100}
+					disabled={creating || wontFit || !lexicon || !dist || wire.errors.size > 0 || !name.trim()}
 				>
 					{busy ? 'the server is busy' : creating ? 'Creating…' : 'Create Cascade'}
 				</Button>

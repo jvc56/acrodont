@@ -1,4 +1,6 @@
 backend/target
+# The one file of it docker/backend.Dockerfile's backend-prebuilt stage copies.
+!backend/target/release/acrodont
 backend/.env
 **/node_modules
 frontend/build

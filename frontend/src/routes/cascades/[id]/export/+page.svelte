@@ -18,7 +18,6 @@
 	import type { UserDb } from '$lib/local/db';
 	import { recordOpen } from '$lib/local/meta';
 	import { userDb } from '$lib/local/open';
-	import { preferencesView } from '$lib/local/preferences';
 	import type { CascadeRow, QuizRow } from '$lib/local/rows';
 	import * as view from '$lib/local/view';
 	import type { RwTx } from '$lib/local/view';
@@ -63,14 +62,13 @@
 			const tx = d.transaction(APPLY_STORES) as unknown as RwTx;
 			cascade = (await view.cascade(tx, id)) ?? null;
 			quizzes = (await view.quizzesOf(tx, id)).sort((a, b) => a.level - b.level);
-			const prefs = await preferencesView(d);
 			const quiz = page.url.searchParams.get('quiz');
 			choices = {
 				...choices,
 				scope: quiz ? 'quiz' : 'cascade',
 				quiz_id: quiz ?? undefined,
 				lines: cascade?.quiz_type === 'anagram' ? 'answers' : 'questions',
-				decimals: prefs.leave_value_decimals
+				decimals: cascade?.leave_value_decimals ?? 1
 			};
 			await recount();
 		})();

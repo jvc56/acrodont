@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::order::{questions_hash, shuffle, to_i64};
-use super::rows::{self, Progression};
+use super::rows::{self, AnswerMode, Progression};
 use crate::app::AppState;
 use crate::auth::{CurrentUser, Session};
 use crate::catalog::tiles::Tile;
@@ -23,7 +23,7 @@ use crate::extract::ApiJson;
 use crate::search::routes::{path_errors, prepare, run, Prepared};
 use crate::search::store::{copy_spec, insert_spec, load_spec, SpecKind};
 use crate::search::wire::{tree_to_json, PathError, QuizType};
-use crate::sync::prefs::AnswerMode;
+use crate::storage;
 
 pub const MAX_CARDS_PER_PAGE: i64 = 10_000;
 pub const MAX_KEYS_PER_PAGE: i64 = 100_000;
@@ -83,8 +83,19 @@ struct NewCascade {
     progression: Progression,
     require_alphabetical: bool,
     answer_mode: AnswerMode,
+    /// Start over copies the original's; a new cascade takes the column defaults.
+    display: Option<Display>,
     /// Start over copies the original's spec; creation stores the request's tree.
     copy_of_spec: Option<Uuid>,
+}
+
+/// What a card shows and what a reveal marks (PLAN.md § Settings): the
+/// cascade's own, set by `set_cascade_options`.
+struct Display {
+    show_definitions: bool,
+    show_hooks: bool,
+    reveal_correct: bool,
+    leave_value_decimals: i16,
 }
 
 fn check_fields(state: &AppState, name: &str, threshold: i64, segment_size: i64) -> Result<(), ApiError> {
@@ -129,18 +140,9 @@ async fn existing(state: &AppState, user: &CurrentUser, id: Uuid) -> ApiResult<O
     }
 }
 
-async fn count_cascades(conn: &mut sqlx::PgConnection, user_id: Uuid) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar!(r#"SELECT count(*) AS "n!" FROM cascades WHERE user_id = $1"#, user_id)
-        .fetch_one(conn)
-        .await
-}
-
-fn limit_error(state: &AppState, count: i64) -> ApiError {
-    ApiError::Conflict(json!({ "error": "cascade_limit", "limit": state.config.max_cascades_per_user, "count": count }))
-}
-
 /// Runs the search before any transaction, then stores the cascade in one
-/// short transaction that locks the user's row and re-checks the limit.
+/// short transaction that locks the user's row and checks the storage limit
+/// (STORAGE_LIMIT_PLAN.md § S2) against what the new cascade will hold.
 async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared) -> ApiResult<Response> {
     if let Some(r) = existing(state, user, n.id).await? {
         return Ok(r);
@@ -151,10 +153,11 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     if taken.is_some() {
         return Err(ApiError::conflict("invalid"));
     }
-    // A cheap limit check refuses an over-limit request without spending a search.
-    let count = count_cascades(&mut *state.db.acquire().await?, user.id).await?;
-    if count >= i64::from(state.config.max_cascades_per_user) {
-        return Err(limit_error(state, count));
+    // A cheap check refuses an account already at its limit without spending
+    // a search; what the cascade needs is not known until the search has run.
+    let usage = user.storage(state);
+    if !usage.fits(1) {
+        return Err(usage.refusal(0));
     }
     let keys = run(state, &p).await?;
     if keys.is_empty() {
@@ -166,6 +169,9 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     }
     let dist = &p.lexicon.distribution;
     let key_text: Vec<String> = keys.iter().map(|k| dist.to_magpie(k)).collect();
+    let key_bytes: i64 = key_text.iter().map(|k| k.len() as i64).sum();
+    // Start over's copy holds the same entries as the tree it was loaded into.
+    let needed = storage::new_cascade_bytes(keys.len() as i64, key_bytes, storage::spec_bytes(&p.tree));
     let count_q = keys.len() as i32;
     let idx: Vec<i32> = (0..count_q).collect();
     let seed: u64 = rand::random();
@@ -179,16 +185,17 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
 
     let mut tx = state.db.begin().await?;
     sqlx::query!("SELECT id FROM users WHERE id = $1 FOR UPDATE", user.id).fetch_one(&mut *tx).await?;
-    let count = count_cascades(&mut tx, user.id).await?;
-    if count >= i64::from(state.config.max_cascades_per_user) {
-        return Err(limit_error(state, count));
-    }
     let race = sqlx::query_scalar!("SELECT user_id FROM cascades WHERE id = $1", n.id)
         .fetch_optional(&mut *tx)
         .await?;
     if race.is_some() {
         drop(tx);
         return existing(state, user, n.id).await?.ok_or(ApiError::conflict("invalid"));
+    }
+    // Checked under the lock, so two creations cannot both take the last space.
+    let usage = storage::usage(&mut tx, user.id, state.config.max_storage_bytes_per_user).await?;
+    if !usage.fits(needed) {
+        return Err(usage.refusal(needed));
     }
     let seq = sqlx::query_scalar!("UPDATE users SET sync_seq = sync_seq + 1 WHERE id = $1 RETURNING sync_seq", user.id)
         .fetch_one(&mut *tx)
@@ -201,8 +208,9 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     sqlx::query!(
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, leave_set_id, spec_id, clear_threshold,
                                segment_size, progression, require_alphabetical, options_changed_at, options_seq,
-                               options_device_id, question_count, depth, peak_depth, updated_seq, answer_mode)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, 1, $13, $16)",
+                               options_device_id, question_count, depth, peak_depth, updated_seq, answer_mode,
+                               storage_bytes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, 1, $13, $16, $17)",
         n.id,
         user.id,
         n.name,
@@ -219,9 +227,24 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
         n.device_id,
         count_q,
         n.answer_mode as AnswerMode,
+        needed,
     )
     .execute(&mut *tx)
     .await?;
+    storage::add_to_user(&mut tx, user.id, needed).await?;
+    if let Some(d) = &n.display {
+        sqlx::query!(
+            "UPDATE cascades SET show_definitions = $2, show_hooks = $3, reveal_correct = $4, leave_value_decimals = $5
+             WHERE id = $1",
+            n.id,
+            d.show_definitions,
+            d.show_hooks,
+            d.reveal_correct,
+            d.leave_value_decimals,
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
     sqlx::query!(
         "INSERT INTO cascade_questions (cascade_id, idx, question_key)
          SELECT $1, * FROM UNNEST($2::int4[], $3::text[])",
@@ -301,13 +324,15 @@ async fn create(
         progression: b.progression,
         require_alphabetical: b.require_alphabetical,
         answer_mode: b.answer_mode,
+        display: None,
         copy_of_spec: None,
     };
     store(&state, &user, n, p).await
 }
 
 /// A new cascade with the same name, a private copy of the same filters, and
-/// the same threshold and quiz options. Subject to the cascade limit.
+/// the same threshold, quiz options, answer mode and display settings. Subject
+/// to the storage limit.
 async fn start_over(
     State(state): State<AppState>,
     Session(user): Session,
@@ -321,7 +346,8 @@ async fn start_over(
     let mut conn = state.db.acquire().await?;
     let row = sqlx::query!(
         r#"SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS "progression: Progression",
-                  c.require_alphabetical, c.answer_mode AS "answer_mode: AnswerMode", l.name AS lexicon
+                  c.require_alphabetical, c.answer_mode AS "answer_mode: AnswerMode", c.show_definitions,
+                  c.show_hooks, c.reveal_correct, c.leave_value_decimals, l.name AS lexicon
            FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2"#,
         original,
         user.id
@@ -343,6 +369,12 @@ async fn start_over(
         progression: row.progression,
         require_alphabetical: row.require_alphabetical,
         answer_mode: row.answer_mode,
+        display: Some(Display {
+            show_definitions: row.show_definitions,
+            show_hooks: row.show_hooks,
+            reveal_correct: row.reveal_correct,
+            leave_value_decimals: row.leave_value_decimals,
+        }),
         copy_of_spec: Some(row.spec_id),
     };
     store(&state, &user, n, p).await

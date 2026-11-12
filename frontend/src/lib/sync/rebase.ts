@@ -49,8 +49,8 @@ async function deleteQuizRows(tx: RwTx, quizId: string) {
 
 /**
  * Removes a cascade from this device: its base rows, its `questions` and
- * `cards` entries, and its `meta` entries (last-open time, Keep offline id,
- * automatic-keep opt-out, budget-dropped mark), as a tombstone does.
+ * `cards` entries, and its `meta` entries (last-open time, sizes,
+ * budget-dropped mark), as a tombstone does.
  */
 export async function deleteCascadeHere(tx: RwTx, cascadeId: string) {
 	await tx.objectStore('cascades').delete(cascadeId);
@@ -69,15 +69,13 @@ export async function deleteCascadeHere(tx: RwTx, cascadeId: string) {
 		delete sizes[cascadeId];
 		await writeMeta(tx, 'sizes', sizes);
 	}
-	for (const key of ['keep_offline', 'auto_keep_optout', 'budget_dropped'] as const) {
-		const ids = await readMeta(tx, key);
-		if (ids.includes(cascadeId)) {
-			await writeMeta(
-				tx,
-				key,
-				ids.filter((id) => id !== cascadeId)
-			);
-		}
+	const dropped = await readMeta(tx, 'budget_dropped');
+	if (dropped.includes(cascadeId)) {
+		await writeMeta(
+			tx,
+			'budget_dropped',
+			dropped.filter((id) => id !== cascadeId)
+		);
 	}
 }
 
@@ -220,9 +218,7 @@ export async function rebase(db: UserDb, st: PullState, acked: Acked[], ctx: Reb
 		await rebaseCascade(db, st, id, workFor(byCascade.get(id) ?? []), ctx, out);
 	}
 
-	// Preferences: the base row; the view is recomputed on every read.
-	const tx = db.transaction(['preferences', 'meta'], 'readwrite');
-	if (st.preferences) await tx.objectStore('preferences').put(st.preferences, 'row');
+	const tx = db.transaction(['meta'], 'readwrite');
 	if (ctx.advance !== false) {
 		await writeMeta(tx as unknown as RwTx, 'sync', {
 			cursor: st.seq,

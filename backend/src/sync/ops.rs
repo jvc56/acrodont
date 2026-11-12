@@ -7,11 +7,11 @@ use serde_json::Value;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use super::prefs::{self, InputAction, InputKind};
 use super::{Effects, IncomingOp};
 use crate::cascade::order::{from_i64, questions_hash, shuffle, to_i64};
-use crate::cascade::rows::{Origin, Progression, QuizStatus};
+use crate::cascade::rows::{AnswerMode, Origin, Progression, QuizStatus};
 use crate::cascade::rules::{self, CascadeState, FinishResult, Grade, NewQuiz, Opts, QuizState, Reason, SegmentResult};
+use crate::storage;
 
 pub enum OpError {
     Rejected(Reason),
@@ -307,8 +307,6 @@ pub async fn apply(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpRes
         "purge_cascade" => purge_cascade(conn, ctx, op).await,
         "set_cascade_options" => set_cascade_options(conn, ctx, op).await,
         "set_quiz_options" => set_quiz_options(conn, ctx, op).await,
-        "set_preferences" => set_preferences(conn, ctx, op).await,
-        "set_bindings" => set_bindings(conn, ctx, op).await,
         _ => Err(OpError::Rejected(Reason::Invalid)),
     }
 }
@@ -459,6 +457,9 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
     let r = rules::finish(&mut l.cascade, &l.quiz, l.correct as u32, misses, seed);
     let outcome = r.outcome();
     record_attempt(conn, ctx, &l, outcome, at).await?;
+    // Studying never fails for storage (STORAGE_LIMIT_PLAN.md § S3): the
+    // attempt and any new level are counted, past the limit or not.
+    let mut added = storage::attempt_bytes();
     let mut fx = Effects { outcome: Some(outcome.as_str().to_owned()), ..Default::default() };
     match &r {
         FinishResult::Finished { replacement, .. } => {
@@ -475,6 +476,7 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
             .await?;
             if let Some(n) = replacement {
                 let (c, h) = insert_quiz(conn, ctx, new_id, l.cascade_id, quiz, n, at).await?;
+                added += storage::level_bytes(c.into());
                 fx.new_quiz_question_count = Some(c);
                 fx.new_quiz_questions_hash = Some(h);
             }
@@ -483,6 +485,7 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
             let qs = reset_quiz(conn, ctx, quiz, l.quiz.attempt + 1, *reset_seed, at).await?;
             let _ = qs;
             let (c, h) = insert_quiz(conn, ctx, new_id, l.cascade_id, quiz, new_level, at).await?;
+            added += storage::level_bytes(c.into());
             fx.new_quiz_question_count = Some(c);
             fx.new_quiz_questions_hash = Some(h);
         }
@@ -498,6 +501,7 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
             .await?;
     }
     write_cascade(conn, ctx, l.cascade_id, &l.cascade, Some(at)).await?;
+    storage::add_to_cascade(conn, ctx.user, l.cascade_id, added, ctx.seq).await?;
     if matches!(r, FinishResult::Completed { .. }) {
         sqlx::query!("UPDATE cascades SET completed_at = now() WHERE id = $1", l.cascade_id).execute(&mut *conn).await?;
     }
@@ -554,9 +558,11 @@ async fn finish_segment(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> 
     .await?;
     let r = rules::finish_segment(&mut l.cascade, &l.quiz, run_misses.into_iter().map(|i| i as u32).collect(), end, seed);
     let mut fx = Effects::default();
+    let mut added = 0;
     match &r {
         SegmentResult::Drilled(n) => {
             let (c, h) = insert_quiz(conn, ctx, new_id, l.cascade_id, quiz, n, at).await?;
+            added = storage::level_bytes(c.into());
             fx.outcome = Some("drilled".into());
             fx.new_quiz_question_count = Some(c);
             fx.new_quiz_questions_hash = Some(h);
@@ -575,6 +581,7 @@ async fn finish_segment(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> 
     .execute(&mut *conn)
     .await?;
     write_cascade(conn, ctx, l.cascade_id, &l.cascade, Some(at)).await?;
+    storage::add_to_cascade(conn, ctx.user, l.cascade_id, added, ctx.seq).await?;
     Ok(fx)
 }
 
@@ -713,13 +720,17 @@ async fn purge_quiz(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpRe
     if l.quiz.active {
         return Err(OpError::Rejected(Reason::NotCleared));
     }
+    // What it frees: its level and its attempts, read before they go.
+    let freed: i64 = storage::quizzes_bytes(conn, &[quiz]).await?.iter().map(|(_, b)| b).sum();
     sqlx::query!("DELETE FROM quizzes WHERE id = $1", quiz).execute(&mut *conn).await?;
     tombstone(conn, ctx.user, "quiz", quiz, ctx.seq).await?;
+    storage::add_to_cascade(conn, ctx.user, l.cascade_id, -freed, ctx.seq).await?;
     Ok(Effects::default())
 }
 
-/// Deletes a cascade by id, table by table, with its spec, and writes
-/// tombstones for it and each of its quizzes. Shared with the purge task.
+/// Deletes a cascade by id, table by table, with its spec, writes
+/// tombstones for it and each of its quizzes, and takes what it held off the
+/// user's total. Shared with the purge task.
 pub async fn purge_cascade_rows(conn: &mut PgConnection, user: Uuid, id: Uuid, seq: i64) -> Result<u64, sqlx::Error> {
     let quizzes: Vec<Uuid> = sqlx::query_scalar!("SELECT id FROM quizzes WHERE cascade_id = $1", id)
         .fetch_all(&mut *conn)
@@ -729,10 +740,11 @@ pub async fn purge_cascade_rows(conn: &mut PgConnection, user: Uuid, id: Uuid, s
     sqlx::query!("UPDATE quizzes SET origin_quiz_id = NULL WHERE cascade_id = $1", id).execute(&mut *conn).await?;
     sqlx::query!("DELETE FROM quizzes WHERE cascade_id = $1", id).execute(&mut *conn).await?;
     sqlx::query!("DELETE FROM cascade_questions WHERE cascade_id = $1", id).execute(&mut *conn).await?;
-    let spec = sqlx::query_scalar!("DELETE FROM cascades WHERE id = $1 RETURNING spec_id", id)
+    let gone = sqlx::query!("DELETE FROM cascades WHERE id = $1 RETURNING spec_id, storage_bytes", id)
         .fetch_one(&mut *conn)
         .await?;
-    sqlx::query!("DELETE FROM search_specs WHERE id = $1", spec).execute(&mut *conn).await?;
+    sqlx::query!("DELETE FROM search_specs WHERE id = $1", gone.spec_id).execute(&mut *conn).await?;
+    storage::add_to_user(conn, user, -gone.storage_bytes).await?;
     sqlx::query!(
         "INSERT INTO sync_tombstones (user_id, entity, entity_id, seq)
          SELECT $1, 'quiz', q, $3 FROM UNNEST($2::uuid[]) AS q
@@ -801,9 +813,21 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         Some(v) => Some(rules::check_clear_threshold(v.as_i64().ok_or(Reason::Invalid)?)?),
     };
     // Flashcard or typed, the cascade's alone like the threshold.
-    let answer_mode: Option<prefs::AnswerMode> = match op.body.get("answer_mode") {
+    let answer_mode: Option<AnswerMode> = match op.body.get("answer_mode") {
         None => None,
         Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| OpError::Rejected(Reason::Invalid))?),
+    };
+    // What a card shows and what a reveal marks (PLAN.md § Settings), the cascade's alone too.
+    let flag = |k: &str| match op.body.get(k) {
+        None => Ok(None),
+        Some(v) => v.as_bool().map(Some).ok_or(OpError::Rejected(Reason::Invalid)),
+    };
+    let show_definitions = flag("show_definitions")?;
+    let show_hooks = flag("show_hooks")?;
+    let reveal_correct = flag("reveal_correct")?;
+    let leave_value_decimals = match op.body.get("leave_value_decimals") {
+        None => None,
+        Some(v) => Some(v.as_i64().filter(|n| (0..=3).contains(n)).ok_or(Reason::Invalid)? as i16),
     };
     let at = clamp(ctx, at);
     if !options_win(ctx, op, c.options_device_id, c.options_seq, c.options_changed_at, at) {
@@ -814,7 +838,11 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
                              require_alphabetical = coalesce($4, require_alphabetical), options_changed_at = $5,
                              options_seq = $6, options_device_id = $7, updated_seq = $6,
                              clear_threshold = coalesce($8, clear_threshold),
-                             answer_mode = coalesce($9, answer_mode)
+                             answer_mode = coalesce($9, answer_mode),
+                             show_definitions = coalesce($10, show_definitions),
+                             show_hooks = coalesce($11, show_hooks),
+                             reveal_correct = coalesce($12, reveal_correct),
+                             leave_value_decimals = coalesce($13, leave_value_decimals)
          WHERE id = $1",
         id,
         f.segment_size.map(|s| s as i32),
@@ -824,7 +852,11 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         ctx.seq,
         ctx.device,
         threshold.map(|t| t as i16),
-        answer_mode as Option<prefs::AnswerMode>,
+        answer_mode as Option<AnswerMode>,
+        show_definitions,
+        show_hooks,
+        reveal_correct,
+        leave_value_decimals,
     )
     .execute(conn)
     .await?;
@@ -854,103 +886,6 @@ async fn set_quiz_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -
         at,
         ctx.seq,
         ctx.device,
-    )
-    .execute(conn)
-    .await?;
-    Ok(Effects::default())
-}
-
-async fn set_preferences(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult {
-    let at = at_of(op)?;
-    let mut fields = op.body.as_object().cloned().unwrap_or_default();
-    for k in ["id", "device_seq", "seen_seq", "at", "type"] {
-        fields.remove(k);
-    }
-    let p = prefs::parse_preferences(&fields, ctx.cap)?;
-    let row = sqlx::query!(
-        "SELECT changed_at, changed_by_device_id, updated_seq FROM user_preferences WHERE user_id = $1 FOR UPDATE",
-        ctx.user
-    )
-    .fetch_one(&mut *conn)
-    .await?;
-    let at = clamp(ctx, at);
-    let wins = row.changed_by_device_id == Some(ctx.device) || row.updated_seq <= op.seen_seq || at > row.changed_at;
-    if !wins {
-        return Err(OpError::Rejected(Reason::Stale));
-    }
-    sqlx::query!(
-        "UPDATE user_preferences SET
-            default_clear_threshold = coalesce($2, default_clear_threshold),
-            leave_value_decimals = coalesce($3, leave_value_decimals),
-            anagram_show_definitions = coalesce($4, anagram_show_definitions),
-            anagram_show_hooks = coalesce($5, anagram_show_hooks),
-            anagram_answer_mode = coalesce($6, anagram_answer_mode),
-            default_segment_size = coalesce($7, default_segment_size),
-            default_progression = coalesce($8, default_progression),
-            default_require_alphabetical = coalesce($9, default_require_alphabetical),
-            changed_at = $10, changed_by_device_id = $11, updated_seq = $12,
-            reveal_correct = coalesce($13, reveal_correct)
-         WHERE user_id = $1",
-        ctx.user,
-        p.default_clear_threshold,
-        p.leave_value_decimals,
-        p.anagram_show_definitions,
-        p.anagram_show_hooks,
-        p.anagram_answer_mode as Option<prefs::AnswerMode>,
-        p.default_segment_size,
-        p.default_progression as Option<Progression>,
-        p.default_require_alphabetical,
-        at,
-        ctx.device,
-        ctx.seq,
-        p.reveal_correct,
-    )
-    .execute(conn)
-    .await?;
-    Ok(Effects::default())
-}
-
-async fn set_bindings(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult {
-    let at = at_of(op)?;
-    let list = prefs::validate_bindings(field(op, "bindings")?)?;
-    let row = sqlx::query!(
-        "SELECT bindings_changed_at, bindings_device_id, updated_seq FROM user_preferences WHERE user_id = $1 FOR UPDATE",
-        ctx.user
-    )
-    .fetch_one(&mut *conn)
-    .await?;
-    let at = clamp(ctx, at);
-    let wins = row.bindings_device_id == Some(ctx.device) || row.updated_seq <= op.seen_seq || at > row.bindings_changed_at;
-    if !wins {
-        return Err(OpError::Rejected(Reason::Stale));
-    }
-    sqlx::query!("DELETE FROM user_input_bindings WHERE user_id = $1", ctx.user).execute(&mut *conn).await?;
-    let mut slots = std::collections::HashMap::<InputAction, i16>::new();
-    for b in &list {
-        let slot = slots.entry(b.action).or_insert(0);
-        sqlx::query!(
-            "INSERT INTO user_input_bindings (user_id, action, slot, kind, code, ctrl, shift, alt, meta)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-            ctx.user,
-            b.action as InputAction,
-            *slot,
-            b.kind as InputKind,
-            b.code,
-            b.ctrl,
-            b.shift,
-            b.alt,
-            b.meta,
-        )
-        .execute(&mut *conn)
-        .await?;
-        *slot += 1;
-    }
-    sqlx::query!(
-        "UPDATE user_preferences SET bindings_changed_at = $2, bindings_device_id = $3, updated_seq = $4 WHERE user_id = $1",
-        ctx.user,
-        at,
-        ctx.device,
-        ctx.seq
     )
     .execute(conn)
     .await?;

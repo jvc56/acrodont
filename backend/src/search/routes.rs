@@ -105,9 +105,14 @@ async fn preview(
     let keys = run(&state, &prepared).await?;
     let dist = &prepared.lexicon.distribution;
     let sample: Vec<String> = keys.iter().take(SAMPLE_SIZE).map(|k| dist.to_magpie(k)).collect();
+    // What a cascade made from this search would hold as created, with the
+    // keys' real bytes (STORAGE_LIMIT_PLAN.md § S6).
+    let key_bytes: i64 = keys.iter().map(|k| dist.to_magpie(k).len() as i64).sum();
+    let storage_bytes = crate::storage::new_cascade_bytes(keys.len() as i64, key_bytes, crate::storage::spec_bytes(&prepared.tree));
     Ok(Json(json!({
         "count": keys.len(),
         "sample": sample,
         "over_cap": keys.len() > state.config.max_quiz_questions as usize,
+        "storage_bytes": storage_bytes,
     })))
 }

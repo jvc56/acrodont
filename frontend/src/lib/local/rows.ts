@@ -21,6 +21,16 @@ export interface CascadeRow {
 	require_alphabetical: boolean;
 	/** Flashcard or typed, the cascade's own (an Anagram cascade's; inert in the others). */
 	answer_mode: AnswerMode;
+	/** An Anagram cascade's: each anagram's definition shows with the answer. */
+	show_definitions: boolean;
+	/** An Anagram cascade's: each anagram's hooks and inner hooks show with the answer. */
+	show_hooks: boolean;
+	/** Whether showing an answer marks it correct (else missed) until toggled. */
+	reveal_correct: boolean;
+	/** A Leave Value cascade's: the decimal places leave values are rounded to, 0 to 3. */
+	leave_value_decimals: number;
+	/** What the cascade holds on the server, in bytes, as the server last counted it (PLAN.md § Storage limit). */
+	storage_bytes: number;
 	options_changed_at: string;
 	options_seq: number;
 	options_device_id: string;
@@ -37,6 +47,19 @@ export interface CascadeRow {
 	/** Overlay only: the outbox purged it. */
 	deleted?: boolean;
 }
+
+/** The per-cascade settings every new cascade starts with (PLAN.md § Settings). */
+export const CASCADE_SETTING_DEFAULTS = {
+	clear_threshold: 80,
+	segment_size: 0,
+	progression: 'ladder',
+	require_alphabetical: false,
+	answer_mode: 'flashcard',
+	show_definitions: true,
+	show_hooks: true,
+	reveal_correct: true,
+	leave_value_decimals: 1
+} as const satisfies Partial<CascadeRow>;
 
 export interface QuizRow {
 	id: string;
@@ -130,37 +153,7 @@ export interface CardRow {
 	word?: WordHooks;
 }
 
-export interface Binding {
-	action: 'show_next' | 'toggle_grade' | 'previous';
-	kind: 'key' | 'mouse_button' | 'wheel';
-	code: string;
-	ctrl: boolean;
-	shift: boolean;
-	alt: boolean;
-	meta: boolean;
-}
-
 export type AnswerMode = 'flashcard' | 'typed';
-
-export interface PreferencesRow {
-	default_clear_threshold: number;
-	leave_value_decimals: number;
-	anagram_show_definitions: boolean;
-	anagram_show_hooks: boolean;
-	/** The answer mode new Anagram cascades start with; each cascade keeps its own. */
-	anagram_answer_mode: AnswerMode;
-	default_segment_size: number;
-	default_progression: Progression;
-	default_require_alphabetical: boolean;
-	/** Whether showing an answer marks it correct (else missed) until toggled; absent from rows pulled before it existed. */
-	reveal_correct?: boolean;
-	changed_at: string;
-	changed_by_device_id: string | null;
-	bindings_changed_at: string;
-	bindings_device_id: string | null;
-	updated_seq: number;
-	bindings: Binding[];
-}
 
 export interface DistributionRow {
 	name: string;
@@ -170,7 +163,7 @@ export interface DistributionRow {
 /** An outbox entry: the operation as sent, and what the device needs to find it. */
 export interface OutboxEntry {
 	device_seq: number;
-	/** The cascade it touches; absent for preferences and bindings. */
+	/** The cascade it touches. */
 	cascade_id?: string;
 	/** Set on a `move_cursor` only, so a newer one finds the pending one. */
 	cursor_quiz?: string;
@@ -206,7 +199,13 @@ const num = (v: unknown) => (typeof v === 'string' ? Number(v) : (v as number));
 
 /** A pulled cascade row, stamped with the response's sequence. */
 export function cascadeFromWire(w: Wire, seq: number): CascadeRow {
-	return { ...(w as unknown as CascadeRow), options_seq: num(w.options_seq), updated_seq: num(w.updated_seq), seq };
+	return {
+		...(w as unknown as CascadeRow),
+		options_seq: num(w.options_seq),
+		updated_seq: num(w.updated_seq),
+		storage_bytes: num(w.storage_bytes ?? 0),
+		seq
+	};
 }
 
 export function quizFromWire(w: Wire, seq: number): QuizRow {
@@ -221,19 +220,6 @@ export function quizFromWire(w: Wire, seq: number): QuizRow {
 
 export function attemptFromWire(w: Wire, cascadeId: string, seq: number): AttemptRow {
 	return { ...(w as unknown as AttemptRow), cascade_id: cascadeId, updated_seq: num(w.updated_seq), seq };
-}
-
-export function preferencesFromWire(w: Wire): PreferencesRow {
-	const bindings = ((w.bindings as Wire[]) ?? []).map((b) => ({
-		action: b.action,
-		kind: b.kind,
-		code: b.code,
-		ctrl: b.ctrl,
-		shift: b.shift,
-		alt: b.alt,
-		meta: b.meta
-	})) as Binding[];
-	return { ...(w as unknown as PreferencesRow), updated_seq: num(w.updated_seq), bindings };
 }
 
 /** Operations that create, reset or restore a quiz: never on the rebase's fast path. */

@@ -30,3 +30,54 @@ describes:
   `anagram_answer_mode` had nothing to backfill on a fresh database and went.
 
 A database made by the earlier files no longer matches: `./scripts/dev.py --reset`.
+
+## 2026-11-11: controls are per device and no longer synced
+
+Player controls became a setting each device keeps for itself, never sent to
+the server, so the server's half went: the `user_input_bindings` table (and the
+`input_action` and `input_kind` types only it used),
+`user_preferences.bindings_changed_at` and `bindings_device_id`, and
+`'set_bindings'` from `sync_op_type`. `user_preferences.updated_seq` is now
+bumped by preference changes alone. Nothing is deployed, so the edit is in
+place.
+
+A database made by the earlier file no longer matches: `./scripts/dev.py --reset`.
+
+## 2026-11-11: no account-level preferences; display settings are the cascade's
+
+Settings are now either a cascade's own (synced on its `cascades` row) or a
+device's own (never synced); nothing applies to the whole account. So the
+`user_preferences` table went, with `'set_preferences'` from `sync_op_type`,
+and with it the defaults for new cascades it held (`default_clear_threshold`,
+`anagram_answer_mode`, `default_segment_size`, `default_progression`,
+`default_require_alphabetical`): a new cascade takes the request's values or
+the column defaults. Its four remaining settings moved onto `cascades`, set by
+`set_cascade_options` and copied by Start over: `show_definitions` and
+`show_hooks` (were `anagram_show_definitions` and `anagram_show_hooks`),
+`reveal_correct`, and `leave_value_decimals`, with the same defaults and
+range. Nothing is deployed, so the edit is in place.
+
+A database made by the earlier file no longer matches: `./scripts/dev.py --reset`.
+
+## 2026-11-11: one storage limit; the question ceiling is 300,000
+
+STORAGE_LIMIT_PLAN.md replaces the cascade and saved-search counts with one
+per-account storage limit, and raises the question ceiling (decisions D1–D5):
+
+- `cascades.storage_bytes BIGINT NOT NULL CHECK (>= 0)`: the bytes the account
+  holds because of the cascade, by the formula in `backend/src/storage.rs` and
+  the per-row sizes in `contract-fixtures/storage.json`. Set at creation and
+  Start over, changed by each finish's attempt and new level and each purged
+  quiz, each with an `updated_seq` bump.
+- `saved_searches.storage_bytes BIGINT NOT NULL CHECK (>= 0)`: its spec's.
+- `users.storage_bytes BIGINT NOT NULL DEFAULT 0 CHECK (>= 0)`: the sum of the
+  two, kept in the same transactions under the user row's lock, and recounted
+  by the purge task.
+- `users.storage_limit_bytes BIGINT` (NULL, `CHECK (>= 0)`): an account's own
+  limit, set only via SQL, in place of `MAX_STORAGE_BYTES_PER_USER`.
+- Every `BETWEEN 1 AND 130000` question-count and segment-size CHECK is
+  `300000` again, and every `BETWEEN 0 AND 129999` index and position CHECK
+  `299999` (undoing the 2026-11-09 edit), matching `QUESTION_CEILING`.
+
+Nothing is deployed, so the edit is in place. A database made by the earlier
+file no longer matches: `./scripts/dev.py --reset`.

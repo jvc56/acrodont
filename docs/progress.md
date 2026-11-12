@@ -5,8 +5,9 @@ Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
 ## Current
 
 - **Phase:** 8 — Production, prepared up to the steps that need credentials
-  (see "Next" below), now with the birdtest lessons implemented (Phase 8b).
-- **Last green checkpoint:** Phase 8b — BIRDTEST_LESSONS_PLAN.md.
+  (see "Next" below), now with the birdtest lessons (Phase 8b) and one
+  storage limit in place of the cascade limits (Phase 8c).
+- **Last green checkpoint:** Phase 8c — STORAGE_LIMIT_PLAN.md.
 
 ## Environment notes
 
@@ -512,6 +513,75 @@ accounts, 20 cascades and 130,000 questions per quiz.
 - **Tests:** backend unit (73) and integration (151) green; frontend check and
   Vitest (577) green; `make infra-validate` and `make ops-check` green.
 
+### Phase 8c — One storage limit instead of cascade limits ✅
+STORAGE_LIMIT_PLAN.md, decisions D1–D5 (PQ-023).
+- **The limit:** `MAX_STORAGE_BYTES_PER_USER` (default 100,000,000 bytes,
+  "100 MB"), replaced for one account by `users.storage_limit_bytes` (set
+  only via SQL). `MAX_CASCADES_PER_USER` and `MAX_SAVED_SEARCHES_PER_USER`
+  are gone, with `cascade_limit` and `saved_search_limit`; creation, Start
+  over and saving a search past the limit are `409 storage_limit` with
+  `used`, `limit` and `needed`, checked under the user row's lock. Studying
+  never fails for storage. `question_rows_for` is bounded by
+  `MAX_QUESTION_ROWS_FOR` (1,000).
+- **Accounting:** `backend/src/storage.rs`, with the per-row sizes in
+  `contract-fixtures/storage.json` and mirrored in
+  `frontend/src/lib/cascades/storage.ts` (which replaces `limits.ts`).
+  `cascades.storage_bytes`, `saved_searches.storage_bytes`,
+  `users.storage_bytes` and `users.storage_limit_bytes` are new, kept in the
+  transactions that change the rows; the purge task recounts each user's
+  total on every run. The calibration test reads 1.012 times the measured
+  live rows.
+- **API:** pulled cascade rows and the create/Start-over response carry
+  `storage_bytes`; every sync response carries `storage: { used, limit }`;
+  `/api/auth/me` reports `storage_bytes` and `max_storage_bytes`; the
+  preview reports `storage_bytes`.
+- **UI:** the Cascades page's storage line and meter (almost full from 90%,
+  over with New cascade disabled), each cascade's size, the Trash's total and
+  each group's, Delete forever saying what it frees; the builder's estimate
+  with Create disabled when it won't fit; Start over disabled when storage is
+  full; the Account page's card is "Storage on this device". Decimal units
+  everywhere.
+- **Ceiling:** `QUESTION_CEILING`, `MAX_QUIZ_QUESTIONS`'s default and the
+  schema's CHECKs are 300,000 / 299,999 again (docs/migration-edits.md,
+  2026-11-11). The server's scale tests pass every budget at 300,000
+  (creation 5.4 s, push 376 s, finish 7.1 s, exports 8.7 s and 473 MiB);
+  the device suites run at 300,000; `scale-many.scale.ts` reads 500
+  cascades' summaries and Trash groups within 10 s each. `sync_faults.rs` and
+  `pull.rs` stay at 130,000 questions.
+- **Tests and scripts:** `backend/tests/storage.rs`; the e2e `@limits` pass
+  runs with `MAX_STORAGE_BYTES_PER_USER=20000` (create until it won't fit,
+  study past it, Delete forever to make room); `pages.spec` checks the
+  sizes; the `limits` scenario fills to 90–100%; `parity.py` sets the limit
+  far past the default.
+- **Docs:** PLAN.md § Storage limit in place of § Cascade limit, and every
+  section that leaned on the old limits or the 130,000 ceiling; JOURNEYS.md
+  C-2 to C-5 and C-14 to C-17; PQ-023.
+
+### Phase 8d — Faster tests ✅
+
+TEST_TIME_PLAN.md, as decided (T1–T5 yes, T3 = C1, T6 no):
+- **CI tiers** (`.github/workflows/ci.yml`): Push (lint, `unit-backend`,
+  `unit-frontend`, integration, `e2e-core`, terraform, scripts) on every push;
+  Main adds `e2e-main` and `seeding` on `main` and manual runs; Nightly adds
+  scale. `seeding` also runs when a push changes `scripts/` (dorny/paths-filter).
+  A failed nightly, in any job, opens the issue. `scripts/deploy.sh` reads CI's
+  run on `main` for the commit (`--branch main`).
+- **End-to-end:** four workers (`E2E_WORKERS`) on one stack, project
+  `parallel`, then project `serial` (`@serial`: admin, the export journey,
+  update) one at a time. Suite stacks raise the per-IP auth and catalog
+  limits. `builder`, `pages` and `player` register their own users. `@limits`
+  is gone: `storage.spec.ts` sets the account's `users.storage_limit_bytes`
+  with SQL on the main stack. update.spec (`@full`) and the four `@env` passes
+  run side by side on stacks of their own (`make test-e2e-main`).
+- **Images:** `backend-prebuilt` (ubuntu:24.04) copies in the release binary
+  built on the host (`make e2e-binary`); compose picks it through
+  `ACRODONT_BACKEND_TARGET`; production's `backend` target is unchanged.
+- **Integration:** `cargo nextest run`, 16 threads (falls back to cargo test
+  without nextest).
+- **Local targets:** `test-quick`, `test-unit-backend`, `test-unit-frontend`,
+  `test-e2e-core`, `test-e2e-main`, `test-e2e SPEC=…`, `test-e2e-seeding`;
+  the local-verification rule is in PLAN.md § Running the tests.
+
 ## Next
 
 Phase 8 — what needs the user (nothing below can be done without credentials,
@@ -548,11 +618,12 @@ the authoritative sequence; in short:
 - PQ-012 (sequence wire forms: sync_seq text, cursor number or text) — provisional.
 - PQ-013 (finish/finish_segment check order) — provisional.
 - PQ-014 (singular "1 answer … wasn't kept") — provisional.
-- PQ-015 (cascade limit as a client constant) — closed: `/api/auth/me` reports `max_cascades_per_user`.
+- PQ-015 (cascade limit as a client constant) — superseded by PQ-023: there is no cascade limit; `/api/auth/me` and every sync response report the account's storage.
 - PQ-016 (expired-session journey TTL 20 s, not 2 s) — provisional.
 - PQ-017 (forty-cascade drop pass; ROW_BYTES 150; "only the kept one") — provisional.
 - PQ-018 (answer-limit journey vs "never its cards") — provisional.
-- PQ-019 (device scale cases at a tenth; the first-sync budget) — decided: the budget is the measurement, 150 s for one heavily played cascade (49–107 s measured).
+- PQ-019 (device scale cases at a tenth; the first-sync budget) — decided: the budget is the measurement, 150 s for one heavily played cascade (49–107 s measured at the 130,000 cap).
+- PQ-023 (one storage limit, 100 MB; saved searches and the Trash count; 300,000 questions; no count cap) — decided 2026-11-11.
 
 ## Known failing tests
 

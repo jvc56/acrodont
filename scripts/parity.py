@@ -90,7 +90,8 @@ def main() -> int:
     if leaves.exists():
         catalog.items.append(stack.CatalogItem("leaves", LEXICON, leaves))
 
-    base_url = stack.up(PROJECT, PORT, {"MAX_CASCADES_PER_USER": "1000",
+    # One cascade per search, none deleted: far past the default storage limit.
+    base_url = stack.up(PROJECT, PORT, {"MAX_STORAGE_BYTES_PER_USER": "100000000000",
                                          "SEARCH_RATE_PER_MINUTE": "1000",
                                          "DOWNLOAD_RATE_PER_MINUTE": "10000",
                                          "ADMIN_UPLOAD_RATE_PER_MINUTE": "100"})

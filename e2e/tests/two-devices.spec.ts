@@ -16,6 +16,14 @@ test('two devices finish the same level offline', async ({ browser, baseURL }) =
 	await pb.goto(player);
 	await expect(pb.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
 	await expect(pa.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
+	// Both devices hold the whole level before going offline: a card shown
+	// while the rest still downloads would read "needs a connection" offline.
+	for (const page of [pa, pb]) {
+		await page.goto('/cascades');
+		await expect(page.getByText('Available offline')).toBeVisible({ timeout: 60_000 });
+		await page.goto(player);
+		await expect(page.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
+	}
 	for (const [ctx, page] of [[a, pa], [b, pb]] as const) {
 		await page.evaluate(async () => {
 			await navigator.serviceWorker.ready;

@@ -3,16 +3,14 @@
 // player could not be using an order they might disturb — every row of a quiz
 // with no base row, and grade rows for an unchanged attempt of a quiz that is
 // not pending — and nowhere at all for a pending quiz, whose rows the grades
-// endpoint brings. Everything else waits in staging (tombstones and the
-// preferences row in memory) for the rebase at the last page. Every row
+// endpoint brings. Everything else waits in staging (tombstones in
+// memory) for the rebase at the last page. Every row
 // written carries `seq`, the sequence this pull took.
 import type { UserDb } from '$lib/local/db';
 import {
 	attemptFromWire,
 	cascadeFromWire,
-	preferencesFromWire,
 	quizFromWire,
-	type PreferencesRow,
 	type QuestionRow,
 	type QuizRow
 } from '$lib/local/rows';
@@ -35,7 +33,6 @@ export interface PullState {
 	 */
 	foreign: Set<string>;
 	tombstones: (Tombstone & { cascade_id: string | null })[];
-	preferences: PreferencesRow | null;
 	/** Pulled quiz → its cascade, for the rows that name only the quiz. */
 	quizCascade: Map<string, string>;
 }
@@ -48,7 +45,6 @@ export function newPull(seq: number, full: boolean, qrf: string[]): PullState {
 		touched: new Set(),
 		foreign: new Set(),
 		tombstones: [],
-		preferences: null,
 		quizCascade: new Map()
 	};
 }
@@ -125,7 +121,6 @@ export async function writePage(db: UserDb, st: PullState, changes: Changes) {
 			)
 		);
 	}
-	if (changes.preferences) st.preferences = preferencesFromWire(changes.preferences);
 	for (const t of changes.tombstones) {
 		const cascade = t.entity === 'cascade' ? t.entity_id : ((await cascadeOfQuiz(t.entity_id)) ?? null);
 		mark(cascade, n(t.seq));

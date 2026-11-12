@@ -1,6 +1,6 @@
 // The download manager (PLAN.md § On the device → Downloads, the budget,
 // eviction and the quota path; § Frontend → lib/sync). After every pull it
-// fetches, for the cascades in the window or kept offline: missing
+// fetches, for the cascades in the window or kept automatically: missing
 // distributions, missing index lists (deepest level first), the graded rows
 // of every pending quiz, then every cascade's question keys, then answers.
 // It drops what has left the window, holds rows and keys under
@@ -13,8 +13,8 @@ import { questionsHash } from '$lib/cascade/order';
 import type { UserDb } from '$lib/local/db';
 import { getMeta, readMeta, writeMeta } from '$lib/local/meta';
 import type { CardRow, CascadeRow, QuestionRow, QuizRow, WordHooks } from '$lib/local/rows';
-import { preferencesView } from '$lib/local/preferences';
-import type { RwTx } from '$lib/local/view';
+import * as view from '$lib/local/view';
+import type { AnyTx, RwTx } from '$lib/local/view';
 import { ANSWER_STORAGE_SOFT_LIMIT_BYTES, ROW_STORAGE_BUDGET } from './config';
 import { policy, type Policy } from './policy';
 import { withPositions } from './rebase';
@@ -72,11 +72,16 @@ export type WireCard = { idx: number; key: string; answer: unknown; word?: WordH
 
 /**
  * Whether a cascade's cards are fetched with hooks: an Anagram cascade's when
- * the preference asks, and always a Definition cascade's, whose answer shows
- * its word with hooks above the definition.
+ * its setting asks, and always a Definition cascade's, whose answer shows its
+ * word with hooks above the definition.
  */
-export function wantsHooks(quizType: string, prefs: { anagram_show_hooks: boolean }): boolean {
-	return quizType === 'definition' || (quizType === 'anagram' && prefs.anagram_show_hooks);
+export function wantsHooks(c: Pick<CascadeRow, 'quiz_type' | 'show_hooks'>): boolean {
+	return c.quiz_type === 'definition' || (c.quiz_type === 'anagram' && c.show_hooks !== false);
+}
+
+/** Whether a cascade's cards are fetched with definitions: an Anagram cascade's when its setting asks. */
+export function wantsDefinitions(c: Pick<CascadeRow, 'quiz_type' | 'show_definitions'>): boolean {
+	return c.quiz_type === 'anagram' && c.show_definitions !== false;
 }
 
 /** The server's cap on cards named with `idx=`. */
@@ -114,7 +119,7 @@ export interface DownloadOptions {
 	rowBudget?: number;
 	answerLimit?: number;
 	/** Figures for the Account page's storage line. */
-	onTotals?: (t: { rows: number; keys: number; answer_bytes: number; over_budget_by_user_kept: boolean }) => void;
+	onTotals?: (t: { rows: number; keys: number; answer_bytes: number }) => void;
 }
 
 const isQuota = (e: unknown) => e instanceof DOMException && e.name === 'QuotaExceededError';
@@ -248,10 +253,10 @@ export class DownloadManager {
 		for (const id of wanted) await this.keys(id);
 		for (const id of wanted) await this.cards(id);
 		await this.evict();
-		await this.totals(pol);
+		await this.totals();
 	}
 
-	/** Everything one cascade needs, now: a first open, Keep offline, a restore (§ Downloads). */
+	/** Everything one cascade needs, now: a first open, a restore (§ Downloads). */
 	async ensureCascade(cascadeId: string): Promise<void> {
 		await this.distributionFor(cascadeId);
 		await this.questionRows(cascadeId);
@@ -424,13 +429,18 @@ export class DownloadManager {
 		}
 	}
 
+	/** The cascade as the device sees it, a setting changed a moment ago and not yet sent included. */
+	private async cascadeView(cascadeId: string): Promise<CascadeRow | undefined> {
+		const tx = this.db.transaction(['cascades', 'overlay_cascades']);
+		return view.cascade(tx as unknown as AnyTx, cascadeId);
+	}
+
 	private async cards(cascadeId: string) {
-		const c = await this.db.get('cascades', cascadeId);
+		const c = await this.cascadeView(cascadeId);
 		if (!c) return;
-		const prefs = await preferencesView(this.db);
-		const hooks = wantsHooks(c.quiz_type, prefs);
-		const definitions = c.quiz_type === 'anagram' && prefs.anagram_show_definitions;
-		// Cards record which extras they hold; a preference asking for more refetches them.
+		const hooks = wantsHooks(c);
+		const definitions = wantsDefinitions(c);
+		// Cards record which extras they hold; a setting asking for more refetches them.
 		let froms = await this.missingRanges('cards', c, CARDS_PAGE);
 		if (hooks || definitions) {
 			const lacking = new Set(froms);
@@ -467,11 +477,10 @@ export class DownloadManager {
 	}
 
 	async fetchForPlayer(cascadeId: string, idx: number, ahead: number[] = []): Promise<void> {
-		const c = await this.db.get('cascades', cascadeId);
+		const c = await this.cascadeView(cascadeId);
 		if (!c) return;
-		const prefs = await preferencesView(this.db);
-		const hooks = wantsHooks(c.quiz_type, prefs);
-		const definitions = c.quiz_type === 'anagram' && prefs.anagram_show_definitions;
+		const hooks = wantsHooks(c);
+		const definitions = wantsDefinitions(c);
 		if (this.api.cardsByIdx) {
 			const want = [idx, ...(await this.missingCards(c.id, ahead))].slice(0, MAX_CARDS_BY_IDX);
 			const cards = await this.forPlayer(() => this.api.cardsByIdx!(c.id, want, hooks, definitions));
@@ -490,13 +499,12 @@ export class DownloadManager {
 	 */
 	async fetchAhead(cascadeId: string, idx: number[]): Promise<void> {
 		if (!this.api.cardsByIdx || idx.length === 0) return;
-		const c = await this.db.get('cascades', cascadeId);
+		const c = await this.cascadeView(cascadeId);
 		if (!c) return;
 		const want = (await this.missingCards(c.id, idx)).slice(0, MAX_CARDS_BY_IDX);
 		if (want.length === 0) return;
-		const prefs = await preferencesView(this.db);
-		const hooks = wantsHooks(c.quiz_type, prefs);
-		const definitions = c.quiz_type === 'anagram' && prefs.anagram_show_definitions;
+		const hooks = wantsHooks(c);
+		const definitions = wantsDefinitions(c);
 		const cards = await this.forPlayer(() => this.api.cardsByIdx!(c.id, want, hooks, definitions));
 		await this.writeCards(c, cards, hooks, definitions);
 	}
@@ -607,10 +615,10 @@ export class DownloadManager {
 	/**
 	 * Cascades that left the window, then — over ROW_STORAGE_BUDGET, or on the
 	 * quota path — the least recently opened unkept cascades, then the
-	 * automatically kept ones, never a user-kept one, one with pending
-	 * operations, or one with its player open.
+	 * automatically kept ones, never one with pending operations or with its
+	 * player open.
 	 */
-	async dropPass(pol: Policy, o: { force?: boolean } = {}): Promise<{ overByUserKept: boolean }> {
+	async dropPass(pol: Policy, o: { force?: boolean } = {}): Promise<void> {
 		const guard = await this.protectedIds();
 		for (const id of await this.db.getAllKeys('cascades')) {
 			if (!pol.wanted.has(id) && !guard.has(id) && (await this.holdsData(id))) await this.dropCascade(id, false);
@@ -626,7 +634,7 @@ export class DownloadManager {
 		}
 		const over = () => total > this.rowBudget || (o.force === true && total > 0);
 		const byAge = (list: string[]) => list.sort((a, b) => (opens[a] ?? '').localeCompare(opens[b] ?? ''));
-		const tier1 = byAge(ids.filter((id) => !pol.userKept.has(id) && !pol.autoKept.has(id)));
+		const tier1 = byAge(ids.filter((id) => !pol.autoKept.has(id)));
 		const tier2 = byAge(ids.filter((id) => pol.autoKept.has(id)));
 		let dropped = false;
 		for (const id of [...tier1, ...tier2]) {
@@ -636,19 +644,17 @@ export class DownloadManager {
 			total -= size.get(id)!;
 			dropped = true;
 		}
-		return { overByUserKept: total > this.rowBudget };
 	}
 
-	/** Answers above the soft limit, least recently opened first; never a user-kept cascade's or one with pending operations. */
+	/** Answers above the soft limit, least recently opened first; never a cascade's with pending operations. */
 	async evict(o: { force?: boolean } = {}) {
 		const sizes = await getMeta(this.db, 'sizes');
 		const opens = await getMeta(this.db, 'opens');
-		const keep = new Set(await getMeta(this.db, 'keep_offline'));
 		const guard = new Set<string>();
 		for (const e of await this.db.getAll('outbox')) if (e.cascade_id) guard.add(e.cascade_id);
 		let total = Object.values(sizes).reduce((n, s) => n + s.answer_bytes, 0);
 		const candidates = Object.keys(sizes)
-			.filter((id) => sizes[id].answer_bytes > 0 && !keep.has(id) && !guard.has(id))
+			.filter((id) => sizes[id].answer_bytes > 0 && !guard.has(id))
 			.sort((a, b) => (opens[a] ?? '').localeCompare(opens[b] ?? ''));
 		let evicted = false;
 		for (const id of candidates) {
@@ -664,14 +670,12 @@ export class DownloadManager {
 		}
 	}
 
-	private async totals(pol: Policy) {
+	private async totals() {
 		const sizes = await getMeta(this.db, 'sizes');
 		const rows = (await this.db.count('quiz_questions')) * ROW_BYTES;
 		const keys = Object.values(sizes).reduce((n, s) => n + s.key_bytes, 0);
 		const answer_bytes = Object.values(sizes).reduce((n, s) => n + s.answer_bytes, 0);
-		let userKept = 0;
-		for (const id of pol.userKept) userKept += await this.rowBytes(id);
-		this.opts.onTotals?.({ rows, keys, answer_bytes, over_budget_by_user_kept: userKept > this.rowBudget });
+		this.opts.onTotals?.({ rows, keys, answer_bytes });
 	}
 
 	// -------------------------------------------------------------------------

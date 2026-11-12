@@ -8,7 +8,6 @@ import { resetSeed } from '$lib/cascade/order';
 import { applyLocally, APPLY_STORES, type NewOp } from '$lib/local/apply';
 import { openUserDb, type UserDb } from '$lib/local/db';
 import { getMeta, initMeta, recordOpen } from '$lib/local/meta';
-import { preferencesView } from '$lib/local/preferences';
 import type { QuizRow } from '$lib/local/rows';
 import { storeCreated, type Created } from '$lib/local/created';
 import * as view from '$lib/local/view';
@@ -353,20 +352,33 @@ describe('the sync engine', () => {
 		expect(texts(a)[0]).toMatch(/^Level 1 came out differently on the server because of changes made on another device\./);
 	});
 
-	it('a stale-rejected preferences change reverts the view; a pull while one is pending leaves it alone', async () => {
+	it("a stale-rejected change to a cascade's settings reverts it; the other device's stands", async () => {
 		const { server, a } = await setup();
 		const b = await second(server);
-		await a.apply({ type: 'set_preferences', default_clear_threshold: 60 });
-		await b.apply({ type: 'set_preferences', leave_value_decimals: 3 });
+		await a.apply({ type: 'set_cascade_options', cascade_id: C1, show_hooks: false });
+		await b.apply({ type: 'set_cascade_options', cascade_id: C1, leave_value_decimals: 3 });
 		await b.sync();
-		// A pull arrives while A's change is still pending: the view keeps it.
-		const pulled = { ...(await preferencesView(a.db)), default_clear_threshold: 90 };
-		await a.db.put('preferences', pulled, 'row');
-		expect((await preferencesView(a.db)).default_clear_threshold).toBe(60);
-		// A's change is older and unseen: stale; the view reverts to the server's row.
+		// A's change is older and unseen: stale; the cascade reverts to the server's row.
 		await a.sync();
-		expect((await preferencesView(a.db)).default_clear_threshold).toBe(80);
-		expect((await preferencesView(a.db)).leave_value_decimals).toBe(3);
+		const c = (await a.db.get('cascades', C1))!;
+		expect([c.show_hooks, c.leave_value_decimals]).toEqual([true, 3]);
+		expect(await a.db.get('overlay_cascades', C1)).toBeUndefined();
+	});
+
+	it('every sync response’s storage is kept, and each cascade carries its own figure', async () => {
+		const { server, a } = await setup();
+		const before = await getMeta(a.db, 'server');
+		expect(before.storage_bytes).toBe(server.storage().used);
+		expect(before.max_storage_bytes).toBe(100_000_000);
+		expect((await a.db.get('cascades', C1))!.storage_bytes).toBe(server.storage().used);
+		// A finish with misses makes a level: the server's figure grows, and the device follows.
+		await a.play(Q1, 'XXCCC');
+		await a.finish(Q1);
+		await a.sync();
+		const after = await getMeta(a.db, 'server');
+		expect(after.storage_bytes).toBeGreaterThan(before.storage_bytes!);
+		expect(after.storage_bytes).toBe(server.storage().used);
+		expect((await a.db.get('cascades', C1))!.storage_bytes).toBe(after.storage_bytes);
 	});
 
 	it('a cascade outside the window holds no question rows, and its played quizzes are pending', async () => {
@@ -787,7 +799,7 @@ describe('the rebase, continued', () => {
 		const { server, a } = await setup();
 		const entries = [];
 		for (let i = 1; i <= 600 * 500; i++) {
-			entries.push({ device_seq: i, op: { id: `op-${i}`, device_seq: i, seen_seq: 0, at: '2026-01-01T00:00:00.000Z', type: 'set_preferences', default_clear_threshold: 50 } });
+			entries.push({ device_seq: i, op: { id: `op-${i}`, device_seq: i, seen_seq: 0, at: '2026-01-02T00:00:00.000Z', type: 'set_cascade_options', cascade_id: C1, show_hooks: i % 2 === 0 } });
 		}
 		const tx = a.db.transaction(['outbox', 'meta'], 'readwrite');
 		for (const e of entries) void tx.objectStore('outbox').put(e);

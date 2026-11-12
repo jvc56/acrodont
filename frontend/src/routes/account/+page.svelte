@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { INFO, SCOPE } from '$lib/settings-info';
+	import { INFO } from '$lib/settings-info';
 	import { confirmAction } from '$lib/confirm.svelte';
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
@@ -12,26 +12,13 @@
 	import { describe } from '$lib/auth/errors';
 	import { forgetSession, logout, session } from '$lib/auth/session.svelte';
 	import { removeAccountData } from '$lib/local/accounts';
-	import { applyLocally, type NewOp } from '$lib/local/apply';
 	import { closeUserDb, userDb } from '$lib/local/open';
 	import { onMount } from 'svelte';
-	import AccountPreferences from '$lib/components/account/AccountPreferences.svelte';
-	import ControlsEditor from '$lib/components/account/ControlsEditor.svelte';
 	import StorageCard from '$lib/components/account/StorageCard.svelte';
-	import DisplaySettings from '$lib/components/player/DisplaySettings.svelte';
 	import SettingRow from '$lib/components/SettingRow.svelte';
-	import { display } from '$lib/player/display.svelte';
 	import type { UserDb } from '$lib/local/db';
-	import { getMeta } from '$lib/local/meta';
-	import { preferencesView } from '$lib/local/preferences';
-	import type { PreferencesRow } from '$lib/local/rows';
-	import { afterLocalWrite, syncNow, syncState } from '$lib/sync/runtime.svelte';
+	import { syncNow, syncState } from '$lib/sync/runtime.svelte';
 
-	let current = $state('');
-	let next = $state('');
-	let pwErrors = $state<FieldError[]>([]);
-	let pwMessage = $state<string | null>(null);
-	let pwError = $state<string | null>(null);
 
 	let everywherePw = $state('');
 	let everywhereErrors = $state<FieldError[]>([]);
@@ -44,34 +31,12 @@
 	let removeData = $state(false);
 
 	let db = $state<UserDb | null>(null);
-	let prefs = $state<PreferencesRow | null>(null);
-	let maxQuiz = $state(130_000);
-
-	async function refreshPrefs() {
-		if (db) prefs = await preferencesView(db);
-	}
-
-	async function savePref(field: keyof PreferencesRow, value: unknown) {
-		if (!db) return;
-		await applyLocally(db, { type: 'set_preferences', [field]: value } as NewOp);
-		afterLocalWrite();
-		await refreshPrefs();
-	}
 
 	onMount(() => {
 		void (async () => {
 			if (!session.userId) return;
 			db = await userDb(session.userId, session.username);
-			maxQuiz = (await getMeta(db, 'server')).max_quiz_questions;
-			await display.load(db);
-			await refreshPrefs();
 		})();
-	});
-
-	// A pull may change the preferences row.
-	$effect(() => {
-		void syncState.changed.tick;
-		void refreshPrefs();
 	});
 
 	function fieldErrorsOr(e: unknown, set: (f: FieldError[]) => void): string | null {
@@ -80,19 +45,6 @@
 			return null;
 		}
 		return describe(e);
-	}
-
-	async function changePassword(e: SubmitEvent) {
-		e.preventDefault();
-		pwErrors = [];
-		pwError = pwMessage = null;
-		try {
-			await authApi.changePassword(current, next);
-			current = next = '';
-			pwMessage = 'Password changed. Your other devices have been signed out.';
-		} catch (err) {
-			pwError = fieldErrorsOr(err, (f) => (pwErrors = f));
-		}
 	}
 
 	async function signOutEverywhere(e: SubmitEvent) {
@@ -179,45 +131,13 @@
 		</Card.Content>
 	</Card.Root>
 
-	{#if db && prefs}
-		<!-- Each group of settings says where it applies (SCOPE), in the player's words. -->
-		<Card.Root id="every-cascade">
-			<Card.Header>
-				<Card.Title>Every cascade</Card.Title>
-				<Card.Description>{SCOPE.every}</Card.Description>
-			</Card.Header>
-			<Card.Content><AccountPreferences {prefs} {maxQuiz} part="every" save={savePref} /></Card.Content>
-		</Card.Root>
-		<Card.Root id="new-cascades">
-			<Card.Header>
-				<Card.Title>Defaults for new cascades</Card.Title>
-				<Card.Description>{SCOPE.defaults}</Card.Description>
-			</Card.Header>
-			<Card.Content><AccountPreferences {prefs} {maxQuiz} part="defaults" save={savePref} /></Card.Content>
-		</Card.Root>
-		<Card.Root id="display">
-			<Card.Header>
-				<Card.Title>On this device</Card.Title>
-				<Card.Description>{SCOPE.device}</Card.Description>
-			</Card.Header>
-			<Card.Content><DisplaySettings /></Card.Content>
-		</Card.Root>
-		<ControlsEditor {db} bindings={prefs.bindings} onchange={refreshPrefs} />
+	<p class="text-sm text-muted-foreground">
+		Each cascade’s settings, and this device’s display and controls, are in the cascade’s Settings: ⚙ in the player.
+	</p>
+
+	{#if db}
 		<StorageCard {db} />
 	{/if}
-
-	<Card.Root>
-		<Card.Header><Card.Title>Change password</Card.Title></Card.Header>
-		<Card.Content>
-			<form class="grid gap-4" onsubmit={changePassword}>
-				<FormError message={pwError} />
-				{#if pwMessage}<p class="text-sm">{pwMessage}</p>{/if}
-				<Field id="current_password" label="Current password" type="password" bind:value={current} errors={pwErrors} autocomplete="current-password" />
-				<Field id="new_password" label="New password" type="password" bind:value={next} errors={pwErrors} autocomplete="new-password" />
-				<Button type="submit">Change password</Button>
-			</form>
-		</Card.Content>
-	</Card.Root>
 
 	<Card.Root>
 		<Card.Header>

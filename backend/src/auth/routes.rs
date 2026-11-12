@@ -41,7 +41,6 @@ pub fn router(state: &AppState) -> Router<AppState> {
             "/api/account/sign-out-everywhere",
             post(sign_out_everywhere),
         )
-        .route("/api/account/password", post(change_password))
         .route("/api/account", delete(delete_account));
     // Only on a local stack: the route does not exist otherwise, so production
     // answers 404 (config.rs refuses DEV_LOGIN with SECURE_COOKIES).
@@ -141,11 +140,7 @@ async fn register(
     if !is_valid_email(&email) {
         errors.push(FieldError::new("email", "Enter a valid email address."));
     }
-    errors.extend(password::strength_errors(
-        "password",
-        &body.password,
-        &[&username, &email],
-    ));
+    errors.extend(password::check_strength("password", &body.password, &username, &email).await?);
     // A taken username is a field error, checked before anything that sends
     // email. One held by an unconfirmed account is taken while that account's
     // latest code is valid.
@@ -276,50 +271,21 @@ async fn insert_confirmation(
     Ok(())
 }
 
-/// The user, its preferences row stamped with the account's first sync
-/// sequence, and the default bindings, in one transaction.
+/// The user row.
 async fn create_user(
     tx: &mut sqlx::PgConnection,
     username: &str,
     email: &str,
     hash: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    let user = sqlx::query!(
-        "INSERT INTO users (username, email, password_hash, sync_seq)
-         VALUES ($1, $2, $3, 1) RETURNING id, sync_seq",
+    sqlx::query_scalar!(
+        "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
         username as &str,
         email as &str,
         hash,
     )
-    .fetch_one(&mut *tx)
-    .await?;
-    sqlx::query!(
-        "INSERT INTO user_preferences (user_id, updated_seq) VALUES ($1, $2)",
-        user.id,
-        user.sync_seq,
-    )
-    .execute(&mut *tx)
-    .await?;
-    // Show / Next: left click, Space, comma or Enter. Toggle grade: right
-    // click, X or M. Previous: middle click, Backspace or J (PLAN.md §
-    // Preferences). An action can hold any number more.
-    sqlx::query!(
-        "INSERT INTO user_input_bindings (user_id, action, slot, kind, code) VALUES
-            ($1, 'show_next',    0, 'mouse_button', 'left'),
-            ($1, 'show_next',    1, 'key',          'Space'),
-            ($1, 'show_next',    2, 'key',          'Comma'),
-            ($1, 'show_next',    3, 'key',          'Enter'),
-            ($1, 'toggle_grade', 0, 'mouse_button', 'right'),
-            ($1, 'toggle_grade', 1, 'key',          'KeyX'),
-            ($1, 'toggle_grade', 2, 'key',          'KeyM'),
-            ($1, 'previous',     0, 'mouse_button', 'middle'),
-            ($1, 'previous',     1, 'key',          'Backspace'),
-            ($1, 'previous',     2, 'key',          'KeyJ')",
-        user.id,
-    )
-    .execute(&mut *tx)
-    .await?;
-    Ok(user.id)
+    .fetch_one(tx)
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -376,17 +342,22 @@ pub struct Me {
     is_admin: bool,
     trash_retention_days: u32,
     max_quiz_questions: u32,
-    max_cascades_per_user: u32,
+    /// The account's server storage and its effective limit, in bytes
+    /// (STORAGE_LIMIT_PLAN.md § S1).
+    storage_bytes: i64,
+    max_storage_bytes: i64,
 }
 
-fn me_body(state: &AppState, id: Uuid, username: String, is_admin: bool) -> Me {
+fn me_body(state: &AppState, id: Uuid, username: String, is_admin: bool, storage: (i64, Option<i64>)) -> Me {
+    let usage = crate::storage::Usage::new(storage.0, storage.1, state.config.max_storage_bytes_per_user);
     Me {
         user_id: id,
         username,
         is_admin,
         trash_retention_days: state.config.trash_retention_days,
         max_quiz_questions: state.config.max_quiz_questions,
-        max_cascades_per_user: state.config.max_cascades_per_user,
+        storage_bytes: usage.used,
+        max_storage_bytes: usage.limit,
     }
 }
 
@@ -420,7 +391,7 @@ async fn login(
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let row = sqlx::query!(
         "SELECT id, username::text AS \"username!\", password_hash, email_confirmed_at,
-                is_admin, session_generation
+                is_admin, session_generation, storage_bytes, storage_limit_bytes
          FROM users WHERE username = $1",
         body.username.trim() as &str,
     )
@@ -445,7 +416,7 @@ async fn login(
     let cookies = SessionCookies::issue(&state, user.id, user.session_generation, None);
     Ok((
         cookies,
-        Json(me_body(&state, user.id, user.username, user.is_admin)),
+        Json(me_body(&state, user.id, user.username, user.is_admin, (user.storage_bytes, user.storage_limit_bytes))),
     )
         .into_response())
 }
@@ -465,7 +436,7 @@ async fn me(
     let cookies = SessionCookies::csrf_for(&state, &user.claims, csrf);
     (
         cookies,
-        Json(me_body(&state, user.id, user.username, user.is_admin)),
+        Json(me_body(&state, user.id, user.username, user.is_admin, (user.storage_bytes, user.storage_limit_bytes))),
     )
         .into_response()
 }
@@ -484,7 +455,8 @@ async fn dev_login(
     ApiJson(body): ApiJson<DevLoginBody>,
 ) -> ApiResult<Response> {
     let user = sqlx::query!(
-        "SELECT id, username::text AS \"username!\", email_confirmed_at, is_admin, session_generation
+        "SELECT id, username::text AS \"username!\", email_confirmed_at, is_admin, session_generation,
+                storage_bytes, storage_limit_bytes
          FROM users WHERE username = $1",
         body.username.trim() as &str,
     )
@@ -495,7 +467,8 @@ async fn dev_login(
         return Err(ApiError::Forbidden("email_unconfirmed"));
     }
     let cookies = SessionCookies::issue(&state, user.id, user.session_generation, None);
-    Ok((cookies, Json(me_body(&state, user.id, user.username, user.is_admin))).into_response())
+    let storage = (user.storage_bytes, user.storage_limit_bytes);
+    Ok((cookies, Json(me_body(&state, user.id, user.username, user.is_admin, storage))).into_response())
 }
 
 /// Clears both cookies. Needs neither a session nor a CSRF token when no
@@ -533,6 +506,11 @@ async fn reset_password(
 ) -> ApiResult<Response> {
     state.limits.auth_ip.check(&ip)?;
     let email = body.email.trim().to_owned();
+    // Checked against the caller and against the address named: the first
+    // bounds bulk probing, the second stops one address being buried in reset
+    // mail from many sources. The same answer for every address either way.
+    state.limits.reset.check(&format!("ip:{ip}"))?;
+    state.limits.reset.check(&format!("em:{}", email.to_lowercase()))?;
     let st = state.clone();
     tokio::spawn(async move {
         if let Err(e) = send_reset(&st, ip, &email).await {
@@ -544,7 +522,7 @@ async fn reset_password(
 
 async fn send_reset(state: &AppState, ip: IpAddr, email: &str) -> anyhow::Result<()> {
     let user = sqlx::query!(
-        "SELECT id, email::text AS \"email!\" FROM users
+        "SELECT id, username::text AS \"username!\", email::text AS \"email!\" FROM users
          WHERE email = $1 AND email_confirmed_at IS NOT NULL",
         email as &str,
     )
@@ -568,6 +546,7 @@ async fn send_reset(state: &AppState, ip: IpAddr, email: &str) -> anyhow::Result
         .send(mail::reset_email(
             &state.config.public_url,
             &user.email,
+            &user.username,
             &token,
         ))
         .await
@@ -583,25 +562,60 @@ async fn reset_password_confirm(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
     ApiJson(body): ApiJson<ResetConfirmBody>,
-) -> ApiResult<StatusCode> {
+) -> ApiResult<Response> {
     state.limits.auth_ip.check(&ip)?;
-    let errors = password::strength_errors("password", &body.password, &[]);
+    let token_hash = sha256(body.token.trim());
+    let invalid = || ApiError::bad_request("invalid_token");
+    // The link first, read without a lock: a wrong or spent one costs neither
+    // a score nor a hash.
+    let account = sqlx::query!(
+        r#"SELECT u.username::text AS "username!", u.email::text AS "email!"
+           FROM password_reset_tokens t JOIN users u ON u.id = t.user_id
+           WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > now()"#,
+        token_hash,
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(invalid)?;
+    // A link refused a weak password still works, so each scoring is counted
+    // against the link too: replayed from many addresses, it would otherwise
+    // be a queue of scorings no per-address limit bounds. Counted once a turn
+    // is held, so a request turned away busy (503) spends none of the owner's tries.
+    let turn = password::scoring_turn().await?;
+    let link: String = token_hash.iter().map(|b| format!("{b:02x}")).collect();
+    state.limits.reset.check(&format!("tok:{link}"))?;
+    // Registration's rule: not the username, not the address.
+    let errors = password::score_in_turn(turn, "password", &body.password, &account.username, &account.email).await?;
     if !errors.is_empty() {
         return Err(ApiError::Fields(errors));
     }
+    // Hashed before the transaction, so the wait holds no lock.
     let hash = password::hash(body.password).await?;
+
     let mut tx = state.db.begin().await?;
+    // The account first, then its token; a delete that commits meanwhile
+    // leaves no account to lock.
+    sqlx::query!(
+        "SELECT u.id FROM users u JOIN password_reset_tokens t ON t.user_id = u.id
+         WHERE t.token_hash = $1 FOR NO KEY UPDATE OF u",
+        token_hash,
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(invalid)?;
     let user_id = sqlx::query_scalar!(
         "UPDATE password_reset_tokens SET used_at = now()
          WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
          RETURNING user_id",
-        sha256(body.token.trim()),
+        token_hash,
     )
     .fetch_optional(&mut *tx)
     .await?
-    .ok_or_else(|| ApiError::bad_request("invalid_token"))?;
-    // Completing a reset spends every other outstanding token and signs out
-    // every session.
+    .ok_or_else(invalid)?;
+    // Every other outstanding link is spent too, so an earlier one cannot be
+    // replayed, and the generation bump signs out every session, an
+    // attacker's included: a reset is what someone does who suspects another
+    // person has access.
     sqlx::query!(
         "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL",
         user_id
@@ -617,7 +631,9 @@ async fn reset_password_confirm(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(StatusCode::NO_CONTENT)
+    // This browser's session goes with the rest: signing in with the new
+    // password is the confirmation.
+    Ok((ClearCookies(state.config.secure_cookies), StatusCode::NO_CONTENT).into_response())
 }
 
 // ---------------------------------------------------------------------------
@@ -656,46 +672,6 @@ async fn sign_out_everywhere(
         "UPDATE users SET session_generation = session_generation + 1 WHERE id = $1
          RETURNING session_generation",
         user.id
-    )
-    .fetch_one(&state.db)
-    .await?;
-    Ok((
-        SessionCookies::issue(&state, user.id, generation, None),
-        StatusCode::NO_CONTENT,
-    )
-        .into_response())
-}
-
-#[derive(Deserialize)]
-pub struct ChangePasswordBody {
-    current_password: String,
-    new_password: String,
-}
-
-async fn change_password(
-    State(state): State<AppState>,
-    Session(user): Session,
-    ApiJson(body): ApiJson<ChangePasswordBody>,
-) -> ApiResult<Response> {
-    let errors = password::strength_errors("new_password", &body.new_password, &[&user.username]);
-    if !errors.is_empty() {
-        return Err(ApiError::Fields(errors));
-    }
-    check_password(&state, &user, body.current_password)
-        .await
-        .map_err(|e| match e {
-            ApiError::Fields(_) => ApiError::Fields(vec![FieldError::new(
-                "current_password",
-                "That password is not right.",
-            )]),
-            other => other,
-        })?;
-    let hash = password::hash(body.new_password).await?;
-    let generation = sqlx::query_scalar!(
-        "UPDATE users SET password_hash = $2, session_generation = session_generation + 1
-         WHERE id = $1 RETURNING session_generation",
-        user.id,
-        hash,
     )
     .fetch_one(&state.db)
     .await?;

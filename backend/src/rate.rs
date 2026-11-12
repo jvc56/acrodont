@@ -32,6 +32,14 @@ impl<K: Hash + Eq + Clone> Keyed<K> {
         }
     }
 
+    pub fn per_hour(n: u32) -> Self {
+        let n = NonZeroU32::new(n).expect("rates are validated as >= 1");
+        Keyed {
+            limiter: RateLimiter::keyed(Quota::per_hour(n)),
+            clock: DefaultClock::default(),
+        }
+    }
+
     pub fn check(&self, key: &K) -> Result<(), ApiError> {
         self.limiter
             .check_key(key)
@@ -104,6 +112,10 @@ impl<K: Hash + Eq + Clone> FailureBuckets<K> {
 /// Every bucket, each with its named refill rate from Configuration.
 pub struct Limiters {
     pub auth_ip: Keyed<IpAddr>,
+    /// Password resets, `RESET_RATE_PER_HOUR` (5) an hour per key: `ip:` the
+    /// caller and `em:` the address named, for asking; `tok:` the link, for
+    /// setting (PLAN.md § Authentication).
+    pub reset: Keyed<String>,
     pub catalog_ip: Keyed<IpAddr>,
     pub login_fail_ip: FailureBuckets<IpAddr>,
     pub login_fail_username: FailureBuckets<String>,
@@ -118,6 +130,7 @@ impl Limiters {
     pub fn new(c: &Config) -> Self {
         Limiters {
             auth_ip: Keyed::per_minute(c.auth_rate_per_ip_per_minute),
+            reset: Keyed::per_hour(c.reset_rate_per_hour),
             catalog_ip: Keyed::per_minute(c.catalog_rate_per_minute),
             login_fail_ip: FailureBuckets::per_minute(c.login_failures_per_ip_per_minute),
             login_fail_username: FailureBuckets::per_minute(

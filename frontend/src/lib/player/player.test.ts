@@ -11,13 +11,12 @@ import { openUserDb, type UserDb } from '$lib/local/db';
 import { initMeta } from '$lib/local/meta';
 import { applyLocally } from '$lib/local/apply';
 import * as view from '$lib/local/view';
-import { defaultPreferences } from '$lib/local/preferences';
-import type { PreferencesRow } from '$lib/local/rows';
 import { questionsHash } from '$lib/cascade/order';
 import { AHEAD, AHEAD_LOW, Player } from './controller';
-import { bind, inputOwns, actionFor, Debounce } from './bindings';
-import { DEFAULT_BINDINGS } from '$lib/local/preferences';
+import { bind, inputOwns, actionFor, Debounce, DEFAULT_BINDINGS, normalizeBindings } from './bindings';
 import { finishBanner } from './banner';
+import { emptyTyped, isAnagramOf, submitTyped, typedGrade } from './typed';
+import { Distribution } from '$lib/tiles';
 
 const C = 'c1000000-0000-4000-8000-000000000000';
 const Q = 'a1000000-0000-4000-8000-000000000000';
@@ -25,13 +24,11 @@ const T0 = '2026-01-01T00:00:00.000Z';
 const WORDS = ['AB', 'BA'];
 
 let db: UserDb;
-let prefs: PreferencesRow;
 
 beforeEach(async () => {
 	globalThis.indexedDB = new IDBFactory();
 	db = await openUserDb('u');
 	await initMeta(db, 'u', 'u');
-	prefs = defaultPreferences();
 });
 
 async function cascade(
@@ -43,6 +40,7 @@ async function cascade(
 		dist?: boolean;
 		quiz_type?: 'anagram' | 'definition';
 		answer_mode?: 'flashcard' | 'typed';
+		reveal_correct?: boolean;
 	} = {}
 ) {
 	const idx = Array.from({ length: count }, (_, i) => i);
@@ -52,7 +50,8 @@ async function cascade(
 			id: C, name: 'x', quiz_type: o.quiz_type ?? 'anagram', lexicon: 'EN', letter_distribution: 'english', clear_threshold: 80, ...opts,
 			options_changed_at: T0, options_seq: '1', options_device_id: 'd', question_count: count, depth: 1, peak_depth: 1,
 			attempts_since_completion: 0, created_at: T0, last_activity_at: T0, completed_at: null, trashed_at: null, updated_seq: '1',
-			answer_mode: o.answer_mode ?? 'flashcard'
+			answer_mode: o.answer_mode ?? 'flashcard', show_definitions: true, show_hooks: true,
+			reveal_correct: o.reveal_correct ?? true, leave_value_decimals: 1
 		},
 		source_quiz: {
 			id: Q, cascade_id: C, level: 1, origin: 'source', origin_quiz_id: null, origin_attempt: null, origin_segment_end: null,
@@ -85,7 +84,7 @@ async function makeTyped() {
 }
 
 function player() {
-	return new Player(db, C, { prefs: async () => prefs, ensure: async () => undefined, seed: () => '777' });
+	return new Player(db, C, { ensure: async () => undefined, seed: () => '777' });
 }
 
 const ops = async () => (await db.getAll('outbox')).map((e) => e.op.type);
@@ -94,7 +93,7 @@ describe('the player', () => {
 	it('Next shows the next card before its writes are saved, from the cards held in memory', async () => {
 		await cascade(5);
 		let saved = 0;
-		const p = new Player(db, C, { prefs: async () => prefs, ensure: async () => undefined, seed: () => '777', afterWrite: () => saved++ });
+		const p = new Player(db, C, { ensure: async () => undefined, seed: () => '777', afterWrite: () => saved++ });
 		await p.load();
 		await new Promise((r) => setTimeout(r, 50)); // the background cache fill
 		let savedWhenShown = -1;
@@ -125,14 +124,15 @@ describe('the player', () => {
 		expect([p.v.card!.pos, p.v.card!.revealed, p.v.card!.saved]).toEqual([0, true, 'correct']);
 	});
 
-	it('a reveal marks the card correct, or missed when the preference says so; Toggle flips either', async () => {
-		await cascade(5);
-		const p = new Player(db, C, { prefs: async () => ({ ...prefs, reveal_correct: false }), ensure: async () => undefined, seed: () => '777' });
+	it('a reveal marks the card correct, or missed when the cascade’s setting says so; Toggle flips either', async () => {
+		await cascade(5, { reveal_correct: false });
+		const p = player();
 		await p.load();
 		await p.showNext();
 		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'missed']);
 		await p.toggle();
 		expect(p.v.card!.grade).toBe('correct');
+		await cascade(5);
 		const q = player();
 		await q.load();
 		await q.showNext();
@@ -142,14 +142,14 @@ describe('the player', () => {
 	it('Show and Toggle act at once during a slow reload, which keeps them; Next waits for it', async () => {
 		await cascade(5);
 		let hold: Promise<void> | null = null;
-		const p = new Player(db, C, {
-			prefs: async () => {
-				await hold;
-				return prefs;
-			},
-			ensure: async () => undefined,
-			seed: () => '777'
-		});
+		const p = player();
+		// The reload's reads wait on `hold`.
+		const inner = p as unknown as { loadNow: (keep: boolean) => Promise<void> };
+		const loadNow = inner.loadNow.bind(p);
+		inner.loadNow = async (keep) => {
+			await hold;
+			return loadNow(keep);
+		};
 		await p.load();
 		let release!: () => void;
 		hold = new Promise((r) => (release = r));
@@ -201,7 +201,6 @@ describe('the player', () => {
 		const asked: number[][] = [];
 		const fetched: number[] = [];
 		const p = new Player(db, C, {
-			prefs: async () => prefs,
 			ensure: async () => undefined,
 			seed: () => '777',
 			fetchCard: async (_c, idx, ahead) => {
@@ -362,21 +361,46 @@ describe('the player', () => {
 		expect((await db.getAll('outbox'))[0].op.grade).toBe('missed');
 	});
 
-	it('typed mode: found, already entered, one word at a time, wrong; all found waits for Enter', async () => {
+	it('typed mode: found, already entered, not an anagram; all found waits for Enter', async () => {
 		await cascade(2);
 		await makeTyped();
 		const p = player();
 		await p.load();
 		expect((await p.enter('ab'))!.kind).toBe('found');
 		expect((await p.enter('AB'))!.kind).toBe('already');
-		expect((await p.enter('ABAB'))!.kind).toBe('one_word');
-		expect((await p.enter('AA'))!.kind).toBe('wrong');
+		// Not the question's tiles: rejected, with a note, and no effect on the grade.
+		expect((await p.enter('ABAB'))!.kind).toBe('not_anagram');
+		expect(p.v.card!.note).toBe('Not an anagram of the question');
+		expect((await p.enter('AA'))!.kind).toBe('not_anagram');
+		expect((await p.enter('XY'))!.kind).toBe('not_anagram');
+		expect((await p.enter('A1'))!.kind).toBe('not_anagram');
 		expect((await p.enter('BA'))!.kind).toBe('found');
 		// Every answer found, but the card waits: the user may have more to try.
 		expect(p.v.card!.revealed).toBe(false);
-		expect((await p.enter('XY'))!.kind).toBe('wrong');
 		expect((await p.enter(''))!.kind).toBe('empty');
-		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'missed']);
+		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'correct']);
+	});
+
+	it('typed entries: only an anagram of the question can be wrong', () => {
+		const tiles = [{ letter: '?', blank_letter: '?', count: 2, value: 0, is_vowel: false }];
+		for (const L of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') tiles.push({ letter: L, blank_letter: L.toLowerCase(), count: 2, value: 1, is_vowel: 'AEIOU'.includes(L) });
+		const dist = new Distribution('english', tiles);
+		const abc = dist.parseMagpie('ABC', true);
+		const submit = (text: string, question = abc, answers = ['CAB']) => submitTyped(emptyTyped(), text, answers, question, dist, false);
+		// ABC: AB and ABD are not anagrams, so they are rejected; BCA is one, and not a word, so it is wrong.
+		expect(submit('AB').result.kind).toBe('not_anagram');
+		expect(submit('ABD').result.kind).toBe('not_anagram');
+		expect(submit('ABCC').result.kind).toBe('not_anagram');
+		expect(submit('AB').state.wrong).toEqual([]);
+		const bca = submit('bca');
+		expect(bca.result.kind).toBe('wrong');
+		expect(typedGrade(bca.state, ['CAB'])).toBe('missed');
+		expect(submit('CAB').result.kind).toBe('found');
+		// A blank stands for any one tile: AB? takes ABD, and not AXY.
+		const blank = dist.parseMagpie('AB?', true);
+		expect(isAnagramOf(dist.parseTyped('DAB', false), blank)).toBe(true);
+		expect(isAnagramOf(dist.parseTyped('AXY', false), blank)).toBe(false);
+		expect(submit('BAD', blank, ['ABS']).result.kind).toBe('wrong');
 	});
 
 	it('typed mode, every answer found and nothing wrong: Enter on an empty input reveals it correct', async () => {
@@ -391,14 +415,12 @@ describe('the player', () => {
 		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'correct']);
 	});
 
-	it("the cascade's own answer mode decides, never the account default", async () => {
+	it("the cascade's own answer mode decides", async () => {
 		await cascade(2, { answer_mode: 'typed' });
 		const p = player();
 		await p.load();
-		// The account default is flashcard; the cascade says typed.
 		expect(p.v.card!.typed).not.toBeNull();
 		await cascade(2, { answer_mode: 'flashcard' });
-		prefs = { ...prefs, anagram_answer_mode: 'typed' };
 		const q = player();
 		await q.load();
 		expect(q.v.card!.typed).toBeNull();
@@ -461,7 +483,6 @@ describe('the player', () => {
 		await makeTyped();
 		let fetched = 0;
 		const p = new Player(db, C, {
-			prefs: async () => prefs,
 			ensure: async () => undefined,
 			seed: () => '777',
 			fetchDistribution: async () => {

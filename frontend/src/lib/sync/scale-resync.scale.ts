@@ -1,4 +1,4 @@
-// PLAN.md § Scale tests: "Resync a device holding five 130,000-question
+// PLAN.md § Scale tests: "Resync a device holding five 300,000-question
 // cascades, one of them with cleared levels whose rows a Trash export
 // fetched, and assert the full pull's base comparison and deletions finish
 // within budget and keep those cleared rows. A sixth cascade has run a
@@ -28,12 +28,11 @@ function rowsIn(p: SyncResponse): number {
 		(c.quizzes?.length ?? 0) +
 		(c.quiz_attempts?.length ?? 0) +
 		(c.quiz_questions ?? []).reduce((n, g) => n + g.question_idx.length, 0) +
-		(c.tombstones?.length ?? 0) +
-		(c.preferences ? 1 : 0)
+		(c.tombstones?.length ?? 0)
 	);
 }
 
-describe('a resync of a device holding five 130,000-question cascades and 4,000 chain quizzes', () => {
+describe('a resync of a device holding five 300,000-question cascades and 4,000 chain quizzes', () => {
 	it('compares and deletes within budget, keeps the exported cleared rows, and pages under 50,000 rows', async () => {
 		const server = new FakeServer();
 		const big = Array.from({ length: 5 }, (_, i) => ids(i + 1));

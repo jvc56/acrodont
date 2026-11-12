@@ -1,16 +1,20 @@
 <script lang="ts">
 	// The Cascades page (PLAN.md § Cascades page): newest activity first, one
 	// row each for a glance — its options in short form, a compact ladder with
-	// the current level's progress, whether it is on this device, and Move to
-	// Trash; the rest (Keep offline, quiz options, Export…, Start over) is in
-	// the player. The header shows the cascade limit. Everything reads the local
-	// stores and works offline.
+	// the current level's progress, how much storage it holds, whether it is on
+	// this device, and Move to Trash; the rest (quiz options, Export…, Start
+	// over) is in the player. The header shows the account's storage against
+	// its one limit (PLAN.md § Storage limit). The Trash is under the cascades, so
+	// they are seen together. Everything reads the local stores and works offline.
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
 	import { session } from '$lib/auth/session.svelte';
 	import TrashIcon from '@lucide/svelte/icons/trash';
 	import { Button } from '$lib/components/ui/button';
-	import { allCascades, cascadeSummaries, ladderText, type CascadeSummary } from '$lib/cascades/summary';
+	import TrashList from '$lib/components/TrashList.svelte';
+	import { tick } from 'svelte';
+	import { cascadeSummaries, ladderText, type CascadeSummary } from '$lib/cascades/summary';
+	import { DEFAULT_STORAGE_LIMIT, formatBytes, levelBytes, storageState } from '$lib/cascades/storage';
 	import { applyLocally, type NewOp } from '$lib/local/apply';
 	import { confirmAction } from '$lib/confirm.svelte';
 	import { getMeta } from '$lib/local/meta';
@@ -20,16 +24,23 @@
 
 	let db = $state<UserDb | null>(null);
 	let list = $state<CascadeSummary[]>([]);
-	let count = $state(0);
+	/** The account's storage and its limit, as the server last reported them. */
+	let used = $state(0);
+	let limit = $state(DEFAULT_STORAGE_LIMIT);
+	let fill = $derived(storageState(used, limit));
 	/** No lexicon on the server: known only online, and asked only while there are no cascades. */
 	let noCatalog = $state(false);
 	let retentionDays = $state(30);
+	/** Bumped when a cascade goes to the Trash here, so the Trash below shows it. */
+	let trashVersion = $state(0);
 
 	async function refresh() {
 		if (!db) return;
 		list = await cascadeSummaries(db, navigator.onLine);
-		count = (await allCascades(db)).length;
-		retentionDays = (await getMeta(db, 'server')).trash_retention_days;
+		const server = await getMeta(db, 'server');
+		retentionDays = server.trash_retention_days;
+		used = server.storage_bytes ?? 0;
+		limit = server.max_storage_bytes ?? DEFAULT_STORAGE_LIMIT;
 	}
 
 	onMount(() => {
@@ -37,6 +48,11 @@
 			if (!session.userId) return;
 			db = await userDb(session.userId, session.username);
 			await refresh();
+			// A link to the Trash (/trash, or #trash) lands on it once it is drawn.
+			if (location.hash === '#trash') {
+				await tick();
+				document.getElementById('trash')?.scrollIntoView({ block: 'start' });
+			}
 			if (list.length === 0 && navigator.onLine) {
 				api
 					.get<unknown[]>('/api/lexicons', { bindUser: false })
@@ -65,15 +81,23 @@
 		await applyLocally(db, op);
 		afterLocalWrite();
 		await refresh();
+		trashVersion++;
 	}
 
 	async function trash(s: CascadeSummary) {
 		const ok = await confirmAction({
 			title: `Move “${s.cascade.name}” to the Trash?`,
-			body: `You can restore it from the Trash for ${retentionDays} days. After that it is deleted forever.`,
+			body: `You can restore it from the Trash for ${retentionDays} days. After that it is deleted forever. Its storage is freed only then, or when you delete it forever from the Trash.`,
 			action: 'Move to Trash'
 		});
 		if (ok) await write({ type: 'trash_cascade', cascade_id: s.cascade.id });
+	}
+
+	/** What a cascade's figure is made of: its levels, from the same per-row costs, and the rest. */
+	function sizeTitle(s: CascadeSummary): string {
+		const levels = s.levels.reduce((n, r) => n + levelBytes(r.quiz.question_count), 0);
+		const rest = Math.max(0, (s.cascade.storage_bytes ?? 0) - levels);
+		return `Storage: ${formatBytes(s.cascade.storage_bytes ?? 0)} — questions and filters ${formatBytes(rest)}, levels ${formatBytes(levels)}`;
 	}
 
 	function badge(s: CascadeSummary): string {
@@ -92,13 +116,39 @@
 
 <main class="mx-auto max-w-4xl p-6">
 	<header class="mb-6 flex flex-wrap items-center justify-between gap-4">
-		<div>
+		<div class="min-w-56 flex-1">
 			<h1 class="text-2xl font-semibold">Cascades</h1>
-			<p class="text-sm text-muted-foreground">{count} of {session.cascadeLimit} cascades</p>
+			<!-- The account's storage against its one limit: the Trash counts until it is emptied. -->
+			<div class="mt-1 max-w-sm space-y-1" data-storage={fill}>
+				<p class="text-sm text-muted-foreground"><span class="text-foreground">{formatBytes(used)}</span> of {formatBytes(limit)} used</p>
+				<div
+					class="h-1.5 overflow-hidden rounded-full bg-muted"
+					role="meter"
+					aria-label="Storage used"
+					aria-valuemin={0}
+					aria-valuemax={limit}
+					aria-valuenow={Math.min(used, limit)}
+				>
+					<div
+						class="h-full {fill === 'over' ? 'bg-red-600' : fill === 'almost' ? 'bg-amber-500' : 'bg-foreground/60'}"
+						style={`width: ${Math.min(100, (used / Math.max(1, limit)) * 100)}%`}
+					></div>
+				</div>
+				{#if fill === 'over'}
+					<p class="text-sm text-destructive">
+						Over your storage by {formatBytes(used - limit)}: you can keep studying, but can’t create cascades until you make room.
+						Empty the <a class="underline" href="#trash">Trash</a> or delete cascades.
+					</p>
+				{:else if fill === 'almost'}
+					<p class="text-sm text-amber-600 dark:text-amber-400">
+						Almost full: empty the <a class="underline" href="#trash">Trash</a> or delete cascades to make room.
+					</p>
+				{/if}
+			</div>
 		</div>
 		<div class="flex items-center gap-4">
-			{#if count >= session.cascadeLimit}
-				<span class="text-sm">At the limit — <a class="underline" href="/trash">Trash</a></span>
+			{#if used >= limit}
+				<Button disabled title="Your storage is full: make room first">New cascade</Button>
 			{:else}
 				<Button href="/cascades/new">New cascade</Button>
 			{/if}
@@ -127,6 +177,7 @@
 						<p class="truncate text-xs text-muted-foreground" title={ladderText(s.levels)}>{ladderText(s.levels)}</p>
 					</div>
 					<div class="flex shrink-0 items-center gap-2">
+						<span class="text-xs text-muted-foreground tabular-nums" title={sizeTitle(s)} data-cascade-storage>{formatBytes(s.cascade.storage_bytes ?? 0)}</span>
 						<span class="rounded bg-muted px-2 py-0.5 text-xs">{badge(s)}</span>
 						<Button
 							size="icon-sm"
@@ -142,5 +193,8 @@
 				</li>
 			{/each}
 		</ul>
+	{/if}
+	{#if db}
+		<div class="mt-10"><TrashList {db} version={trashVersion} onchange={refresh} /></div>
 	{/if}
 </main>

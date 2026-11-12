@@ -21,10 +21,15 @@ use crate::auth::session::renewal;
 use crate::auth::Session;
 use crate::cascade::order::{from_i64, to_i64};
 use crate::cascade::rules::{Grade, Reason};
+use crate::config::MAX_QUESTION_ROWS_FOR;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::ApiJson;
 
 pub const MAX_INDEX_PAGE: i64 = 50_000;
+
+/// The `set_cascade_options` fields a `set_quiz_options` never carries.
+const CASCADE_ONLY_FIELDS: [&str; 6] =
+    ["clear_threshold", "answer_mode", "show_definitions", "show_hooks", "reveal_correct", "leave_value_decimals"];
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -97,8 +102,8 @@ fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Reques
     let question_rows_for: Vec<Uuid> = match obj.get("question_rows_for") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(a)) => {
-            if a.len() > state.config.max_cascades_per_user as usize {
-                return Err(bad("question_rows_for is longer than the cascade limit"));
+            if a.len() > MAX_QUESTION_ROWS_FOR {
+                return Err(bad(&format!("question_rows_for names at most {MAX_QUESTION_ROWS_FOR} cascades")));
             }
             a.iter()
                 .map(|v| v.as_str().and_then(|s| s.parse().ok()).ok_or_else(|| bad("question_rows_for")))
@@ -119,9 +124,11 @@ fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Reques
             let target = if op_type == "set_cascade_options" { "cascade_id" } else { "quiz_id" };
             for k in m.keys() {
                 let allowed = ["id", "device_seq", "seen_seq", "at", "type", target, "segment_size", "progression", "require_alphabetical"];
-                // The clear threshold and answer mode are the cascade's alone, never a quiz's.
-                let threshold = op_type == "set_cascade_options" && (k == "clear_threshold" || k == "answer_mode");
-                if !allowed.contains(&k.as_str()) && !threshold {
+                // The clear threshold, answer mode and display settings are the
+                // cascade's alone, never a quiz's.
+                let cascade_only = op_type == "set_cascade_options"
+                    && CASCADE_ONLY_FIELDS.contains(&k.as_str());
+                if !allowed.contains(&k.as_str()) && !cascade_only {
                     return Err(bad(&format!("{op_type} carries only the fields that changed; {k} is not one")));
                 }
             }
@@ -364,6 +371,14 @@ async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, Api
     Ok(Pushed::Done { results, seq, floor: u.sync_floor_seq })
 }
 
+/// The account's storage against its limit, which every response carries
+/// (STORAGE_LIMIT_PLAN.md § S1): read after the push, so it counts what the
+/// push's finishes and purges just changed.
+async fn storage(state: &AppState, user: Uuid) -> ApiResult<Value> {
+    let mut conn = state.db.acquire().await?;
+    Ok(crate::storage::usage(&mut conn, user, state.config.max_storage_bytes_per_user).await?.json())
+}
+
 async fn sync(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -383,7 +398,8 @@ async fn sync(
         // A page request takes no new sequence; its token fixes the ceiling.
         let mut conn = state.db.acquire().await?;
         let (changes, next) = pull::page(&mut conn, token).await?;
-        let mut v = json!({ "results": [], "changes": changes, "sync_seq": token.ceil.to_string() });
+        let mut v = json!({ "results": [], "changes": changes, "sync_seq": token.ceil.to_string(),
+                            "storage": storage(&state, user.id).await? });
         if let Some(n) = next {
             v["next_page_token"] = json!(n.encode());
         }
@@ -394,7 +410,8 @@ async fn sync(
         Pushed::AheadOfServer { seq } => {
             return Ok(respond(
                 StatusCode::OK,
-                json!({ "results": [], "sync_seq": seq.to_string(), "resync_required": true }),
+                json!({ "results": [], "sync_seq": seq.to_string(), "resync_required": true,
+                        "storage": storage(&state, user.id).await? }),
             ));
         }
         Pushed::Done { results, seq, floor } => (results, seq, floor),
@@ -408,13 +425,15 @@ async fn sync(
     if req.cursor.is_some_and(|c| c < floor) {
         return Ok(respond(
             status,
-            json!({ "results": results, "sync_seq": seq.to_string(), "resync_required": true }),
+            json!({ "results": results, "sync_seq": seq.to_string(), "resync_required": true,
+                    "storage": storage(&state, user.id).await? }),
         ));
     }
     let token = PageToken { u: user.id, cur: req.cursor, ceil: seq, qrf: req.question_rows_for.clone(), table: 0, after: vec![] };
     let mut conn = state.db.acquire().await?;
     let (changes, next) = pull::page(&mut conn, &token).await?;
-    let mut v = json!({ "results": results, "changes": changes, "sync_seq": seq.to_string() });
+    let mut v = json!({ "results": results, "changes": changes, "sync_seq": seq.to_string(),
+                        "storage": storage(&state, user.id).await? });
     if let Some(n) = next {
         v["next_page_token"] = json!(n.encode());
     }

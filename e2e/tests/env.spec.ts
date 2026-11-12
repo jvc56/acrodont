@@ -1,7 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
-import { PROJECT } from '../stack';
-import { confirm, createCascade, login, newUser, playLevel, press } from './support';
+import { createCascade, login, newUser, playLevel, press } from './support';
 
 // PLAN.md § End-to-end tests: the journeys that need the stack configured
 // through the same --env flag a developer uses. Each tag runs in its own pass
@@ -66,71 +64,12 @@ test('@env @purge a cleared quiz is purged and the tombstone removes it from a s
 		.poll(
 			async () => {
 				await p2.goto('/trash');
+				// Read once the Trash has loaded, not while it is still being read.
+				await expect(p2.locator('#trash[data-loaded]')).toBeVisible({ timeout: 15_000 });
 				return await p2.getByText('The Trash is empty.').isVisible();
 			},
 			{ timeout: 120_000, intervals: [3000] }
 		)
 		.toBe(true);
 	await other.close();
-});
-
-// The saved-search limit (MAX_SAVED_SEARCHES_PER_USER lowered).
-test('@env @limits Save Search at the limit is refused with the limit and count; an overwrite is accepted', async ({ page }) => {
-	test.setTimeout(120_000);
-	await newUser(page, 'limits');
-	const limit = Number(process.env.E2E_SAVED_LIMIT ?? 2);
-	await page.goto('/cascades/new');
-	await page.getByLabel('Lexicon').selectOption('EN-FIX');
-	await page.getByLabel('Minimum').first().fill('7');
-	await page.getByLabel('Maximum').first().fill('7');
-	await expect(page.getByText(/\d+ questions/).first()).toBeVisible({ timeout: 15_000 });
-	const save = async (name: string) => {
-		await page.getByRole('button', { name: 'Save Search…' }).click();
-		await page.getByPlaceholder('Name').fill(name);
-		await page.getByRole('button', { name: 'Save', exact: true }).click();
-	};
-	for (let i = 0; i < limit; i++) {
-		await save(`S${i}`);
-		await expect(page.getByRole('dialog')).toHaveCount(0);
-	}
-	await save('one too many');
-	await expect(page.getByText(`You have ${limit} of ${limit} saved searches, the most you can keep. Delete one first.`)).toBeVisible();
-	await page.keyboard.press('Escape');
-	// A name already taken asks before replacing.
-	await save('S0');
-	await confirm(page, 'Replace');
-	await expect(page.getByRole('dialog')).toHaveCount(0);
-});
-
-// A cascade whose segmented attempt left 5,000 cleared chain quizzes opens /trash in budget.
-test('@env @limits /trash with 5,000 cleared chain quizzes: one collapsed group, pages of 100', async ({ page }) => {
-	test.setTimeout(240_000);
-	const { username } = await newUser(page, 'trash5k');
-	const player = await createCascade(page, { name: 'Many chains' });
-	const cascade = player.split('/').pop()!;
-	// The chain quizzes as a segmented attempt leaves them, written to the database.
-	execFileSync('docker', ['compose', '-p', PROJECT, 'exec', '-T', 'postgres', 'psql', '-U', 'acrodont', '-d', 'acrodont', '-v', 'ON_ERROR_STOP=1', '-c', `
-		WITH u AS (UPDATE users SET sync_seq = sync_seq + 1 WHERE username = '${username}' RETURNING id, sync_seq),
-		     src AS (SELECT q.id, q.cascade_id FROM quizzes q WHERE q.cascade_id = '${cascade}' AND q.origin = 'source'),
-		     ins AS (
-		       INSERT INTO quizzes (id, cascade_id, user_id, level, origin, origin_quiz_id, origin_attempt, origin_segment_end,
-		                            status, segment_chain, segment_size, progression, options_changed_at, options_seq,
-		                            options_device_id, shuffle_seed, questions_hash, question_count, correct_count,
-		                            created_seq, updated_seq, cleared_at, last_activity_at)
-		       SELECT gen_random_uuid(), src.cascade_id, u.id, 2, 'segment', src.id, g, 5, 'cleared', true, 0, 'drill', now(),
-		              u.sync_seq, gen_random_uuid(), g, 0, 1, 1, u.sync_seq, u.sync_seq, now() - interval '1 day', now()
-		       FROM u, src, generate_series(1, 5000) AS g RETURNING 1)
-		SELECT count(*) FROM ins;`], { encoding: 'utf8' });
-	await page.goto('/cascades');
-	await expect(page.getByText('Synced')).toBeVisible({ timeout: 60_000 });
-	const t = Date.now();
-	await page.goto('/trash');
-	const group = page.getByRole('button', { name: /Many chains/ });
-	await expect(group).toContainText('5000 entries', { timeout: 30_000 });
-	expect(Date.now() - t).toBeLessThan(15_000);
-	await expect(page.getByRole('button', { name: 'Restore' })).toHaveCount(0);
-	await group.click();
-	await expect(page.getByRole('button', { name: 'Restore' })).toHaveCount(100);
-	await page.getByRole('button', { name: 'Show more' }).click();
-	await expect(page.getByRole('button', { name: 'Restore' })).toHaveCount(200);
 });

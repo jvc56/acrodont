@@ -18,13 +18,19 @@ test('switching accounts in another tab', async ({ context }) => {
 	await a.goto('/cascades');
 	await expect(a.getByText('Available offline')).toBeVisible({ timeout: 60_000 });
 	await a.goto(player);
+	await expect(a.getByText(/^1 \/ \d+$/).first()).toBeVisible({ timeout: 30_000 });
 	// This tab alone is offline.
 	await a.route('**/api/**', (r) => r.abort('internetdisconnected'));
+	// Twenty cards graded, each press once its card is ready: a press before
+	// the card shows (or while it is still revealing) is dropped.
 	for (let i = 0; i < 20; i++) {
+		await expect(a.getByText(new RegExp(`^${i + 1} / \\d+$`)).first()).toBeVisible({ timeout: 15_000 });
 		await press(a, 'Space');
+		await expect(a.locator('[data-grade="correct"], [data-grade="missed"]')).toBeVisible();
 		await press(a, 'Space');
 	}
-	expect(await outboxCount(a, 'grade')).toBe(20);
+	// The screen moves before the writes are saved.
+	await expect.poll(() => outboxCount(a, 'grade'), { timeout: 10_000 }).toBe(20);
 	const aliceId = await idb<string>(a, `return (await req(db.transaction('meta').objectStore('meta').get('identity'))).user_id;`);
 	// A second tab: log out, log in as Bob.
 	const b = await context.newPage();

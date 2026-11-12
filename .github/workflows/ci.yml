@@ -1,12 +1,35 @@
-# PLAN.md § Running the tests: CI runs the test targets on every push, in
-# parallel jobs, and `make test-scale` nightly. Every job uses the same
-# one-command Makefile entry points a developer does. Parity never runs here:
-# its data cannot be committed. Deploys do not run here either: they run from
-# an operator's machine with scripts/deploy.sh, which refuses a commit whose
-# CI run on this workflow is not green.
+# PLAN.md § Running the tests. Three tiers, each a superset of the last:
+#
+#   Push     every push, every branch: lint, the unit tests (backend and
+#            frontend jobs), the integration tests (nextest), the core
+#            end-to-end pass (make test-e2e-core: every journey on one stack,
+#            side by side, then the @serial ones), Terraform and the operator
+#            scripts. About 5 minutes.
+#   Main     a push to main, and a manual run on any branch: the Push tier,
+#            plus make test-e2e-main (update.spec and the @env passes, each on
+#            its own stack, side by side) and the seeding check.
+#   Nightly  04:30 UTC on main: the Main tier, plus make test-scale. A failure
+#            opens (or comments on) one issue.
+#
+# The seeding check also runs on a push that changes scripts/ (or this file).
+# A manual run (workflow_dispatch, any branch) is also how a branch gets the
+# scale suite before it merges: never run `make test-scale` locally for that.
+#
+# Every job uses the same one-command Makefile entry points a developer does.
+# Parity never runs here: its data cannot be committed. Deploys do not run here
+# either: they run from an operator's machine with scripts/deploy.sh, which
+# refuses a commit whose CI run on main is not green, so a branch's green Push
+# tier alone never clears a deploy.
+#
+# The end-to-end jobs build the backend's release binary on the runner, with
+# its own Rust cache, and copy it into a thin test image
+# (docker/backend.Dockerfile, backend-prebuilt) instead of compiling it cold
+# inside Docker; production images keep their own full build.
 #
 # Actions are pinned by commit SHA (a tag can be moved); the comment names the
-# tag. ubuntu-24.04 is pinned: on 26.04 Playwright cannot install its browser.
+# tag. ubuntu-24.04 is pinned: on 26.04 Playwright cannot install its browser,
+# and the prebuilt test image's base (ubuntu:24.04) must have a glibc at least
+# as new as the runner that builds the binary.
 name: CI
 
 on:
@@ -27,7 +50,6 @@ env:
 
 jobs:
   lint:
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -42,8 +64,7 @@ jobs:
       - name: cargo clippy
         run: cd backend && SQLX_OFFLINE=true cargo clippy --locked --all-targets -- -D warnings
 
-  unit:
-    if: github.event_name != 'schedule'
+  unit-backend:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -54,16 +75,23 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: backend
+      - name: make test-unit-backend (cargo test --lib)
+        run: make test-unit-backend
+
+  unit-frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: make test-unit (cargo test --lib, svelte-check, Vitest, the Nginx config test)
-        run: make test-unit
+      - name: make test-unit-frontend (svelte-check, Vitest, the Nginx config test)
+        run: make test-unit-frontend
 
   integration:
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -74,15 +102,26 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: backend
-      - name: make test-integration (against a throwaway Postgres)
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cargo-nextest
+      - name: make test-integration (nextest, against a throwaway Postgres)
         run: make test-integration
 
-  e2e:
-    if: github.event_name != 'schedule'
+  e2e-core:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.98"
+      # The release build the test image copies in, cached apart from the
+      # debug builds; shared with e2e-main and seeding.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: backend
+          shared-key: e2e-release
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
@@ -92,30 +131,99 @@ jobs:
             e2e/package-lock.json
       - name: Chromium and its system libraries for Playwright
         run: cd e2e && npm ci && npx playwright install --with-deps chromium
-      - name: make test-e2e (every pass, each on its own stack)
-        run: make test-e2e
-      # § End-to-end tests → What the tests reuse: "CI runs it once more with
-      # ADMIN_UPLOAD_RATE_PER_MINUTE=2, where seeding must wait out 429s and still finish".
-      - name: Seeding under a two-a-minute upload limit
-        run: |
-          python3 scripts/stack.py up --project acrodont-ci-seed --port 5190 --env ADMIN_UPLOAD_RATE_PER_MINUTE=2
-          python3 scripts/stack.py seed --project acrodont-ci-seed --port 5190
+      - name: make test-e2e-core (every journey but update.spec and the @env passes, 4 workers)
+        run: make test-e2e-core
+      - name: Stack down, volumes and all
+        if: always()
+        run: python3 scripts/stack.py down --project acrodont-e2e --volumes || true
+      - name: Traces of failed journeys
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-results-core
+          path: e2e/test-results
+          if-no-files-found: ignore
+
+  e2e-main:
+    if: github.ref == 'refs/heads/main' || github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.98"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: backend
+          shared-key: e2e-release
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+      - name: Chromium and its system libraries for Playwright
+        run: cd e2e && npm ci && npx playwright install --with-deps chromium
+      - name: make test-e2e-main (update.spec and the @env passes, each on its own stack, side by side)
+        run: make test-e2e-main
       - name: Stacks down, volumes and all
         if: always()
         run: |
-          for p in acrodont-e2e acrodont-e2e-ttl acrodont-e2e-purge acrodont-e2e-limits acrodont-e2e-answers acrodont-e2e-budget acrodont-ci-seed; do
+          for p in acrodont-e2e-update acrodont-e2e-ttl acrodont-e2e-purge acrodont-e2e-answers acrodont-e2e-budget; do
             python3 scripts/stack.py down --project "$p" --volumes || true
           done
       - name: Traces of failed journeys
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: playwright-results
+          name: playwright-results-main
           path: e2e/test-results
           if-no-files-found: ignore
 
+  # Which paths a push changed, for the seeding check.
+  changes:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      seeding: ${{ steps.filter.outputs.seeding }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          # This push's own changes: on a branch, the default base is where it
+          # left main, which counted every scripts/ change since then each time.
+          base: ${{ github.ref }}
+          filters: |
+            seeding:
+              - 'scripts/**'
+              - '.github/workflows/ci.yml'
+
+  # § End-to-end tests → What the tests reuse: "CI runs it once more with
+  # ADMIN_UPLOAD_RATE_PER_MINUTE=2, where seeding must wait out 429s and still
+  # finish". Mostly a wait by design, and it changes only with scripts/, so it
+  # runs in the Main tier and on a push that changes scripts/.
+  seeding:
+    needs: changes
+    if: ${{ !cancelled() && (github.ref == 'refs/heads/main' || github.event_name != 'push' || needs.changes.outputs.seeding == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.98"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: backend
+          shared-key: e2e-release
+      - name: make test-e2e-seeding (seeding under a two-a-minute upload limit)
+        run: make test-e2e-seeding
+
   terraform:
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -127,7 +235,6 @@ jobs:
         run: make infra-validate
 
   scripts:
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -154,13 +261,14 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Chromium and its system libraries for the device's scale suites
         run: cd frontend && npm ci && npx playwright install --with-deps chromium
-      - name: make test-scale (the 130,000-question budgets)
+      - name: make test-scale (the 300,000-question budgets)
         run: make test-scale
 
   # birdtest's nightly failed for weeks before anyone noticed. A failed
-  # scheduled run opens (or comments on) one issue, and scripts/deploy.sh warns.
+  # scheduled run, in any job, opens (or comments on) one issue, and
+  # scripts/deploy.sh warns.
   nightly-failure:
-    needs: scale
+    needs: [lint, unit-backend, unit-frontend, integration, e2e-core, e2e-main, seeding, terraform, scripts, scale]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     permissions:
@@ -177,5 +285,5 @@ jobs:
           if [ -n "$n" ]; then
             gh issue comment "$n" --body "Failed again: $RUN_URL"
           else
-            gh issue create --title "$title" --body "The scheduled \`make test-scale\` run failed: $RUN_URL"
+            gh issue create --title "$title" --body "The scheduled CI run (the Main tier and \`make test-scale\`) failed: $RUN_URL"
           fi

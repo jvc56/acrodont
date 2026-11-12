@@ -1,9 +1,9 @@
 <script lang="ts">
-	// One setting: what it is on the left, the control on the right. Every
-	// settings form uses it, so whatever the setting — a checkbox, a choice, a
-	// number — the place to click is always the row's right end.
+	// One setting: what it is on the left, with what it does written under its
+	// name, and the control on the right. Every settings form uses it, so
+	// whatever the setting — a checkbox, a choice, a number — the place to click
+	// is always the row's right end.
 	import type { Snippet } from 'svelte';
-	import InfoTip from './InfoTip.svelte';
 
 	let {
 		label,
@@ -16,7 +16,7 @@
 		/** The control's id, so the label names it and a click on it reaches it. */
 		for: string;
 		hint?: string | null;
-		/** What the setting does, behind an ⓘ beside its name. */
+		/** What the setting does, under its name. */
 		info?: string | null;
 		children: Snippet;
 	} = $props();
@@ -24,10 +24,8 @@
 
 <div class="flex items-center justify-between gap-4">
 	<div class="min-w-0">
-		<div class="flex items-center gap-1.5">
-			<label for={forId} class="text-sm">{label}</label>
-			{#if info}<InfoTip text={info} />{/if}
-		</div>
+		<label for={forId} class="text-sm">{label}</label>
+		{#if info}<p class="text-xs text-muted-foreground" data-info>{info}</p>{/if}
 		{#if hint}<p class="text-xs text-muted-foreground">{hint}</p>{/if}
 	</div>
 	<div class="flex shrink-0 items-center gap-2 text-sm">{@render children()}</div>

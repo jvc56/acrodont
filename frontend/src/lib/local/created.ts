@@ -18,7 +18,7 @@ export interface Created {
 /**
  * Question rows written per transaction while a new cascade is stored: few
  * enough commits that storing stays quick (each costs more than its rows), and
- * enough steps for the progress bar (13 for a 130,000-question cascade).
+ * enough steps for the progress bar (30 for a 300,000-question cascade).
  */
 export const CREATE_CHUNK = 10_000;
 

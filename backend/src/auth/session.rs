@@ -38,6 +38,12 @@ pub struct CurrentUser {
     pub is_admin: bool,
     pub session_generation: i32,
     pub claims: SessionClaims,
+    /// `users.storage_bytes` and `storage_limit_bytes` as the session was
+    /// loaded: `/api/auth/me` reports them, and creation's cheap pre-check
+    /// reads them before any search (the exact check reads them again under
+    /// the user row's lock).
+    pub storage_bytes: i64,
+    pub storage_limit_bytes: Option<i64>,
 }
 
 pub fn random_token() -> String {
@@ -166,7 +172,8 @@ pub async fn load_session(state: &AppState, jar: &CookieJar) -> Result<CurrentUs
         return Err(ApiError::Unauthorized);
     }
     let row = sqlx::query!(
-        "SELECT id, username::text AS \"username!\", is_admin, session_generation
+        "SELECT id, username::text AS \"username!\", is_admin, session_generation, storage_bytes,
+                storage_limit_bytes
          FROM users WHERE id = $1",
         claims.uid
     )
@@ -182,6 +189,8 @@ pub async fn load_session(state: &AppState, jar: &CookieJar) -> Result<CurrentUs
         is_admin: row.is_admin,
         session_generation: row.session_generation,
         claims,
+        storage_bytes: row.storage_bytes,
+        storage_limit_bytes: row.storage_limit_bytes,
     })
 }
 
@@ -242,6 +251,13 @@ impl FromRequestParts<AppState> for Admin {
 
 /// The sliding TTL: in the last `RENEW_WINDOW_DAYS` of a cookie's life a
 /// sync is answered with fresh cookies of the full TTL.
+impl CurrentUser {
+    /// The account's storage as loaded with the session, against its effective limit.
+    pub fn storage(&self, state: &AppState) -> crate::storage::Usage {
+        crate::storage::Usage::new(self.storage_bytes, self.storage_limit_bytes, state.config.max_storage_bytes_per_user)
+    }
+}
+
 pub fn renewal(state: &AppState, user: &CurrentUser, jar: &CookieJar) -> Option<SessionCookies> {
     let now = state.clock.now();
     if user.claims.expires_at() - now < Duration::days(RENEW_WINDOW_DAYS) {

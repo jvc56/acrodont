@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { apiCascade, createCascade, idb, newUser, plainAnswers } from './support';
+import { createCascade, idb, newUser, plainCascade } from './support';
 
 // PLAN.md § End-to-end tests: the answer limit with two automatic keeps, and
 // ROW_STORAGE_BUDGET "lowered with a test constant". Each runs on its own
@@ -18,33 +18,32 @@ const idOf = (path: string) => path.split('/').pop()!;
 test('over the answer limit with two automatic keeps @env @answers', async ({ page, context }) => {
 	test.setTimeout(300_000);
 	await newUser(page, 'ans');
-	// The sizes below are of answers without hooks or definitions, which are on by default.
-	await plainAnswers(page);
 	// Two cascades above the automatic keep, their answers together over the limit:
 	// 83 questions (about 1.7 KB of answers) opened first, then 37 (about 0.9 KB).
-	const a = idOf(await createCascade(page, { name: 'Answers A', min: 2, max: 4 }));
+	// The sizes are of answers without hooks or definitions, which are on by default.
+	const a = idOf(await plainCascade(page, 'Answers A', 2, 4));
+	await page.goto(`/cascades/${a}`);
 	await expect(page.getByText('1 / 83')).toBeVisible({ timeout: 30_000 });
 	await page.goto('/cascades');
 	await expect(entry(page, 'Answers A').getByText('Available offline')).toBeVisible({ timeout: 60_000 });
-	await createCascade(page, { name: 'Answers B', min: 5, max: 15 });
+	await page.goto(await plainCascade(page, 'Answers B', 5, 15));
 	await expect(page.getByText('1 / 37')).toBeVisible({ timeout: 30_000 });
 	await page.goto('/cascades');
 	await expect(entry(page, 'Answers B').getByText('Available offline')).toBeVisible({ timeout: 60_000 });
 
-	// The Account page lists both, kept automatically, with answer and key sizes.
-	await page.goto('/account');
-	for (const name of ['Answers A', 'Answers B']) {
-		const row = page.getByRole('row').filter({ hasText: `${name} (kept automatically)` });
-		await expect(row).toBeVisible({ timeout: 30_000 });
-		await expect(row.getByRole('cell').filter({ hasText: /^\d+\.\d (KB|MB)$/ })).toHaveCount(2);
-	}
-
-	// Turn the first off: the next pass frees its answers (least recently opened),
-	// and its questions stay (PQ-018).
-	await page.getByLabel('Keep Answers A offline').uncheck();
+	// Over the limit, the pass frees the least recently opened one's answers,
+	// kept automatically or not, and its questions stay (PQ-018).
 	await expect.poll(() => countFor(page, 'cards', a), { timeout: 60_000 }).toBe(0);
 	expect(await countFor(page, 'questions', a)).toBe(83);
-	await expect(page.getByRole('row').filter({ hasText: 'Answers A' })).toHaveCount(0);
+
+	// The Account page lists both, with answer and key sizes.
+	await page.goto('/account');
+	await expect(page.getByRole('heading', { name: 'Cascades on this device' })).toBeVisible({ timeout: 30_000 });
+	for (const name of ['Answers A', 'Answers B']) {
+		const row = page.getByRole('row').filter({ hasText: name });
+		await expect(row).toBeVisible({ timeout: 30_000 });
+		await expect(row.getByRole('cell').filter({ hasText: /^\d+(\.\d)? (B|KB|MB)$/ })).toHaveCount(2);
+	}
 	await page.evaluate(async () => {
 		await navigator.serviceWorker.ready;
 	});
@@ -70,49 +69,37 @@ test('over the answer limit with two automatic keeps @env @answers', async ({ pa
 	await context.setOffline(false);
 });
 
-test('over ROW_STORAGE_BUDGET: unkept first, then the automatic keeps, never the user’s; drops stay dropped @env @budget', async ({ page, context }) => {
+test('over ROW_STORAGE_BUDGET: unkept first, then the automatic keeps; drops stay dropped @env @budget', async ({ page, context }) => {
 	test.setTimeout(420_000);
 	await newUser(page, 'bud');
-	// Unkept and opened first: 18 questions, about 3.7 KB of rows and keys.
-	await createCascade(page, { name: 'Budget U', min: 7, max: 7 });
+	// Unkept and opened first: 18 questions, about 3.7 KB of rows and keys, under the 5,000-byte budget.
+	const u = idOf(await createCascade(page, { name: 'Budget U', min: 7, max: 7 }));
 	await expect(page.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
-	// Kept by hand from the start: 30 questions, about 5.9 KB, over the 5,000-byte budget alone.
-	await apiCascade(page, { name: 'Budget K', filters: { op: 'and', children: [{ type: 'length', negated: false, min: 3, max: 3 }] } });
 	await page.goto('/cascades');
-	await expect(entry(page, 'Budget K')).toBeVisible({ timeout: 60_000 });
-	// Keep offline is in the player's Preferences, under This device.
-	await entry(page, 'Budget K').getByRole('link', { name: 'Budget K' }).click();
-	await expect(page.getByText('1 / 30')).toBeVisible({ timeout: 30_000 });
-	await page.getByRole('button', { name: 'Show menu' }).click();
-	await page.getByRole('button', { name: 'Preferences' }).click();
-	await page.getByRole('dialog', { name: 'Preferences' }).getByRole('region', { name: 'This device' }).getByLabel('Keep this cascade offline on this device').check();
-	await page.goto('/cascades');
-	await expect(entry(page, 'Budget K').getByText('Available offline')).toBeVisible({ timeout: 60_000 });
+	await expect(entry(page, 'Budget U').getByText('Available offline')).toBeVisible({ timeout: 60_000 });
 
-	// The least recently opened unkept cascade goes before its window is out; the kept one stays.
-	await expect(entry(page, 'Budget U').getByText('Not downloaded on this device, open to download')).toBeVisible({ timeout: 60_000 });
-	await page.goto('/account');
-	await expect(page.getByText(/^Rows and question keys: [\d.]+ KB of 4\.9 KB\.$/)).toBeVisible();
-	await expect(page.getByText('The cascades you keep offline hold this above the budget; turn Keep offline off to free space.')).toBeVisible({ timeout: 30_000 });
-
-	// Two automatic keeps (83 and 37 questions): still over with nothing unkept left,
-	// the oldest automatic keep goes, then the next; the user's stays whole.
-	await createCascade(page, { name: 'Budget A1', min: 2, max: 4 });
+	// An automatic keep (83 questions), over the budget alone. The unkept cascade
+	// goes first, before its window is out; the automatic keep holds its rows
+	// while its player is open, which the pass never drops.
+	const a1 = idOf(await createCascade(page, { name: 'Budget A1', min: 2, max: 4 }));
 	await expect(page.getByText('1 / 83')).toBeVisible({ timeout: 30_000 });
+	await expect.poll(() => countFor(page, 'quiz_questions', u), { timeout: 60_000 }).toBe(0);
+	expect(await countFor(page, 'quiz_questions', a1)).toBe(83);
+
+	// A second automatic keep (37 questions): still over with nothing unkept left,
+	// the oldest automatic keep goes once its player closes, then the next.
 	await createCascade(page, { name: 'Budget A2', min: 5, max: 15 });
 	await expect(page.getByText('1 / 37')).toBeVisible({ timeout: 30_000 });
 	await page.goto('/cascades');
-	for (const name of ['Budget A1', 'Budget A2']) {
+	for (const name of ['Budget U', 'Budget A1', 'Budget A2']) {
 		await expect(entry(page, name).getByText('Not downloaded on this device, open to download')).toBeVisible({ timeout: 60_000 });
 	}
-	await expect(entry(page, 'Budget K').getByText('Available offline')).toBeVisible();
 
-	// The storage line: the kept list holds the user's cascade alone, and says what holds the total up.
+	// The storage line: the total against the lowered budget, and no cascade listed with nothing behind it.
 	await page.goto('/account');
 	const total = page.getByText(/^Rows and question keys: /);
-	await expect(page.getByRole('row').filter({ hasText: 'Budget K' })).toBeVisible();
-	await expect(page.getByRole('row').filter({ hasText: /Budget A|Budget U/ })).toHaveCount(0);
-	await expect(page.getByText('The cascades you keep offline hold this above the budget; turn Keep offline off to free space.')).toBeVisible();
+	await expect(page.getByText(/^Rows and question keys: [\d.]+ (B|KB) of 5\.0 KB\.$/)).toBeVisible();
+	await expect(page.getByRole('row').filter({ hasText: /Budget/ })).toHaveCount(0);
 	const steady = await total.textContent();
 
 	// Several sync cycles online: they stay dropped, the total steady, no progress coming back.
@@ -135,5 +122,5 @@ test('over ROW_STORAGE_BUDGET: unkept first, then the automatic keeps, never the
 	await other.goto('/cascades');
 	await expect(entry(other, 'Budget A2').getByText('Available offline')).toBeVisible({ timeout: 60_000 });
 	await other.goto('/account');
-	await expect(other.getByRole('row').filter({ hasText: 'Budget A2 (kept automatically)' })).toBeVisible({ timeout: 30_000 });
+	await expect(other.getByRole('row').filter({ hasText: 'Budget A2' })).toBeVisible({ timeout: 30_000 });
 });

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createCascade, login, newUser } from './support';
+import { createCascade, cursorSaved, login, newUser } from './support';
 
 // PLAN.md § Taking a quiz, § Saving progress, § Offline and Sync: study a new
 // cascade with the default keys, go offline, keep studying, reload with no
@@ -12,11 +12,8 @@ async function press(page: Page, key: string) {
 }
 
 test('the player studies with the default keys, offline too', async ({ page, context }) => {
-	await page.goto('/login');
-	await page.getByLabel('Username').fill('dev');
-	await page.getByLabel('Password').fill('correct-tile-rack-bingo');
-	await page.getByRole('button', { name: 'Log in' }).click();
-	await expect(page).toHaveURL(/\/cascades$/);
+	// Its own account rather than the seeded admin: the journeys run side by side.
+	await newUser(page, 'player');
 	await page.goto('/cascades/new');
 	await page.getByLabel('Lexicon').selectOption('EN-FIX');
 	await page.getByLabel('Minimum').first().fill('7');
@@ -44,6 +41,7 @@ test('the player studies with the default keys, offline too', async ({ page, con
 	await press(page, 'Space');
 	await press(page, 'Space');
 	await expect(page.getByText('3 / 18')).toBeVisible();
+	await cursorSaved(page, 3);
 	await page.goto(url);
 	await expect(page.getByText('3 / 18')).toBeVisible({ timeout: 20_000 });
 	await expect(page.getByText('1 ✓ 1 ✗')).toBeVisible();
@@ -65,14 +63,21 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	expect(await question.boundingBox()).toEqual(before);
 
-	// Answers are drawn like the question by default; each can be changed.
+	// Answers are drawn like the question by default; each can be changed. An
+	// answer too tall for the screen is scaled by the player's --fit factor (the
+	// cascade's shuffle can put AEINRST's nine anagrams first), so compare at it.
 	const answer = area.locator('[data-answer]').first();
-	expect(await answer.evaluate((e) => getComputedStyle(e).fontSize)).toBe(await question.evaluate((e) => getComputedStyle(e).fontSize));
+	const drawn = await answer.evaluate((e) => {
+		const s = getComputedStyle(e);
+		return { size: parseFloat(s.fontSize), fit: Number(s.getPropertyValue('--fit') || 1) };
+	});
+	const questionSize = parseFloat(await question.evaluate((e) => getComputedStyle(e).fontSize));
+	expect(drawn.size).toBeCloseTo(questionSize * drawn.fit, 1);
 	// A cascade opens with the menu hidden; ☰ shows it.
 	await expect(page.getByRole('navigation', { name: 'Player menu' })).toHaveCount(0);
 	await page.getByRole('button', { name: 'Show menu' }).click();
-	await page.getByRole('navigation', { name: 'Player menu' }).getByRole('button', { name: 'Preferences' }).click();
-	const settings = page.getByRole('dialog', { name: 'Preferences' });
+	await page.getByRole('navigation', { name: 'Player menu' }).getByRole('button', { name: 'Settings' }).click();
+	const settings = page.getByRole('dialog', { name: 'Settings' });
 	// The typeface is a choice; sizes are typed, and take effect when the field is left.
 	await settings.getByRole('group', { name: 'Answers' }).getByLabel('Font').selectOption('monospace');
 	await settings.getByRole('group', { name: 'Question' }).getByLabel('Size').fill('48');
@@ -91,19 +96,25 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await expect(page.getByRole('navigation', { name: 'Player menu' })).toHaveCount(0);
 	await page.getByRole('button', { name: 'Show menu' }).click();
 
-	// Preferences is the one dialog: the menu has no Levels, and the ladder is in Preferences' This cascade section,
-	// apart from the account's settings and this device's, each saying where it applies.
+	// Settings is the one dialog: the menu has no Levels, and the ladder is in its Cascade Settings,
+	// apart from the Device Settings, each saying where it applies. There are no other kinds, and no index of them.
 	const menu = page.getByRole('navigation', { name: 'Player menu' });
+	await expect(menu.getByRole('link')).toHaveText(['Acrodont', 'Account']);
 	await expect(menu.getByRole('button', { name: 'Levels' })).toHaveCount(0);
-	await menu.getByRole('button', { name: 'Preferences' }).click();
-	const prefs = page.getByRole('dialog', { name: 'Preferences' });
-	for (const name of ['This cascade', 'Every cascade', 'Defaults for new cascades', 'This device']) {
-		await expect(prefs.getByRole('region', { name })).toBeVisible();
+	await menu.getByRole('button', { name: 'Settings' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Settings' });
+	await expect(dialog.getByRole('navigation')).toHaveCount(0);
+	for (const name of ['Cascade Settings', 'Device Settings']) {
+		await expect(dialog.getByRole('region', { name })).toBeVisible();
 	}
-	const levels = prefs.getByRole('region', { name: 'This cascade' });
-	await expect(levels.getByText('Your other cascades keep their own.')).toBeVisible();
-	await expect(prefs.getByRole('region', { name: 'Defaults for new cascades' }).getByText(/prefilled with these when you build it/)).toBeVisible();
-	await expect(prefs.getByRole('region', { name: 'This device' }).getByText(/not synced/)).toBeVisible();
+	await expect(dialog.getByRole('region')).toHaveCount(2);
+	// This device's controls are here too, and their reset says it is theirs alone.
+	const device = dialog.getByRole('region', { name: 'Device Settings' });
+	await expect(device.locator('#controls')).toBeVisible();
+	await expect(device.getByRole('button', { name: 'Reset controls to defaults' })).toBeVisible();
+	const levels = dialog.getByRole('region', { name: 'Cascade Settings' });
+	await expect(levels.getByText(/Your other cascades keep their own/)).toBeVisible();
+	await expect(device.getByText(/not synced/)).toBeVisible();
 	await expect(levels.getByRole('table', { name: 'Ladder' })).toBeVisible();
 	await expect(levels.getByRole('columnheader')).toHaveText(['Level', 'Questions', 'Pass', 'Last pass', 'Status', 'Actions']);
 	// The clear threshold changes there, for the pass in progress too; out of range is put back.
@@ -115,10 +126,11 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await threshold.fill('55');
 	await threshold.press('Tab');
 	await expect(levels.getByText(/at least\s+55%\s+correct/)).toBeVisible();
-	// The account's default is apart from it, and unchanged.
-	await expect(prefs.getByRole('region', { name: 'Defaults for new cascades' }).getByLabel('Default clear threshold (%)')).toHaveValue('80');
-	await prefs.getByRole('button', { name: 'Close' }).click();
-	await expect(prefs).toHaveCount(0);
+	// Saved for this cascade alone; with no other cascade, there is no offer to use it for all of them.
+	await expect(levels.getByText('✓ Saved for this cascade')).toBeVisible();
+	await expect(levels.getByText('Also use for:')).toHaveCount(0);
+	await dialog.getByRole('button', { name: 'Close' }).click();
+	await expect(dialog).toHaveCount(0);
 	// It syncs to another device.
 	await expect(page.getByText('Synced')).toBeVisible({ timeout: 30_000 });
 	const other = await browser.newContext({ baseURL });

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createCascade, login, newUser, playerPref, press } from './support';
+import { createCascade, login, newUser, openPlayerSettings, playerSetting, press } from './support';
 
 // PLAN.md § End-to-end tests → Desktop controls.
 
@@ -62,9 +62,9 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await at(page, 2);
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 
-	// Rebind Toggle grade to the wheel and to Shift+T on the Account page, in
-	// place of right click and M; X stays bound for the typed-mode check below.
-	await page.goto('/account');
+	// Rebind Toggle grade to the wheel and to Shift+T in Settings' Device Settings
+	// section, in place of right click and M; X stays bound for the typed-mode check below.
+	await openPlayerSettings(page);
 	const toggle = section(page, 'Toggle grade');
 	for (const name of [/^Right click/, /^M/]) {
 		await toggle.getByRole('listitem').filter({ hasText: name }).getByRole('button', { name: 'Remove binding' }).click();
@@ -79,10 +79,11 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 		await page.keyboard.press('Shift+KeyT');
 	});
 	await expect(page.getByText('Shift+T')).toBeVisible();
-	// Escape cancels capture instead of being bound.
+	// Escape cancels capture instead of being bound, and leaves Settings open.
 	await page.getByRole('button', { name: 'Add binding' }).first().click();
 	await page.keyboard.press('Escape');
 	await expect(page.getByText('Press a key, click or scroll here.')).toHaveCount(0);
+	await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
 	// A stroke of another action moves, with the notice, and the old action keeps its other binding.
 	await bindOn(page, 'Previous', async () => {
 		await page.keyboard.press('Space');
@@ -118,26 +119,32 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await page.keyboard.press('Shift+KeyT');
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 
-	// The change syncs to a second browser.
+	// Controls belong to this device: a second browser keeps the defaults, and
+	// they survive a reload here.
 	await page.goto('/cascades');
 	await expect(page.getByText('Synced')).toBeVisible({ timeout: 30_000 });
 	const other = await browser.newContext({ baseURL });
 	const p2 = await other.newPage();
 	await login(p2, username);
-	await p2.goto('/account');
-	await expect(p2.getByText('Shift+T')).toBeVisible({ timeout: 30_000 });
-	await expect(p2.getByText('Wheel down')).toBeVisible();
+	await p2.goto(player);
+	await openPlayerSettings(p2);
+	await expect(section(p2, 'Toggle grade').getByRole('listitem').filter({ hasText: /^Right click/ })).toBeVisible({ timeout: 30_000 });
+	await expect(p2.getByText('Shift+T')).toHaveCount(0);
+	await expect(p2.getByText('Wheel down')).toHaveCount(0);
 	await other.close();
+	await page.goto(player);
+	await page.reload();
+	await openPlayerSettings(page);
+	await expect(page.getByText('Shift+T')).toBeVisible({ timeout: 30_000 });
 
 	// Typed mode: bound letters, Space and Backspace type; Ctrl+Backspace, bound, still goes back.
-	await page.goto('/account');
 	await bindOn(page, 'Previous', async () => {
 		await page.keyboard.press('Control+Backspace');
 	});
 	await expect(section(page, 'Previous').getByRole('listitem').filter({ hasText: /^Ctrl\+Backspace/ })).toBeVisible();
 	await page.goto(player);
 	await at(page, 2);
-	await playerPref(page, 'Answer mode for this cascade', 'typed');
+	await playerSetting(page, 'Answer mode', 'typed');
 	const input = page.getByLabel('Type an answer');
 	await input.focus();
 	await page.keyboard.press('KeyX');

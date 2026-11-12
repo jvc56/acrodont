@@ -1,7 +1,7 @@
 // PLAN.md § Scale tests: "A new device logging into an account with ten such
 // cascades completes its first sync in under 5 seconds with no question rows
 // transferred, since none is opened here; after opening all ten, with each
-// Source quiz finished once, creating a 65,000-question Level 2, then fully
+// Source quiz finished once, creating a 150,000-question Level 2, then fully
 // graded again on its new attempt without finishing, and that Level 2 half
 // graded (375,000 graded rows per cascade, about 3.75 million in all, 75
 // pages), the sync that follows finishes in under 120 seconds on the CI
@@ -21,23 +21,24 @@ import { ids, QUESTIONS, report, ScaleDev, ServerPlayer, timed } from './testing
 const CASCADES = 10;
 const FIRST_SYNC_BUDGET_MS = 5_000;
 /**
- * The sync after opening one heavily played cascade (162,500 graded rows at
- * the 130,000-question cap): what Chromium's IndexedDB measures, not the
+ * The sync after opening one heavily played cascade (375,000 graded rows at
+ * the 300,000-question cap): what Chromium's IndexedDB measures, not the
  * plan's first figure. That figure, 120 s for ten cascades and so 12 s for
  * one, asked for about 13,500 graded rows a second; a row per question with
- * its indexes gets 1,500–3,300 here (49–107 s across runs, slower when other
- * suites have filled the profile first), and only a different way of storing
- * rows on the device could reach the first figure. The budget is the worst
- * measurement with room to spare, so a real slowdown still fails (PQ-019,
- * decided).
+ * its indexes gets 1,500–3,300 here (49–107 s across runs for 162,500 rows
+ * at the old 130,000 cap, slower when other suites have filled the profile
+ * first; 164 s for 375,000 on CI at 300,000), and only a different way of
+ * storing rows on the device could reach the first figure. The budget is the
+ * worst rate, 1,500 rows a second, at this size (250 s), with room to spare,
+ * so a real slowdown still fails (PQ-019, decided).
  */
-const OPEN_SYNC_BUDGET_MS = 150_000;
+const OPEN_SYNC_BUDGET_MS = 300_000;
 /** The played cascade's open: its two active quizzes' index lists, positions, keys and answers. */
 const MATERIALISE_BUDGET_MS = 300_000;
 const GRADED = QUESTIONS + QUESTIONS / 4;
 const PAGE_ROWS = 50_000;
 
-describe('a new device on an account with ten 130,000-question cascades', () => {
+describe('a new device on an account with ten 300,000-question cascades', () => {
 	it('first syncs with no question rows, then pulls 375,000 graded rows through the staging split, and materialises', async () => {
 		const server = new FakeServer();
 		const all = Array.from({ length: CASCADES }, (_, i) => ids(i + 1));
@@ -53,7 +54,7 @@ describe('a new device on an account with ten 130,000-question cascades', () => 
 		expect(firstMs).toBeLessThan(FIRST_SYNC_BUDGET_MS);
 
 		// All ten opened here; meanwhile another device plays the first: finished
-		// once (half missed, a 65,000-question Level 2), fully graded again on its
+		// once (half missed, a 150,000-question Level 2), fully graded again on its
 		// new attempt without finishing, and Level 2 half graded.
 		await d.open(...all.map((x) => x.cascade));
 		const [played] = all;

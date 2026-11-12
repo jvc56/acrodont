@@ -18,7 +18,6 @@ class SyncState {
 	progress = $state(0);
 	/** The cascade this tab's player has open (the drop pass skips it). */
 	openCascade = $state<string | null>(null);
-	overBudgetByUserKept = $state(false);
 	/** Operations waiting in the outbox; null until counted, so "Synced" is never shown unread. */
 	pending = $state<number | null>(null);
 	/** Cascades a rebase changed: a player showing one refreshes (step 5). */
@@ -146,7 +145,6 @@ export function startSync(userId: string): () => void {
 				openHere: () => syncState.openCascade,
 				onProgress: () => (syncState.progress += 1),
 				onTotals: (t) => {
-					syncState.overBudgetByUserKept = t.over_budget_by_user_kept;
 					void recordTotals(userId, { rows: t.rows, keys: t.keys, answer_bytes: t.answer_bytes });
 				}
 			});

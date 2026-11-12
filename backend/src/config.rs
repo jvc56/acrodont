@@ -7,7 +7,12 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 /// The hard ceiling on questions per quiz; `MAX_QUIZ_QUESTIONS` may only lower it.
-pub const QUESTION_CEILING: u32 = 130_000;
+pub const QUESTION_CEILING: u32 = 300_000;
+
+/// Cascades one sync request may name in `question_rows_for`: a protocol
+/// bound, not a quota (STORAGE_LIMIT_PLAN.md § S4). A device holding rows for
+/// more splits them across requests.
+pub const MAX_QUESTION_ROWS_FOR: usize = 1_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MailBackend {
@@ -31,9 +36,10 @@ pub struct Config {
     pub mail_max_per_second: u32,
     pub public_url: String,
     pub max_quiz_questions: u32,
-    pub max_cascades_per_user: u32,
     pub max_accounts: u32,
-    pub max_saved_searches_per_user: u32,
+    /// An account's server storage in bytes (STORAGE_LIMIT_PLAN.md § S2);
+    /// `users.storage_limit_bytes` replaces it for one account.
+    pub max_storage_bytes_per_user: u64,
     pub search_timeout_ms: u64,
     pub search_concurrency: u32,
     pub export_concurrency: u32,
@@ -54,6 +60,8 @@ pub struct Config {
     pub login_failures_per_ip_per_minute: u32,
     pub login_failures_per_username_per_minute: u32,
     pub auth_rate_per_ip_per_minute: u32,
+    /// Password resets an hour, per caller, per address named and per link.
+    pub reset_rate_per_hour: u32,
     pub catalog_reconcile_seconds: u64,
     pub trusted_proxy_hops: u32,
     /// `POST /api/dev/login` for `./scripts/dev.py`. Refused with secure
@@ -110,9 +118,9 @@ impl Config {
         if export_concurrency == 0 {
             return Err(ConfigError("EXPORT_CONCURRENCY must be at least 1".into()));
         }
-        let max_cascades_per_user: u32 = r.parse("MAX_CASCADES_PER_USER", 20)?;
-        if max_cascades_per_user == 0 {
-            return Err(ConfigError("MAX_CASCADES_PER_USER must be at least 1".into()));
+        let max_storage_bytes_per_user: u64 = r.parse("MAX_STORAGE_BYTES_PER_USER", 100_000_000)?;
+        if max_storage_bytes_per_user == 0 || max_storage_bytes_per_user > i64::MAX as u64 {
+            return Err(ConfigError("MAX_STORAGE_BYTES_PER_USER must be at least 1".into()));
         }
         Ok(Config {
             database_url: r.required("DATABASE_URL")?,
@@ -126,9 +134,8 @@ impl Config {
             mail_max_per_second: r.parse_rate("MAIL_MAX_PER_SECOND", 1)?,
             public_url: r.string("PUBLIC_URL", "http://localhost:5173"),
             max_quiz_questions,
-            max_cascades_per_user,
             max_accounts: r.parse("MAX_ACCOUNTS", 50)?,
-            max_saved_searches_per_user: r.parse("MAX_SAVED_SEARCHES_PER_USER", 200)?,
+            max_storage_bytes_per_user,
             search_timeout_ms: r.parse("SEARCH_TIMEOUT_MS", 2000)?,
             search_concurrency,
             export_concurrency,
@@ -152,6 +159,7 @@ impl Config {
             login_failures_per_username_per_minute: r
                 .parse_rate("LOGIN_FAILURES_PER_USERNAME_PER_MINUTE", 10)?,
             auth_rate_per_ip_per_minute: r.parse_rate("AUTH_RATE_PER_IP_PER_MINUTE", 30)?,
+            reset_rate_per_hour: r.parse_rate("RESET_RATE_PER_HOUR", 5)?,
             catalog_reconcile_seconds: r.parse("CATALOG_RECONCILE_SECONDS", 60)?,
             trusted_proxy_hops: r.parse("TRUSTED_PROXY_HOPS", 0)?,
             dev_login,
@@ -237,8 +245,8 @@ mod tests {
     fn defaults_apply() {
         let c = Config::from_map(&base()).unwrap();
         assert_eq!(c.session_ttl_seconds, 2_592_000);
-        assert_eq!(c.max_quiz_questions, 130_000);
-        assert_eq!(c.max_cascades_per_user, 20);
+        assert_eq!(c.max_quiz_questions, 300_000);
+        assert_eq!(c.max_storage_bytes_per_user, 100_000_000);
         assert_eq!(c.max_accounts, 50);
         assert_eq!(c.export_concurrency, 2);
         assert!(!c.dev_login);
@@ -254,8 +262,9 @@ mod tests {
             ("SESSION_TTL_SECONDS", "abc"),
             ("SECURE_COOKIES", "yes"),
             ("MAIL_BACKEND", "smtp"),
-            ("MAX_QUIZ_QUESTIONS", "130001"),
-            ("MAX_CASCADES_PER_USER", "0"),
+            ("MAX_QUIZ_QUESTIONS", "300001"),
+            ("MAX_STORAGE_BYTES_PER_USER", "0"),
+            ("MAX_STORAGE_BYTES_PER_USER", "100 MB"),
             ("EXPORT_CONCURRENCY", "0"),
             ("MAIL_MAX_PER_SECOND", "0"),
             ("DEV_LOGIN", "yes"),

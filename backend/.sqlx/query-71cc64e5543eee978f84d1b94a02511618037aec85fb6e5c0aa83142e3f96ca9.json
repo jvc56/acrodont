@@ -1,0 +1,61 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, leave_set_id, spec_id, clear_threshold,\n                               segment_size, progression, require_alphabetical, options_changed_at, options_seq,\n                               options_device_id, question_count, depth, peak_depth, updated_seq, answer_mode,\n                               storage_bytes)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, 1, $13, $16, $17)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        {
+          "Custom": {
+            "name": "quiz_type",
+            "kind": {
+              "Enum": [
+                "anagram",
+                "definition",
+                "leave_value"
+              ]
+            }
+          }
+        },
+        "Int2",
+        "Int4",
+        "Uuid",
+        "Int2",
+        "Int4",
+        {
+          "Custom": {
+            "name": "quiz_progression",
+            "kind": {
+              "Enum": [
+                "ladder",
+                "drill"
+              ]
+            }
+          }
+        },
+        "Bool",
+        "Timestamptz",
+        "Int8",
+        "Uuid",
+        "Int4",
+        {
+          "Custom": {
+            "name": "anagram_answer_mode",
+            "kind": {
+              "Enum": [
+                "flashcard",
+                "typed"
+              ]
+            }
+          }
+        },
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "71cc64e5543eee978f84d1b94a02511618037aec85fb6e5c0aa83142e3f96ca9"
+}

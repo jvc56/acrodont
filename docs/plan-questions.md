@@ -36,6 +36,9 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   `400 { error: "invalid_code" | "invalid_token" }`.
 - Marked in `backend/src/auth/session.rs`, `backend/src/auth/password.rs`,
   `backend/src/error.rs`, `frontend/src/lib/api.ts`.
+- **Since PQ-022:** there is no change-password endpoint, so its body
+  `{ current_password, new_password }` and its `204` no longer apply; the
+  length bounds stand, for registration and a reset alike.
 
 ## PQ-003 — Which responses slide the session TTL (open)
 
@@ -196,7 +199,7 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   the literal sentence otherwise (`frontend/src/lib/sync/notices.ts`,
   `keptSentence`).
 
-## PQ-015 — Where the device learns the cascade limit (open)
+## PQ-015 — Where the device learns the cascade limit (superseded by PQ-023)
 
 - **Plan:** Cascade limit (405–427): "The Cascades page shows `87 of 100
   cascades`, and the cascade builder shows a warning from 90";
@@ -208,6 +211,11 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   client constant (`frontend/src/lib/cascades/summary.ts`, `CASCADE_LIMIT`),
   with the warning from 90, as PQ-010 does for the search rate. The server's
   `409` still refuses creation at its own configured limit.
+- **Since PQ-023:** there is no cascade limit. `/api/auth/me` and every sync
+  response report the account's storage and its effective limit
+  (`storage_bytes`, `max_storage_bytes`; `storage: { used, limit }`), which
+  the device keeps in `meta.server`; `DEFAULT_STORAGE_LIMIT` in
+  `lib/cascades/storage.ts` stands in only until the server has reported one.
 
 ## PQ-016 — The expired-session journey's TTL (open)
 
@@ -224,49 +232,41 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
 
 ## PQ-017 — The forty-cascade drop pass (open)
 
-- **Plan:** Scale tests (5972–5985): forty 300,000-question cascades inside
+- **Plan:** Scale tests (6321–6336): forty 130,000-question cascades inside
   the window, all automatically kept; the pass "brings the base's rows and
-  keys under `ROW_STORAGE_BUDGET` … oldest last-open first", one marked Keep
-  offline "is the one cascade still whole at the end", and the next sync's
-  `question_rows_for` "names only the kept one". Downloads (2291–2296): the
-  pass drops "until the total is under the budget"; Local size (2247–2250):
+  keys under `ROW_STORAGE_BUDGET` … oldest last-open first and no more than
+  needed, the most recently opened still whole". Downloads (2534–2536): the
+  pass drops "until the total is under the budget"; Local size (2491):
   "roughly 100–200 bytes per question per level".
-- **Issue:** Two things. (1) Whether forty cascades exceed 2 GB at all depends
-  on the per-row estimate: with about 56 bytes per measured English key, they
-  are over only when a row counts for more than about 123 bytes. The first
-  estimate, 120, left them under budget, so the pass had nothing to do.
-  (2) A pass that stops once under budget drops about six of the forty, not
-  thirty-nine. So "the one cascade still whole" and "names only the kept one"
-  contradict "until the total is under the budget".
-- **Provisional choice:**
-  - (1) `ROW_BYTES` is 150, the middle of the plan's range
-    (`frontend/src/lib/sync/downloads.ts`).
-  - (2) The pass keeps the plan's rule and stops once under budget. The scale
-    test (`frontend/src/lib/sync/scale-drop.scale.ts`) makes the
-    oldest-opened cascade the one kept by hand. It asserts that cascade is
-    still whole, and that the dropped cascades are exactly the next-oldest
-    ones, just enough to fit under the budget. It also asserts that the
-    sync's `question_rows_for` names exactly the cascades still holding rows,
-    the kept one among them.
+- **Issue:** Whether forty cascades exceed 2 GB at all depends on the per-row
+  estimate: with about 56 bytes per measured English key, they are over only
+  when a row counts for more than about 123 bytes. The first estimate, 120,
+  left them under budget, so the pass had nothing to do.
+- **Provisional choice:** `ROW_BYTES` is 150, the middle of the plan's range
+  (`frontend/src/lib/sync/downloads.ts`). The pass stops once under budget, so
+  it drops only a few of the cascades. The scale test
+  (`frontend/src/lib/sync/scale-drop.scale.ts`) takes "still whole" to mean
+  the most recently opened cascade: it asserts that one is whole, that the
+  dropped cascades are exactly the oldest-opened ones, just enough to fit
+  under the budget, and that the next sync's `question_rows_for` names
+  exactly the cascades still holding rows.
 
-## PQ-018 — The answer-limit journey and the automatic keep (open)
+## PQ-018 — The answer-limit journey and the automatic keep (decided)
 
-- **Plan:** End-to-end tests (5862–5866): "Over the answer limit with two
-  automatic keeps, see the Account page list both with their answer and key
-  sizes, turn one off, and see its answers freed on the next drop pass while
-  its questions still show in the player." Downloads (2204–2214): "never the
-  cards of a cascade the user marked Keep offline"; "An automatic keep by size
-  protects a cascade's rows from the window alone, never its cards".
-- **Issue:** An automatic keep never protects cards, so turning one off
-  changes nothing about eviction. Over the limit, the pass evicts the least
-  recently opened cascade's answers whether or not it is still kept.
-- **Provisional choice:** eviction follows the Downloads rule. The journey
+- **Plan:** End-to-end tests (6196–6200): "Over the answer limit with two
+  automatic keeps, see the least recently opened one's answers freed while its
+  questions still show in the player". Downloads (2464–2465): "An automatic
+  keep by size protects a cascade's rows from the window alone, never its
+  cards".
+- **Issue:** An automatic keep never protects cards, so over the limit the pass
+  evicts the least recently opened cascade's answers whether or not it is kept
+  automatically, and nothing the user does on the Account page changes that.
+- **Choice:** eviction follows the Downloads rule. The journey
   (`e2e/tests/budget.spec.ts`) opens the first cascade before the second and
-  checks the Account page lists both with their answer and key sizes. It then
-  turns off the first one's keep and checks the first one's answers are gone
-  after the next pass while its keys stay. Its question still shows in the
-  player, it reads "Answers need a connection" offline, and it shows download
-  progress again online.
+  checks the first one's answers are gone while its keys stay, and that the
+  Account page lists both with their answer and key sizes. Its question still
+  shows in the player, it reads "Answers need a connection" offline, and it
+  shows download progress again online.
 
 ## PQ-019 — Device scale cases too large to run in minutes (decided)
 
@@ -316,3 +316,190 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   a long history, and the user accepted it. The drop pass runs as many
   cascades as an account may hold (20) at 56,000 questions each against a
   tenth of the budget.
+- **Since PQ-023:** there is no cascade count to hold. The drop pass keeps
+  its twenty 56,000-question cascades as a case of many automatic keeps, and
+  `scale-many.scale.ts` covers an account of 500 smaller cascades. The device
+  suites' `QUESTIONS` is 300,000 again. The first-sync budget of 150 s was
+  set at the 130,000-question cap for 162,500 rows. CI measured 164 s for
+  375,000 rows at 300,000 (2,290 a second, inside the measured range), so it
+  is now 300 s: the worst measured rate, 1,500 a second, at this size (250 s),
+  with room to spare.
+
+## PQ-020 — Two kinds of settings, no defaults for new cascades (decided)
+
+- **Plan:** User Experience → Preferences, as it stood before this decision:
+  four scopes (this cascade, every cascade, new cascades, this device), an
+  account-level `user_preferences` row changed by `set_preferences` and pulled
+  as `preferences`, a Preferences page at `/preferences`, a builder prefilled
+  from the `Default …` preferences, and a change to a cascade's setting
+  offering "new cascades" or "all N cascades and new ones".
+- **Issue:** The four scopes overlapped: an answer mode or threshold lived on
+  each cascade and again as a default for new ones, and definitions, hooks,
+  the reveal grade and leave rounding applied to every cascade at once with no
+  way to set them for one. A user changing a setting had to know which of
+  four places held it, and the builder carried settings most users never
+  changed at creation.
+- **Decision (2026-11-11):**
+  - There are two kinds of settings, which do not overlap: **a cascade's**
+    (synced, on the `cascades` row) and **this device's** (display and
+    controls, in `meta`, never synced). They are called **settings**
+    everywhere a user sees them; "preferences" is gone.
+  - No account-level settings: `user_preferences`, `set_preferences`, the
+    pull's `preferences` object and the IndexedDB `preferences` store are
+    removed. Definitions, hooks, the reveal grade and leave rounding move onto
+    each cascade (`show_definitions`, `show_hooks`, `reveal_correct`,
+    `leave_value_decimals`), carried by `set_cascade_options`. A
+    `set_preferences` from an old build is `invalid`, and the device's
+    version-3 migration drops any still queued.
+  - No defaults for new cascades: every new cascade starts with the same
+    fixed settings (`CASCADE_SETTING_DEFAULTS`), and the builder shows none,
+    only a note that they are changed in the cascade's Settings.
+  - All settings are edited in one place, the cascade's Settings dialog in the
+    player, each saved as soon as it is changed. A change offers "all N
+    cascades" (of the kind the setting applies to) when there are at least
+    two; **Copy another cascade's settings** gives this cascade, in one
+    `set_cascade_options`, every setting of a chosen cascade that applies to
+    it. Both are ordinary `set_cascade_options`, so they work offline and
+    resolve latest-wins like any options change.
+  - PLAN.md § Settings, § Creating a cascade, § Desktop layout, § Operations,
+    § Conflicts, § On the device and § Schema describe the result.
+
+## PQ-021 — Explanations inline, the Trash on the Cascades page, a smaller header (decided)
+
+- **Plan:** User Experience, as it stood before this decision: each setting's
+  explanation behind an ⓘ beside its name (`InfoTip`), shown on hover or
+  focus; the Trash its own page at `/trash`; the site header and the player's
+  menu linking to Cascades, New cascade and Trash; and the player's Settings
+  opening with a row of buttons jumping to its sections, "This cascade" and
+  "This device", and Controls.
+- **Issue:** An explanation behind a hover is missed on a phone and unread on
+  a desktop, and the ⓘ added an extra target to every row. The Trash on a
+  page of its own split the cascades from what had been trashed of them,
+  though it is where a user at the cascade limit has to go. With New cascade
+  and the Trash on the Cascades page, the header's links repeated what that
+  page already holds. In Settings, the section names read as ordinary prose
+  and the two sections ran together, and the jump row took space in a dialog
+  with only two sections.
+- **Decision (2026-11-11):**
+  - Every setting's explanation (`INFO` in `lib/settings-info.ts`) is written
+    in muted text directly under its name by `SettingRow`, followed by any
+    hint. `InfoTip` is removed; nothing is hidden behind an icon. The clear
+    threshold's hint "For every level, the pass in progress included" is
+    dropped, since its explanation says the same.
+  - The Trash is a section of the Cascades page, below the cascades
+    (`TrashList`, `id="trash"`), with the same grouping, paging and actions.
+    `/trash` only redirects to `/cascades#trash`. Links to the Trash at the
+    cascade limit go there.
+  - The site header holds Acrodont (to the Cascades page, the landing page),
+    Admin for admins only, the sync status and the account link; a regular
+    user's header has no Main nav. The player's menu holds Acrodont, Admin
+    for admins, Account and Settings.
+  - The Settings dialog's header is "Settings" and Close, with no jump row.
+    Its sections are **Cascade Settings** (Synced) and **Device Settings**
+    (Not synced), each opening with a full-width shaded bar and a larger
+    heading; Controls stays a subheading of Device Settings, and its reset
+    reads **Reset controls to defaults**.
+  - PLAN.md § Settings, § Cascade limit, § Cascades page, § Trash, § Desktop
+    layout, § Controls, § Exporting words, § Frontend and § End-to-end tests
+    describe the result.
+
+## PQ-022 — Password changes and resets match birdtest (decided)
+
+- **Plan:** Authentication, as it stood before this decision: **Change
+  password** on `/account` (`POST /api/account/password`, the current and the
+  new password, bumping `session_generation` and re-issuing this session)
+  beside a reset by email; the strength rule ("`zxcvbn` (score ≥ 3) and
+  length") at registration only, scored against the username and address
+  whole, on the request's own thread; a reset limited only by the shared
+  per-IP auth bucket and the email caps, its mail carrying only the link, and
+  no rule named for its new password.
+- **Issue:** Two ways to set a password, hardened differently, where birdtest
+  has one. A reset's new password was scored without the account's username
+  or address, so it could be either. Asking
+  for a reset could bury one address in mail from many sources, and a link
+  refused a password could be replayed without bound. zxcvbn matched the
+  address whole, so `jsmith` passed for `jsmith@example.com`, and a crafted
+  password cost close to a second of scoring on the executor, stalling every
+  request behind it.
+- **Decision (2026-11-11):** Match birdtest (`PLAN.md` § Password Reset Flow).
+  - No signed-in password change: the route, the Account page's card and its
+    client call are gone. A reset by email is the one way to change a
+    password. Sign out everywhere and delete account, each with password
+    re-entry, stay on `/account`.
+  - One strength rule for registration and a reset: length, then a `zxcvbn`
+    score of at least 3 against the username, the address and the address's
+    local part. Scoring runs on the blocking pool in turns of its own, at most
+    2 at once; a request waits at most 10 seconds for a turn, else `503` with
+    Retry-After 10.
+  - Asking for a reset still always answers `202 {}`, with the lookup and the
+    email after the response, and is now also limited to
+    `RESET_RATE_PER_HOUR` (new, default 5) per caller and per address named,
+    answered `429` alike for every address. The mail carries the account's
+    username, since signing in asks for it. The link still lasts 30 minutes.
+  - Setting the new password reads the link first, without a lock, so a wrong
+    or spent link is `400 invalid_token` and costs neither a score nor a hash;
+    then takes a scoring turn and charges the link's own
+    `RESET_RATE_PER_HOUR` bucket, whoever sends it (a link refused a weak
+    password still works); scores against the account's username and address
+    and hashes, both outside any transaction; then locks the account row,
+    spends the token and every other outstanding one, stores the hash and
+    bumps `session_generation`. The `204` clears the caller's cookies, and the
+    page goes to `/login` with no message.
+  - The length bounds stay acrodont's own, 8–128 characters (PQ-002); birdtest
+    is followed for the reset's hardening, not for its bounds.
+  - PLAN.md § Authentication, § Auth and account, § Frontend,
+    § Configuration, § Unit tests and § Integration tests, and JOURNEYS.md
+    V-6, V-10 and V-11, describe the result.
+
+## PQ-023 — One storage limit instead of cascade limits (decided)
+
+- **Plan:** § Cascade limit and § Configuration, as they stood before this
+  decision: at most 20 cascades an account, the Trash included
+  (`MAX_CASCADES_PER_USER`, reported as `max_cascades_per_user`, refused with
+  `409 cascade_limit`); at most 200 saved searches (`MAX_SAVED_SEARCHES_PER_USER`,
+  `409 saved_search_limit`); at most 130,000 questions a cascade
+  (`QUESTION_CEILING`, with the migration's CHECKs at 130000 and 129999 while
+  § Schema still showed 300000 and 299999); and a sync request's
+  `question_rows_for` bounded by the cascade limit.
+- **Issue:** The count limits were blunt. Twenty cascades of 200 questions and
+  twenty of 130,000 were both "at the limit", though the second account held
+  hundreds of times the space, and nothing told a user how close they were to
+  anything that mattered. The 130,000 ceiling left out any search over a whole
+  lexicon. STORAGE_LIMIT_PLAN.md works it through.
+- **Decision (2026-11-11):** One per-account storage limit, sized from what
+  the owner named, in place of every count limit.
+  - **D1, the default:** `MAX_STORAGE_BYTES_PER_USER` = 100,000,000 bytes
+    (100 MB), sized from three cascades: every CSW24 anagram of 7 and 8
+    letters (64,353 questions, 18.64 MB as created, 30.74 MB studied hard),
+    every CSW24 definition of 7 and 8 letters (76,847 questions, 22.25 MB /
+    36.70 MB) and 10,000 CSW24 leave values (2.88 MB / 4.76 MB). All three
+    come to 43.77 MB as created and 72.20 MB studied hard, leaving 27.8 MB of
+    headroom, 1.39 times the need. An account's own limit,
+    `users.storage_limit_bytes`, can replace it, set only through SQL.
+  - **D2, saved searches count:** a saved search's spec counts toward the same
+    limit, so there is one limit. An In Word List entry costs about 110 bytes,
+    so a 300,000-entry list is about 33 MB.
+  - **D3, the question ceiling:** 300,000, so any word search over a whole
+    lexicon fits. `QUESTION_CEILING`, `MAX_QUIZ_QUESTIONS`'s default and every
+    schema CHECK are 300,000 / 299,999, and PLAN.md § Schema matches the
+    migration again. The server's scale tests pass every budget at 300,000.
+    A 300,000-question cascade is about 87 MB as created.
+  - **D4, the Trash counts:** its rows are still stored and can be restored;
+    only purging frees storage, after `TRASH_RETENTION_DAYS` or with Delete
+    forever.
+  - **D5, no count cap:** nothing bounds how many cascades or saved searches
+    an account holds. `question_rows_for` gets a protocol bound of its own,
+    `MAX_QUESTION_ROWS_FOR` = 1,000.
+  - Storage is counted from row counts with fixed per-row sizes
+    (`contract-fixtures/storage.json`), kept on `cascades`, `saved_searches`
+    and `users` in the transactions that change the rows, checked only where
+    something new is made (creation, Start over, saving a search, each
+    refused with `409 storage_limit` and `used`, `limit`, `needed`), and never
+    on studying. `MAX_CASCADES_PER_USER`, `MAX_SAVED_SEARCHES_PER_USER`,
+    `cascade_limit` and `saved_search_limit` are gone.
+  - PLAN.md § Overview, § Storage limit (in place of § Cascade limit),
+    § Quiz options, § Creating a cascade, § Cascades page, § Trash, § Search
+    Engine, § Working at 300,000 questions, § Operations, § The sync cycle,
+    § Schema, § Purge task, § API, § Frontend, § Configuration, § Deployment
+    and Operations (Capacity) and the test sections, and JOURNEYS.md C-2 to
+    C-5 and C-14 to C-17, describe the result.

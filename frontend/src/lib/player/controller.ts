@@ -11,7 +11,7 @@
 // gone still grades, and a typed card falls back to flashcard mode.
 import { applyLocally, APPLY_STORES, quizState, type LocalResult, type NewOp } from '$lib/local/apply';
 import type { UserDb } from '$lib/local/db';
-import type { CascadeRow, PreferencesRow, QuestionRow, QuizRow, WordHooks } from '$lib/local/rows';
+import type { CascadeRow, QuestionRow, QuizRow, WordHooks } from '$lib/local/rows';
 import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
 import { nextBoundary, Rejected, runIndicator, type Grade } from '$lib/cascade/rules';
@@ -35,7 +35,7 @@ export interface Card {
 	saved: Grade | null;
 	/** Typed mode on this card; null in flashcard mode or when falling back. */
 	typed: TypedState | null;
-	/** The last typed entry's note: already entered, one word at a time, out of order. */
+	/** The last typed entry's note: already entered, not an anagram of the question, out of order. */
 	note: string | null;
 }
 
@@ -60,7 +60,6 @@ export interface PlayerView {
 }
 
 export interface PlayerOptions {
-	prefs: () => Promise<PreferencesRow>;
 	/** Runs the full fetch sequence for the cascade (first open). */
 	ensure: (cascadeId: string) => Promise<void>;
 	afterWrite?: () => void;
@@ -112,8 +111,6 @@ export class Player {
 	/** Keys and answers of the cards around the current one, by idx: Next and Previous draw from here. */
 	private cache = new Map<number, { key: string; answer: unknown; word: WordHooks | null }>();
 	private filling = false;
-	/** The user's preferences as last read; typed mode depends on them. */
-	private prefsNow: PreferencesRow | null = null;
 	/** The writes behind the screen, applied one at a time in order. */
 	private queue: Promise<void> = Promise.resolve();
 	/** Set by a failed write: later queued writes are held, not applied. */
@@ -180,8 +177,8 @@ export class Player {
 		await this.loadNow(keep);
 	}
 
-	/** A preference changed what an answer holds (definitions, hooks): the cards in memory go. */
-	prefsChanged() {
+	/** A setting changed what an answer holds (definitions, hooks): the cards in memory go. */
+	settingsChanged() {
 		this.cache.clear();
 	}
 
@@ -195,7 +192,6 @@ export class Player {
 	}
 
 	private async loadNow(keep: boolean): Promise<void> {
-		this.prefsNow = await this.opts.prefs();
 		const tx = this.tx();
 		const cascade = (await view.cascade(tx, this.cascadeId)) ?? null;
 		if (!cascade) {
@@ -300,7 +296,6 @@ export class Player {
 				this.v.fetchingCard = false;
 			}
 		}
-		this.prefsNow = await this.opts.prefs();
 		// Typed mode splits words with the cascade's tiles: a cascade played card by
 		// card may not have them yet, so they are fetched now, as the card is.
 		if (!this.dist && this.v.cascade?.quiz_type === 'anagram' && this.v.cascade.answer_mode === 'typed') {
@@ -325,7 +320,6 @@ export class Player {
 	/** Shows the card at `pos` from what is in hand: no IndexedDB, so it costs one redraw. */
 	private present(pos: number, idx: number, key: string | null, answer: unknown | null, word: WordHooks | null) {
 		const saved = this.rows.get(idx)?.grade ?? null;
-		const prefs = this.prefsNow;
 		const typedWanted = this.v.cascade!.quiz_type === 'anagram' && this.v.cascade!.answer_mode === 'typed';
 		this.v.distributionMissing = typedWanted && !this.dist;
 		// A card with no answer, or no distribution to split typed text, falls back to flashcard mode.
@@ -352,7 +346,7 @@ export class Player {
 	/** The card at `pos`: from the cache at once, else read (and fetched if need be). */
 	private async showCard(pos: number) {
 		const idx = this.order[pos];
-		const hit = this.prefsNow ? this.cache.get(idx) : undefined;
+		const hit = this.cache.get(idx);
 		if (hit) this.present(pos, idx, hit.key, hit.answer, hit.word);
 		else await this.loadCard(pos);
 	}
@@ -566,9 +560,9 @@ export class Player {
 		await this.flush();
 	}
 
-	/** The grade a shown answer starts with: the preference's (correct unless set otherwise). */
+	/** The grade a shown answer starts with: the cascade's setting's (correct unless set otherwise). */
 	private revealGrade(card: Card): Grade {
-		const base: Grade = this.prefsNow?.reveal_correct === false ? 'missed' : 'correct';
+		const base: Grade = this.v.cascade?.reveal_correct === false ? 'missed' : 'correct';
 		return card.toggled ? (base === 'correct' ? 'missed' : 'correct') : base;
 	}
 
@@ -752,7 +746,7 @@ export class Player {
 			card.typed,
 			text,
 			words,
-			this.dist.parseMagpie(card.key, true).length,
+			this.dist.parseMagpie(card.key, true),
 			this.dist,
 			this.v.quiz!.require_alphabetical
 		);
@@ -762,7 +756,7 @@ export class Player {
 		}
 		const notes: Record<string, string> = {
 			already: 'Already entered',
-			one_word: 'Type one word at a time',
+			not_anagram: 'Not an anagram of the question',
 			out_of_order: 'Out of order'
 		};
 		this.v.card = { ...card, typed: state, note: notes[result.kind] ?? null };
@@ -778,7 +772,7 @@ export class Player {
 
 	/**
 	 * A download landed: the current card takes the key or answer it lacked, or
-	 * the answer refetched with the definitions or hooks a preference now asks
+	 * the answer refetched with the definitions or hooks a setting now asks
 	 * for, keeping its state.
 	 */
 	async refreshCard() {

@@ -83,6 +83,10 @@ export type NewOp =
 			clear_threshold?: number;
 			/** The cascade's alone: flashcard or typed. */
 			answer_mode?: AnswerMode;
+			show_definitions?: boolean;
+			show_hooks?: boolean;
+			reveal_correct?: boolean;
+			leave_value_decimals?: number;
 	  }
 	| {
 			type: 'set_quiz_options';
@@ -90,9 +94,7 @@ export type NewOp =
 			segment_size?: number;
 			progression?: Progression;
 			require_alphabetical?: boolean;
-	  }
-	| { type: 'set_preferences'; [field: string]: unknown }
-	| { type: 'set_bindings'; bindings: unknown[] };
+	  };
 
 export const APPLY_STORES: StoreName[] = [...view.VIEW_STORES, 'meta', 'outbox'];
 
@@ -498,6 +500,16 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 				if (op.answer_mode !== 'flashcard' && op.answer_mode !== 'typed') throw new Rejected('invalid');
 				next.answer_mode = op.answer_mode;
 			}
+			for (const f of ['show_definitions', 'show_hooks', 'reveal_correct'] as const) {
+				if (op[f] === undefined) continue;
+				if (typeof op[f] !== 'boolean') throw new Rejected('invalid');
+				next[f] = op[f];
+			}
+			if (op.leave_value_decimals !== undefined) {
+				const d = op.leave_value_decimals;
+				if (typeof d !== 'number' || !Number.isInteger(d) || d < 0 || d > 3) throw new Rejected('invalid');
+				next.leave_value_decimals = d;
+			}
 			await putCascade(tx, next);
 			return { cascade_id: c.id };
 		}
@@ -515,11 +527,6 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 			await putQuiz(tx, next);
 			return { cascade_id: c.id };
 		}
-		case 'set_preferences':
-		case 'set_bindings':
-			// No overlay rows: the preferences view is the base row with the
-			// pending operations' fields laid over it (see `preferencesView`).
-			return {};
 		default:
 			throw new Rejected('invalid');
 	}

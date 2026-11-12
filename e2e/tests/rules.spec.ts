@@ -7,7 +7,7 @@ import { createCascade, newUser, playLevel } from './support';
 test('every cascade rule, from a new account', async ({ page }) => {
 	test.setTimeout(180_000);
 	await newUser(page, 'rules');
-	await createCascade(page, { name: 'Rules', threshold: 80 });
+	await createCascade(page, { name: 'Rules' });
 	// Level 1 (18 questions) below the threshold: down to Level 2 with the 5 misses.
 	expect(await playLevel(page, (i) => i < 5)).toBe('Level 1: 72%. Reshuffled, and its 5 missed questions are now Level 2.');
 	// Level 2 cleared with a miss: replaced at Level 2.

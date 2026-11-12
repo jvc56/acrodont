@@ -931,8 +931,9 @@ async fn insert_cascade(
     let id = uuid::Uuid::new_v4();
     sqlx::query(
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, leave_set_id, spec_id, clear_threshold,
-                               options_changed_at, options_seq, options_device_id, question_count, depth, updated_seq)
-         VALUES ($1, $2, 'c', $3::quiz_type, $4, $5, $6, 80, now(), 1, gen_random_uuid(), 1, 1, 1)",
+                               options_changed_at, options_seq, options_device_id, question_count, depth, updated_seq,
+                               storage_bytes)
+         VALUES ($1, $2, 'c', $3::quiz_type, $4, $5, $6, 80, now(), 1, gen_random_uuid(), 1, 1, 1, 0)",
     )
     .bind(id)
     .bind(user)
@@ -1066,7 +1067,7 @@ async fn a_saved_search_does_not_pin_a_lexicon(pool: sqlx::PgPool) {
     .execute(app.db())
     .await
     .unwrap();
-    sqlx::query("INSERT INTO saved_searches (id, user_id, name, spec_id) VALUES (gen_random_uuid(), $1, 's', $2)")
+    sqlx::query("INSERT INTO saved_searches (id, user_id, name, spec_id, storage_bytes) VALUES (gen_random_uuid(), $1, 's', $2, 0)")
         .bind(user)
         .bind(spec)
         .execute(app.db())

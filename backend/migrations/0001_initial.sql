@@ -14,10 +14,6 @@ CREATE TYPE grade AS ENUM ('correct', 'missed');
 
 CREATE TYPE anagram_answer_mode AS ENUM ('flashcard', 'typed');
 
-CREATE TYPE input_action AS ENUM ('show_next', 'toggle_grade', 'previous');
-
-CREATE TYPE input_kind AS ENUM ('mouse_button', 'wheel', 'key');
-
 -- 'cleared' means finished and in the Trash, whether or not the score met the
 -- clear threshold (see Progression).
 CREATE TYPE quiz_status AS ENUM ('active', 'cleared');
@@ -47,7 +43,7 @@ CREATE TYPE finish_outcome AS ENUM (
 CREATE TYPE sync_op_type AS ENUM (
     'grade', 'move_cursor', 'finish', 'finish_segment', 'restore_quiz',
     'trash_cascade', 'restore_cascade', 'purge_quiz', 'purge_cascade',
-    'set_preferences', 'set_bindings', 'set_cascade_options', 'set_quiz_options'
+    'set_cascade_options', 'set_quiz_options'
 );
 
 CREATE TYPE sync_op_status AS ENUM ('applied', 'rejected');
@@ -109,6 +105,12 @@ CREATE TABLE users (
     session_generation  INTEGER NOT NULL DEFAULT 0,     -- bumped to revoke all sessions
     sync_seq            BIGINT NOT NULL DEFAULT 0,      -- last sync sequence value issued
     sync_floor_seq      BIGINT NOT NULL DEFAULT 0,      -- tombstones at or below this were pruned
+    storage_bytes       BIGINT NOT NULL DEFAULT 0 CHECK (storage_bytes >= 0),
+                            -- the sum of the user's cascades' and saved searches'
+                            -- storage_bytes, kept in the same transactions (Storage limit)
+    storage_limit_bytes BIGINT CHECK (storage_limit_bytes >= 0),
+                            -- set only via SQL: replaces MAX_STORAGE_BYTES_PER_USER
+                            -- for this account
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (sync_floor_seq <= sync_seq)
 );
@@ -133,58 +135,6 @@ CREATE TABLE password_reset_tokens (
 );
 CREATE INDEX password_reset_tokens_user_id_unused
     ON password_reset_tokens (user_id) WHERE used_at IS NULL;
-
--- One row per user, inserted in the same transaction as the user.
-CREATE TABLE user_preferences (
-    user_id                   UUID PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
-    default_clear_threshold   SMALLINT NOT NULL DEFAULT 80
-                                  CHECK (default_clear_threshold BETWEEN 1 AND 100),
-    leave_value_decimals      SMALLINT NOT NULL DEFAULT 1
-                                  CHECK (leave_value_decimals BETWEEN 0 AND 3),
-    anagram_show_definitions  BOOLEAN NOT NULL DEFAULT true,
-    anagram_show_hooks        BOOLEAN NOT NULL DEFAULT true,
-    anagram_answer_mode       anagram_answer_mode NOT NULL DEFAULT 'flashcard',
-                                  -- what new Anagram cascades start with; each keeps its own
-    -- Defaults for new cascades only; changing one never touches an existing cascade.
-    default_segment_size      INTEGER NOT NULL DEFAULT 0
-                                  CHECK (default_segment_size = 0
-                                         OR default_segment_size BETWEEN 5 AND 130000),
-    default_progression       quiz_progression NOT NULL DEFAULT 'ladder',
-    default_require_alphabetical BOOLEAN NOT NULL DEFAULT false,
-    reveal_correct            BOOLEAN NOT NULL DEFAULT true,   -- a reveal marks the card
-                                  -- correct (false: missed) until toggled
-    changed_at                TIMESTAMPTZ NOT NULL DEFAULT now(), -- device time of the latest
-                                  -- set_preferences; an older operation is rejected whole
-    changed_by_device_id      UUID,                               -- NULL until the first change;
-                                  -- that device's own next change always applies
-    bindings_changed_at       TIMESTAMPTZ NOT NULL DEFAULT now(), -- device time of latest binding change
-    bindings_device_id        UUID,                               -- likewise for bindings
-    updated_seq               BIGINT NOT NULL                     -- the sequence registration took, then
-                                  -- bumped by every preferences or bindings change,
-                                  -- so every device's first pull carries the row
-);
-
--- Desktop controls. The defaults are inserted with the user; every action keeps
--- at least one binding.
-CREATE TABLE user_input_bindings (
-    user_id  UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    action   input_action NOT NULL,
-    slot     SMALLINT NOT NULL CHECK (slot >= 0),  -- any number per action
-    kind     input_kind NOT NULL,
-    code     TEXT NOT NULL,
-    ctrl     BOOLEAN NOT NULL DEFAULT false,
-    shift    BOOLEAN NOT NULL DEFAULT false,
-    alt      BOOLEAN NOT NULL DEFAULT false,
-    meta     BOOLEAN NOT NULL DEFAULT false,
-    PRIMARY KEY (user_id, action, slot),
-    UNIQUE (user_id, kind, code, ctrl, shift, alt, meta), -- one action per stroke
-    CHECK (CASE kind
-        WHEN 'mouse_button' THEN code IN ('left', 'middle', 'right', 'back', 'forward')
-        WHEN 'wheel'        THEN code IN ('up', 'down')
-        WHEN 'key'          THEN code ~ '^[A-Za-z0-9]{1,32}$'  -- KeyboardEvent.code
-                                 AND code <> 'Escape'
-    END)
-);
 
 -- -------------------------------------------------------------------------
 -- Catalog (uploaded by admins; immutable once uploaded)
@@ -422,6 +372,8 @@ CREATE TABLE saved_searches (
     user_id     UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     name        TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
     spec_id     UUID NOT NULL UNIQUE REFERENCES search_specs (id),
+    storage_bytes BIGINT NOT NULL CHECK (storage_bytes >= 0),  -- its spec's, by the
+                            -- storage formula (Storage limit); counted in users.storage_bytes
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (user_id, name)
@@ -445,7 +397,7 @@ CREATE TABLE cascades (
 
     -- Quiz options: what every quiz created for this cascade starts with.
     segment_size         INTEGER NOT NULL DEFAULT 0
-                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 130000),
+                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 300000),
                                  -- 0 = no segments; the minimum of 5 rules out the
                                  -- one-question run. See Quiz options for the
                                  -- ceil(question_count / S) bound on chain quizzes
@@ -453,13 +405,19 @@ CREATE TABLE cascades (
     require_alphabetical BOOLEAN NOT NULL DEFAULT false,
     answer_mode          anagram_answer_mode NOT NULL DEFAULT 'flashcard',
                                  -- the cascade's own, never a quiz's (Typed mode)
+    show_definitions     BOOLEAN NOT NULL DEFAULT true,  -- Anagram: each anagram's definition on reveal
+    show_hooks           BOOLEAN NOT NULL DEFAULT true,  -- Anagram: hooks on reveal
+    reveal_correct       BOOLEAN NOT NULL DEFAULT true,  -- a reveal marks the card correct
+                                 -- (false: missed) until toggled
+    leave_value_decimals SMALLINT NOT NULL DEFAULT 1    -- Leave Value: decimal places shown
+                             CHECK (leave_value_decimals BETWEEN 0 AND 3),
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
                              -- set_cascade_options; an older operation is rejected whole
     options_seq          BIGINT NOT NULL,            -- sync sequence of that change, for seen_seq
     options_device_id    UUID NOT NULL,              -- the device that made it (the creator at first);
                                                      -- its own next change always applies
 
-    question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 130000),
+    question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 300000),
     depth             INTEGER NOT NULL CHECK (depth >= 1),
                           -- number of active levels; Level 1 is always the Source quiz
     peak_depth        INTEGER NOT NULL DEFAULT 1 CHECK (peak_depth >= depth),
@@ -472,6 +430,11 @@ CREATE TABLE cascades (
     last_activity_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at      TIMESTAMPTZ,                -- latest finish of the Source quiz with no misses
     trashed_at        TIMESTAMPTZ,                -- set only by the user
+    storage_bytes     BIGINT NOT NULL CHECK (storage_bytes >= 0),
+                          -- the rows the account holds because of this cascade, by the
+                          -- storage formula (Storage limit): set at creation, changed by
+                          -- every new level and attempt and every purged quiz, each with
+                          -- an updated_seq bump; counted in users.storage_bytes
     updated_seq       BIGINT NOT NULL,
 
     -- The leave value set must belong to the cascade's lexicon.
@@ -489,7 +452,7 @@ CREATE INDEX cascades_leave_set_id ON cascades (leave_set_id) WHERE leave_set_id
 -- The cascade's questions, in search order. Immutable.
 CREATE TABLE cascade_questions (
     cascade_id    UUID NOT NULL REFERENCES cascades (id) ON DELETE CASCADE,
-    idx           INTEGER NOT NULL CHECK (idx BETWEEN 0 AND 129999),
+    idx           INTEGER NOT NULL CHECK (idx BETWEEN 0 AND 299999),
     question_key  TEXT NOT NULL CHECK (char_length(question_key) BETWEEN 1 AND 300),
                       -- alphagram, word or canonical leave, in MAGPIE notation
     PRIMARY KEY (cascade_id, idx)
@@ -516,7 +479,7 @@ CREATE TABLE quizzes (
 
     -- Quiz options, copied from the cascade at creation and editable afterwards.
     segment_size         INTEGER NOT NULL DEFAULT 0
-                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 130000),
+                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 300000),
     progression          quiz_progression NOT NULL DEFAULT 'ladder',
     require_alphabetical BOOLEAN NOT NULL DEFAULT false,
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
@@ -535,7 +498,7 @@ CREATE TABLE quizzes (
                                                   -- shuffle_seed above: a hash with its top bit set
                                                   -- reads back negative, and the wire form is the
                                                   -- unsigned decimal either way (see API)
-    question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 130000),
+    question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 300000),
     correct_count     INTEGER NOT NULL DEFAULT 0 CHECK (correct_count >= 0),
     missed_count      INTEGER NOT NULL DEFAULT 0 CHECK (missed_count >= 0),
     cursor            INTEGER NOT NULL DEFAULT 0,
@@ -576,9 +539,9 @@ CREATE UNIQUE INDEX quizzes_one_per_segment
 
 CREATE TABLE quiz_questions (
     quiz_id       UUID NOT NULL REFERENCES quizzes (id) ON DELETE CASCADE,
-    question_idx  INTEGER NOT NULL CHECK (question_idx BETWEEN 0 AND 129999),
+    question_idx  INTEGER NOT NULL CHECK (question_idx BETWEEN 0 AND 299999),
                       -- index into cascade_questions
-    position      INTEGER NOT NULL CHECK (position BETWEEN 0 AND 129999),
+    position      INTEGER NOT NULL CHECK (position BETWEEN 0 AND 299999),
     grade         grade,
     graded_at     TIMESTAMPTZ,                    -- device time, for latest-wins between devices
     graded_by_device_id UUID,                     -- a device's own regrade always applies
@@ -602,7 +565,7 @@ CREATE TABLE quiz_attempts (
                         -- without it the candidate set is every quiz the user owns:
                         -- 60,000 chain quizzes would mean 60,000 seeks per sync
     attempt         INTEGER NOT NULL CHECK (attempt >= 1),
-    question_count  INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 130000),
+    question_count  INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 300000),
     correct_count   INTEGER NOT NULL CHECK (correct_count >= 0),
     missed_count    INTEGER NOT NULL CHECK (missed_count >= 0),
     outcome         finish_outcome NOT NULL,

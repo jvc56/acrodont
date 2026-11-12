@@ -157,8 +157,10 @@ DNS and the GitHub repository.
 scripts/deploy.sh
 ```
 
-Run it from a clean checkout of `main` once CI is green on that commit. It
-refuses otherwise; `--skip-ci-check` exists for emergencies. In order, it:
+Run it from a clean checkout of `main` once CI's run on `main` is green on
+that commit (a branch's run of the same commit is only the Push tier, which
+does not count). It refuses otherwise; `--skip-ci-check` exists for
+emergencies. In order, it:
 
 1. checks the checkout, the AWS login and account, and that ECS is running what
    `prod.tfvars` names. If ECS's circuit breaker rolled a release back, the
@@ -177,7 +179,8 @@ refuses otherwise; `--skip-ci-check` exists for emergencies. In order, it:
 
 A docs-only commit deploys nothing. `infra/` changes plan and apply without
 building. The service rolls: the new task serves before the old one drains,
-so a deploy has no gap. A warning means the last nightly scale run failed.
+so a deploy has no gap. A warning means the last nightly CI run (the Main
+tier and the scale suite) failed.
 
 **Migrations are append-only and additive.** Never edit or remove an applied
 migration. Add a numbered file instead.

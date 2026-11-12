@@ -2,7 +2,6 @@
 //! Cascades and sync): a push, then a pull, in one request.
 
 pub mod ops;
-pub mod prefs;
 pub mod pull;
 pub mod routes;
 
@@ -64,7 +63,7 @@ pub struct IncomingOp {
     pub body: Value,
 }
 
-pub const OP_TYPES: [&str; 13] = [
+pub const OP_TYPES: [&str; 11] = [
     "grade",
     "move_cursor",
     "finish",
@@ -74,8 +73,6 @@ pub const OP_TYPES: [&str; 13] = [
     "restore_cascade",
     "purge_quiz",
     "purge_cascade",
-    "set_preferences",
-    "set_bindings",
     "set_cascade_options",
     "set_quiz_options",
 ];
