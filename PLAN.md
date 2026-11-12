@@ -6751,9 +6751,10 @@ where PQ-019 runs a case at a tenth.
     without finishing, and that Level 2 half graded (375,000 graded rows
     per cascade, about 3.75 million in all, 75
     pages), the sync that follows finishes within its measured budget —
-    **150 seconds for the one heavily played cascade** (PQ-019; the budget was
-    set from 49–107 s measured for 162,500 graded rows while the cap was
-    130,000), measured with the staging
+    **300 seconds for the one heavily played cascade** (PQ-019: the worst
+    measured rate, 1,500 graded rows a second, for its 375,000 rows, with room
+    to spare; 49–107 s were measured for 162,500 rows while the cap was
+    130,000, and 164 s for 375,000 on CI at 300,000), measured with the staging
     split (rows of quizzes new to the device and grade rows for unchanged
     attempts written once). The plan first asked 120 s for all ten, about
     13,500 graded rows a second; Chromium's IndexedDB, writing a row per

@@ -319,8 +319,11 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
 - **Since PQ-023:** there is no cascade count to hold. The drop pass keeps
   its twenty 56,000-question cascades as a case of many automatic keeps, and
   `scale-many.scale.ts` covers an account of 500 smaller cascades. The device
-  suites' `QUESTIONS` is 300,000 again; the first-sync budget of 150 s was
-  measured at the 130,000-question cap and stands until it is measured again.
+  suites' `QUESTIONS` is 300,000 again. The first-sync budget of 150 s was
+  set at the 130,000-question cap for 162,500 rows. CI measured 164 s for
+  375,000 rows at 300,000 (2,290 a second, inside the measured range), so it
+  is now 300 s: the worst measured rate, 1,500 a second, at this size (250 s),
+  with room to spare.
 
 ## PQ-020 — Two kinds of settings, no defaults for new cascades (decided)
 
