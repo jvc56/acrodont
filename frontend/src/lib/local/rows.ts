@@ -142,6 +142,8 @@ export interface WordHooks {
 	back_hooks: string;
 	front_inner: boolean;
 	back_inner: boolean;
+	/** The word's rank by probability among the lexicon's words of its length; absent on cards saved before the server sent it. */
+	probability_order?: number;
 }
 
 export interface CardRow {

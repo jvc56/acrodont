@@ -419,7 +419,7 @@ async fn login_sets_session_and_csrf_cookies_with_one_ttl(pool: sqlx::PgPool) {
     assert_eq!(body["trash_retention_days"], 30);
     assert_eq!(body["max_quiz_questions"], 300000);
     assert_eq!(body["storage_bytes"], 0);
-    assert_eq!(body["max_storage_bytes"], 100_000_000);
+    assert_eq!(body["max_storage_bytes"], 10_000_000);
     assert!(body.get("max_cascades_per_user").is_none());
     let session = r.set_cookie("acrodont_session").unwrap();
     let csrf = r.set_cookie("acrodont_csrf").unwrap();

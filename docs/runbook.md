@@ -290,8 +290,8 @@ TypeScript rules.
 
 ## What it costs
 
-The stack is sized for one user at first and 100 accounts at most (`MAX_ACCOUNTS`): 20
-cascades each, 130,000 questions per quiz. Approximate us-east-1 prices:
+The stack is sized for one user at first and 750 accounts at most (`MAX_ACCOUNTS`), each
+holding at most 10 MB (`MAX_STORAGE_BYTES_PER_USER`). Approximate us-east-1 prices:
 
 | Item | Monthly |
 |---|---|

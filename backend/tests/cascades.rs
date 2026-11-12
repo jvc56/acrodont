@@ -464,11 +464,13 @@ async fn card_pages(pool: sqlx::PgPool) {
     let words: Vec<&str> = aeinrst["answer"].as_array().unwrap().iter().map(|w| w["word"].as_str().unwrap()).collect();
     assert_eq!(words, ["ANESTRI", "ANTSIER", "NASTIER", "RATINES", "RETAINS", "RETINAS", "RETSINA", "STAINER", "STEARIN"]);
     assert!(aeinrst["answer"][0].get("front_hooks").is_none() && aeinrst["answer"][0].get("definition").is_none());
+    assert!(aeinrst["answer"][0].get("probability_order").is_none(), "the probability order comes with the hooks");
     // With hooks and definitions.
     let r = c.get(&format!("/api/cascades/{id}/cards?from=0&limit=18&hooks=1&definitions=1")).await;
     let card = r.json().as_array().unwrap().iter().find(|c| c["key"] == "AEINRST").unwrap().clone();
     assert!(card["answer"][0]["definition"].is_string());
     assert_eq!(card["answer"][0]["front_hooks"], "");
+    assert!(card["answer"][0]["probability_order"].as_u64().is_some_and(|p| p >= 1), "{card}");
     // With hooks, each word says whether it has a front and a back inner hook.
     assert!(card["answer"][0]["front_inner"].is_boolean() && card["answer"][0]["back_inner"].is_boolean());
     // keys=1: `{ from, keys }`, the same keys in the same order as the full form.
@@ -514,6 +516,7 @@ async fn card_pages(pool: sqlx::PgPool) {
     assert_eq!(card["answer"], "the vital force in Chinese thought [n -S]");
     assert_eq!(card["word"]["word"], "QI");
     assert!(card["word"]["front_hooks"].is_string() && card["word"]["back_hooks"].is_string());
+    assert!(card["word"]["probability_order"].as_u64().is_some_and(|p| p >= 1), "{card}");
     assert!(card["word"]["front_inner"].is_boolean() && card["word"]["back_inner"].is_boolean());
     let lv = create(&mut c, "EN-FIX", "leave_value", json!({ "op": "and", "children": [
         { "type": "leave_value", "negated": false, "min": 0.1, "max": 0.3 } ] })).await;

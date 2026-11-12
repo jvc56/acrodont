@@ -9,6 +9,13 @@
 	import { applyUpdate } from '$lib/sw/client.svelte';
 	import { syncState } from '$lib/sync/runtime.svelte';
 
+	/**
+	 * Quiet (the player, with its sync status or its status bar hidden): the
+	 * everyday labels are not shown, only what needs attention.
+	 */
+	let { quiet = false }: { quiet?: boolean } = $props();
+	const EVERYDAY = new Set(['Synced', 'Syncing…', 'Waiting to sync']);
+
 	let text = $derived.by(() => {
 		if (session.signedOutInAnotherTab) return 'Signed out in another tab';
 		if (session.needsLogin || syncState.status === 'needs_login') return 'Log in to sync';
@@ -33,6 +40,7 @@
 
 <!-- Flush right in a fixed box: "Synced" stays in the corner, and a longer label grows to the left.
      On a phone the box fits its label, so the header stays on one line. -->
+{#if !(quiet && EVERYDAY.has(text))}
 <div class="flex max-w-40 min-w-0 items-center sm:w-40 sm:shrink-0 justify-end gap-2 text-sm whitespace-nowrap" role="status" title={text}>
 	<span class="inline-block h-2 w-2 shrink-0 rounded-full" class:bg-green-600={text === 'Synced'} class:bg-muted-foreground={text !== 'Synced'}></span>
 	{#if syncState.status === 'reload'}
@@ -43,3 +51,4 @@
 		<span class="truncate">{text}</span>
 	{/if}
 </div>
+{/if}

@@ -54,8 +54,14 @@ export interface MetaValues {
 		/** Whether the grade border shows for a correct answer (off by default) and for a missed one (on). */
 		border_correct: boolean;
 		border_missed: boolean;
-		/** The player's status bar along the bottom is hidden. */
+		/** The player's status bar along the bottom is hidden; the sync status goes quiet with it. */
 		status_bar_hidden: boolean;
+		/** The sync status at the player's bottom right is quiet: only what needs attention shows. */
+		sync_status_hidden: boolean;
+		/** A word's definition sits in a column of its own after the back hooks (the default), not centred under the word. */
+		definition_column: boolean;
+		/** A word's probability order shows in a column of its own before the front hooks. */
+		show_probability: boolean;
 		/** On a phone, the three actions' tap zones: three columns (the default) or three rows. */
 		mobile_buttons: 'columns' | 'rows';
 		/** In the rows layout, each row's height, in px. */
@@ -92,6 +98,9 @@ export const META_DEFAULTS: { [K in MetaKey]: () => MetaValues[K] } = {
 		border_correct: false,
 		border_missed: true,
 		status_bar_hidden: false,
+		sync_status_hidden: false,
+		definition_column: true,
+		show_probability: false,
 		mobile_buttons: 'columns',
 		mobile_row_px: 64,
 		version: 2

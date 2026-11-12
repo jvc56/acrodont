@@ -60,7 +60,11 @@ fn report(what: &str, took: Duration, budget: Duration, rows: &str) {
 }
 
 async fn app(pool: sqlx::PgPool, extra: &[(&str, &str)]) -> TestApp {
-    TestApp::with(pool, extra).await
+    // These tests measure time at the question ceiling, several full cascades
+    // to an account: the storage limit (10 MB by default, about two of them) is lifted.
+    let mut env = vec![("MAX_STORAGE_BYTES_PER_USER", "1000000000")];
+    env.extend_from_slice(extra);
+    TestApp::with(pool, &env).await
 }
 
 // ---------------------------------------------------------------------------

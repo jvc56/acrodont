@@ -117,7 +117,7 @@ impl Config {
         if export_concurrency == 0 {
             return Err(ConfigError("EXPORT_CONCURRENCY must be at least 1".into()));
         }
-        let max_storage_bytes_per_user: u64 = r.parse("MAX_STORAGE_BYTES_PER_USER", 100_000_000)?;
+        let max_storage_bytes_per_user: u64 = r.parse("MAX_STORAGE_BYTES_PER_USER", 10_000_000)?;
         if max_storage_bytes_per_user == 0 || max_storage_bytes_per_user > i64::MAX as u64 {
             return Err(ConfigError("MAX_STORAGE_BYTES_PER_USER must be at least 1".into()));
         }
@@ -244,7 +244,7 @@ mod tests {
         let c = Config::from_map(&base()).unwrap();
         assert_eq!(c.session_ttl_seconds, 2_592_000);
         assert_eq!(c.max_quiz_questions, 300_000);
-        assert_eq!(c.max_storage_bytes_per_user, 100_000_000);
+        assert_eq!(c.max_storage_bytes_per_user, 10_000_000);
         assert_eq!(c.export_concurrency, 2);
         assert!(!c.dev_login);
         assert_eq!(c.search_concurrency, 2);
