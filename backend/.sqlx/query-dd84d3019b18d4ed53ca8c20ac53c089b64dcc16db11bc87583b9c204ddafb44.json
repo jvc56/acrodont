@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO lexicon_words (lexicon_id, words) VALUES ($1, $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dd84d3019b18d4ed53ca8c20ac53c089b64dcc16db11bc87583b9c204ddafb44"
+}

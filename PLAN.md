@@ -383,6 +383,11 @@ Moving on from the last question of a run that is not the last run:
   score cleared the quiz or it was replaced under
   [Drill progression](#progression-ladder-or-drill). The Source quiz never
   does.
+  On the server a quiz in the Trash keeps each question's grade, which an
+  [export](#exporting-words) of it reads, and drops the grades' times,
+  sequences and devices: nothing pulls a cleared quiz's questions, and a
+  restore starts a new attempt. Its grades, when a device asks for them, are
+  each dated the finish that cleared it.
 - **A complete cascade** (Source quiz finished with no misses) stays active.
   The user sees a completion screen showing how many levels and attempts it
   took, with **Keep studying**, **Start over** and **Move to Trash**. A
@@ -437,8 +442,8 @@ created), every CSW24 definition of 7 and 8 letters (76,847 questions,
 22.25 MB) and 10,000 leave values (2.88 MB). The three came to 43.77 MB as
 created and 72.20 MB studied hard (levels made from misses adding up to a
 second Source quiz each) when every question of every level was a row of its
-own. Stored packed, as below, the same three are 2.89 MB as created (1.24 MB,
-1.47 MB and 0.18 MB) and 5.10 MB studied hard. An
+own. Stored packed, as below, the same three are 2.61 MB as created (1.12 MB,
+1.33 MB and 0.16 MB) and 4.09 MB studied hard. An
 account's own limit can replace the default: `users.storage_limit_bytes`, NULL
 unless set, is set only through SQL.
 
@@ -462,11 +467,11 @@ keeping them equal to the fixture:
 |---|---|
 | `cascade_row` | 380 |
 | `question` | 1 (its line break), plus the question key's bytes |
-| `quiz_row` | 420 |
-| `chunk_row` | 160 (a `quiz_cards` row, up to 256 questions) |
-| `card` | 10 (a question's grade, time, sequence and device) |
-| `card_idx` | 4 (a question's index, in every level but the Source quiz) |
-| `attempt_row` | 176 |
+| `quiz_row` | 430 |
+| `chunk_row` | 200 (a `quiz_cards` row, up to 256 questions) |
+| `card` | 8 (a question's grade, and its record: device, sequence and time) |
+| `card_idx` | 1 (a question's index as its difference from the one before, in every level but the Source quiz) |
+| `attempt_row` | 210 |
 | `spec_row` | 380 (the spec with its groups and conditions) |
 | `spec_word` | 1 (its line break), plus the entry's bytes |
 
@@ -481,17 +486,20 @@ spec    = spec_row + Σ In Word List entries (spec_word + octet_length(entry))
 ```
 
 The sizes include index and tuple overhead, and `card` is the graded size, so
-a level's figure does not grow as it is studied. A chunk's arrays are
-compressed (lz4), so what Postgres stores varies with the grades; the sizes
-are set a little above what it measures for a level studied the usual way
-(about 2 bytes a question for an unstudied Source chunk, 11.5 for a graded
-chunk with its indexes), so the count never falls short of the disk used. The
+a level's figure does not grow as it is studied, nor shrink when the level is
+cleared and its chunks drop all but the grades. What Postgres stores varies
+with the grades: an unstudied chunk is its row alone (under half a byte a
+question for the Source quiz), and a chunk graded the usual way, a sync after
+each grade a few seconds apart, measures about 8 bytes a question with its
+indexes and its row. The sizes are set a little above that (about 9 and 10
+bytes a question for the Source quiz and for any other level), so the count
+never falls short of the disk used. The
 count is of live rows: the dead row versions grading leaves are vacuum's to
 reclaim, not the account's to pay for. An integration test calibrates the sizes
 against `pg_total_relation_size`: the whole cascade within ±20% of what Postgres
-measures, and its levels counted at no less than they take and no more than
-twice, so a schema change that makes rows bigger fails the build instead of
-quietly under-counting. A 300,000-question cascade is about 6 MB as created; an
+measures with every level graded, and its levels counted at no less than they
+take and no more than twice, so a schema change that makes rows bigger fails
+the build instead of quietly under-counting. A 300,000-question cascade is about 5 MB as created; an
 In Word List entry costs its bytes plus one, so a 300,000-entry list of 8-letter words is about 2.7 MB.
 
 **Where it is kept.** `cascades.storage_bytes`, `saved_searches.storage_bytes`
@@ -1515,9 +1523,9 @@ the offline fallback, which would fail for the same reason.
 Admins manage the catalog from `/admin`. It lists every letter distribution,
 lexicon and leave value set, with its size, uploader, upload time, how many
 cascades reference it, and its **Storage**: everything the server keeps for it,
-which is its rows in Postgres (the item's own row and its tiles, words with
-definitions, or leave values: each row as stored, TOASTed values at their
-compressed size, plus its share of the tables' indexes) and, for a lexicon or
+which is its rows in Postgres (the item's own row and its tiles, or its one
+packed row of words with definitions or of leave values: each row as stored,
+a packed text at its compressed size, plus its share of the tables' indexes) and, for a lexicon or
 leave value set, its in-memory index on the instance answering. Hovering the
 figure splits it into the database's part and the in-memory part with the
 index's build time. Nothing about an item is kept on disk outside Postgres. Admin status is the `users.is_admin`
@@ -1655,7 +1663,11 @@ EIRS?,34.117000
 ### Upload limits
 
 Uploads are synchronous. The largest realistic file, around a million leaves, is
-expected to validate and insert in well under a minute. Admin upload endpoints
+expected to validate and insert in well under a minute. Most of that is
+compressing it: a lexicon's words and a leave set's leaves are each stored as
+one text compressed with zstd at level 19 (see [Schema](#schema)), about ten
+seconds for CSW24's 280,887 words and twenty-five for its 914,624 leaves,
+which then take 3.8 MB and 3.9 MB where a row for each took 40 MB and 91 MB. Admin upload endpoints
 accept request bodies up to 100 MB and have a 120-second timeout, and the ALB
 idle timeout is raised to match.
 
@@ -2319,9 +2331,13 @@ by `idx` rather than repeating the key. Every level's questions come from the
 Source quiz's questions, so:
 
 - a level costs a few bytes per question: its questions and grades are packed
-  in `quiz_cards` chunks of up to 256, each question's grade, time, sync
-  sequence and device at the same place in a chunk's arrays, its idx too
-  except in the Source quiz, whose chunks hold `0 … n−1` in turn. A position
+  in `quiz_cards` chunks of up to 256: a chunk's questions as the differences
+  between their idx values (nothing at all in the Source quiz, whose chunks
+  hold `0 … n−1` in turn), its grades two bits a question, and one short
+  record per graded question for its device, sync sequence and time to the
+  second. A chunk with nothing graded stores no grades, and a cleared quiz's
+  chunks keep the grades and drop the records
+  ([Trash](#trash-restore-and-purge)). A position
   in the attempt is never stored; it comes from the seed
   ([Deterministic shuffles](#deterministic-shuffles)). A view, `quiz_questions`,
   reads the chunks back as one row per question, for tests, scripts and
@@ -2460,10 +2476,10 @@ question set is written for it; the [scale tests](#scale-tests) run there:
   memory at once. With every anagram's words included, such a file is on the
   order of tens of megabytes.
 - **Storage**: by the [storage formula](#storage-limit), a question costs
-  about 10.6 bytes in the Source quiz and 14.6 in any other level, and its key
+  about 8.8 bytes in the Source quiz and 9.8 in any other level, and its key
   plus one byte in the question index, so a full 300,000-question level is
-  about 4.4 MB, and a cascade as created (its Source quiz plus question index)
-  about 6 MB.
+  about 2.9 MB, and a cascade as created (its Source quiz plus question index)
+  about 5 MB.
   This is watched on the database dashboard. The Trash's automatic purge keeps
   cleared quizzes from piling up.
 
@@ -3379,7 +3395,7 @@ offline**. Using one device on a plane never conflicts. The rules:
 
 | Situation | Result |
 |---|---|
-| The same question graded on two devices in the same attempt | If one device had seen the other's grade (`seen_seq`), its change wins as a deliberate regrade. Otherwise the later `graded_at` wins. A grade that loses is rejected as `stale` and counted in a notice on the losing device. |
+| The same question graded on two devices in the same attempt | If one device had seen the other's grade (`seen_seq`), its change wins as a deliberate regrade. Otherwise the later `graded_at` wins; a stored grade's time is kept to the second, so of two grades in the same second the one that reaches the server later wins. A grade that loses is rejected as `stale` and counted in a notice on the losing device. |
 | The same quiz finished on two devices | The first `finish` the server receives wins. The other device's `finish` is rejected as `stale_attempt` when the first finish reset the quiz, or `not_active` when it cleared it. Its operations on the attempt seeds it created (the reset quiz's next attempt, the level it created locally) are dropped by the rebase, because the server has neither seed. The device shows: "Level 3 was finished on another device. 42 answers from this device weren't kept." |
 | A quiz restored on one device and purged on another | Whichever operation arrives first wins; the other is rejected. |
 | The same quiz restored on two devices | The first `restore_quiz` wins. The second is rejected as `not_cleared`, and its grades name an attempt seed the server never had, so the rebase drops them and counts them in the notice. |
@@ -3778,17 +3794,18 @@ CREATE TABLE lexicons (
 );
 CREATE INDEX lexicons_letter_distribution_id ON lexicons (letter_distribution_id);
 
+-- A lexicon's words, packed: one row per lexicon. The text is one line per
+-- word, `word TAB playability TAB definition LF`, the word in canonical MAGPIE
+-- notation, in upload order, compressed with zstd by the server (so Postgres
+-- stores it as it is: STORAGE EXTERNAL). Every instance reads the whole
+-- lexicon into memory and nothing queries a word in SQL; a row per word took
+-- five times the space. Upload validation checks each word, playability and
+-- definition (see File formats); a text that does not parse fails the load.
 CREATE TABLE lexicon_words (
-    lexicon_id   SMALLINT NOT NULL REFERENCES lexicons (id) ON DELETE CASCADE,
-    word         TEXT NOT NULL CHECK (char_length(word) BETWEEN 1 AND 300
-                                      AND position('?' IN word) = 0),
-                     -- MAGPIE notation; 1–15 tiles, checked on upload. 15 bracketed
-                     -- 8-byte tiles need 150 characters; 300 leaves margin.
-    playability  DOUBLE PRECISION NOT NULL
-                     CHECK (playability NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)),
-    definition   TEXT NOT NULL CHECK (char_length(definition) BETWEEN 1 AND 10000),
-    PRIMARY KEY (lexicon_id, word)
+    lexicon_id  SMALLINT PRIMARY KEY REFERENCES lexicons (id) ON DELETE CASCADE,
+    words       BYTEA NOT NULL CHECK (octet_length(words) > 0)
 );
+ALTER TABLE lexicon_words ALTER COLUMN words SET STORAGE EXTERNAL;
 
 -- At most one per lexicon. Leaves use the lexicon's letter distribution.
 CREATE TABLE leave_sets (
@@ -3800,15 +3817,14 @@ CREATE TABLE leave_sets (
     UNIQUE (id, lexicon_id)   -- target of cascades' composite foreign key
 );
 
+-- A leave set's leaves, packed as a lexicon's words are: one row per set, the
+-- text one line per leave, `leave TAB value LF`, the leave in canonical MAGPIE
+-- notation (1–6 tiles in distribution order, blanks first), compressed with zstd.
 CREATE TABLE leave_values (
-    leave_set_id  INTEGER NOT NULL REFERENCES leave_sets (id) ON DELETE CASCADE,
-    leave         TEXT NOT NULL CHECK (char_length(leave) BETWEEN 1 AND 120),
-                      -- MAGPIE notation; 1–6 tiles in distribution order, blanks first.
-                      -- 6 bracketed 8-byte tiles need 60 characters; 120 leaves margin.
-    value         DOUBLE PRECISION NOT NULL
-                      CHECK (value NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)),
-    PRIMARY KEY (leave_set_id, leave)
+    leave_set_id  INTEGER PRIMARY KEY REFERENCES leave_sets (id) ON DELETE CASCADE,
+    leaves        BYTEA NOT NULL CHECK (octet_length(leaves) > 0)
 );
+ALTER TABLE leave_values ALTER COLUMN leaves SET STORAGE EXTERNAL;
 
 -- -------------------------------------------------------------------------
 -- Filter specifications (shared by saved searches and cascades)
@@ -4126,51 +4142,125 @@ CREATE UNIQUE INDEX quizzes_one_per_segment
     WHERE origin = 'segment';
 
 -- A level's questions and their grades, packed: one row per run of up to 256
--- of its questions in idx order (a chunk), each question's state at the same
--- place in the chunk's arrays. A question's position in the attempt is never
--- stored: it is computed from the quiz's shuffle_seed (Deterministic shuffles).
--- See Storage limit for what a chunk costs.
+-- of its questions in idx order (a chunk); a question's place in that run is
+-- its slot. A question's position in the attempt is never stored: it is
+-- computed from the quiz's shuffle_seed (Deterministic shuffles). See Storage
+-- limit for what a chunk costs.
 CREATE TABLE quiz_cards (
     quiz_id      UUID NOT NULL REFERENCES quizzes (id) ON DELETE CASCADE,
     first_idx    INTEGER NOT NULL CHECK (first_idx BETWEEN 0 AND 299999),
                      -- the chunk's first question; the chunks of a quiz in
                      -- first_idx order are its questions in idx order
-    idxs         INT4[] COMPRESSION lz4,
-                     -- the chunk's questions, ascending; NULL for the Source
-                     -- quiz, whose chunk holds first_idx, first_idx + 1, …
-    grades       BYTEA COMPRESSION lz4 NOT NULL,
-                     -- one byte per question: 0 ungraded, 1 correct, 2 missed
-    graded_at    TIMESTAMPTZ[] COMPRESSION lz4 NOT NULL,
-                     -- device time, for latest-wins between devices; NULL when ungraded
-    graded_seq   INT8[] COMPRESSION lz4 NOT NULL,
-                     -- the sync sequence of the grade, for seen_seq and pulls
-    graded_by    INT2[] COMPRESSION lz4 NOT NULL,
-                     -- the device that set it, as a 1-based index into devices,
-                     -- so a device's own regrade always applies
+    n            SMALLINT NOT NULL CHECK (n BETWEEN 1 AND 256),
+                     -- the questions in the chunk
+    idxs         BYTEA COMPRESSION lz4,
+                     -- the chunk's questions after first_idx, ascending, each
+                     -- as the difference from the one before it, a LEB128
+                     -- varint; NULL for the Source quiz, whose chunk holds
+                     -- first_idx, first_idx + 1, …
+    cards        BYTEA COMPRESSION lz4,
+                     -- NULL while nothing is graded. Otherwise ceil(n / 4)
+                     -- bytes of grades, two bits a slot from the low bits up
+                     -- (0 ungraded, 1 correct, 2 missed), then one record per
+                     -- graded question in (sequence, slot) order: the slot
+                     -- (one byte), the device that set the grade as a 1-based
+                     -- index into devices (one byte; so a device's own regrade
+                     -- always applies), the sync sequence of the grade as a
+                     -- varint of its difference from the record before (from 0
+                     -- for the first; for seen_seq and pulls), and its device
+                     -- time in whole seconds since 1970 as a zigzag varint of
+                     -- its difference from the record before (latest-wins
+                     -- between devices is decided to the second). A cleared
+                     -- quiz keeps its grades and no records (Trash).
     devices      UUID[] NOT NULL DEFAULT '{}',
     updated_seq  BIGINT NOT NULL,
-                     -- the latest graded_seq here (the creation's at first), so a
-                     -- pull reads only the chunks that changed
+                     -- the latest grade's sequence here (the creation's at
+                     -- first), so a pull reads only the chunks that changed
     PRIMARY KEY (quiz_id, first_idx),
-    CHECK (octet_length(grades) BETWEEN 1 AND 256),
-    CHECK (cardinality(graded_at) = octet_length(grades)
-           AND cardinality(graded_seq) = octet_length(grades)
-           AND cardinality(graded_by) = octet_length(grades)),
-    CHECK (idxs IS NULL OR (cardinality(idxs) = octet_length(grades) AND idxs[1] = first_idx))
+    CHECK (cards IS NULL OR octet_length(cards) >= (n + 3) / 4)
 );
+
+-- A chunk as one row per question, for the view below.
+CREATE FUNCTION quiz_card_rows(first_idx INTEGER, n SMALLINT, idxs BYTEA, cards BYTEA)
+RETURNS TABLE (question_idx INTEGER, grade SMALLINT, graded_at TIMESTAMPTZ, graded_seq BIGINT, graded_by SMALLINT)
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
+    q    INTEGER[] := ARRAY[first_idx];
+    ats  BIGINT[]  := array_fill(NULL::BIGINT, ARRAY[n]);
+    seqs BIGINT[]  := array_fill(NULL::BIGINT, ARRAY[n]);
+    bys  INTEGER[] := array_fill(NULL::INTEGER, ARRAY[n]);
+    p    INTEGER := 0;
+    len  INTEGER;
+    b    INTEGER;
+    v    BIGINT;
+    sh   INTEGER;
+    slot INTEGER;
+    seq  BIGINT := 0;
+    secs BIGINT := 0;
+BEGIN
+    IF idxs IS NULL THEN
+        q := ARRAY(SELECT generate_series(first_idx, first_idx + n - 1));
+    ELSE
+        len := octet_length(idxs);
+        WHILE p < len LOOP
+            v := 0; sh := 0;
+            LOOP
+                b := get_byte(idxs, p); p := p + 1;
+                v := v | ((b & 127)::BIGINT << sh); sh := sh + 7;
+                EXIT WHEN b < 128;
+            END LOOP;
+            q := q || (q[cardinality(q)] + v::INTEGER);
+        END LOOP;
+    END IF;
+    IF cards IS NOT NULL THEN
+        p := (n + 3) / 4;
+        len := octet_length(cards);
+        WHILE p < len LOOP
+            slot := get_byte(cards, p) + 1;
+            bys[slot] := get_byte(cards, p + 1);
+            p := p + 2;
+            v := 0; sh := 0;
+            LOOP
+                b := get_byte(cards, p); p := p + 1;
+                v := v | ((b & 127)::BIGINT << sh); sh := sh + 7;
+                EXIT WHEN b < 128;
+            END LOOP;
+            seq := seq + v;
+            v := 0; sh := 0;
+            LOOP
+                b := get_byte(cards, p); p := p + 1;
+                v := v | ((b & 127)::BIGINT << sh); sh := sh + 7;
+                EXIT WHEN b < 128;
+            END LOOP;
+            secs := secs + ((v >> 1) # -(v & 1));
+            seqs[slot] := seq;
+            ats[slot] := secs;
+        END LOOP;
+    END IF;
+    FOR i IN 1 .. n LOOP
+        question_idx := q[i];
+        grade := CASE WHEN cards IS NULL THEN 0 ELSE (get_byte(cards, (i - 1) / 4) >> (2 * ((i - 1) % 4))) & 3 END;
+        graded_at := to_timestamp(ats[i]);
+        graded_seq := seqs[i];
+        graded_by := NULLIF(bys[i], 0);
+        RETURN NEXT;
+    END LOOP;
+END
+$$;
 
 -- The chunks as one row per question, as the table was before it was packed:
 -- for reading in tests, scripts and support queries, never by the server's
--- hot paths. question_idx is an index into cascades.question_keys.
+-- hot paths. question_idx is an index into cascades.question_keys. A cleared
+-- quiz's rows have a grade and no time, device or sequence.
 CREATE VIEW quiz_questions AS
 SELECT c.quiz_id,
-       coalesce(c.idxs[s.i], c.first_idx + s.i - 1) AS question_idx,
-       CASE get_byte(c.grades, s.i - 1) WHEN 1 THEN 'correct'::grade WHEN 2 THEN 'missed'::grade END AS grade,
-       c.graded_at[s.i] AS graded_at,
-       c.devices[c.graded_by[s.i]] AS graded_by_device_id,
-       c.graded_seq[s.i] AS updated_seq
+       r.question_idx,
+       CASE r.grade WHEN 1 THEN 'correct'::grade WHEN 2 THEN 'missed'::grade END AS grade,
+       r.graded_at,
+       c.devices[r.graded_by] AS graded_by_device_id,
+       r.graded_seq AS updated_seq
 FROM quiz_cards c
-CROSS JOIN LATERAL generate_series(1, octet_length(c.grades)) AS s (i);
+CROSS JOIN LATERAL quiz_card_rows(c.first_idx, c.n, c.idxs, c.cards) AS r;
 
 -- One row per finished attempt. Immutable.
 CREATE TABLE quiz_attempts (
@@ -4832,7 +4922,7 @@ person to write it copies names rather than choosing them.
 | `POST` | `/api/cascades/:id/start-over` | Body `{ id, source_quiz_id, device_id, at }`, minted per press exactly as for creation and subject to the same repeat, timestamp and `options_device_id` rules. New cascade with a copy of the spec and the same threshold and options; returns the same shape. Subject to the [storage limit](#storage-limit), with the original's questions and a copy of its spec as what it needs. |
 | `GET` | `/api/cascades/:id/cards?from=<idx>&limit=<n>&hooks=<0\|1>&definitions=<0\|1>&keys=<0\|1>`, or `?idx=<i,j,…>&hooks=…&definitions=…` | Answer cards `[{ idx, key, answer }]` for question indexes `from`…`from+limit−1` (`limit` ≤ 10,000), or for the comma-separated indexes in `idx` (at most 1,000, returned in idx order; never with `from`, `limit` or `keys`, else `400 invalid_idx`) — the player's read-ahead, which asks for the next cards in its quiz's own order. With `hooks=1`, an Anagram answer's words carry `front_hooks`, `back_hooks` and the booleans `front_inner` and `back_inner` (the word less its first, or last, tile is a word), and a Definition card carries `word`: `{ word, front_hooks, back_hooks, front_inner, back_inner }` beside its answer. The device splits each row between its `questions` store (the `key`) and its `cards` store (the rest), so eviction can take the answer and leave the question (see [On the device](#on-the-device)). With `keys=1` the response is `{ from, keys: [...] }` — the keys alone, in idx order, since the range makes every index implied — and **`limit` ≤ 100,000**, which at about 10 bytes a key is roughly the size of one 10,000-card page: a 300,000-question cascade's keys are three requests where its answers are thirty, a tenth of the cost in the shared rate bucket, and about a quarter of the bytes of cards without definitions (see [Downloads](#on-the-device)). It is what the download manager fetches first, so a cascade becomes playable and self-gradable before its answers arrive; `hooks` and `definitions` are then a `400`. A Leave Value `answer` is a JSON number written as the shortest text that round-trips the stored `f64`, which `JSON.parse` reads back exactly. Card pages are served `Cache-Control: private, no-store`, because the device keeps every byte it fetches in IndexedDB and a second copy in the browser's HTTP cache would sit outside every budget the plan states; only the questions endpoint, whose index lists are small and refetched by the pending path, keeps immutable caching. Responses are compressed. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/questions?from=<n>&limit=<n>` | The quiz's question indexes `[idx…]` in idx order, `limit` ≤ 50,000. A quiz's question set never changes, so it is served with the same immutable caching. Fetched when the device materialises a quiz; never part of a pull. `404` for another user's, a purged, or a Source quiz, whose indexes are implied. |
-| `GET` | `/api/cascades/:id/quizzes/:quiz_id/grades?from=<idx>&limit=<n>` | The quiz's graded rows for the attempt its row names, which for a cleared quiz is the attempt it finished on, as the parallel arrays a pull uses, in idx order, with the quiz row's `attempt` and `shuffle_seed` so the device can tell whether they belong to the order it holds. `from` is an **index, not an offset**, as on the card pages: the response holds the graded rows whose `question_idx` is in `from … from+limit−1`, `limit` ≤ 50,000, so the device pages the index space by `from += limit` until `from` reaches the cascade's `question_count` and a sparse page — most of a quiz's questions may be ungraded — means nothing is left behind. The questions endpoint below reads `from` the other way, as an offset into a dense list, which is why the two are written `<idx>` and `<n>`. There is no `min_updated_seq` here, which only a pull's fast path needs; the device stamps these rows with the sequence of the sync it made before the fetch. Not cacheable. Fetched when the device materialises a quiz whose rows it dropped on leaving the download window; never part of a pull. If the device's quiz row names a different attempt or seed, the device discards the response, syncs and fetches again. `404` for another user's or a purged quiz. |
+| `GET` | `/api/cascades/:id/quizzes/:quiz_id/grades?from=<idx>&limit=<n>` | The quiz's graded rows for the attempt its row names, which for a cleared quiz is the attempt it finished on (its grades each dated that finish, the quiz's `last_activity_at`, since a cleared quiz keeps no grade times), as the parallel arrays a pull uses, in idx order, with the quiz row's `attempt` and `shuffle_seed` so the device can tell whether they belong to the order it holds. `from` is an **index, not an offset**, as on the card pages: the response holds the graded rows whose `question_idx` is in `from … from+limit−1`, `limit` ≤ 50,000, so the device pages the index space by `from += limit` until `from` reaches the cascade's `question_count` and a sparse page — most of a quiz's questions may be ungraded — means nothing is left behind. The questions endpoint below reads `from` the other way, as an offset into a dense list, which is why the two are written `<idx>` and `<n>`. There is no `min_updated_seq` here, which only a pull's fast path needs; the device stamps these rows with the sequence of the sync it made before the fetch. Not cacheable. Fetched when the device materialises a quiz whose rows it dropped on leaving the download window; never part of a pull. If the device's quiz row names a different attempt or seed, the device discards the response, syncs and fetches again. `404` for another user's or a purged quiz. |
 | `POST` | `/api/cascades/:id/export-token` | Body: the export's choices, as the query of the export row below. Checks the session, `X-Acrodont-User`, the cascade and quiz, and `EXPORT_RATE_PER_MINUTE`, answering `401`, `404` and `429` with `Retry-After` exactly as any other request does, which a navigation could not show the page; on success returns `{ url }`, the export URL with a token valid for **60 seconds and one use**, bound to this user and these choices: a PASETO under the HKDF-derived export key, which any task can verify and no session validator can decrypt, its use recorded in `export_tokens_spent` (see [Exporting words](#exporting-words)). The dialog navigates a hidden `<iframe>` to it at once, and mints a new one for any retry |
 | `GET` | `/api/cascades/:id/export?scope=<cascade\|quiz>&quiz_id=<uuid>&which=<all\|correct\|missed\|ungraded>&format=<txt\|csv>&lines=<answers\|questions>&columns=<list>&order=<study\|alphabetical>&definitions=<0\|1>&hooks=<0\|1>&decimals=<0-3>&token=<token>` | The same file the device builds locally (see [Exporting words](#exporting-words)), streamed as `text/plain` or `text/csv` with a `Content-Disposition` filename. Used when the device doesn't have what the export needs. `token` is the single-use, 60-second token the row above issued for exactly these choices; it is the request's proof of account, since a download navigation cannot send a header, and an expired, reused or mismatched token answers `204 No Content`, which the dialog's hidden frame discards. `404` for another user's or a purged cascade, and for a `quiz_id` that is not this cascade's, has been purged, or is unknown. |
 | `GET` | `/api/sync/events?user=<id>&device=<id>` | Server-Sent Events: a `changed` event whenever another device of the account syncs a change (see [Telling the other devices](#telling-the-other-devices)). The session cookie, and `user` in place of `X-Acrodont-User`, which `EventSource` cannot send; a mismatch or no session is a `401`. Ends after five minutes |

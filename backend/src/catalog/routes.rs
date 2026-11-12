@@ -281,20 +281,21 @@ async fn admin_catalog(
 /// for it: these rows, plus its in-memory search index on this instance
 /// (`index_bytes`, the index's own estimate; nothing is written to disk). The
 /// rows are the item's own row in `letter_distributions`, `lexicons` or
-/// `leave_sets`, and its rows in `letter_distribution_tiles`, `lexicon_words`
-/// (words, playabilities, definitions) or `leave_values`. In each table an
+/// `leave_sets`, and its rows in `letter_distribution_tiles`, or its one packed
+/// row in `lexicon_words` (words, playabilities, definitions) or
+/// `leave_values`. In each table an
 /// item counts
 ///
 /// - every row as stored: `pg_column_size` of the whole row, which includes
-///   the tuple header and counts a TOASTed definition at its stored,
-///   compressed size, plus the row's 4-byte line pointer; and
+///   the tuple header and counts a packed text at its stored, compressed
+///   size, plus the row's 4-byte line pointer; and
 /// - its share of the table's indexes (primary key and unique constraints) by
 ///   row count, since every row has one entry in each.
 ///
 /// Page headers, padding between rows and dead rows not yet vacuumed are left
 /// out, so the figures add up to a little less than the tables' size on disk.
-/// Each table is scanned once per request (about 50 ms per 300,000 words),
-/// which keeps the figure exact without storing a derived column.
+/// Each table is scanned once per request, which keeps the figure exact
+/// without storing a derived column.
 struct RowBytes {
     distributions: HashMap<i64, i64>,
     lexicons: HashMap<i64, i64>,
@@ -524,12 +525,19 @@ async fn upload_lexicon(
                 "there is no letter distribution named {dist_name:?}"
             ))
         })?;
-    let words = tokio::task::spawn_blocking(move || upload::parse_lexicon(&bytes, &dist))
-        .await
-        .map_err(|e| ApiError::Internal(e.into()))?
-        .map_err(upload_errors)?;
+    // Parsed and packed (compressed) off the async threads, before the transaction opens.
+    let (word_count, packed) = tokio::task::spawn_blocking(move || {
+        upload::parse_lexicon(&bytes, &dist).map(|words| {
+            let packed = store::pack_words(words.iter().map(|w| (w.word.as_str(), w.playability, w.definition.as_str())));
+            (words.len(), packed)
+        })
+    })
+    .await
+    .map_err(|e| ApiError::Internal(e.into()))?
+    .map_err(upload_errors)?;
+    let packed = packed.map_err(|e| ApiError::Internal(e.into()))?;
     let mut tx = state.db.begin().await?;
-    let id = match store::insert_lexicon(&mut tx, &name, dist_id, user.id, &words).await {
+    let id = match store::insert_lexicon(&mut tx, &name, dist_id, user.id, word_count, &packed).await {
         Ok(id) => id,
         Err(sqlx::Error::Database(d)) if d.constraint() == Some("lexicons_name_key") => {
             return Err(form_error(format!(
@@ -543,7 +551,7 @@ async fn upload_lexicon(
     trigger_reconcile(&state);
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "id": id, "name": name, "letter_distribution": dist_name, "word_count": words.len() })),
+        Json(json!({ "id": id, "name": name, "letter_distribution": dist_name, "word_count": word_count })),
     )
         .into_response())
 }
@@ -576,12 +584,18 @@ async fn upload_leaves(
     let dist = store::load_distribution(&state.db, row.letter_distribution_id)
         .await?
         .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("lexicon without distribution")))?;
-    let leaves = tokio::task::spawn_blocking(move || upload::parse_leaves(&bytes, &dist))
-        .await
-        .map_err(|e| ApiError::Internal(e.into()))?
-        .map_err(upload_errors)?;
+    let (leave_count, packed) = tokio::task::spawn_blocking(move || {
+        upload::parse_leaves(&bytes, &dist).map(|leaves| {
+            let packed = store::pack_leaves(leaves.iter().map(|l| (l.leave.as_str(), l.value)));
+            (leaves.len(), packed)
+        })
+    })
+    .await
+    .map_err(|e| ApiError::Internal(e.into()))?
+    .map_err(upload_errors)?;
+    let packed = packed.map_err(|e| ApiError::Internal(e.into()))?;
     let mut tx = state.db.begin().await?;
-    let id = match store::insert_leave_set(&mut tx, row.id, user.id, &leaves).await {
+    let id = match store::insert_leave_set(&mut tx, row.id, user.id, leave_count, &packed).await {
         Ok(id) => id,
         Err(sqlx::Error::Database(d)) if d.constraint() == Some("leave_sets_lexicon_id_key") => {
             return Err(form_error(format!("{lexicon} already has leave values")));
@@ -593,7 +607,7 @@ async fn upload_leaves(
     trigger_reconcile(&state);
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "id": id, "lexicon": lexicon, "leave_count": leaves.len() })),
+        Json(json!({ "id": id, "lexicon": lexicon, "leave_count": leave_count })),
     )
         .into_response())
 }

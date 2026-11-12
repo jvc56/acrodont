@@ -445,8 +445,8 @@ async fn a_million_row_leave_upload(pool: sqlx::PgPool) {
     let file = leave_csv();
     let (_, took) = upload(&mut admin, "/api/admin/leave-sets", &[("lexicon", "SMALL")], "SMALL-leaves.csv", file.as_bytes()).await;
     report("leave upload", took, UPLOAD_TIMEOUT, &format!("{LEAVE_ROWS} rows, {} bytes", file.len()));
-    let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM leave_values").fetch_one(app.db()).await.unwrap();
-    assert_eq!(stored as usize, LEAVE_ROWS);
+    let packed: Vec<u8> = sqlx::query_scalar("SELECT leaves FROM leave_values").fetch_one(app.db()).await.unwrap();
+    assert_eq!(acrodont::catalog::store::unpack_leaves(&packed).unwrap().len(), LEAVE_ROWS);
     assert!(took <= UPLOAD_TIMEOUT);
 }
 

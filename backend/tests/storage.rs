@@ -12,6 +12,7 @@ use common::sync::{assert_storage_consistent, play_and_finish, result, rows, Dev
 use common::{Client, TestApp};
 use serde_json::{json, Value};
 use uuid::Uuid;
+use acrodont::cascade::rules::Grade;
 use acrodont::storage::{attempt_bytes, level_bytes, ROW_BYTES};
 
 fn length(min: i64, max: i64) -> Value {
@@ -359,37 +360,28 @@ async fn total_size(app: &TestApp, tables: &[String]) -> i64 {
 }
 
 /// Grades every question of a quiz in the database as a study session would:
-/// in play order, a few seconds apart, about one sync's sequence per twenty
-/// grades, every other one missed.
+/// in play order, a few seconds apart with breaks, a sync's sequence for each grade (a
+/// device online syncs after every one), every other one missed.
 async fn grade_half_missed(app: &TestApp, quiz: Uuid) {
     let order = common::sync::positions(app, quiz).await;
     let pos: std::collections::HashMap<u32, usize> = order.iter().enumerate().map(|(p, &i)| (i as u32, p)).collect();
     let device = Uuid::new_v4();
     let start = chrono::Utc::now();
     let mut conn = app.db().acquire().await.unwrap();
+    // 1.5 to 9 seconds a question, unevenly, and a break of some hours every 400.
+    let mut at_ms = Vec::with_capacity(order.len());
+    let mut t = 0i64;
+    for p in 0..order.len() as i64 {
+        t += 1_500 + (p * 7_919) % 7_500 + if p % 400 == 399 { 3_600_000 + (p * 104_729) % 80_000_000 } else { 0 };
+        at_ms.push(t);
+    }
     for mut c in acrodont::cards::load(&mut conn, quiz).await.unwrap() {
-        c.devices = vec![device];
         for slot in 0..c.len() {
             let p = pos[&c.idx(slot)];
-            c.grades[slot] = if p.is_multiple_of(2) { 1 } else { 2 };
-            c.graded_at[slot] = Some(start + chrono::Duration::milliseconds(3_217 * p as i64));
-            c.graded_seq[slot] = Some(1_000 + (p / 20) as i64);
-            c.graded_by[slot] = Some(1);
+            let g = if p.is_multiple_of(2) { Grade::Correct } else { Grade::Missed };
+            c.set(slot, g, start + chrono::Duration::milliseconds(at_ms[p]), 1_000 + p as i64, device);
         }
-        sqlx::query(
-            "UPDATE quiz_cards SET grades = $3, graded_at = $4, graded_seq = $5, graded_by = $6, devices = $7
-             WHERE quiz_id = $1 AND first_idx = $2",
-        )
-        .bind(c.quiz_id)
-        .bind(c.first_idx)
-        .bind(&c.grades)
-        .bind(&c.graded_at)
-        .bind(&c.graded_seq)
-        .bind(&c.graded_by)
-        .bind(&c.devices)
-        .execute(&mut *conn)
-        .await
-        .unwrap();
+        acrodont::cards::store(&mut conn, &c).await.unwrap();
     }
     sqlx::query(
         "UPDATE quizzes SET correct_count = (SELECT count(*) FROM quiz_questions WHERE quiz_id = $1 AND grade = 'correct'),
@@ -409,7 +401,8 @@ async fn grade_half_missed(app: &TestApp, quiz: Uuid) {
 ///
 /// A 20,000-question anagram cascade made from a 20,000-entry In Word List,
 /// studied through two finishes with half missed (Levels 2 and 3, each
-/// finish's attempt row), Level 3 left graded. Its live rows are then copied
+/// finish's attempt row), and then every level graded, since the formula
+/// counts a question at its graded size. Its live rows are then copied
 /// into fresh tables made `LIKE … INCLUDING ALL` (every index), and
 /// `pg_total_relation_size` of the copies is the measurement: the rows the
 /// account holds, without the dead row versions studying leaves for vacuum,
@@ -441,14 +434,19 @@ async fn the_formula_is_within_20_percent_of_what_postgres_measures(pool: sqlx::
     let user = admin.user_id.unwrap();
     let mut d = Device::new(admin);
     d.sync_all(vec![]).await;
+    let mut levels = vec![quiz];
     for _ in 0..2 {
         grade_half_missed(&app, quiz).await;
         let (f, new) = common::sync::finish_op(&app, &mut d, quiz, "777").await;
         let r = d.sync(vec![f]).await;
         assert_eq!(result(&r, 0)["outcome"], "descended", "{:?}", r.json());
         quiz = new;
+        levels.push(quiz);
     }
-    grade_half_missed(&app, quiz).await;
+    // Every level graded: what the formula counts a level at.
+    for q in levels {
+        grade_half_missed(&app, q).await;
+    }
     let formula = assert_storage_consistent(&app, user).await;
     let grown = total_size(&app, &real).await - before;
 
@@ -484,7 +482,7 @@ async fn the_formula_is_within_20_percent_of_what_postgres_measures(pool: sqlx::
     // which counts a fixed size for each question, may count more than
     // Postgres stores, but never less, and not more than twice as much.
     let (chunks, cards, indexed): (i64, i64, i64) = sqlx::query_as(
-        "SELECT count(*), coalesce(sum(octet_length(grades)), 0)::int8, coalesce(sum(cardinality(idxs)), 0)::int8
+        "SELECT count(*), coalesce(sum(n), 0)::int8, coalesce(sum(n) FILTER (WHERE idxs IS NOT NULL), 0)::int8
          FROM quiz_cards WHERE quiz_id IN (SELECT id FROM quizzes WHERE cascade_id = $1)",
     )
     .bind(cascade)

@@ -184,17 +184,18 @@ CREATE TABLE lexicons (
 );
 CREATE INDEX lexicons_letter_distribution_id ON lexicons (letter_distribution_id);
 
+-- A lexicon's words, packed: one row per lexicon. The text is one line per
+-- word, `word TAB playability TAB definition LF`, the word in canonical MAGPIE
+-- notation, in upload order, compressed with zstd by the server (so Postgres
+-- stores it as it is: STORAGE EXTERNAL). Every instance reads the whole
+-- lexicon into memory and nothing queries a word in SQL; a row per word took
+-- five times the space. Upload validation checks each word, playability and
+-- definition (see File formats); a text that does not parse fails the load.
 CREATE TABLE lexicon_words (
-    lexicon_id   SMALLINT NOT NULL REFERENCES lexicons (id) ON DELETE CASCADE,
-    word         TEXT NOT NULL CHECK (char_length(word) BETWEEN 1 AND 300
-                                      AND position('?' IN word) = 0),
-                     -- MAGPIE notation; 1–15 tiles, checked on upload. 15 bracketed
-                     -- 8-byte tiles need 150 characters; 300 leaves margin.
-    playability  DOUBLE PRECISION NOT NULL
-                     CHECK (playability NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)),
-    definition   TEXT NOT NULL CHECK (char_length(definition) BETWEEN 1 AND 10000),
-    PRIMARY KEY (lexicon_id, word)
+    lexicon_id  SMALLINT PRIMARY KEY REFERENCES lexicons (id) ON DELETE CASCADE,
+    words       BYTEA NOT NULL CHECK (octet_length(words) > 0)
 );
+ALTER TABLE lexicon_words ALTER COLUMN words SET STORAGE EXTERNAL;
 
 -- At most one per lexicon. Leaves use the lexicon's letter distribution.
 CREATE TABLE leave_sets (
@@ -206,15 +207,14 @@ CREATE TABLE leave_sets (
     UNIQUE (id, lexicon_id)   -- target of cascades' composite foreign key
 );
 
+-- A leave set's leaves, packed as a lexicon's words are: one row per set, the
+-- text one line per leave, `leave TAB value LF`, the leave in canonical MAGPIE
+-- notation (1–6 tiles in distribution order, blanks first), compressed with zstd.
 CREATE TABLE leave_values (
-    leave_set_id  INTEGER NOT NULL REFERENCES leave_sets (id) ON DELETE CASCADE,
-    leave         TEXT NOT NULL CHECK (char_length(leave) BETWEEN 1 AND 120),
-                      -- MAGPIE notation; 1–6 tiles in distribution order, blanks first.
-                      -- 6 bracketed 8-byte tiles need 60 characters; 120 leaves margin.
-    value         DOUBLE PRECISION NOT NULL
-                      CHECK (value NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)),
-    PRIMARY KEY (leave_set_id, leave)
+    leave_set_id  INTEGER PRIMARY KEY REFERENCES leave_sets (id) ON DELETE CASCADE,
+    leaves        BYTEA NOT NULL CHECK (octet_length(leaves) > 0)
 );
+ALTER TABLE leave_values ALTER COLUMN leaves SET STORAGE EXTERNAL;
 
 -- -------------------------------------------------------------------------
 -- Filter specifications (shared by saved searches and cascades)
@@ -533,51 +533,125 @@ CREATE UNIQUE INDEX quizzes_one_per_segment
     WHERE origin = 'segment';
 
 -- A level's questions and their grades, packed: one row per run of up to 256
--- of its questions in idx order (a chunk), each question's state at the same
--- place in the chunk's arrays. A question's position in the attempt is never
--- stored: it is computed from the quiz's shuffle_seed (Deterministic shuffles).
--- See Storage limit for what a chunk costs.
+-- of its questions in idx order (a chunk); a question's place in that run is
+-- its slot. A question's position in the attempt is never stored: it is
+-- computed from the quiz's shuffle_seed (Deterministic shuffles). See Storage
+-- limit for what a chunk costs.
 CREATE TABLE quiz_cards (
     quiz_id      UUID NOT NULL REFERENCES quizzes (id) ON DELETE CASCADE,
     first_idx    INTEGER NOT NULL CHECK (first_idx BETWEEN 0 AND 299999),
                      -- the chunk's first question; the chunks of a quiz in
                      -- first_idx order are its questions in idx order
-    idxs         INT4[] COMPRESSION lz4,
-                     -- the chunk's questions, ascending; NULL for the Source
-                     -- quiz, whose chunk holds first_idx, first_idx + 1, …
-    grades       BYTEA COMPRESSION lz4 NOT NULL,
-                     -- one byte per question: 0 ungraded, 1 correct, 2 missed
-    graded_at    TIMESTAMPTZ[] COMPRESSION lz4 NOT NULL,
-                     -- device time, for latest-wins between devices; NULL when ungraded
-    graded_seq   INT8[] COMPRESSION lz4 NOT NULL,
-                     -- the sync sequence of the grade, for seen_seq and pulls
-    graded_by    INT2[] COMPRESSION lz4 NOT NULL,
-                     -- the device that set it, as a 1-based index into devices,
-                     -- so a device's own regrade always applies
+    n            SMALLINT NOT NULL CHECK (n BETWEEN 1 AND 256),
+                     -- the questions in the chunk
+    idxs         BYTEA COMPRESSION lz4,
+                     -- the chunk's questions after first_idx, ascending, each
+                     -- as the difference from the one before it, a LEB128
+                     -- varint; NULL for the Source quiz, whose chunk holds
+                     -- first_idx, first_idx + 1, …
+    cards        BYTEA COMPRESSION lz4,
+                     -- NULL while nothing is graded. Otherwise ceil(n / 4)
+                     -- bytes of grades, two bits a slot from the low bits up
+                     -- (0 ungraded, 1 correct, 2 missed), then one record per
+                     -- graded question in (sequence, slot) order: the slot
+                     -- (one byte), the device that set the grade as a 1-based
+                     -- index into devices (one byte; so a device's own regrade
+                     -- always applies), the sync sequence of the grade as a
+                     -- varint of its difference from the record before (from 0
+                     -- for the first; for seen_seq and pulls), and its device
+                     -- time in whole seconds since 1970 as a zigzag varint of
+                     -- its difference from the record before (latest-wins
+                     -- between devices is decided to the second). A cleared
+                     -- quiz keeps its grades and no records (Trash).
     devices      UUID[] NOT NULL DEFAULT '{}',
     updated_seq  BIGINT NOT NULL,
-                     -- the latest graded_seq here (the creation's at first), so a
-                     -- pull reads only the chunks that changed
+                     -- the latest grade's sequence here (the creation's at
+                     -- first), so a pull reads only the chunks that changed
     PRIMARY KEY (quiz_id, first_idx),
-    CHECK (octet_length(grades) BETWEEN 1 AND 256),
-    CHECK (cardinality(graded_at) = octet_length(grades)
-           AND cardinality(graded_seq) = octet_length(grades)
-           AND cardinality(graded_by) = octet_length(grades)),
-    CHECK (idxs IS NULL OR (cardinality(idxs) = octet_length(grades) AND idxs[1] = first_idx))
+    CHECK (cards IS NULL OR octet_length(cards) >= (n + 3) / 4)
 );
+
+-- A chunk as one row per question, for the view below.
+CREATE FUNCTION quiz_card_rows(first_idx INTEGER, n SMALLINT, idxs BYTEA, cards BYTEA)
+RETURNS TABLE (question_idx INTEGER, grade SMALLINT, graded_at TIMESTAMPTZ, graded_seq BIGINT, graded_by SMALLINT)
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
+    q    INTEGER[] := ARRAY[first_idx];
+    ats  BIGINT[]  := array_fill(NULL::BIGINT, ARRAY[n]);
+    seqs BIGINT[]  := array_fill(NULL::BIGINT, ARRAY[n]);
+    bys  INTEGER[] := array_fill(NULL::INTEGER, ARRAY[n]);
+    p    INTEGER := 0;
+    len  INTEGER;
+    b    INTEGER;
+    v    BIGINT;
+    sh   INTEGER;
+    slot INTEGER;
+    seq  BIGINT := 0;
+    secs BIGINT := 0;
+BEGIN
+    IF idxs IS NULL THEN
+        q := ARRAY(SELECT generate_series(first_idx, first_idx + n - 1));
+    ELSE
+        len := octet_length(idxs);
+        WHILE p < len LOOP
+            v := 0; sh := 0;
+            LOOP
+                b := get_byte(idxs, p); p := p + 1;
+                v := v | ((b & 127)::BIGINT << sh); sh := sh + 7;
+                EXIT WHEN b < 128;
+            END LOOP;
+            q := q || (q[cardinality(q)] + v::INTEGER);
+        END LOOP;
+    END IF;
+    IF cards IS NOT NULL THEN
+        p := (n + 3) / 4;
+        len := octet_length(cards);
+        WHILE p < len LOOP
+            slot := get_byte(cards, p) + 1;
+            bys[slot] := get_byte(cards, p + 1);
+            p := p + 2;
+            v := 0; sh := 0;
+            LOOP
+                b := get_byte(cards, p); p := p + 1;
+                v := v | ((b & 127)::BIGINT << sh); sh := sh + 7;
+                EXIT WHEN b < 128;
+            END LOOP;
+            seq := seq + v;
+            v := 0; sh := 0;
+            LOOP
+                b := get_byte(cards, p); p := p + 1;
+                v := v | ((b & 127)::BIGINT << sh); sh := sh + 7;
+                EXIT WHEN b < 128;
+            END LOOP;
+            secs := secs + ((v >> 1) # -(v & 1));
+            seqs[slot] := seq;
+            ats[slot] := secs;
+        END LOOP;
+    END IF;
+    FOR i IN 1 .. n LOOP
+        question_idx := q[i];
+        grade := CASE WHEN cards IS NULL THEN 0 ELSE (get_byte(cards, (i - 1) / 4) >> (2 * ((i - 1) % 4))) & 3 END;
+        graded_at := to_timestamp(ats[i]);
+        graded_seq := seqs[i];
+        graded_by := NULLIF(bys[i], 0);
+        RETURN NEXT;
+    END LOOP;
+END
+$$;
 
 -- The chunks as one row per question, as the table was before it was packed:
 -- for reading in tests, scripts and support queries, never by the server's
--- hot paths. question_idx is an index into cascades.question_keys.
+-- hot paths. question_idx is an index into cascades.question_keys. A cleared
+-- quiz's rows have a grade and no time, device or sequence.
 CREATE VIEW quiz_questions AS
 SELECT c.quiz_id,
-       coalesce(c.idxs[s.i], c.first_idx + s.i - 1) AS question_idx,
-       CASE get_byte(c.grades, s.i - 1) WHEN 1 THEN 'correct'::grade WHEN 2 THEN 'missed'::grade END AS grade,
-       c.graded_at[s.i] AS graded_at,
-       c.devices[c.graded_by[s.i]] AS graded_by_device_id,
-       c.graded_seq[s.i] AS updated_seq
+       r.question_idx,
+       CASE r.grade WHEN 1 THEN 'correct'::grade WHEN 2 THEN 'missed'::grade END AS grade,
+       r.graded_at,
+       c.devices[r.graded_by] AS graded_by_device_id,
+       r.graded_seq AS updated_seq
 FROM quiz_cards c
-CROSS JOIN LATERAL generate_series(1, octet_length(c.grades)) AS s (i);
+CROSS JOIN LATERAL quiz_card_rows(c.first_idx, c.n, c.idxs, c.cards) AS r;
 
 -- One row per finished attempt. Immutable.
 CREATE TABLE quiz_attempts (

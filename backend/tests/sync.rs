@@ -559,7 +559,7 @@ async fn latest_wins_whole(pool: sqlx::PgPool) {
 /// with an earlier graded_at applies; another device's earlier grade is
 /// stale unless its seen_seq covers the current grade; a grade a year ahead
 /// is stored at now() + 5 minutes and loses to a real grade ten minutes
-/// later; a grade's `at` is stored as graded_at.
+/// later; a grade's `at` is stored as graded_at, to the second.
 #[sqlx::test]
 async fn grade_conflicts(pool: sqlx::PgPool) {
     let app = app(pool).await;
@@ -581,7 +581,7 @@ async fn grade_conflicts(pool: sqlx::PgPool) {
         .fetch_one(app.db())
         .await
         .unwrap();
-    assert!((stored - now).num_milliseconds().abs() < 2, "at is stored as graded_at");
+    assert_eq!(stored, acrodont::cards::to_second(now), "at is stored as graded_at, cut to the second");
     // Own regrade, earlier time: applies.
     let o = g(&mut a, 0, "missed", now - Duration::minutes(1));
     assert_eq!(result(&a.sync(vec![o]).await, 0)["status"], "applied");

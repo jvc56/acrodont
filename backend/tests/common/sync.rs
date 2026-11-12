@@ -156,8 +156,9 @@ pub async fn tiny_lexicon(app: &TestApp) -> i16 {
     .fetch_one(app.db())
     .await
     .unwrap();
-    sqlx::query("INSERT INTO lexicon_words (lexicon_id, word, playability, definition) VALUES ($1, 'A', 1, 'a')")
+    sqlx::query("INSERT INTO lexicon_words (lexicon_id, words) VALUES ($1, $2)")
         .bind(l)
+        .bind(acrodont::catalog::store::pack_words([("A", 1.0, "a")].into_iter()).unwrap())
         .execute(app.db())
         .await
         .unwrap();
@@ -324,42 +325,16 @@ pub async fn write_grades(
     let mut conn = app.db().acquire().await.unwrap();
     for mut c in acrodont::cards::load(&mut conn, quiz).await.unwrap() {
         let mut changed = false;
-        let by = match c.devices.iter().position(|d| *d == device) {
-            Some(i) => i + 1,
-            None => {
-                c.devices.push(device);
-                c.devices.len()
-            }
-        } as i16;
         let stamp = seq.unwrap_or(c.updated_seq);
         for slot in 0..c.len() {
             if let Some(g) = grade(c.idx(slot)) {
-                c.grades[slot] = acrodont::cards::grade_byte(Some(g));
-                c.graded_at[slot] = Some(at);
-                c.graded_seq[slot] = Some(stamp);
-                c.graded_by[slot] = Some(by);
+                c.set(slot, g, at, stamp, device);
                 changed = true;
             }
         }
-        if !changed {
-            continue;
+        if changed {
+            acrodont::cards::store(&mut conn, &c).await.unwrap();
         }
-        sqlx::query(
-            "UPDATE quiz_cards SET grades = $3, graded_at = $4, graded_seq = $5, graded_by = $6, devices = $7,
-                                   updated_seq = greatest(updated_seq, $8)
-             WHERE quiz_id = $1 AND first_idx = $2",
-        )
-        .bind(c.quiz_id)
-        .bind(c.first_idx)
-        .bind(&c.grades)
-        .bind(&c.graded_at)
-        .bind(&c.graded_seq)
-        .bind(&c.graded_by)
-        .bind(&c.devices)
-        .bind(stamp)
-        .execute(&mut *conn)
-        .await
-        .unwrap();
     }
 }
 
@@ -456,8 +431,8 @@ pub async fn insert_cleared_chains(app: &TestApp, user: Uuid, s: &Setup, n: i32,
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO quiz_cards (quiz_id, first_idx, idxs, grades, graded_at, graded_seq, graded_by, devices, updated_seq)
-         SELECT id, 0, ARRAY[0], '\\x01'::bytea, ARRAY[now()], ARRAY[$2::int8], ARRAY[1::int2], ARRAY[gen_random_uuid()], $2
+        "INSERT INTO quiz_cards (quiz_id, first_idx, n, idxs, cards, updated_seq)
+         SELECT id, 0, 1, ''::bytea, '\\x01'::bytea, $2
          FROM quizzes WHERE origin_quiz_id = $1 AND status = 'cleared' AND created_seq = $2",
     )
     .bind(s.source_id)

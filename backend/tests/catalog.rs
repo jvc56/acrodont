@@ -304,10 +304,10 @@ async fn leave_upload_rules(pool: sqlx::PgPool) {
         )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
-    let leaves: Vec<String> = sqlx::query_scalar("SELECT leave FROM leave_values ORDER BY leave")
-        .fetch_all(app.db())
-        .await
-        .unwrap();
+    let packed: Vec<u8> = sqlx::query_scalar("SELECT leaves FROM leave_values").fetch_one(app.db()).await.unwrap();
+    let mut leaves: Vec<String> =
+        acrodont::catalog::store::unpack_leaves(&packed).unwrap().into_iter().map(|(leave, _)| leave).collect();
+    leaves.sort();
     assert_eq!(
         leaves,
         ["?", "?ES"],

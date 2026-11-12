@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT attempt, shuffle_seed FROM quizzes WHERE id = $1 AND cascade_id = $2 AND user_id = $3",
+  "query": "SELECT attempt, shuffle_seed, last_activity_at FROM quizzes WHERE id = $1 AND cascade_id = $2 AND user_id = $3",
   "describe": {
     "columns": [
       {
@@ -24,6 +24,17 @@
             "name": "shuffle_seed"
           }
         }
+      },
+      {
+        "ordinal": 2,
+        "name": "last_activity_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "quizzes",
+            "name": "last_activity_at"
+          }
+        }
       }
     ],
     "parameters": {
@@ -35,8 +46,9 @@
     },
     "nullable": [
       false,
+      false,
       false
     ]
   },
-  "hash": "3ae520537d59bd66b2295ccda49fd58ecf9502fdbfed92fcd969998d47f1c172"
+  "hash": "01a8903e249a4361625b1d37832ad430d499e0dd1cdc3ef07749c70218834eee"
 }
