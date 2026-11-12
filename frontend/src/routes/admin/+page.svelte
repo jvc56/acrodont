@@ -77,7 +77,7 @@
 {#if notFound}
 	<NotFound />
 {:else}
-	<main class="mx-auto grid max-w-6xl gap-6 p-6">
+	<main class="mx-auto grid max-w-6xl gap-6 p-4 sm:p-6">
 		<header class="flex flex-wrap items-center justify-between gap-3">
 			<h1 class="text-2xl font-semibold">Catalog</h1>
 			<div class="flex flex-wrap gap-2">
@@ -97,7 +97,7 @@
 			<Card.Root>
 				<Card.Header><Card.Title>Letter distributions</Card.Title></Card.Header>
 				<Card.Content>
-					<Table.Root>
+					<Table.Root class="max-sm:[&_td]:whitespace-normal max-sm:[&_th]:whitespace-normal">
 						<Table.Header>
 							<Table.Row>
 								<Table.Head>Name</Table.Head><Table.Head>Tiles</Table.Head>
@@ -137,7 +137,7 @@
 			<Card.Root>
 				<Card.Header><Card.Title>Lexicons</Card.Title></Card.Header>
 				<Card.Content>
-					<Table.Root>
+					<Table.Root class="max-sm:[&_td]:whitespace-normal max-sm:[&_th]:whitespace-normal">
 						<Table.Header>
 							<Table.Row>
 								<Table.Head>Name</Table.Head><Table.Head>Distribution</Table.Head>
@@ -181,7 +181,7 @@
 			<Card.Root>
 				<Card.Header><Card.Title>Leave values</Card.Title></Card.Header>
 				<Card.Content>
-					<Table.Root>
+					<Table.Root class="max-sm:[&_td]:whitespace-normal max-sm:[&_th]:whitespace-normal">
 						<Table.Header>
 							<Table.Row>
 								<Table.Head>Lexicon</Table.Head><Table.Head>Leaves</Table.Head>

@@ -114,7 +114,7 @@
 	}
 </script>
 
-<main class="mx-auto max-w-4xl p-6">
+<main class="mx-auto max-w-4xl p-4 sm:p-6">
 	<header class="mb-6 flex flex-wrap items-center justify-between gap-4">
 		<div class="min-w-56 flex-1">
 			<h1 class="text-2xl font-semibold">Cascades</h1>
@@ -166,8 +166,9 @@
 		     this device, and Move to Trash. Everything else is in the player. -->
 		<ul class="divide-y rounded-lg border">
 			{#each list as s (s.cascade.id)}
-				<li class="flex items-center gap-x-4 px-4 py-2.5">
-					<div class="min-w-0 flex-1">
+				<!-- On a phone the size, badge and Trash wrap below the name, so the name keeps the width. -->
+				<li class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5">
+					<div class="min-w-0 flex-1 basis-full sm:basis-0">
 						<div class="flex min-w-0 items-baseline gap-2">
 							<a class="min-w-0 truncate font-medium underline-offset-2 hover:underline" href={`/cascades/${s.cascade.id}`} title={s.cascade.name}>{s.cascade.name}</a>
 							<span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
@@ -176,13 +177,13 @@
 						</div>
 						<p class="truncate text-xs text-muted-foreground" title={ladderText(s.levels)}>{ladderText(s.levels)}</p>
 					</div>
-					<div class="flex shrink-0 items-center gap-2">
-						<span class="text-xs text-muted-foreground tabular-nums" title={sizeTitle(s)} data-cascade-storage>{formatBytes(s.cascade.storage_bytes ?? 0)}</span>
-						<span class="rounded bg-muted px-2 py-0.5 text-xs">{badge(s)}</span>
+					<div class="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:shrink-0">
+						<span class="shrink-0 text-xs text-muted-foreground tabular-nums" title={sizeTitle(s)} data-cascade-storage>{formatBytes(s.cascade.storage_bytes ?? 0)}</span>
+						<span class="min-w-0 rounded bg-muted px-2 py-0.5 text-xs">{badge(s)}</span>
 						<Button
 							size="icon-sm"
 							variant="ghost"
-							class="hover:text-destructive"
+							class="ml-auto shrink-0 hover:text-destructive sm:ml-0"
 							onclick={() => trash(s)}
 							aria-label="Move to Trash"
 							title="Move to Trash"
