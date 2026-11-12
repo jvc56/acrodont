@@ -86,7 +86,7 @@ test('segments and progression', async ({ page }) => {
 	await expect(dialog).toHaveCount(0);
 	// Written once the Cascades page's options summary says so.
 	await page.goto('/cascades');
-	await expect(page.getByText(/· drill/).first()).toBeVisible();
+	await expect(page.getByTitle(/· drill/).first()).toBeAttached();
 	await page.goto(player);
 	d = await settings(page);
 	await expect(d.getByLabel('When a quiz is finished below the clear threshold')).toHaveValue('ladder');

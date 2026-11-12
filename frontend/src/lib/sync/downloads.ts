@@ -122,7 +122,7 @@ export interface DownloadOptions {
 	/** ROW_STORAGE_BUDGET and the answer soft limit; tests shrink them. */
 	rowBudget?: number;
 	answerLimit?: number;
-	/** Figures for the Account page's storage line. */
+	/** The device's totals, kept on the account's `accounts` row. */
 	onTotals?: (t: { rows: number; keys: number; answer_bytes: number }) => void;
 }
 

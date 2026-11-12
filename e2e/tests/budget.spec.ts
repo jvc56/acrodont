@@ -15,6 +15,9 @@ const countFor = (page: Page, store: string, cascade: string) =>
 
 const idOf = (path: string) => path.split('/').pop()!;
 
+/** Every question row this device holds, of any cascade. */
+const held = (page: Page) => idb<number>(page, `return await req(db.transaction('quiz_questions').objectStore('quiz_questions').count());`);
+
 test('over the answer limit with two automatic keeps @env @answers', async ({ page, context }) => {
 	test.setTimeout(300_000);
 	await newUser(page, 'ans');
@@ -26,7 +29,8 @@ test('over the answer limit with two automatic keeps @env @answers', async ({ pa
 	await expect(page.getByText('1 / 83')).toBeVisible({ timeout: 30_000 });
 	await page.goto('/cascades');
 	await expect(entry(page, 'Answers A').getByText('Available offline')).toBeVisible({ timeout: 60_000 });
-	await page.goto(await plainCascade(page, 'Answers B', 5, 15));
+	const b = idOf(await plainCascade(page, 'Answers B', 5, 15));
+	await page.goto(`/cascades/${b}`);
 	await expect(page.getByText('1 / 37')).toBeVisible({ timeout: 30_000 });
 	await page.goto('/cascades');
 	await expect(entry(page, 'Answers B').getByText('Available offline')).toBeVisible({ timeout: 60_000 });
@@ -36,14 +40,9 @@ test('over the answer limit with two automatic keeps @env @answers', async ({ pa
 	await expect.poll(() => countFor(page, 'cards', a), { timeout: 60_000 }).toBe(0);
 	expect(await countFor(page, 'questions', a)).toBe(83);
 
-	// The Account page lists both, with answer and key sizes.
-	await page.goto('/account');
-	await expect(page.getByRole('heading', { name: 'Cascades on this device' })).toBeVisible({ timeout: 30_000 });
-	for (const name of ['Answers A', 'Answers B']) {
-		const row = page.getByRole('row').filter({ hasText: name });
-		await expect(row).toBeVisible({ timeout: 30_000 });
-		await expect(row.getByRole('cell').filter({ hasText: /^\d+(\.\d)? (B|KB|MB)$/ })).toHaveCount(2);
-	}
+	// The device still holds both cascades' question rows.
+	expect(await countFor(page, 'quiz_questions', a)).toBeGreaterThan(0);
+	expect(await countFor(page, 'quiz_questions', b)).toBeGreaterThan(0);
 	await page.evaluate(async () => {
 		await navigator.serviceWorker.ready;
 	});
@@ -88,19 +87,16 @@ test('over ROW_STORAGE_BUDGET: unkept first, then the automatic keeps; drops sta
 
 	// A second automatic keep (37 questions): still over with nothing unkept left,
 	// the oldest automatic keep goes once its player closes, then the next.
-	await createCascade(page, { name: 'Budget A2', min: 5, max: 15 });
+	const a2 = idOf(await createCascade(page, { name: 'Budget A2', min: 5, max: 15 }));
 	await expect(page.getByText('1 / 37')).toBeVisible({ timeout: 30_000 });
 	await page.goto('/cascades');
 	for (const name of ['Budget U', 'Budget A1', 'Budget A2']) {
 		await expect(entry(page, name).getByText('Not downloaded on this device, open to download')).toBeVisible({ timeout: 60_000 });
 	}
 
-	// The storage line: the total against the lowered budget, and no cascade listed with nothing behind it.
-	await page.goto('/account');
-	const total = page.getByText(/^Rows and question keys: /);
-	await expect(page.getByText(/^Rows and question keys: [\d.]+ (B|KB) of 5\.0 KB\.$/)).toBeVisible();
-	await expect(page.getByRole('row').filter({ hasText: /Budget/ })).toHaveCount(0);
-	const steady = await total.textContent();
+	// None of the three holds a question row on the device.
+	for (const id of [u, a1, a2]) expect(await countFor(page, 'quiz_questions', id)).toBe(0);
+	const steady = await held(page);
 
 	// Several sync cycles online: they stay dropped, the total steady, no progress coming back.
 	await page.goto('/cascades');
@@ -111,16 +107,14 @@ test('over ROW_STORAGE_BUDGET: unkept first, then the automatic keeps; drops sta
 			await expect(entry(page, name).getByText(/^Downloading/)).toHaveCount(0);
 		}
 	}
-	await page.goto('/account');
-	await expect(total).toHaveText(steady!);
+	expect(await held(page)).toBe(steady);
 
-	// Open one: it comes back whole, and while its player is open it is listed again.
+	// Open one: it comes back whole, and while its player is open it is held again.
 	await page.goto('/cascades');
 	await entry(page, 'Budget A2').getByRole('link', { name: 'Budget A2' }).click();
 	await expect(page.getByText('1 / 37')).toBeVisible({ timeout: 30_000 });
 	const other = await context.newPage();
 	await other.goto('/cascades');
 	await expect(entry(other, 'Budget A2').getByText('Available offline')).toBeVisible({ timeout: 60_000 });
-	await other.goto('/account');
-	await expect(other.getByRole('row').filter({ hasText: 'Budget A2' })).toBeVisible({ timeout: 30_000 });
+	expect(await countFor(other, 'quiz_questions', a2)).toBe(37);
 });

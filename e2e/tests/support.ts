@@ -241,7 +241,6 @@ export async function idb<T>(page: Page, fn: string, arg?: unknown): Promise<T> 
 	return page.evaluate(source) as Promise<T>;
 }
 
-/** Operations of a kind waiting in the outbox. */
 /** The usernames of the accounts with data in this browser, from the shared `accounts` store. */
 export async function deviceAccounts(page: Page): Promise<string[]> {
 	return page.evaluate(async () => {
@@ -259,6 +258,7 @@ export async function deviceAccounts(page: Page): Promise<string[]> {
 	});
 }
 
+/** Operations of a kind waiting in the outbox. */
 export async function outboxCount(page: Page, type?: string): Promise<number> {
 	return idb(page, `const all = await req(db.transaction('outbox').objectStore('outbox').getAll()); return all.filter((e) => !arg || e.op.type === arg).length;`, type);
 }

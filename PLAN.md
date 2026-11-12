@@ -431,8 +431,7 @@ An account may hold at most **100 MB** on the server
 (`MAX_STORAGE_BYTES_PER_USER`, default 100,000,000 bytes). That is the one
 limit on what an account owns: there is no limit on how many cascades or saved
 searches it has, only on how much they hold. Storage figures are in decimal
-units wherever they are shown, on the Cascades page, in the builder and on the
-Account page's device card alike: 1 MB is 1,000,000 bytes. The default was sized from three cascades the owner named
+units wherever they are shown, on the Cascades page and in the builder alike: 1 MB is 1,000,000 bytes. The default was sized from three cascades the owner named
 (PQ-023): every CSW24 anagram of 7 and 8 letters (64,353 questions, 18.64 MB as
 created), every CSW24 definition of 7 and 8 letters (76,847 questions,
 22.25 MB) and 10,000 leave values (2.88 MB). The three come to 43.77 MB as
@@ -2529,7 +2528,7 @@ login page rather than the last account's cascades; and removing an account's
 data deletes its per-user database and empties its row, which is then deleted
 too unless it still holds an unacknowledged logout (see
 [Authentication while offline](#authentication-while-offline)). Everything the
-Account page needs about an account other than the signed-in one is in its row,
+app needs about an account other than the signed-in one is in its row,
 so **no per-user database but the signed-in one is ever opened**: opening another
 at this app's schema version would run that account's migrations behind its back,
 and `indexedDB.databases()` is missing in Safari and Firefox in any case. This
@@ -2796,8 +2795,7 @@ brings the server's.
   under 2 GB, which is the case the budget was written for. What the automatic
   keep still buys in that case is order — the small unkept cascades go first,
   and a large one is refetched on its next open only when nothing smaller is
-  left to drop. The Account page's storage line shows the total against the
-  budget beside the per-cascade sizes.
+  left to drop.
 - **A budget drop is remembered, or it would undo itself.** A cascade the
   budget drops is typically still inside the 14-day window — that is the whole
   point of the budget overriding it: the pass takes the oldest last-open first,
@@ -2836,18 +2834,19 @@ brings the server's.
     grade, cursor move or finish reached neither the overlay nor the outbox, so
     the player cannot pretend it was saved and cannot advance past the card. It
     stays on that card and shows the storage message where the grade would go
-    ("Free space by removing another account's data on the Account page.", with
-    **Try again**), and writes the action when the user frees space —
+    ("This device is full. Free space by deleting cascades you no longer need,
+    or by logging in to another account used here and logging out with its
+    data removed.", with **Try again**), and writes the action when the user frees space —
     the one place in the plan where studying stops, because the alternative is a
     Show / Next that silently does nothing.
   If the retry also
-  fails, the sync status reads "not enough room on this device", and the Account
-  page's storage line says the same **beside the other accounts' totals with
-  their removal action**, which is the only remedy when the space belongs to an account that is
-  not signed in, since the drop pass and eviction are per user.
-- The app calls `navigator.storage.persist()` on first login. The Account page
-  notes that some browsers, notably Safari, can clear site data after a period
-  of not being used.
+  fails, the sync status reads "not enough room on this device". When the
+  space belongs to an account that is not signed in, the remedy is to log in
+  as it and log out with its data removed, since the drop pass and eviction
+  are per user; no page lists the accounts with data here (a list of them
+  read as clutter, and on a device used by one person it never helps).
+- The app calls `navigator.storage.persist()` on first login. Some browsers,
+  notably Safari, can still clear site data after a period of not being used.
 
 ### Operations
 
@@ -3091,8 +3090,8 @@ which alarms. Then:
    last-open time an orphan has none of. The same transaction also removes that
    cascade's entries from the `meta` store — its last-open time and its
    budget-dropped mark — since nothing else ever
-   would, and the Account page's storage line would otherwise list a cascade
-   that no longer exists. The deletion of graded question rows
+   would, and the device's sizes would otherwise count a cascade that no
+   longer exists. The deletion of graded question rows
    applies only to the **active** quizzes of cascades in the request's
    `question_rows_for`, since the pull carries no row for a cleared quiz and
    none for a cascade left out of the list, which by definition holds no rows
@@ -3498,13 +3497,10 @@ of divergence (see [Monitoring](#deployment-and-operations)).
   `accounts` row — its totals and its last-signed-in time — and deletes the row
   itself **unless the row still holds an unacknowledged logout**, in which case
   a row carrying that account's id, its username and the flag alone survives
-  until the request goes through and is deleted when the flag clears. An emptied
-  row is never listed on the Account page's storage line, since there is no
-  data behind it to remove. Because `ROW_STORAGE_BUDGET` and
+  until the request goes through and is deleted when the flag clears. Because `ROW_STORAGE_BUDGET` and
   the answer limit are per user, a device several accounts have used can hold
-  several budgets; the Account page's storage line lists every account in the
-  `accounts` table that still has data here, with the totals its row holds, and
-  offers the same action for each.
+  several budgets; each account's data leaves only by its own logout with
+  removal (or by account deletion).
 
 ---
 
@@ -4538,17 +4534,17 @@ The flows are the conventional ones, built directly on Axum:
   database and the `accounts` row go, with no queued logout, since the session
   is already void, and the app lands on the log-in page. Without that step the
   `401`-keeps-everything rule would apply to an account that can never log in
-  again, leaving its question keys and downloaded answers on the device for good
-  and listing a dead account on the next user's storage line. Another device
+  again, leaving its question keys and downloaded answers on the device for good. Another device
   holding that account's data learns of the deletion only when a sync answers
   `401`, where the ordinary rule applies: it keeps its data and shows
-  **Log in to sync**, and its Account page still offers the removal.
+  **Log in to sync**, and its Account page still offers logging out with the
+  data removed.
   **An account replaced under the same username goes too.** Usernames are
   unique, so another account with data here under the signed-in account's
   username was deleted, or its server reset (a local stack's
   `./scripts/dev.py --reset` makes a new `dev` each time): at every sign-in
   and app start the device deletes that account's database and row, which
-  would otherwise sit on the Account page forever, since nothing can sign in
+  would otherwise sit on the device forever, since nothing can sign in
   to it again.
 
 Security generally:
@@ -5813,11 +5809,11 @@ pointer and no row, a startup with no pointer opening no per-user database,
 removing an account's data with **no** pending logout deleting its row and its
 database while the other account's survive, and the whole path running with
 `indexedDB.databases()` deleted from the global, since Safari and Firefox lack
-it. They also assert that the storage line's figures for an account that is not
+it. They also assert that `storageLine`'s figures for an account that is not
 signed in come from its `accounts` row with **no `open` on its database**, and
 cover the queued logout end to end: removing the data of an account that
 **does** hold an unacknowledged logout leaving a row carrying its id, username
-and flag alone, absent from the storage line, and deleted once the request goes
+and flag alone, absent from `storageLine`, and deleted once the request goes
 through; the flag clearing on a `2xx`, on a `401` and on a `403` — the class is
 any `4xx` but `429`, and a `403` is what a browser that cleared only its CSRF
 cookie would meet — while a `429`, a `503` and a network error each leave it
@@ -5902,8 +5898,8 @@ manager fetching every in-window cascade's keys with `keys=1` before any
 cascade's answers, and a restored quiz's per-quiz sequence fetching the
 cascade's missing keys too; a tombstone and a full pull's deletion each removing
 a cascade's `questions` and `cards` entries with its rows, and its `meta`
-entries too — its last-open time and its budget-dropped mark — so the Account
-page's storage line stops listing it; the drop pass
+entries too — its last-open time and its budget-dropped mark — so the device's
+sizes stop counting it; the drop pass
 removing a cascade's question keys along with its rows, and the next open
 fetching both back from the card pages;
 a quiz cleared offline getting a provisional `cleared_at` from the operation's
@@ -6584,7 +6580,7 @@ through the ordinary endpoints, so there is still no test-only path.
   changes sync at
   the next login here, and **Remove this account's data from this device**
   deletes the per-user database after naming what that discards, and drops that
-  account from the storage line while a logout still queued for it is sent on
+  account from the accounts list while a logout still queued for it is sent on
   the next connection with no account signed in. A second
   account logging in on the same browser sees none of the first account's
   cascades, and its Account page lists **both** accounts with their totals and
@@ -6611,8 +6607,7 @@ through the ordinary endpoints, so there is still no test-only path.
   report the update rather than block the new build's IndexedDB upgrade.
 - **Deleting the account** from `/account`, with a second account's data also on
   the browser, lands on the log-in page, leaves no per-user database or
-  `accounts` row for the deleted account — so the second account's storage line
-  lists only itself — and a reload offers the login page rather than the deleted
+  `accounts` row for the deleted account — so the browser's accounts list holds only the second — and a reload offers the login page rather than the deleted
   account's cascades. On a second browser context still signed in as that
   account, the next sync answers `401`, it shows **Log in to sync** with its
   cascades still readable, and its Account page still offers to remove them.

@@ -113,7 +113,7 @@ export async function recordLogin(userId: string, username: string, now = new Da
  * Usernames are unique on the server, so another account here with this
  * one's username was deleted, or its server reset (a local stack's
  * `./scripts/dev.py --reset` makes a new `dev` each time). Its data can never
- * sync again: its row goes from the Account page's list and its database is
+ * sync again: its row goes and its database is
  * deleted, without waiting, since nothing will open it again.
  */
 export async function forgetReplacedAccounts(userId: string, username: string) {
@@ -197,7 +197,7 @@ export async function removeAccountData(userId: string) {
 	if (clearedPointer) broadcast(null);
 }
 
-/** The Account page's storage line: every account with data here, from its row alone. */
+/** Every account with data here, from its row alone. */
 export async function storageLine(): Promise<AccountRow[]> {
 	return withDb(async (db) => (await db.getAll('accounts')).filter((r) => !r.emptied));
 }

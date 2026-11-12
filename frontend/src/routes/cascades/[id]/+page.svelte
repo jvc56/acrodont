@@ -634,8 +634,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		{/if}
 		{#if v.storage}
 			<div class="mt-2 text-center text-sm">
-				Free space by removing another account’s data on the
-				<a class="underline" href="/account">Account page</a>.
+				This device is full. Free space by deleting cascades you no longer need, or by logging in to
+				another account used here and logging out with its data removed.
 				<Button size="sm" variant="outline" onclick={() => player?.retryStorage()}>Try again</Button>
 			</div>
 		{/if}
