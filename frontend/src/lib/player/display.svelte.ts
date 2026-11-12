@@ -29,6 +29,7 @@ export const LIMITS = {
 	spacing_em: { min: -0.2, max: 2, step: 0.01, default: 0 },
 	question_top_px: { min: 0, max: 800, step: 1, default: 8 },
 	border_px: { min: 0, max: 40, step: 1, default: 10 },
+	mobile_row_px: { min: 32, max: 200, step: 1, default: 64 },
 	repeat_guard_ms: { min: 0, max: 1000, step: 5, default: 0 }
 } as const;
 export type LimitKey = keyof typeof LIMITS;
@@ -53,6 +54,7 @@ export function defaultDisplay(): Display {
 		border_missed: true,
 		status_bar_hidden: false,
 		mobile_buttons: 'columns',
+		mobile_row_px: LIMITS.mobile_row_px.default,
 		version: DISPLAY_VERSION
 	};
 }
@@ -113,6 +115,7 @@ export function normalizeDisplay(stored: Stored | undefined): Display {
 		border_missed: d.border_missed === undefined ? true : !!d.border_missed,
 		status_bar_hidden: !!d.status_bar_hidden,
 		mobile_buttons: d.mobile_buttons === 'rows' ? 'rows' : 'columns',
+		mobile_row_px: clampSetting('mobile_row_px', d.mobile_row_px),
 		version: DISPLAY_VERSION
 	};
 }

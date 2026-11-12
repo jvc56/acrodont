@@ -267,29 +267,37 @@
 
 	<Card.Root>
 		<Card.Content class="grid gap-4 pt-6">
-			<div class="flex flex-wrap gap-6">
-				<fieldset class="grid gap-1">
-					<legend class="text-sm font-medium">Quiz type</legend>
-					<div class="flex gap-3">
-						{#each QUIZ_TYPES as q (q)}
-							<label class="flex items-center gap-1 text-sm">
-								<input type="radio" name="quiz_type" checked={quizType === q} onchange={() => setQuizType(q)} />
-								{QUIZ_TYPE_LABELS[q]}
-							</label>
-						{/each}
-					</div>
-				</fieldset>
-				<div class="grid gap-1">
-					<Label for="lexicon">Lexicon</Label>
-					<select id="lexicon" class="h-9 rounded-md border bg-transparent px-2 text-sm" bind:value={lexicon}>
-						{#each lexicons as l (l.name)}
-							{@const disabled = quizType === 'leave_value' && l.leave_count === null}
-							<option value={l.name} {disabled} title={disabled ? `${l.name} has no leave values` : ''}>
-								{l.name}
-							</option>
-						{/each}
-					</select>
+			<!-- Quiz type as a segmented control, like the filters' AND / OR, and the lexicon
+			     under it: labels in a column of their own on a wide screen, above on a phone,
+			     where both controls take the full width. The segments are real radio inputs,
+			     so the arrow keys move between them. -->
+			<div class="grid gap-x-4 gap-y-2 sm:grid-cols-[auto_1fr] sm:items-center">
+				<span id="quiz-type-label" class="text-sm font-medium">Quiz type</span>
+				<div
+					class="grid grid-cols-3 overflow-hidden rounded-md border text-sm sm:inline-grid sm:w-fit"
+					role="radiogroup"
+					aria-labelledby="quiz-type-label"
+				>
+					{#each QUIZ_TYPES as q, i (q)}
+						<label
+							class="flex h-9 cursor-pointer items-center justify-center px-2 text-center whitespace-nowrap select-none hover:bg-muted has-checked:bg-primary has-checked:text-primary-foreground has-focus-visible:ring-2 has-focus-visible:ring-ring has-focus-visible:ring-inset sm:px-4 {i
+								? 'border-l'
+								: ''}"
+						>
+							<input class="sr-only" type="radio" name="quiz_type" checked={quizType === q} onchange={() => setQuizType(q)} />
+							{QUIZ_TYPE_LABELS[q]}
+						</label>
+					{/each}
 				</div>
+				<Label for="lexicon" class="max-sm:pt-2">Lexicon</Label>
+				<select id="lexicon" class="h-9 w-full rounded-md border bg-transparent px-2 text-sm sm:w-60" bind:value={lexicon}>
+					{#each lexicons as l (l.name)}
+						{@const disabled = quizType === 'leave_value' && l.leave_count === null}
+						<option value={l.name} {disabled} title={disabled ? `${l.name} has no leave values` : ''}>
+							{l.name}
+						</option>
+					{/each}
+				</select>
 			</div>
 
 			<div class="grid gap-2">

@@ -87,7 +87,7 @@
 		{#each groups as g (g.cascade.id)}
 			{@const n = shown(g)}
 			<li class="rounded-lg border p-4">
-				<button class="flex w-full items-baseline justify-between text-left" onclick={() => (open[g.cascade.id] = n ? 0 : PAGE)}>
+				<button class="flex w-full flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-left" onclick={() => (open[g.cascade.id] = n ? 0 : PAGE)}>
 					<span class="font-medium">{g.trashed ? `${g.cascade.name} (cascade in the Trash)` : g.cascade.name}</span>
 					<span class="text-sm text-muted-foreground">
 						{`${g.entries.length} ${g.entries.length === 1 ? 'entry' : 'entries'} · ${formatBytes(g.bytes)}${g.earliest ? ` · deleted forever on ${date(g.earliest)}` : ''}`}
@@ -104,7 +104,7 @@
 								<span class="text-muted-foreground">
 									{#if e.provisional}deleted forever {days} days after this syncs{:else if e.purgesAt}deleted forever on {date(e.purgesAt)}{/if}
 								</span>
-								<span class="ml-auto flex gap-2">
+								<span class="ml-auto flex flex-wrap gap-2">
 									<Button size="sm" variant="outline" onclick={() => restore(e)}>Restore</Button>
 									<Button size="sm" variant="outline" href={`/cascades/${g.cascade.id}/export${e.kind === 'quiz' ? `?quiz=${e.id}` : ''}`}>Export…</Button>
 									{#if canDeleteForever(e)}

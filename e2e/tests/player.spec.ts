@@ -99,7 +99,7 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	// Settings is the one dialog: the menu has no Levels, and the ladder is in its Cascade Settings,
 	// apart from the Device Settings, each saying where it applies. There are no other kinds, and no index of them.
 	const menu = page.getByRole('navigation', { name: 'Player menu' });
-	await expect(menu.getByRole('link')).toHaveText(['Acrodont', 'Cascades', 'Account']);
+	await expect(menu.getByRole('link')).toHaveText(['Acrodont', 'Account']);
 	await expect(menu.getByRole('button', { name: 'Levels' })).toHaveCount(0);
 	await menu.getByRole('button', { name: 'Settings' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Settings' });
@@ -136,7 +136,7 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	const other = await browser.newContext({ baseURL });
 	const p2 = await other.newPage();
 	await login(p2, username);
-	await expect(p2.getByText(/clear at 55%/)).toBeVisible({ timeout: 30_000 });
+	await expect(p2.getByTitle(/clear at 55%/)).toBeVisible({ timeout: 30_000 });
 	await other.close();
 
 	// Hiding the status bar leaves the quiz area, and so its grade border, where it was.

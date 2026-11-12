@@ -577,8 +577,8 @@ There are two kinds of settings, and they do not overlap:
 Both are edited in one place only: a cascade's **Settings** dialog in the
 player (the menu's **Settings**, on the desktop and on a phone alike; see
 [Desktop layout](#desktop-layout)), where a change takes effect on the current
-card straight away. There is no settings page and nothing in the site header;
-the Account page says where they are. The dialog has two sections, each with a
+card straight away. There is no settings page and nothing in the site header
+or on the Account page. The dialog has two sections, each with a
 heading, a badge saying whether it syncs (*Synced*, *Not synced*) and one line
 saying what it reaches: **Cascade Settings** and **Device Settings**.
 
@@ -669,8 +669,12 @@ Question order is **not** a setting: questions are always shuffled.
 `/cascades/new` is laid out like Zyzzyva's Search tab. It needs a connection,
 because searching runs on the server.
 
-1. **Quiz type**: Anagram, Definition or Leave Value.
-2. **Lexicon**: e.g. `CSW24`. When the type is Leave Value, lexicons without
+1. **Quiz type**: Anagram, Definition or Leave Value, a segmented control
+   like the filters' AND / OR (radio inputs underneath, so the arrow keys
+   move between them).
+2. **Lexicon**: e.g. `CSW24`, a select under it. Each label sits in a column
+   of its own on a wide screen and above its control on a phone, where both
+   controls take the full width. When the type is Leave Value, lexicons without
    leave values are disabled, with a tooltip saying why.
 3. **Filters**: a tree of condition rows in AND / OR [groups](#groups). Each
    row has a `+` menu (add a row or a group below), a `−` button (remove this
@@ -768,13 +772,15 @@ because searching runs on the server.
 first, one compact row each, for a glance, with **New cascade** at the top and
 the [Trash](#trash) below the list. Each cascade shows:
 
-- name, quiz type, lexicon and clear threshold, and "complete" with the date
-  once the Source quiz has been finished with no misses
-- its [quiz options](#quiz-options) in short form, e.g. `segments of 40 · drill`,
-  or nothing when they are all at their defaults
-- a compact ladder of its levels, the current one with its progress and that
-  progress as a percentage to two places, e.g. `L1 · 250 (waiting, run 3 of 7) →
-  L2 · 38 (waiting) → L3 · 9 (4/9 done, 44.44%)`
+- its name, alone on the left, so a phone has room for it (on a phone it
+  wraps rather than being cut short). Hovering it shows the rest, as a
+  tooltip of three lines: the name; quiz type, lexicon and clear threshold,
+  its [quiz options](#quiz-options) in short form (e.g. `segments of 40 ·
+  drill`, nothing when all are at their defaults), and "complete" with the
+  date once the Source quiz has been finished with no misses; and a compact
+  ladder of its levels, the current one with its progress and that progress
+  as a percentage to two places, e.g. `L1 · 250 (waiting, run 3 of 7) → L2 ·
+  38 (waiting) → L3 · 9 (4/9 done, 44.44%)`
 - how much [storage](#storage-limit) it holds on the server, e.g. `4.2 MB`,
   the server's figure for it; hovering it shows the split between its
   questions and filters and its levels (`Storage: 4.2 MB — questions and
@@ -901,8 +907,8 @@ as the term of the data model and the API.
   fade) as the grade is toggled. Each colour is its own setting, as is the
   width (10 px by default). A visually hidden status line says the grade for screen readers;
   the area carries it as `data-grade` (`correct`, `missed`).
-- **The menu** on the left holds Acrodont and Cascades (to the Cascades page),
-  Admin (for admins), Account and **Settings**; on a phone the same menu opens
+- **The menu** on the left holds Acrodont (to the Cascades page, so no
+  separate Cascades link), Admin (for admins), Account and **Settings**; on a phone the same menu opens
   as a sheet over the quiz from **☰**, so there is no separate settings button.
   Settings is the one settings dialog there is: every
   [setting](#settings), in its two sections, under a header that holds only
@@ -991,10 +997,13 @@ as the term of the data model and the API.
   alike (`SettingRow`), so the place to click is
   always the same. Progression is a choice (Ladder or Drill) with the chosen
   one's explanation beneath, not a pair of radio buttons.
-- **Every setting explains itself**: what it does is written in muted text
-  directly under its name, followed by any hint — a cascade's settings, the
-  quiz options and this device's display settings. Nothing is hidden behind
-  an icon or a hover. The texts live in one module (`lib/settings-info`), with
+- **Every setting explains itself**: an ⓘ beside its name (`InfoTip`) shows
+  what it does — on hover with a mouse, and on a tap or click, which keeps it
+  open until a tap elsewhere, so a phone has it too — in a cascade's
+  settings, the quiz options and this device's display settings. Written out
+  under every name, the explanations crowded the dialog on a phone and a
+  desktop alike. A hint (such as the chosen progression's) stays visible
+  under the name. The texts live in one module (`lib/settings-info`), with
   the line each group of settings says about where it applies (`SCOPE`).
 - **Sensitive actions ask first** (`ConfirmDialog`, one per app, in the root
   layout): Move to Trash, Delete forever, Start over, removing an account's
@@ -1273,9 +1282,10 @@ with **Reset controls to defaults**.
 In the touch layout the quiz area fills the screen above typed mode's input
 and the [status bar](#desktop-layout), which is the desktop's: the level, the
 pass, the card out of the level, the score, the run and the found count,
-wrapping to a second line rather than leave anything out, with the sync
-status at its right end and the same icon to hide it. **☰** in the quiz
-area's top-left corner opens the player's menu as a sheet (Cascades, Admin,
+wrapping to a second line rather than leave anything out (the second line
+starts under the first item, so nothing sits under the hide icon), with the
+sync status at its right end and the same icon to hide it. **☰** in the quiz
+area's top-left corner opens the player's menu as a sheet (Acrodont, Admin,
 Account, Settings). The quiz area is divided into three tap zones, one per
 action, laid out by a device setting, **Tap zones on a phone**:
 
@@ -1283,35 +1293,37 @@ action, laid out by a device setting, **Tap zones on a phone**:
 Show / Next, each a third of the screen's width and the quiz area's full
 height. A tap anywhere in a column is that column's action, the question and
 answer included, and each column's label sits along the bottom, in a row of
-three buttons, with faint lines between the columns.
+three buttons. Nothing marks the columns' edges: the labels are enough.
 
 ```
-┌─────────┬─────────┬─────────┐
-│☰        │         │         │
+┌─────────────────────────────┐
+│☰                            │
 │         AEINRST             │
 │   ANESTRI ANTSIER NASTIER … │
-│         │         │         │
-├─────────┼─────────┼─────────┤
-│↶Previous│✓⇄✗Toggle│ Show ▸  │
-├─────────┴─────────┴─────────┤
-│ Level 2 of 3  Pass 1  37 / 250 (14.80%)  30 ✓ 7 ✗ (81.08%) │
-│                                               ● Synced    │  status bar
+│                             │
+│                             │
+│ ↶Previous ✓⇄✗Toggle  Show ▸ │
+├─────────────────────────────┤
+│ ▣ Level 2 of 3  Pass 1  37 / 250 (14.80%)
+│   30 ✓ 7 ✗ (81.08%)       ● Synced │  status bar
 └─────────────────────────────┘
 ```
 
-**Rows**: three bands stacked, Previous along the top (15%), the question and
-answer in the middle for Show / Next (60%), Toggle along the bottom (25%); in
-landscape they become columns, Previous on the left (20%) and Toggle on the
-right (25%).
+**Rows**: the question and answer fill the top, and under them three rows of
+buttons, top to bottom Previous, Toggle and Show / Next, each the full width
+and as tall as a device setting, **Row height on a phone** (64 px by default,
+32–200; shown once Rows is chosen). The question itself does not act. In
+landscape the question takes the left and the three rows stand at the bottom
+of a column on the right, two fifths of the width.
 
 Why these layouts:
 
 - **Columns** put every action within reach of a thumb along the bottom edge,
   each a large target, and keep the whole screen tappable.
-- **Rows** give **Show / Next**, used twice per card, the largest zone, in the
-  middle of the screen where the thumb rests; Toggle, only needed on missed
-  cards, the bottom band; and Previous, the rarest action and the only one
-  that moves backwards, the top edge where it is hardest to hit by accident.
+- **Rows** put **Show / Next**, used twice per card, at the bottom, nearest
+  the thumb holding the phone, Toggle above it and Previous, the rarest, the
+  furthest up; the row height lets a large hand or a small screen make them
+  easier to hit.
 
 Details:
 
@@ -2717,27 +2729,12 @@ brings the server's.
   a cascade whose cards are gone — and **"answers need a connection" while the
   device is offline**, since there is no progress to show until the download
   manager can fetch again, and a bar sitting at nothing would read as a stuck
-  download rather than as the state the reveal already explains. The Account
-  page's card **Storage on this device** (`StorageCard`) says it is what this
-  device has downloaded to study offline, with a line pointing to the Cascades
-  page for the account's [storage](#storage-limit) on the server, which is
-  what the limit counts and a different thing. It gives the device's total rows and
-  keys against `ROW_STORAGE_BUDGET`, in the same decimal units (1 MB is
-  1,000,000 bytes), and under **Cascades on this device**
-  lists, by name, every cascade the device holds question rows, keys or
-  answers for, with its answer size and its much smaller key size — so a
-  cascade the [budget](#on-the-device) dropped leaves the list rather than
-  sitting in it with nothing behind it, and the Cascades page offers "open to
-  download". That budget and the
-  answer limit are **per user**, so a device several accounts have used can hold
-  several of each; the line lists every account in the unscoped `accounts` table
-  that still has data here — never a row emptied by the removal action and kept
-  only for an unacknowledged logout — with the totals that row holds, and offers
-  **Remove this account's data from
-  this device** for each, **the signed-in one included** — removing the
-  signed-in account's data also clears the `signed_in` pointer and returns to the
-  login page, since deleting the database under a live session would leave the
-  app pointing at nothing. It is the same action the logout dialog offers (see
+  download rather than as the state the reveal already explains. No page
+  lists what the device holds: the Cascades page's badges say, per cascade,
+  whether it is on this device, and the budget and answer limit are **per
+  user**, so a device several accounts have used can hold several of each.
+  An account's data leaves the device by logging out with **Remove this
+  account's data from this device** ticked (see
   [Authentication while offline](#authentication-while-offline)).
 - **Local size.** A cascade costs one copy of its quiz rows in the base plus the
   overlay's few hundred rows, or, while an offline session's grades are still
@@ -4867,8 +4864,8 @@ SvelteKit static SPA. The routes:
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, name, preview with what the cascade will use against the account's storage), with no settings: a note says a new cascade's settings are changed in its Settings once it is created |
 | `/cascades/:id` | Player for the cascade's deepest level, whose Settings dialog holds the ladder and every [setting](#settings), the cascade's and this device's |
 | `/trash` | No page of its own: redirects to `/#trash`, so an old link lands on the Cascades page scrolled to the Trash |
-| `/account` | Log out, sync status, **Storage on this device** (pointing to the Cascades page for the account's storage) with the total rows and keys against the budget and, for each cascade this device holds data for, its answer size and key size, every account with data on this device and **Remove this account's data from this device** for each, sign out everywhere, delete account. No password change: a new password comes only from a [reset](#authentication). No settings: a line says each cascade's settings, and this device's display and controls, are in the cascade's Settings (☰ → Settings in the player) |
-| `/admin` | Catalog overview with delete actions (admins only; others get a not-found page) |
+| `/account` | Log out (with **Remove this account's data from this device**), sync status, sign out everywhere, delete account. Nothing about storage: the Cascades page has the account's. No password change: a new password comes only from a [reset](#authentication). No settings: those are in a cascade's Settings (☰ → Settings in the player) |
+| `/admin` | Catalog overview with delete actions (admins only; others get a not-found page): a card per kind (letter distributions, lexicons, leave values), each with its **Upload** button, its items a table on a wide screen and a list of entries, figures under each name, on a phone, so nothing scrolls sideways |
 | `/admin/letter-distributions/new`, `/admin/lexicons/new`, `/admin/leave-sets/new` | Upload forms with validation error lists |
 
 Modules:
@@ -5033,8 +5030,8 @@ Components:
 - **`lib/builder/preview.ts`**: the builder's preview, which carries the
   server's `storage_bytes` for the search, so the builder can say what the
   cascade will use and disable Create Cascade when it won't fit.
-- **`StorageCard`**: the Account page's **Storage on this device** card: what
-  this device has downloaded, never the account's storage. The page bumps its `version` when it moves a cascade to
+- **`TrashList`**: the Trash under the Cascades page's list. Each entry's
+  buttons wrap onto a line of their own on a phone. The page bumps its `version` when it moves a cascade to
   the Trash, so the list shows it at once, and its `onchange` refreshes the
   cascades above after a restore or a deletion.
 - **`AppHeader`**: the site header on every logged-in page but the player:
@@ -6791,8 +6788,8 @@ through the ordinary endpoints, so there is still no test-only path.
   and Device Settings, with the controls in Device Settings and their **Reset
   controls to defaults** button.
 - **Every setting explains itself** (`misc.spec.ts`): a setting's explanation
-  is visible under its name in Settings, and there is no "About this setting"
-  button to hover.
+  is hidden until its ⓘ ("About this setting") is hovered, goes when the
+  mouse leaves, and stays open after a click.
 - **Signed in, `/` is the Cascades page** (`home.spec.ts`): New cascade and
   the Trash ("The Trash is empty.") are on it, a regular user's header has no
   Main nav, Admin appears only for admins, and an old link to `/trash`

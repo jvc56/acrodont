@@ -94,11 +94,11 @@
 		<fieldset class="grid gap-2">
 			<legend class="mb-1 font-medium">{part.title}</legend>
 			<SettingRow label="Font" info={INFO.font} for={`display-${part.which}_font`}>
-<select
+				<select
 					id={`display-${part.which}_font`}
 					class={selectClass}
 					value={font}
-onchange={(e) => change({ [`${part.which}_font`]: e.currentTarget.value })}
+					onchange={(e) => change({ [`${part.which}_font`]: e.currentTarget.value })}
 				>
 					{#each FONTS as f (f.value)}<option value={f.value}>{f.label}</option>{/each}
 				</select>
@@ -120,16 +120,16 @@ onchange={(e) => change({ [`${part.which}_font`]: e.currentTarget.value })}
 	<fieldset class="grid gap-2">
 		<legend class="mb-1 font-medium">Layout</legend>
 		{@render number('Question position from the top', 'px', 'question_top_px', 'question_top_px', INFO.question_top)}
-{@render check('Green border on a correct answer', 'border_correct', 'display-border-correct', d.border_correct, INFO.border_correct, (on) => change({ border_correct: on }))}
-{@render check('Red border on a missed answer', 'border_missed', 'display-border-missed', d.border_missed, INFO.border_missed, (on) => change({ border_missed: on }))}
+		{@render check('Green border on a correct answer', 'border_correct', 'display-border-correct', d.border_correct, INFO.border_correct, (on) => change({ border_correct: on }))}
+		{@render check('Red border on a missed answer', 'border_missed', 'display-border-missed', d.border_missed, INFO.border_missed, (on) => change({ border_missed: on }))}
 		{@render number('Grade border width', 'px', 'border_px', 'border_px', INFO.border_width)}
-{@render check('Show the status bar below the quiz', 'status_bar_hidden', 'display-status-bar', !d.status_bar_hidden, INFO.status_bar, (on) => change({ status_bar_hidden: !on }))}
+		{@render check('Show the status bar below the quiz', 'status_bar_hidden', 'display-status-bar', !d.status_bar_hidden, INFO.status_bar, (on) => change({ status_bar_hidden: !on }))}
 		<SettingRow label="Tap zones on a phone" info={INFO.mobile_buttons} for="display-mobile-buttons">
 			<select
 				id="display-mobile-buttons"
 				class={selectClass}
 				value={d.mobile_buttons}
-onchange={(e) => change({ mobile_buttons: e.currentTarget.value === 'rows' ? 'rows' : 'columns' })}
+				onchange={(e) => change({ mobile_buttons: e.currentTarget.value === 'rows' ? 'rows' : 'columns' })}
 			>
 				<option value="columns">Columns</option>
 				<option value="rows">Rows</option>
@@ -137,6 +137,9 @@ onchange={(e) => change({ mobile_buttons: e.currentTarget.value === 'rows' ? 'ro
 			<span class="w-8" aria-hidden="true"></span>
 		</SettingRow>
 		{@render widen('mobile_buttons')}
+		{#if d.mobile_buttons === 'rows'}
+			{@render number('Row height on a phone', 'px', 'mobile_row_px', 'mobile_row_px', INFO.mobile_row_px)}
+		{/if}
 	</fieldset>
 	<fieldset class="grid gap-2">
 		<legend class="mb-1 font-medium">Repeated presses</legend>

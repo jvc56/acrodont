@@ -1,10 +1,10 @@
 import { test, expect, devices, type Page } from '@playwright/test';
-import { createCascade, login, newUser, playerSetting } from './support';
+import { createCascade, login, newUser, openPlayerSettings, playerSetting } from './support';
 
 // PLAN.md § End-to-end tests → Touch zones (mobile viewport emulation,
 // portrait and landscape): in the columns layout, the default, each column
 // fires its action wherever it is tapped and by its button along the bottom;
-// in the rows layout each band does; a drag scrolls without acting, a quick
+// in the rows layout each row of buttons under the question does; a drag scrolls without acting, a quick
 // double tap advances once per tap, and the status bar and the menu (with
 // Settings in it) are those of the desktop.
 
@@ -79,9 +79,18 @@ for (const orientation of ['portrait', 'landscape'] as const) {
 		await at(page, 2);
 		await expect(graded(page)).toBeVisible();
 
-		// Rows, from the menu's Settings: Previous above, the question for Show / Next, Toggle below.
+		// Rows, from the menu's Settings: the question, then Previous, Toggle and Show / Next,
+		// top to bottom, each as tall as the row height setting.
 		await playerSetting(page, 'Tap zones on a phone', 'rows');
-		const show = page.locator('[data-zone="show_next"]');
+		await openPlayerSettings(page);
+		const height = page.getByRole('dialog', { name: 'Settings' }).getByLabel('Row height on a phone', { exact: true });
+		await height.fill('80');
+		await height.blur();
+		await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close' }).click();
+		const rows = page.locator('[data-zone="rows"] button');
+		await expect(rows).toHaveText(['↶ Previous', '✓ ⇄ ✗ Toggle', 'Show / Next ▸']);
+		expect((await rows.last().boundingBox())!.height).toBeCloseTo(80, 0);
+		const show = page.getByRole('button', { name: /Show \/ Next/ });
 		await page.waitForTimeout(150);
 		await show.tap();
 		await at(page, 3);

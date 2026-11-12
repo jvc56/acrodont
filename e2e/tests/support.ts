@@ -242,6 +242,23 @@ export async function idb<T>(page: Page, fn: string, arg?: unknown): Promise<T> 
 }
 
 /** Operations of a kind waiting in the outbox. */
+/** The usernames of the accounts with data in this browser, from the shared `accounts` store. */
+export async function deviceAccounts(page: Page): Promise<string[]> {
+	return page.evaluate(async () => {
+		const db = await new Promise<IDBDatabase>((res, rej) => {
+			const r = indexedDB.open('acrodont');
+			r.onsuccess = () => res(r.result);
+			r.onerror = () => rej(r.error);
+		});
+		const rows = await new Promise<{ username: string }[]>((res) => {
+			const r = db.transaction('accounts').objectStore('accounts').getAll();
+			r.onsuccess = () => res(r.result);
+		});
+		db.close();
+		return rows.map((r) => r.username).sort();
+	});
+}
+
 export async function outboxCount(page: Page, type?: string): Promise<number> {
 	return idb(page, `const all = await req(db.transaction('outbox').objectStore('outbox').getAll()); return all.filter((e) => !arg || e.op.type === arg).length;`, type);
 }

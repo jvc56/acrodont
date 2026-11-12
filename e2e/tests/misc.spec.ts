@@ -178,10 +178,19 @@ test('a reveal marks the card correct by default, or missed when set; settings e
 	await expect(page.getByText('2 / 18')).toBeVisible();
 	await press(page, 'Space');
 	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
-	// Each setting says what it does under its name, with no ⓘ to hover.
+	// Each setting says what it does behind an ⓘ beside its name: hovering shows it,
+	// leaving hides it, and a click keeps it open until a click elsewhere.
 	await openPlayerSettings(page);
 	const settings = page.getByRole('dialog', { name: 'Settings' });
-	await expect(settings.getByText('The score a pass needs to clear a level of this cascade', { exact: false })).toBeVisible();
-	await expect(settings.getByRole('button', { name: 'About this setting' })).toHaveCount(0);
+	const text = 'The score a pass needs to clear a level of this cascade';
+	await expect(settings.getByText(text, { exact: false })).toHaveCount(0);
+	const tip = settings.locator(`[data-info^="${text}"]`);
+	await tip.hover();
+	await expect(page.getByRole('tooltip')).toContainText(text);
+	await settings.getByRole('heading', { name: 'Settings', exact: true }).hover();
+	await expect(page.getByRole('tooltip')).toHaveCount(0);
+	await tip.click();
+	await settings.getByRole('heading', { name: 'Settings', exact: true }).hover();
+	await expect(page.getByRole('tooltip')).toContainText(text);
 });
 

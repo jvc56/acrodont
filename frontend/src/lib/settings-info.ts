@@ -40,7 +40,8 @@ export const INFO = {
 	border_width: 'How thick the green and red grade borders are, in pixels.',
 	status_bar: 'The bar under the quiz with the level, pass, progress, score and sync status. Hiding it leaves the quiz area the same size.',
 	mobile_buttons:
-		'On a phone or tablet. Columns: Previous, Toggle and Show / Next side by side, each a third of the screen, tapped anywhere in its column. Rows: Previous above the question, the question itself for Show / Next, and Toggle below.',
+		'On a phone or tablet. Columns: Previous, Toggle and Show / Next side by side, each a third of the screen, tapped anywhere in its column. Rows: the question, then Previous, Toggle and Show / Next in rows under it, Show / Next at the bottom, nearest your thumb.',
+	mobile_row_px: 'In the rows layout, how tall each of the three rows of buttons is.',
 	repeat_guard:
 		'Ignores the same action pressed again within this many milliseconds, to stop an accidental double press from skipping a card. 0 turns it off.',
 	// Account

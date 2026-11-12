@@ -58,6 +58,8 @@ export interface MetaValues {
 		status_bar_hidden: boolean;
 		/** On a phone, the three actions' tap zones: three columns (the default) or three rows. */
 		mobile_buttons: 'columns' | 'rows';
+		/** In the rows layout, each row's height, in px. */
+		mobile_row_px: number;
 		/** Which defaults the stored values were saved under (lib/player/display DISPLAY_VERSION). */
 		version: number;
 	};
@@ -91,6 +93,7 @@ export const META_DEFAULTS: { [K in MetaKey]: () => MetaValues[K] } = {
 		border_missed: true,
 		status_bar_hidden: false,
 		mobile_buttons: 'columns',
+		mobile_row_px: 64,
 		version: 2
 	})
 };

@@ -1,9 +1,9 @@
 <script lang="ts">
 	// The Cascades page (PLAN.md § Cascades page), the site's root, where a
 	// signed-in user starts (/cascades redirects here): newest activity first, one
-	// row each for a glance — its options in short form, a compact ladder with
-	// the current level's progress, how much storage it holds, whether it is on
-	// this device, and Move to Trash; the rest (quiz options, Export…, Start
+	// row each for a glance — its name (its options and ladder in its tooltip),
+	// how much storage it holds, whether it is on this device, and Move to
+	// Trash; the rest (quiz options, Export…, Start
 	// over) is in the player. The header shows the account's storage against
 	// its one limit (PLAN.md § Storage limit). The Trash is under the cascades, so
 	// they are seen together. Everything reads the local stores and works offline.
@@ -118,6 +118,15 @@
 		if (ok) await write({ type: 'trash_cascade', cascade_id: s.cascade.id });
 	}
 
+	/** A row's tooltip: the name, its options, and its ladder. */
+	function details(s: CascadeSummary): string {
+		const c = s.cascade;
+		const opts = [c.quiz_type.replace('_', ' '), c.lexicon, `clear at ${c.clear_threshold}%`];
+		if (s.options) opts.push(s.options);
+		if (s.completedAt) opts.push(`complete ${new Date(s.completedAt).toLocaleDateString()}`);
+		return `${c.name}\n${opts.join(' · ')}\n${ladderText(s.levels)}`;
+	}
+
 	/** What a cascade's figure is made of: its levels, from the same per-row costs, and the rest. */
 	function sizeTitle(s: CascadeSummary): string {
 		const levels = s.levels.reduce((n, r) => n + levelBytes(r.quiz.question_count), 0);
@@ -202,17 +211,14 @@
 		     this device, and Move to Trash. Everything else is in the player. -->
 		<ul class="divide-y rounded-lg border">
 			{#each list as s (s.cascade.id)}
-				<!-- On a phone the size, badge and Trash wrap below the name, so the name keeps the width. -->
+				<!-- Just the name; its options and ladder are its tooltip. On a phone the size, badge
+				     and Trash wrap below the name, so the name keeps the width. -->
 				<li class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5">
-					<div class="min-w-0 flex-1 basis-full sm:basis-0">
-						<div class="flex min-w-0 items-baseline gap-2">
-							<a class="min-w-0 truncate font-medium underline-offset-2 hover:underline" href={`/cascades/${s.cascade.id}`} title={s.cascade.name}>{s.cascade.name}</a>
-							<span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-								{s.cascade.quiz_type.replace('_', ' ')} · {s.cascade.lexicon} · clear at {s.cascade.clear_threshold}%{#if s.options} · {s.options}{/if}{#if s.completedAt} · complete {new Date(s.completedAt).toLocaleDateString()}{/if}
-							</span>
-						</div>
-						<p class="truncate text-xs text-muted-foreground" title={ladderText(s.levels)}>{ladderText(s.levels)}</p>
-					</div>
+					<a
+						class="min-w-0 flex-1 basis-full font-medium break-words underline-offset-2 hover:underline sm:basis-0 sm:truncate"
+						href={`/cascades/${s.cascade.id}`}
+						title={details(s)}>{s.cascade.name}</a
+					>
 					<div class="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:shrink-0">
 						<span class="shrink-0 text-xs text-muted-foreground tabular-nums" title={sizeTitle(s)} data-cascade-storage>{formatBytes(s.cascade.storage_bytes ?? 0)}</span>
 						{#if s.offline !== 'checking'}<span class="min-w-0 rounded bg-muted px-2 py-0.5 text-xs">{badge(s)}</span>{/if}

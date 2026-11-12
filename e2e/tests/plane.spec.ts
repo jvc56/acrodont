@@ -62,7 +62,8 @@ test('the plane', async ({ baseURL }) => {
 		await expect(page.getByText('2 / 2')).toBeVisible({ timeout: 30_000 });
 		const card = await page.locator('[data-question]').first().textContent();
 		await page.goto('/cascades');
-		const state = await page.getByText(/^L1 · 18/).textContent();
+		// The ladder is the last line of the cascade row's tooltip.
+		const state = (await page.getByTitle(/\nL1 · 18/).getAttribute('title'))!.split('\n')[2];
 		await context.close();
 		// 7. A fresh browser: the same state, grades and order.
 		const fresh = await chromium.launch();
@@ -75,7 +76,8 @@ test('the plane', async ({ baseURL }) => {
 		// The same question order: the same card at the same place.
 		await expect(p2.locator('[data-question]').first()).toHaveText(card!);
 		await p2.goto('/cascades');
-		await expect(p2.getByText(state!)).toBeVisible({ timeout: 60_000 });
+		const ladder = async () => (await p2.getByTitle(/\nL1 · /).getAttribute('title'))?.split('\n')[2];
+		await expect.poll(ladder, { timeout: 60_000 }).toBe(state);
 		await fresh.close();
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
