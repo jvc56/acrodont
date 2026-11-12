@@ -138,7 +138,7 @@ impl Config {
             search_concurrency,
             export_concurrency,
             trash_retention_days: r.parse("TRASH_RETENTION_DAYS", 30)?,
-            sync_retention_days: r.parse("SYNC_RETENTION_DAYS", 90)?,
+            sync_retention_days: r.parse("SYNC_RETENTION_DAYS", 30)?,
             sync_max_ops: r.parse("SYNC_MAX_OPS", 500)?,
             min_app_version: r.parse("MIN_APP_VERSION", 0)?,
             purge_interval_seconds: r.parse("PURGE_INTERVAL_SECONDS", 3600)?,

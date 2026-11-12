@@ -8,7 +8,8 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use super::{Effects, IncomingOp};
-use crate::cascade::order::{from_i64, questions_hash, shuffle, to_i64};
+use crate::cards;
+use crate::cascade::order::{from_i64, questions_hash, to_i64};
 use crate::cascade::rows::{AnswerMode, Origin, Progression, QuizStatus};
 use crate::cascade::rules::{self, CascadeState, FinishResult, Grade, NewQuiz, Opts, QuizState, Reason, SegmentResult};
 use crate::storage;
@@ -174,31 +175,11 @@ async fn write_cascade(
     Ok(())
 }
 
-async fn quiz_questions(conn: &mut PgConnection, quiz: Uuid) -> Result<Vec<u32>, sqlx::Error> {
-    let v: Vec<i32> = sqlx::query_scalar!("SELECT question_idx FROM quiz_questions WHERE quiz_id = $1 ORDER BY question_idx", quiz)
-        .fetch_all(conn)
-        .await?;
-    Ok(v.into_iter().map(|i| i as u32).collect())
-}
-
-/// A new attempt in place: positions rewritten from the seed in one UPDATE …
-/// FROM UNNEST, grades cleared. Only the quiz row is stamped; other devices
-/// rebuild the order from the seed.
+/// A new attempt in place: grades cleared, and the new seed on the quiz row,
+/// from which every side computes the order. Only the quiz row is stamped.
 async fn reset_quiz(conn: &mut PgConnection, ctx: &Ctx, quiz: Uuid, attempt: u32, seed: u64, at: DateTime<Utc>) -> Result<Vec<u32>, sqlx::Error> {
-    let questions = quiz_questions(conn, quiz).await?;
-    let order = shuffle(&questions, seed);
-    let idx: Vec<i32> = order.iter().map(|&i| i as i32).collect();
-    let pos: Vec<i32> = (0..order.len() as i32).collect();
-    sqlx::query!(
-        "UPDATE quiz_questions q SET position = u.pos, grade = NULL, graded_at = NULL, graded_by_device_id = NULL
-         FROM UNNEST($2::int4[], $3::int4[]) AS u(idx, pos)
-         WHERE q.quiz_id = $1 AND q.question_idx = u.idx",
-        quiz,
-        &idx,
-        &pos,
-    )
-    .execute(&mut *conn)
-    .await?;
+    let questions = cards::members(conn, quiz).await?;
+    cards::reset(conn, quiz).await?;
     sqlx::query!(
         "UPDATE quizzes SET attempt = $2, shuffle_seed = $3, correct_count = 0, missed_count = 0, cursor = 0,
                             cursor_moved_at = $4, cursor_device_id = $5, run_start = 0, updated_seq = $6
@@ -258,19 +239,9 @@ async fn insert_quiz(
     )
     .execute(&mut *conn)
     .await?;
-    let order = shuffle(&n.questions, n.seed);
-    let idx: Vec<i32> = order.iter().map(|&i| i as i32).collect();
-    let pos: Vec<i32> = (0..count).collect();
-    sqlx::query!(
-        "INSERT INTO quiz_questions (quiz_id, question_idx, position, updated_seq)
-         SELECT $1, u.idx, u.pos, $4 FROM UNNEST($2::int4[], $3::int4[]) AS u(idx, pos)",
-        id,
-        &idx,
-        &pos,
-        ctx.seq,
-    )
-    .execute(conn)
-    .await?;
+    let mut idx = n.questions.clone();
+    idx.sort_unstable();
+    cards::insert(conn, id, &idx, false, ctx.seq).await?;
     Ok((count, hash))
 }
 
@@ -321,21 +292,14 @@ async fn grade(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult 
     let l = load_quiz(conn, ctx.user, quiz).await?;
     rules::check_live(&l.cascade, &l.quiz)?;
     rules::check_attempt(&l.quiz, attempt, attempt_seed)?;
-    let row = sqlx::query!(
-        r#"SELECT grade AS "grade: Grade", graded_at, graded_by_device_id, updated_seq
-           FROM quiz_questions WHERE quiz_id = $1 AND question_idx = $2"#,
-        quiz,
-        idx as i32
-    )
-    .fetch_optional(&mut *conn)
-    .await?
-    .ok_or(OpError::Rejected(Reason::NotFound))?;
+    let (chunk, slot) = cards::chunk_of(conn, quiz, idx).await?.ok_or(OpError::Rejected(Reason::NotFound))?;
+    let row = chunk.card(slot);
     let at = clamp(ctx, at);
     // The question is ungraded, or its grade is this device's, or the device
     // had seen it, or this change is later.
     let wins = row.grade.is_none()
-        || row.graded_by_device_id == Some(ctx.device)
-        || row.updated_seq <= op.seen_seq
+        || row.graded_by == Some(ctx.device)
+        || row.graded_seq.is_some_and(|s| s <= op.seen_seq)
         || row.graded_at.is_none_or(|t| at > t);
     if !wins {
         return Err(OpError::Rejected(Reason::Stale));
@@ -343,18 +307,7 @@ async fn grade(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult 
     let delta = |g: Option<Grade>, want: Grade| i32::from(g == Some(want));
     let dc = delta(Some(g), Grade::Correct) - delta(row.grade, Grade::Correct);
     let dm = delta(Some(g), Grade::Missed) - delta(row.grade, Grade::Missed);
-    sqlx::query!(
-        "UPDATE quiz_questions SET grade = $3, graded_at = $4, graded_by_device_id = $5, updated_seq = $6
-         WHERE quiz_id = $1 AND question_idx = $2",
-        quiz,
-        idx as i32,
-        g as Grade,
-        at,
-        ctx.device,
-        ctx.seq,
-    )
-    .execute(&mut *conn)
-    .await?;
+    cards::set_grade(conn, &chunk, slot, g, at, ctx.seq, ctx.device).await?;
     sqlx::query!(
         "UPDATE quizzes SET correct_count = correct_count + $2, missed_count = missed_count + $3,
                             last_activity_at = greatest(last_activity_at, $4), updated_seq = $5
@@ -446,13 +399,8 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
     }
     id_free(conn, ctx.user, new_id).await?;
     let at = clamp(ctx, at);
-    let misses: Vec<i32> = sqlx::query_scalar!(
-        "SELECT question_idx FROM quiz_questions WHERE quiz_id = $1 AND grade = 'missed' ORDER BY question_idx",
-        quiz
-    )
-    .fetch_all(&mut *conn)
-    .await?;
-    let misses: Vec<u32> = misses.into_iter().map(|i| i as u32).collect();
+    let misses: Vec<u32> =
+        cards::cards(conn, quiz).await?.into_iter().filter(|c| c.grade == Some(Grade::Missed)).map(|c| c.idx).collect();
     // The server's grades decide, and the quiz's own progression.
     let r = rules::finish(&mut l.cascade, &l.quiz, l.correct as u32, misses, seed);
     let outcome = r.outcome();
@@ -476,7 +424,7 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
             .await?;
             if let Some(n) = replacement {
                 let (c, h) = insert_quiz(conn, ctx, new_id, l.cascade_id, quiz, n, at).await?;
-                added += storage::level_bytes(c.into());
+                added += storage::level_bytes(c.into(), false);
                 fx.new_quiz_question_count = Some(c);
                 fx.new_quiz_questions_hash = Some(h);
             }
@@ -485,7 +433,7 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
             let qs = reset_quiz(conn, ctx, quiz, l.quiz.attempt + 1, *reset_seed, at).await?;
             let _ = qs;
             let (c, h) = insert_quiz(conn, ctx, new_id, l.cascade_id, quiz, new_level, at).await?;
-            added += storage::level_bytes(c.into());
+            added += storage::level_bytes(c.into(), false);
             fx.new_quiz_question_count = Some(c);
             fx.new_quiz_questions_hash = Some(h);
         }
@@ -535,34 +483,27 @@ async fn finish_segment(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> 
     }
     rules::check_deepest(&l.cascade, &l.quiz)?;
     rules::check_segment_past_cursor(&l.quiz, end)?;
-    let ungraded = sqlx::query_scalar!(
-        r#"SELECT count(*) AS "n!" FROM quiz_questions WHERE quiz_id = $1 AND position < $2 AND grade IS NULL"#,
-        quiz,
-        end as i32
-    )
-    .fetch_one(&mut *conn)
-    .await?;
-    if ungraded > 0 {
+    // Positions come from the attempt's seed.
+    let all = cards::cards(conn, quiz).await?;
+    let grades = cards::grades_by_idx(&all);
+    let played = cards::order(&all, l.quiz.seed);
+    let end_at = (end as usize).min(played.len());
+    if played[..end_at].iter().any(|i| grades[i].is_none()) {
         return Err(OpError::Rejected(Reason::Ungraded));
     }
     id_free(conn, ctx.user, new_id).await?;
     let at = clamp(ctx, at);
-    let run_misses: Vec<i32> = sqlx::query_scalar!(
-        "SELECT question_idx FROM quiz_questions WHERE quiz_id = $1 AND position >= $2 AND position < $3
-           AND grade = 'missed' ORDER BY question_idx",
-        quiz,
-        l.quiz.run_start as i32,
-        end as i32
-    )
-    .fetch_all(&mut *conn)
-    .await?;
-    let r = rules::finish_segment(&mut l.cascade, &l.quiz, run_misses.into_iter().map(|i| i as u32).collect(), end, seed);
+    let start = (l.quiz.run_start as usize).min(end_at);
+    let mut run_misses: Vec<u32> =
+        played[start..end_at].iter().copied().filter(|i| grades[i] == Some(Grade::Missed)).collect();
+    run_misses.sort_unstable();
+    let r = rules::finish_segment(&mut l.cascade, &l.quiz, run_misses, end, seed);
     let mut fx = Effects::default();
     let mut added = 0;
     match &r {
         SegmentResult::Drilled(n) => {
             let (c, h) = insert_quiz(conn, ctx, new_id, l.cascade_id, quiz, n, at).await?;
-            added = storage::level_bytes(c.into());
+            added = storage::level_bytes(c.into(), false);
             fx.outcome = Some("drilled".into());
             fx.new_quiz_question_count = Some(c);
             fx.new_quiz_questions_hash = Some(h);
@@ -736,10 +677,9 @@ pub async fn purge_cascade_rows(conn: &mut PgConnection, user: Uuid, id: Uuid, s
         .fetch_all(&mut *conn)
         .await?;
     sqlx::query!("DELETE FROM quiz_attempts WHERE quiz_id = ANY($1)", &quizzes).execute(&mut *conn).await?;
-    sqlx::query!("DELETE FROM quiz_questions WHERE quiz_id = ANY($1)", &quizzes).execute(&mut *conn).await?;
+    cards::delete(conn, &quizzes).await?;
     sqlx::query!("UPDATE quizzes SET origin_quiz_id = NULL WHERE cascade_id = $1", id).execute(&mut *conn).await?;
     sqlx::query!("DELETE FROM quizzes WHERE cascade_id = $1", id).execute(&mut *conn).await?;
-    sqlx::query!("DELETE FROM cascade_questions WHERE cascade_id = $1", id).execute(&mut *conn).await?;
     let gone = sqlx::query!("DELETE FROM cascades WHERE id = $1 RETURNING spec_id, storage_bytes", id)
         .fetch_one(&mut *conn)
         .await?;

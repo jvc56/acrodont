@@ -12,7 +12,7 @@ mod common;
 use std::time::{Duration, Instant};
 
 use axum::http::StatusCode;
-use common::sync::{account, insert_cascade, insert_cleared_chains, positions, quiz_now, Device, Setup};
+use common::sync::{account, insert_cascade, insert_cleared_chains, positions, quiz_now, write_grades, Device, Setup};
 use common::{Client, TestApp, TestResponse};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -475,9 +475,10 @@ async fn pad(app: &TestApp) {
         // the table, which says nothing about a production instance.
         sqlx::query(
             "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, spec_id, clear_threshold, options_changed_at,
-                                   options_seq, options_device_id, question_count, depth, updated_seq, storage_bytes)
+                                   options_seq, options_device_id, question_count, depth, updated_seq, storage_bytes,
+                                   question_keys)
              SELECT gen_random_uuid(), user_id, 'padding', quiz_type, lexicon_id, spec_id, 80, now(), 1, gen_random_uuid(),
-                    1, 1, g, 0
+                    1, 1, g, 0, ''
              FROM cascades, generate_series(1, $2 - 1) AS g WHERE id = $1",
         )
         .bind(s.cascade_id)
@@ -549,17 +550,12 @@ async fn add_levels(app: &TestApp, s: &Setup, n2: i32, n3: i32) {
         .execute(app.db())
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO quiz_questions (quiz_id, question_idx, position, grade, graded_at, graded_by_device_id, updated_seq)
-             SELECT $1, g, g, CASE WHEN g % 2 = 0 THEN 'correct'::grade END, CASE WHEN g % 2 = 0 THEN now() END,
-                    CASE WHEN g % 2 = 0 THEN gen_random_uuid() END, 1
-             FROM generate_series(0, $2 - 1) AS g",
-        )
-        .bind(id)
-        .bind(n)
-        .execute(app.db())
-        .await
-        .unwrap();
+        let idxs: Vec<u32> = (0..n as u32).collect();
+        acrodont::cards::insert(&mut app.db().acquire().await.unwrap(), id, &idxs, false, 1).await.unwrap();
+        write_grades(app, id, Uuid::new_v4(), chrono::Utc::now(), Some(1), |g| {
+            (g % 2 == 0).then_some(acrodont::cascade::rules::Grade::Correct)
+        })
+        .await;
         prev = id;
     }
     sqlx::query("UPDATE cascades SET depth = 3, peak_depth = 3 WHERE id = $1").bind(s.cascade_id).execute(app.db()).await.unwrap();

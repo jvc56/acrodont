@@ -6,7 +6,8 @@ mod common;
 use std::collections::HashSet;
 
 use axum::http::StatusCode;
-use common::sync::{grades, insert_cascade, insert_cleared_chains, play_and_finish, result, rows, Device, Setup};
+use acrodont::cascade::rules::Grade;
+use common::sync::{grades, insert_cascade, insert_cleared_chains, play_and_finish, result, rows, write_grades, Device, Setup};
 use common::TestApp;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -198,16 +199,7 @@ async fn a_minimum_per_page(pool: sqlx::PgPool) {
         .fetch_one(app.db())
         .await
         .unwrap();
-    sqlx::query(
-        "UPDATE quiz_questions SET grade = 'correct', graded_at = now(), graded_by_device_id = $3, updated_seq = $2
-         WHERE quiz_id = $1 AND question_idx > 0",
-    )
-    .bind(s.source_id)
-    .bind(s2)
-    .bind(a.id)
-    .execute(app.db())
-    .await
-    .unwrap();
+    write_grades(&app, s.source_id, a.id, chrono::Utc::now(), Some(s2), |i| (i > 0).then_some(Grade::Correct)).await;
     sqlx::query("UPDATE quizzes SET correct_count = 60000, updated_seq = $2 WHERE id = $1").bind(s.source_id).bind(s2).execute(app.db()).await.unwrap();
     let (_, pages) = b.sync_all(vec![]).await;
     let mins: Vec<String> = pages
@@ -327,15 +319,7 @@ async fn the_grades_endpoint(pool: sqlx::PgPool) {
     let user = d.client.user_id.unwrap();
     let s = Setup::new(130_000);
     insert_cascade(&app, user, &s).await;
-    sqlx::query(
-        "UPDATE quiz_questions SET grade = 'missed', graded_at = now(), graded_by_device_id = $2
-         WHERE quiz_id = $1 AND question_idx >= 129600",
-    )
-    .bind(s.source_id)
-    .bind(d.id)
-    .execute(app.db())
-    .await
-    .unwrap();
+    write_grades(&app, s.source_id, d.id, chrono::Utc::now(), None, |i| (i >= 129_600).then_some(Grade::Missed)).await;
     let q = common::sync::quiz_now(&app, s.source_id).await;
     for page in 0..3 {
         let from = page * 50_000;

@@ -434,55 +434,65 @@ searches it has, only on how much they hold. Storage figures are in decimal
 units wherever they are shown, on the Cascades page and in the builder alike: 1 MB is 1,000,000 bytes. The default was sized from three cascades the owner named
 (PQ-023): every CSW24 anagram of 7 and 8 letters (64,353 questions, 18.64 MB as
 created), every CSW24 definition of 7 and 8 letters (76,847 questions,
-22.25 MB) and 10,000 leave values (2.88 MB). The three come to 43.77 MB as
+22.25 MB) and 10,000 leave values (2.88 MB). The three came to 43.77 MB as
 created and 72.20 MB studied hard (levels made from misses adding up to a
-second Source quiz each), which leaves 27.8 MB, 1.39 times the need. An
+second Source quiz each) when every question of every level was a row of its
+own. Stored packed, as below, the same three are 2.89 MB as created (1.24 MB,
+1.47 MB and 0.18 MB) and 5.10 MB studied hard. An
 account's own limit can replace the default: `users.storage_limit_bytes`, NULL
 unless set, is set only through SQL.
 
-**What counts.** A cascade's storage is the server rows the account holds
-because of it: its `cascades` row, one `cascade_questions` row per question
-with its key, one `quizzes` row per level (active or in the Trash), one
-`quiz_questions` row per question per level, one `quiz_attempts` row per
-finished pass, and its private filter spec with any In Word List entries. A
+**What counts.** A cascade's storage is what the account holds on the server
+because of it: its `cascades` row with its question keys (one line each in
+`question_keys`), one `quizzes` row per level (active or in the Trash), each
+level's questions and grades packed in `quiz_cards` chunks of up to 256
+questions, one `quiz_attempts` row per finished pass, and its private filter
+spec with any In Word List entries. A
 saved search's is its spec. Answers, definitions and hooks are catalog data,
 shared by every account, and count for no one.
 
-**How it is counted.** From row counts with fixed per-row sizes, never by
-asking Postgres, which would mean scanning hundreds of thousands of rows or
-table sizes that cannot be split by cascade. The sizes are
+**How it is counted.** From counts with fixed sizes, never by asking
+Postgres, which would mean reading every chunk or table sizes that cannot be
+split by cascade. The sizes are
 `contract-fixtures/storage.json`, which `backend/src/storage.rs` and the
 device's `lib/cascades/storage.ts` each carry as constants, a test on each side
 keeping them equal to the fixture:
 
-| Row | Bytes |
+| Size | Bytes |
 |---|---|
 | `cascade_row` | 380 |
-| `question_row` | 94, plus the question key's bytes |
+| `question` | 1 (its line break), plus the question key's bytes |
 | `quiz_row` | 420 |
-| `quiz_question_row` | 188 |
+| `chunk_row` | 160 (a `quiz_cards` row, up to 256 questions) |
+| `card` | 10 (a question's grade, time, sequence and device) |
+| `card_idx` | 4 (a question's index, in every level but the Source quiz) |
 | `attempt_row` | 176 |
 | `spec_row` | 380 (the spec with its groups and conditions) |
 | `spec_word_row` | 100, plus the entry's bytes |
 
 ```
 cascade = cascade_row
-        + Σ questions (question_row + octet_length(question_key))
-        + Σ levels (quiz_row + question_count × quiz_question_row)
+        + Σ questions (question + octet_length(question_key))
+        + Σ levels (quiz_row + ⌈question_count / 256⌉ × chunk_row
+                    + question_count × (card + card_idx unless the Source quiz))
         + attempts × attempt_row
         + spec
 spec    = spec_row + Σ In Word List entries (spec_word_row + octet_length(entry))
 ```
 
-The sizes include index and tuple overhead, and `quiz_question_row` is the
-graded size, so a level's figure does not grow as it is studied. The count is
-of live rows: the dead row versions grading leaves are vacuum's to reclaim, not
-the account's to pay for. An integration test calibrates the sizes against
-`pg_total_relation_size` and keeps the formula within ±20% of what Postgres
-measures (it reads 1.012 times the measured rows), so a schema change that
-makes rows bigger fails the build instead of quietly under-counting. A
-300,000-question cascade is about 87 MB as created; an In Word List entry
-costs about 110 bytes, so a 300,000-entry list is about 33 MB.
+The sizes include index and tuple overhead, and `card` is the graded size, so
+a level's figure does not grow as it is studied. A chunk's arrays are
+compressed (lz4), so what Postgres stores varies with the grades; the sizes
+are set a little above what it measures for a level studied the usual way
+(about 2 bytes a question for an unstudied Source chunk, 11.5 for a graded
+chunk with its indexes), so the count never falls short of the disk used. The
+count is of live rows: the dead row versions grading leaves are vacuum's to
+reclaim, not the account's to pay for. An integration test calibrates the sizes
+against `pg_total_relation_size`: the whole cascade within ±20% of what Postgres
+measures, and its levels counted at no less than they take and no more than
+twice, so a schema change that makes rows bigger fails the build instead of
+quietly under-counting. A 300,000-question cascade is about 6 MB as created; an
+In Word List entry costs about 110 bytes, so a 300,000-entry list is about 33 MB.
 
 **Where it is kept.** `cascades.storage_bytes`, `saved_searches.storage_bytes`
 and the account's total, `users.storage_bytes`, each changed in the
@@ -2293,7 +2303,7 @@ word-list search over a whole lexicon does, but a full English leave value set
 (around a million leaves) does not. What fits under the cap is still bounded
 by the account's [storage](#storage-limit): the preview reports what the
 cascade would hold (`storage_bytes`), and a 300,000-question cascade is about
-87 MB as created. Preview returns the count and the first
+6 MB as created. Preview returns the count and the first
 20 questions.
 
 ---
@@ -2303,11 +2313,19 @@ cascade would hold (`storage_bytes`), and a 300,000-question cascade is about
 ### Questions are stored once per cascade
 
 When a cascade is created, its search results are stored once, in search order,
-as the cascade's **question index**: `cascade_questions(idx → question_key)`.
-Every quiz in the cascade refers to questions by `idx` rather than repeating the
-key. Every level's questions come from the Source quiz's questions, so:
+as the cascade's **question index**: `cascades.question_keys`, one key per line,
+a question's `idx` being its line. Every quiz in the cascade refers to questions
+by `idx` rather than repeating the key. Every level's questions come from the
+Source quiz's questions, so:
 
-- a level quiz costs a few bytes per question
+- a level costs a few bytes per question: its questions and grades are packed
+  in `quiz_cards` chunks of up to 256, each question's grade, time, sync
+  sequence and device at the same place in a chunk's arrays, its idx too
+  except in the Source quiz, whose chunks hold `0 … n−1` in turn. A position
+  in the attempt is never stored; it comes from the seed
+  ([Deterministic shuffles](#deterministic-shuffles)). A view, `quiz_questions`,
+  reads the chunks back as one row per question, for tests, scripts and
+  support queries
 - the answer cards downloaded for the Source quiz cover every level that can ever
   exist in the cascade, including levels created offline
 
@@ -2441,10 +2459,11 @@ question set is written for it; the [scale tests](#scale-tests) run there:
   the server, so a 300,000-question word list never needs the whole file in
   memory at once. With every anagram's words included, such a file is on the
   order of tens of megabytes.
-- **Storage**: by the [storage formula](#storage-limit), a `quiz_questions`
-  row costs 188 bytes and a `cascade_questions` row 94 plus its key, so a
-  full 300,000-question level is about 56 MB, and a cascade as created (its
-  Source quiz plus question index) about 87 MB, most of an account's 100 MB.
+- **Storage**: by the [storage formula](#storage-limit), a question costs
+  about 10.6 bytes in the Source quiz and 14.6 in any other level, and its key
+  plus one byte in the question index, so a full 300,000-question level is
+  about 4.4 MB, and a cascade as created (its Source quiz plus question index)
+  about 6 MB.
   This is watched on the database dashboard. The Trash's automatic purge keeps
   cleared quizzes from piling up.
 
@@ -3105,7 +3124,7 @@ which alarms. Then:
    the device never counts a cascade's figure itself.
 3. If the device's cursor is below the user's `sync_floor_seq` (the highest
    tombstone sequence the purge task has pruned; tombstones are pruned after
-   90 days), the server replies `resync_required`; a cursor at or above the
+   30 days), the server replies `resync_required`; a cursor at or above the
    floor has missed no pruned tombstone, even when older tombstones remain
    above the floor. That response carries the `results` of the push that
    arrived with it and no `changes`, so the device drops the acknowledged
@@ -3997,6 +4016,10 @@ CREATE TABLE cascades (
                                                      -- its own next change always applies
 
     question_count    INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 300000),
+    question_keys     TEXT COMPRESSION lz4 NOT NULL,
+                          -- the cascade's questions in search order, one key per
+                          -- line (alphagram, word or canonical leave, in MAGPIE
+                          -- notation); a question's idx is its line. Immutable.
     depth             INTEGER NOT NULL CHECK (depth >= 1),
                           -- number of active levels; Level 1 is always the Source quiz
     peak_depth        INTEGER NOT NULL DEFAULT 1 CHECK (peak_depth >= depth),
@@ -4027,15 +4050,6 @@ CREATE INDEX cascades_trashed_at ON cascades (trashed_at) WHERE trashed_at IS NO
 CREATE INDEX cascades_spec_id ON cascades (spec_id);
 CREATE INDEX cascades_lexicon_id ON cascades (lexicon_id);
 CREATE INDEX cascades_leave_set_id ON cascades (leave_set_id) WHERE leave_set_id IS NOT NULL;
-
--- The cascade's questions, in search order. Immutable.
-CREATE TABLE cascade_questions (
-    cascade_id    UUID NOT NULL REFERENCES cascades (id) ON DELETE CASCADE,
-    idx           INTEGER NOT NULL CHECK (idx BETWEEN 0 AND 299999),
-    question_key  TEXT NOT NULL CHECK (char_length(question_key) BETWEEN 1 AND 300),
-                      -- alphagram, word or canonical leave, in MAGPIE notation
-    PRIMARY KEY (cascade_id, idx)
-);
 
 CREATE TABLE quizzes (
     id                UUID PRIMARY KEY,           -- device-generated, the Source quiz included
@@ -4116,22 +4130,52 @@ CREATE UNIQUE INDEX quizzes_one_per_segment
     ON quizzes (origin_quiz_id, origin_attempt, origin_segment_end)
     WHERE origin = 'segment';
 
-CREATE TABLE quiz_questions (
-    quiz_id       UUID NOT NULL REFERENCES quizzes (id) ON DELETE CASCADE,
-    question_idx  INTEGER NOT NULL CHECK (question_idx BETWEEN 0 AND 299999),
-                      -- index into cascade_questions
-    position      INTEGER NOT NULL CHECK (position BETWEEN 0 AND 299999),
-    grade         grade,
-    graded_at     TIMESTAMPTZ,                    -- device time, for latest-wins between devices
-    graded_by_device_id UUID,                     -- a device's own regrade always applies
-    updated_seq   BIGINT NOT NULL,
-    PRIMARY KEY (quiz_id, question_idx),
-    CONSTRAINT quiz_questions_position_unique
-        UNIQUE (quiz_id, position) DEFERRABLE INITIALLY DEFERRED,
-    CHECK ((grade IS NULL) = (graded_at IS NULL)),
-    CHECK ((grade IS NULL) = (graded_by_device_id IS NULL))
+-- A level's questions and their grades, packed: one row per run of up to 256
+-- of its questions in idx order (a chunk), each question's state at the same
+-- place in the chunk's arrays. A question's position in the attempt is never
+-- stored: it is computed from the quiz's shuffle_seed (Deterministic shuffles).
+-- See Storage limit for what a chunk costs.
+CREATE TABLE quiz_cards (
+    quiz_id      UUID NOT NULL REFERENCES quizzes (id) ON DELETE CASCADE,
+    first_idx    INTEGER NOT NULL CHECK (first_idx BETWEEN 0 AND 299999),
+                     -- the chunk's first question; the chunks of a quiz in
+                     -- first_idx order are its questions in idx order
+    idxs         INT4[] COMPRESSION lz4,
+                     -- the chunk's questions, ascending; NULL for the Source
+                     -- quiz, whose chunk holds first_idx, first_idx + 1, …
+    grades       BYTEA COMPRESSION lz4 NOT NULL,
+                     -- one byte per question: 0 ungraded, 1 correct, 2 missed
+    graded_at    TIMESTAMPTZ[] COMPRESSION lz4 NOT NULL,
+                     -- device time, for latest-wins between devices; NULL when ungraded
+    graded_seq   INT8[] COMPRESSION lz4 NOT NULL,
+                     -- the sync sequence of the grade, for seen_seq and pulls
+    graded_by    INT2[] COMPRESSION lz4 NOT NULL,
+                     -- the device that set it, as a 1-based index into devices,
+                     -- so a device's own regrade always applies
+    devices      UUID[] NOT NULL DEFAULT '{}',
+    updated_seq  BIGINT NOT NULL,
+                     -- the latest graded_seq here (the creation's at first), so a
+                     -- pull reads only the chunks that changed
+    PRIMARY KEY (quiz_id, first_idx),
+    CHECK (octet_length(grades) BETWEEN 1 AND 256),
+    CHECK (cardinality(graded_at) = octet_length(grades)
+           AND cardinality(graded_seq) = octet_length(grades)
+           AND cardinality(graded_by) = octet_length(grades)),
+    CHECK (idxs IS NULL OR (cardinality(idxs) = octet_length(grades) AND idxs[1] = first_idx))
 );
-CREATE INDEX quiz_questions_quiz_seq ON quiz_questions (quiz_id, updated_seq);
+
+-- The chunks as one row per question, as the table was before it was packed:
+-- for reading in tests, scripts and support queries, never by the server's
+-- hot paths. question_idx is an index into cascades.question_keys.
+CREATE VIEW quiz_questions AS
+SELECT c.quiz_id,
+       coalesce(c.idxs[s.i], c.first_idx + s.i - 1) AS question_idx,
+       CASE get_byte(c.grades, s.i - 1) WHEN 1 THEN 'correct'::grade WHEN 2 THEN 'missed'::grade END AS grade,
+       c.graded_at[s.i] AS graded_at,
+       c.devices[c.graded_by[s.i]] AS graded_by_device_id,
+       c.graded_seq[s.i] AS updated_seq
+FROM quiz_cards c
+CROSS JOIN LATERAL generate_series(1, octet_length(c.grades)) AS s (i);
 
 -- One row per finished attempt. Immutable.
 CREATE TABLE quiz_attempts (
@@ -4199,7 +4243,7 @@ CREATE TABLE sync_devices (
     PRIMARY KEY (user_id, device_id)
 );
 
--- Records of purged cascades and quizzes, so other devices remove them. Pruned after 90 days.
+-- Records of purged cascades and quizzes, so other devices remove them. Pruned after 30 days.
 CREATE TABLE sync_tombstones (
     user_id     UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     entity      sync_entity NOT NULL,
@@ -4309,8 +4353,7 @@ Notes on the schema:
   `storage_bytes` off `users.storage_bytes`.
 - **The 300,000 ceiling** lives in `cascades.question_count`,
   `quizzes.question_count`, `quiz_attempts.question_count` and the two
-  `segment_size` columns (`BETWEEN … 300000`), and in `cascade_questions.idx`,
-  `quiz_questions.question_idx` and `quiz_questions.position`
+  `segment_size` columns (`BETWEEN … 300000`), and in `quiz_cards.first_idx`
   (`BETWEEN 0 AND 299999`), so no configuration can exceed it.
 - **Storage figures** (`cascades.storage_bytes`,
   `saved_searches.storage_bytes`, `users.storage_bytes`) are never negative,
@@ -5115,7 +5158,7 @@ startup rather than falling back to a default.
 | `SEARCH_CONCURRENCY` | `2` | Searches running at once per instance, sized to the task's vCPUs. A request waiting longer than `SEARCH_TIMEOUT_MS` for a permit gets `503` with `Retry-After`, never `422` |
 | `EXPORT_CONCURRENCY` | `2` | Server-streamed exports at once per instance (production sets 1). A permit is held for the whole stream and taken before the token is spent; a request waits up to 50 seconds for one, then gets `503` with `Retry-After`. It is what bounds peak memory (the catalog plus this many exports) whatever the number of users |
 | `TRASH_RETENTION_DAYS` | `30` | Y: how long cleared quizzes and trashed cascades stay in the Trash |
-| `SYNC_RETENTION_DAYS` | `90` | How long operation records and tombstones are kept |
+| `SYNC_RETENTION_DAYS` | `30` | How long operation records and tombstones are kept. A device offline longer resyncs in full on its return; its unsent work still applies |
 | `SYNC_MAX_OPS` | `500` | Operations accepted per sync request; a request carrying more is a `400` |
 | `MIN_APP_VERSION` | `0` | The lowest frontend build number `/api/sync` accepts. `0` refuses nothing; raising it is a deploy-time change, made only when a sync API change cannot stay compatible, and a request below it gets `426` after its operations are applied |
 | `PURGE_INTERVAL_SECONDS` | `3600` | |
@@ -5406,9 +5449,9 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
 - **Backups** have their own section: see [Backups](#backups).
 - **Capacity**: RDS storage autoscaling is on (20 GiB, growing up to five
   times that), with RDS storage events mailed, because large cascades (about
-  87 MB at 300,000 questions as created, plus about 56 MB for each full-size
+  6 MB at 300,000 questions as created, plus about 4.4 MB for each full-size
   level) are the main driver of database growth. The
-  [storage limit](#storage-limit) bounds them: at 100 accounts of 100 MB each
+  [storage limit](#storage-limit) bounds them: at 100 accounts at the limit
   the worst case is 10 GB, half the starting allocation, and a realistic
   one is a small fraction of that. The figure is the formula's, of live rows;
   dead row versions from grading wait for vacuum on top of it. Filter specs
@@ -5420,7 +5463,7 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
   `sync_operations` would have outgrown both: studying emits about two
   operations per card (a grade and, online, its own cursor move), at roughly
   250 bytes a record with its indexes, so keeping every record for 90 days
-  would hold about 150 MB for each 300,000-card pass, nearly twice the 87 MB
+  would hold about 150 MB for each 300,000-card pass, 25 times the 6 MB
   cascade it describes, and outside the storage limit. Records of result-free operations are therefore deleted as soon as
   their device has acknowledged them (see [The sync cycle](#the-sync-cycle)), so
   the table holds about one batch per active device plus a few `finish`,

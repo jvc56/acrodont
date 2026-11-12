@@ -6,6 +6,7 @@
 pub mod app;
 pub mod auth;
 pub mod cascade;
+pub mod cards;
 pub mod catalog;
 pub mod clock;
 pub mod config;

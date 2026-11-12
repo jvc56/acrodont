@@ -193,7 +193,7 @@ migration. Add a numbered file instead.
   starts on the newer schema. That is what makes a rollback possible.
 
 **Sync compatibility.** A sync API change must stay compatible with the
-previous app version for at least `SYNC_RETENTION_DAYS` (90). Devices can be
+previous app version for at least `SYNC_RETENTION_DAYS` (30). Devices can be
 offline that long. To retire old builds, raise `min_app_version` with
 `scripts/set-setting.sh`. Devices below it get `426` after their operations
 are applied, and they offer "reload to keep syncing".

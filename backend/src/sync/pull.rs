@@ -191,22 +191,16 @@ pub async fn page(conn: &mut PgConnection, start: &PageToken) -> Result<(Changes
                 let last_quiz = after.first().and_then(|s| s.parse::<Uuid>().ok()).unwrap_or(Uuid::nil());
                 let last_idx: i32 = after.get(1).and_then(|s| s.parse().ok()).unwrap_or(-1);
                 // Graded rows of active quizzes of the cascades in question_rows_for.
-                let mut rows: Vec<(Uuid, i32, Grade, DateTime<Utc>, i64)> = sqlx::query_as(
-                    "SELECT qq.quiz_id, qq.question_idx, qq.grade, qq.graded_at, qq.updated_seq
-                     FROM quiz_questions qq JOIN quizzes q ON q.id = qq.quiz_id
-                     WHERE q.user_id = $1 AND q.status = 'active' AND q.cascade_id = ANY($2)
-                       AND qq.grade IS NOT NULL AND qq.updated_seq > $3 AND qq.updated_seq <= $4
-                       AND (qq.quiz_id, qq.question_idx) > ($5, $6)
-                     ORDER BY qq.quiz_id, qq.question_idx LIMIT $7",
+                let mut rows = crate::cards::graded_since(
+                    conn,
+                    user,
+                    &start.qrf,
+                    floor,
+                    ceil,
+                    last_quiz,
+                    last_idx,
+                    fetch.max(0) as usize,
                 )
-                .bind(user)
-                .bind(&start.qrf)
-                .bind(floor)
-                .bind(ceil)
-                .bind(last_quiz)
-                .bind(last_idx)
-                .bind(fetch)
-                .fetch_all(&mut *conn)
                 .await?;
                 let more = rows.len() as i64 > left;
                 if more {

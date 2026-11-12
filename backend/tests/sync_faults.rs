@@ -9,7 +9,8 @@ use std::time::Instant;
 
 use axum::http::StatusCode;
 use chrono::Duration;
-use common::sync::{finish_op, grades, insert_cascade, play_and_finish, result, rows, Device, Setup};
+use acrodont::cascade::rules::Grade;
+use common::sync::{finish_op, grades, insert_cascade, play_and_finish, result, rows, write_grades, Device, Setup};
 use common::TestApp;
 use serde_json::json;
 
@@ -81,7 +82,7 @@ async fn a_serialization_failure_is_503_and_the_resend_applies(pool: sqlx::PgPoo
            END IF;
            RETURN NEW;
          END $$ LANGUAGE plpgsql;
-         CREATE TRIGGER wf_fault BEFORE UPDATE ON quiz_questions FOR EACH ROW EXECUTE FUNCTION wf_fault();",
+         CREATE TRIGGER wf_fault BEFORE UPDATE ON quiz_cards FOR EACH ROW EXECUTE FUNCTION wf_fault();",
     )
     .execute(app.db())
     .await
@@ -177,15 +178,10 @@ async fn a_130000_question_finish_and_reset(pool: sqlx::PgPool) {
     b.sync(vec![]).await;
     // Every question graded, half missed, straight in the database (the
     // 260-request push is the scale test's).
-    sqlx::query(
-        "UPDATE quiz_questions SET grade = CASE WHEN question_idx % 2 = 0 THEN 'correct'::grade ELSE 'missed'::grade END,
-                graded_at = now(), graded_by_device_id = $2 WHERE quiz_id = $1",
-    )
-    .bind(s.source_id)
-    .bind(d.id)
-    .execute(app.db())
-    .await
-    .unwrap();
+    write_grades(&app, s.source_id, d.id, chrono::Utc::now(), None, |i| {
+        Some(if i % 2 == 0 { Grade::Correct } else { Grade::Missed })
+    })
+    .await;
     sqlx::query("UPDATE quizzes SET correct_count = 65000, missed_count = 65000 WHERE id = $1").bind(s.source_id).execute(app.db()).await.unwrap();
     // The finish: the Source quiz descends, which resets it, and creates a 65,000-question Level 2.
     let (f, l2) = finish_op(&app, &mut d, s.source_id, "123").await;
@@ -195,14 +191,7 @@ async fn a_130000_question_finish_and_reset(pool: sqlx::PgPool) {
     assert_eq!(result(&r, 0)["outcome"], "descended");
     assert_eq!(result(&r, 0)["new_quiz_question_count"], 65_000);
     // A reset on its own: a reshuffle of the Source quiz.
-    sqlx::query(
-        "UPDATE quiz_questions SET grade = 'missed', graded_at = now(), graded_by_device_id = $2 WHERE quiz_id = $1",
-    )
-    .bind(s.source_id)
-    .bind(d.id)
-    .execute(app.db())
-    .await
-    .unwrap();
+    write_grades(&app, s.source_id, d.id, chrono::Utc::now(), None, |_| Some(Grade::Missed)).await;
     sqlx::query("UPDATE quizzes SET correct_count = 0, missed_count = 130000 WHERE id = $1").bind(s.source_id).execute(app.db()).await.unwrap();
     // Level 2 is the deepest; clear it out of the way first.
     sqlx::query("UPDATE quizzes SET status = 'cleared', cleared_at = now() WHERE id = $1").bind(l2).execute(app.db()).await.unwrap();

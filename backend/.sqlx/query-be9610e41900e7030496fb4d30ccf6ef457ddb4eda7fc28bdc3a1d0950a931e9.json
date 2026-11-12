@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.spec_id,\n                  octet_length(c.question_keys)::int8 AS \"keys_and_breaks!\",\n                  (SELECT count(*) FROM quizzes WHERE cascade_id = c.id) AS \"quizzes!\",\n                  (SELECT count(*) FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id\n                    WHERE q.cascade_id = c.id) AS \"chunks!\",\n                  (SELECT coalesce(sum(octet_length(k.grades)), 0)::int8 FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id\n                    WHERE q.cascade_id = c.id) AS \"cards!\",\n                  (SELECT coalesce(sum(cardinality(k.idxs)), 0)::int8 FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id\n                    WHERE q.cascade_id = c.id) AS \"indexed!\",\n                  (SELECT count(*) FROM quiz_attempts a JOIN quizzes q ON q.id = a.quiz_id\n                    WHERE q.cascade_id = c.id) AS \"attempts!\"\n           FROM cascades c WHERE c.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "spec_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "cascades",
+            "name": "spec_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "keys_and_breaks!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "quizzes!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "chunks!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "cards!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "indexed!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "attempts!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "be9610e41900e7030496fb4d30ccf6ef457ddb4eda7fc28bdc3a1d0950a931e9"
+}

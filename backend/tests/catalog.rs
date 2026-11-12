@@ -932,8 +932,8 @@ async fn insert_cascade(
     sqlx::query(
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, leave_set_id, spec_id, clear_threshold,
                                options_changed_at, options_seq, options_device_id, question_count, depth, updated_seq,
-                               storage_bytes)
-         VALUES ($1, $2, 'c', $3::quiz_type, $4, $5, $6, 80, now(), 1, gen_random_uuid(), 1, 1, 1, 0)",
+                               storage_bytes, question_keys)
+         VALUES ($1, $2, 'c', $3::quiz_type, $4, $5, $6, 80, now(), 1, gen_random_uuid(), 1, 1, 1, 0, E'K\\n')",
     )
     .bind(id)
     .bind(user)

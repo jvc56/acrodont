@@ -78,7 +78,7 @@ async fn the_preview_reports_what_a_cascade_holds_as_created(pool: sqlx::PgPool)
         let cascade = &r.json()["cascade"];
         assert_eq!(bytes_of(cascade), want, "{quiz_type}");
         let n = cascade["question_count"].as_i64().unwrap();
-        assert!(want > ROW_BYTES.cascade_row + level_bytes(n) + n * ROW_BYTES.question_row, "keys and spec on top");
+        assert!(want > ROW_BYTES.cascade_row + level_bytes(n, true) + n * ROW_BYTES.question, "keys and spec on top");
         total += want;
         assert_eq!(used(&app, user).await, total);
         assert_storage_consistent(&app, user).await;
@@ -97,23 +97,23 @@ async fn the_preview_reports_what_a_cascade_holds_as_created(pool: sqlx::PgPool)
 /// with `needed` 0.
 #[sqlx::test]
 async fn creation_and_start_over_are_refused_past_the_limit(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("MAX_STORAGE_BYTES_PER_USER", "10000")]).await;
+    let app = TestApp::with(pool, &[("MAX_STORAGE_BYTES_PER_USER", "3000")]).await;
     let mut c = app.seed_fixture_catalog("root").await;
     let user = c.user_id.unwrap();
     let anagrams = estimate(&mut c, "anagram", length(7, 7)).await;
     let definitions = estimate(&mut c, "definition", length(7, 7)).await;
-    assert!(anagrams < 10_000 && definitions < 10_000 && anagrams + definitions > 10_000, "{anagrams} {definitions}");
+    assert!(anagrams < 3_000 && definitions < 3_000 && anagrams + definitions > 3_000, "{anagrams} {definitions}");
     let first = body("EN-FIX", "anagram", length(7, 7));
     assert_eq!(c.post("/api/cascades", first.clone()).await.status, StatusCode::CREATED);
     let specs = count(&app, "search_specs").await;
 
     let r = c.post("/api/cascades", body("EN-FIX", "definition", length(7, 7))).await;
     assert_eq!(r.status, StatusCode::CONFLICT);
-    assert_eq!(r.json(), json!({ "error": "storage_limit", "used": anagrams, "limit": 10_000, "needed": definitions }));
+    assert_eq!(r.json(), json!({ "error": "storage_limit", "used": anagrams, "limit": 3_000, "needed": definitions }));
     let path = format!("/api/cascades/{}/start-over", first["id"].as_str().unwrap());
     let r = c.post(&path, start_over_body()).await;
     assert_eq!(r.status, StatusCode::CONFLICT);
-    assert_eq!(r.json(), json!({ "error": "storage_limit", "used": anagrams, "limit": 10_000, "needed": anagrams }));
+    assert_eq!(r.json(), json!({ "error": "storage_limit", "used": anagrams, "limit": 3_000, "needed": anagrams }));
     assert_eq!((count(&app, "cascades").await, count(&app, "search_specs").await), (1, specs), "nothing written");
     assert_eq!(used(&app, user).await, anagrams);
 
@@ -182,7 +182,7 @@ async fn a_finish_past_the_limit_still_applies(pool: sqlx::PgPool) {
     assert_eq!(finish["status"], "applied");
     assert_eq!(finish["outcome"], "descended");
     assert_eq!(finish["new_quiz_question_count"], 9);
-    let after = before + attempt_bytes() + level_bytes(9);
+    let after = before + attempt_bytes() + level_bytes(9, false);
     assert_eq!(used(&app, user).await, after);
     assert_storage_consistent(&app, user).await;
     // Another device's pull carries the cascade row with its new figure, over the limit.
@@ -228,7 +228,7 @@ async fn purging_frees_exactly_what_was_counted(pool: sqlx::PgPool) {
     other.cursor = d.cursor;
     let op = d.op("purge_quiz", json!({ "quiz_id": l2 }));
     assert_eq!(result(&d.sync(vec![op]).await, 0)["status"], "applied");
-    assert_eq!(used(&app, user).await, held - level_bytes(6) - attempt_bytes());
+    assert_eq!(used(&app, user).await, held - level_bytes(6, false) - attempt_bytes());
     let (_, pages) = other.sync_all(vec![]).await;
     let pulled = rows(&pages, "cascades");
     assert_eq!(pulled.len(), 1, "the purge changed the cascade's figure, so its row travels");
@@ -257,7 +257,7 @@ async fn purging_frees_exactly_what_was_counted(pool: sqlx::PgPool) {
     let held = used(&app, user).await;
     sqlx::query("UPDATE quizzes SET cleared_at = now() - interval '31 days' WHERE status = 'cleared'").execute(app.db()).await.unwrap();
     acrodont::purge::purge_trash(&app.state).await.unwrap();
-    assert_eq!(used(&app, user).await, held - level_bytes(3) - attempt_bytes());
+    assert_eq!(used(&app, user).await, held - level_bytes(3, false) - attempt_bytes());
     assert_storage_consistent(&app, user).await;
     let (_, pages) = d.sync_all(vec![]).await;
     assert_eq!(rows(&pages, "cascades").len(), 1, "the purge task's change reaches the pull");
@@ -339,11 +339,10 @@ fn eight_letter_words(n: usize) -> Vec<String> {
 }
 
 /// The tables a cascade's rows live in, each with the rows of one cascade.
-const TABLES: [(&str, &str); 9] = [
+const TABLES: [(&str, &str); 8] = [
     ("cascades", "id = $1"),
-    ("cascade_questions", "cascade_id = $1"),
     ("quizzes", "cascade_id = $1"),
-    ("quiz_questions", "quiz_id IN (SELECT id FROM quizzes WHERE cascade_id = $1)"),
+    ("quiz_cards", "quiz_id IN (SELECT id FROM quizzes WHERE cascade_id = $1)"),
     ("quiz_attempts", "quiz_id IN (SELECT id FROM quizzes WHERE cascade_id = $1)"),
     ("search_specs", "id = (SELECT spec_id FROM cascades WHERE id = $1)"),
     ("search_groups", "spec_id = (SELECT spec_id FROM cascades WHERE id = $1)"),
@@ -360,17 +359,39 @@ async fn total_size(app: &TestApp, tables: &[String]) -> i64 {
     n
 }
 
-/// Grades every question of a quiz in the database, every other one missed.
+/// Grades every question of a quiz in the database as a study session would:
+/// in play order, a few seconds apart, about one sync's sequence per twenty
+/// grades, every other one missed.
 async fn grade_half_missed(app: &TestApp, quiz: Uuid) {
-    sqlx::query(
-        "UPDATE quiz_questions SET grade = CASE WHEN position % 2 = 0 THEN 'correct'::grade ELSE 'missed'::grade END,
-                                   graded_at = now(), graded_by_device_id = gen_random_uuid()
-         WHERE quiz_id = $1",
-    )
-    .bind(quiz)
-    .execute(app.db())
-    .await
-    .unwrap();
+    let order = common::sync::positions(app, quiz).await;
+    let pos: std::collections::HashMap<u32, usize> = order.iter().enumerate().map(|(p, &i)| (i as u32, p)).collect();
+    let device = Uuid::new_v4();
+    let start = chrono::Utc::now();
+    let mut conn = app.db().acquire().await.unwrap();
+    for mut c in acrodont::cards::load(&mut conn, quiz).await.unwrap() {
+        c.devices = vec![device];
+        for slot in 0..c.len() {
+            let p = pos[&c.idx(slot)];
+            c.grades[slot] = if p.is_multiple_of(2) { 1 } else { 2 };
+            c.graded_at[slot] = Some(start + chrono::Duration::milliseconds(3_217 * p as i64));
+            c.graded_seq[slot] = Some(1_000 + (p / 20) as i64);
+            c.graded_by[slot] = Some(1);
+        }
+        sqlx::query(
+            "UPDATE quiz_cards SET grades = $3, graded_at = $4, graded_seq = $5, graded_by = $6, devices = $7
+             WHERE quiz_id = $1 AND first_idx = $2",
+        )
+        .bind(c.quiz_id)
+        .bind(c.first_idx)
+        .bind(&c.grades)
+        .bind(&c.graded_at)
+        .bind(&c.graded_seq)
+        .bind(&c.graded_by)
+        .bind(&c.devices)
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    }
     sqlx::query(
         "UPDATE quizzes SET correct_count = (SELECT count(*) FROM quiz_questions WHERE quiz_id = $1 AND grade = 'correct'),
                             missed_count = (SELECT count(*) FROM quiz_questions WHERE quiz_id = $1 AND grade = 'missed')
@@ -382,9 +403,10 @@ async fn grade_half_missed(app: &TestApp, quiz: Uuid) {
     .unwrap();
 }
 
-/// STORAGE_LIMIT_PLAN.md § S1: the formula stays within ±20% of what Postgres
-/// measures for a realistic cascade, so a schema change that makes rows
-/// bigger fails here instead of quietly under-counting.
+/// PLAN.md § Storage limit: the formula stays within ±20% of what Postgres
+/// measures for a realistic cascade, and never counts the packed levels as
+/// less than they take, so a schema change that makes rows bigger fails here
+/// instead of quietly under-counting.
 ///
 /// A 20,000-question anagram cascade made from a 20,000-entry In Word List,
 /// studied through two finishes with half missed (Levels 2 and 3, each
@@ -433,6 +455,7 @@ async fn the_formula_is_within_20_percent_of_what_postgres_measures(pool: sqlx::
 
     // The live rows, copied into fresh tables with every index.
     let mut measured = 0;
+    let mut cards_measured = 0;
     let mut lines = Vec::new();
     for (table, filter) in TABLES {
         let copy = format!("calib_{table}");
@@ -445,6 +468,9 @@ async fn the_formula_is_within_20_percent_of_what_postgres_measures(pool: sqlx::
             .unwrap()
             .rows_affected();
         let size = total_size(&app, std::slice::from_ref(&copy)).await - empty;
+        if table == "quiz_cards" {
+            cards_measured = size;
+        }
         lines.push(format!("{table}: {n} rows, {size} bytes ({:.0} a row)", size as f64 / n.max(1) as f64));
         measured += size;
     }
@@ -455,4 +481,20 @@ async fn the_formula_is_within_20_percent_of_what_postgres_measures(pool: sqlx::
         lines.join("\n  ")
     );
     assert!((0.8..=1.2).contains(&ratio), "formula {formula} against measured {measured}: {ratio:.3}");
+    // The levels on their own: the packed chunks compress, so the formula,
+    // which counts a fixed size for each question, may count more than
+    // Postgres stores, but never less, and not more than twice as much.
+    let (chunks, cards, indexed): (i64, i64, i64) = sqlx::query_as(
+        "SELECT count(*), coalesce(sum(octet_length(grades)), 0)::int8, coalesce(sum(cardinality(idxs)), 0)::int8
+         FROM quiz_cards WHERE quiz_id IN (SELECT id FROM quizzes WHERE cascade_id = $1)",
+    )
+    .bind(cascade)
+    .fetch_one(app.db())
+    .await
+    .unwrap();
+    let b = ROW_BYTES;
+    let counted = chunks * b.chunk_row + cards * b.card + indexed * b.card_idx;
+    let r = counted as f64 / cards_measured as f64;
+    println!("levels: formula {counted} bytes, measured {cards_measured} bytes ({r:.3})");
+    assert!((1.0..=2.0).contains(&r), "levels: formula {counted} against measured {cards_measured}: {r:.3}");
 }

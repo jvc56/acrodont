@@ -287,20 +287,18 @@ async fn load(state: &AppState, cascade: Uuid, p: &Parsed) -> ApiResult<(ExportI
         "definition" => QuizType::Definition,
         _ => QuizType::LeaveValue,
     };
-    let keys = sqlx::query!("SELECT idx, question_key FROM cascade_questions WHERE cascade_id = $1 ORDER BY idx", cascade)
-        .fetch_all(&state.db)
-        .await?;
+    let keys = crate::cascade::routes::question_keys(&state.db, cascade).await?;
     let snap = state.catalog.snapshot();
     let lex = snap.lexicons.get(&c.lexicon_id).ok_or(ApiError::Unavailable { retry_after_secs: 5 })?;
     let dist = &lex.distribution;
     let leaves = snap.leave_set_for(lex.id);
     let tiles: Vec<String> = dist.tiles.iter().map(|t| t.letter.clone()).collect();
     let mut questions = Vec::with_capacity(keys.len());
-    for r in &keys {
-        let mut q = format::Question { idx: r.idx, key: r.question_key.clone(), ..Default::default() };
+    for (idx, key) in keys.iter().enumerate() {
+        let mut q = format::Question { idx: idx as i32, key: key.clone(), ..Default::default() };
         match quiz_type {
             QuizType::Anagram => {
-                let alpha: Vec<Tile> = dist.parse_magpie(&r.question_key, false).unwrap_or_default();
+                let alpha: Vec<Tile> = dist.parse_magpie(key, false).unwrap_or_default();
                 q.words = Some(
                     lex.anagrams(&alpha)
                         .map(|w| format::Word {
@@ -313,7 +311,7 @@ async fn load(state: &AppState, cascade: Uuid, p: &Parsed) -> ApiResult<(ExportI
                 );
             }
             QuizType::Definition => {
-                let tiles = dist.parse_magpie(&r.question_key, false).unwrap_or_default();
+                let tiles = dist.parse_magpie(key, false).unwrap_or_default();
                 if let Some(w) = lex.find(&tiles) {
                     q.definition = Some(w.definition.to_string());
                     q.front_hooks = Some(dist.to_magpie(&w.front_hooks));
@@ -321,7 +319,7 @@ async fn load(state: &AppState, cascade: Uuid, p: &Parsed) -> ApiResult<(ExportI
                 }
             }
             QuizType::LeaveValue => {
-                let tiles = dist.parse_magpie(&r.question_key, true).unwrap_or_default();
+                let tiles = dist.parse_magpie(key, true).unwrap_or_default();
                 q.value = leaves.and_then(|s| s.find(&tiles)).map(|l| l.value);
             }
         }
@@ -329,7 +327,7 @@ async fn load(state: &AppState, cascade: Uuid, p: &Parsed) -> ApiResult<(ExportI
     }
     // Quizzes: every active one (the cascade-wide selection), or the one named.
     let quiz_rows = sqlx::query!(
-        r#"SELECT id, level, status::text AS "status!" FROM quizzes WHERE cascade_id = $1"#,
+        r#"SELECT id, level, status::text AS "status!", shuffle_seed FROM quizzes WHERE cascade_id = $1"#,
         cascade
     )
     .fetch_all(&state.db)
@@ -344,26 +342,24 @@ async fn load(state: &AppState, cascade: Uuid, p: &Parsed) -> ApiResult<(ExportI
         if named {
             level = Some(qr.level);
         }
-        let rows = sqlx::query!(
-            r#"SELECT question_idx, position, grade::text AS "grade" FROM quiz_questions WHERE quiz_id = $1 ORDER BY position"#,
-            qr.id
-        )
-        .fetch_all(&state.db)
-        .await?;
-        let grades = rows
+        let mut conn = state.db.acquire().await?;
+        let cards = crate::cards::cards(&mut conn, qr.id).await?;
+        // The attempt's order, from its seed.
+        let order = crate::cards::order(&cards, crate::cascade::order::from_i64(qr.shuffle_seed));
+        let grades = cards
             .iter()
-            .filter_map(|r| {
-                let g = match r.grade.as_deref()? {
-                    "correct" => Grade::Correct,
-                    _ => Grade::Missed,
+            .filter_map(|c| {
+                let g = match c.grade? {
+                    crate::cascade::rules::Grade::Correct => Grade::Correct,
+                    crate::cascade::rules::Grade::Missed => Grade::Missed,
                 };
-                Some((r.question_idx.to_string(), g))
+                Some((c.idx.to_string(), g))
             })
             .collect();
         quizzes.push(format::Quiz {
             level: qr.level,
             active: qr.status == "active",
-            order: rows.iter().map(|r| r.question_idx).collect(),
+            order: order.iter().map(|&i| i as i32).collect(),
             grades,
             pick: Some(named || p.quiz_id.is_none()),
         });

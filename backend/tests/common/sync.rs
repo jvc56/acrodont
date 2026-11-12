@@ -214,9 +214,10 @@ pub async fn insert_cascade(app: &TestApp, user: Uuid, s: &Setup) {
     sqlx::query(
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, spec_id, clear_threshold, segment_size,
                                progression, require_alphabetical, options_changed_at, options_seq, options_device_id,
-                               question_count, depth, updated_seq, storage_bytes)
+                               question_count, depth, updated_seq, storage_bytes, question_keys)
          VALUES ($1, $2, 'test', 'anagram', $3, $4, $5, $6, $7::quiz_progression, $8, now() - interval '1 day', $9, $10,
-                 $11, 1, $9, 0)",
+                 $11, 1, $9, 0, (SELECT string_agg(format('K%s', lpad(g::text, 6, '0')) || E'\n', '' ORDER BY g)
+                                 FROM generate_series(0, $11 - 1) AS g))",
     )
     .bind(s.cascade_id)
     .bind(user)
@@ -232,15 +233,6 @@ pub async fn insert_cascade(app: &TestApp, user: Uuid, s: &Setup) {
     .execute(&mut *tx)
     .await
     .unwrap();
-    let idx: Vec<i32> = (0..s.count).collect();
-    let keys: Vec<String> = idx.iter().map(|i| format!("K{i:06}")).collect();
-    sqlx::query("INSERT INTO cascade_questions (cascade_id, idx, question_key) SELECT $1, * FROM UNNEST($2::int4[], $3::text[])")
-        .bind(s.cascade_id)
-        .bind(&idx)
-        .bind(&keys)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
     let all: Vec<u32> = (0..s.count as u32).collect();
     sqlx::query(
         "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, segment_size, progression, require_alphabetical,
@@ -262,19 +254,7 @@ pub async fn insert_cascade(app: &TestApp, user: Uuid, s: &Setup) {
     .execute(&mut *tx)
     .await
     .unwrap();
-    let order: Vec<i32> = shuffle(&all, s.source_seed).into_iter().map(|i| i as i32).collect();
-    let pos: Vec<i32> = (0..s.count).collect();
-    sqlx::query(
-        "INSERT INTO quiz_questions (quiz_id, question_idx, position, updated_seq)
-         SELECT $1, u.i, u.p, $4 FROM UNNEST($2::int4[], $3::int4[]) AS u(i, p)",
-    )
-    .bind(s.source_id)
-    .bind(&order)
-    .bind(&pos)
-    .bind(seq)
-    .execute(&mut *tx)
-    .await
-    .unwrap();
+    acrodont::cards::insert(&mut tx, s.source_id, &all, true, seq).await.unwrap();
     tx.commit().await.unwrap();
     account(app, s.cascade_id).await;
 }
@@ -321,13 +301,66 @@ pub async fn assert_storage_consistent(app: &TestApp, user: Uuid) -> i64 {
     total
 }
 
-/// The positions of a quiz, from the database.
+/// A quiz's questions in the order of its current attempt: its members,
+/// shuffled with the seed on its row.
 pub async fn positions(app: &TestApp, quiz: Uuid) -> Vec<i32> {
-    sqlx::query_scalar("SELECT question_idx FROM quiz_questions WHERE quiz_id = $1 ORDER BY position")
-        .bind(quiz)
-        .fetch_all(app.db())
+    let mut conn = app.db().acquire().await.unwrap();
+    let seed: i64 = sqlx::query_scalar("SELECT shuffle_seed FROM quizzes WHERE id = $1").bind(quiz).fetch_one(&mut *conn).await.unwrap();
+    let members = acrodont::cards::members(&mut conn, quiz).await.unwrap();
+    shuffle(&members, acrodont::cascade::order::from_i64(seed)).into_iter().map(|i| i as i32).collect()
+}
+
+/// Sets grades straight in the database, a chunk at a time: `grade(idx)` for
+/// each of the quiz's questions, `None` leaving it as it is, stamped with
+/// `device`, `at` and sequence `seq` (the chunk's own when `None`).
+pub async fn write_grades(
+    app: &TestApp,
+    quiz: Uuid,
+    device: Uuid,
+    at: DateTime<Utc>,
+    seq: Option<i64>,
+    grade: impl Fn(u32) -> Option<acrodont::cascade::rules::Grade>,
+) {
+    let mut conn = app.db().acquire().await.unwrap();
+    for mut c in acrodont::cards::load(&mut conn, quiz).await.unwrap() {
+        let mut changed = false;
+        let by = match c.devices.iter().position(|d| *d == device) {
+            Some(i) => i + 1,
+            None => {
+                c.devices.push(device);
+                c.devices.len()
+            }
+        } as i16;
+        let stamp = seq.unwrap_or(c.updated_seq);
+        for slot in 0..c.len() {
+            if let Some(g) = grade(c.idx(slot)) {
+                c.grades[slot] = acrodont::cards::grade_byte(Some(g));
+                c.graded_at[slot] = Some(at);
+                c.graded_seq[slot] = Some(stamp);
+                c.graded_by[slot] = Some(by);
+                changed = true;
+            }
+        }
+        if !changed {
+            continue;
+        }
+        sqlx::query(
+            "UPDATE quiz_cards SET grades = $3, graded_at = $4, graded_seq = $5, graded_by = $6, devices = $7,
+                                   updated_seq = greatest(updated_seq, $8)
+             WHERE quiz_id = $1 AND first_idx = $2",
+        )
+        .bind(c.quiz_id)
+        .bind(c.first_idx)
+        .bind(&c.grades)
+        .bind(&c.graded_at)
+        .bind(&c.graded_seq)
+        .bind(&c.graded_by)
+        .bind(&c.devices)
+        .bind(stamp)
+        .execute(&mut *conn)
         .await
-        .unwrap()
+        .unwrap();
+    }
 }
 
 pub struct QuizNow {
@@ -423,9 +456,9 @@ pub async fn insert_cleared_chains(app: &TestApp, user: Uuid, s: &Setup, n: i32,
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO quiz_questions (quiz_id, question_idx, position, grade, graded_at, graded_by_device_id, updated_seq)
-         SELECT id, 0, 0, 'correct', now(), gen_random_uuid(), $2 FROM quizzes
-         WHERE origin_quiz_id = $1 AND status = 'cleared' AND created_seq = $2",
+        "INSERT INTO quiz_cards (quiz_id, first_idx, idxs, grades, graded_at, graded_seq, graded_by, devices, updated_seq)
+         SELECT id, 0, ARRAY[0], '\\x01'::bytea, ARRAY[now()], ARRAY[$2::int8], ARRAY[1::int2], ARRAY[gen_random_uuid()], $2
+         FROM quizzes WHERE origin_quiz_id = $1 AND status = 'cleared' AND created_seq = $2",
     )
     .bind(s.source_id)
     .bind(seq)

@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use super::order::{questions_hash, shuffle, to_i64};
+use super::order::{questions_hash, to_i64};
 use super::rows::{self, AnswerMode, Progression};
 use crate::app::AppState;
 use crate::auth::{CurrentUser, Session};
@@ -174,14 +174,11 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     // Start over's copy holds the same entries as the tree it was loaded into.
     let needed = storage::new_cascade_bytes(keys.len() as i64, key_bytes, storage::spec_bytes(&p.tree));
     let count_q = keys.len() as i32;
-    let idx: Vec<i32> = (0..count_q).collect();
+    // One key per line, each ending with its line break.
+    let question_keys: String = key_text.iter().flat_map(|k| [k.as_str(), "\n"]).collect();
     let seed: u64 = rand::random();
-    let order = shuffle(&(0..count_q as u32).collect::<Vec<_>>(), seed);
-    let mut positions = vec![0i32; order.len()];
-    for (pos, &i) in order.iter().enumerate() {
-        positions[i as usize] = pos as i32;
-    }
-    let hash = questions_hash(&(0..count_q as u32).collect::<Vec<_>>());
+    let all: Vec<u32> = (0..count_q as u32).collect();
+    let hash = questions_hash(&all);
     let at = clamp_at(state, n.at);
 
     let mut tx = state.db.begin().await?;
@@ -212,8 +209,8 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, leave_set_id, spec_id, clear_threshold,
                                segment_size, progression, require_alphabetical, options_changed_at, options_seq,
                                options_device_id, question_count, depth, peak_depth, updated_seq, answer_mode,
-                               storage_bytes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, 1, $13, $16, $17)",
+                               storage_bytes, question_keys)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, 1, $13, $16, $17, $18)",
         n.id,
         user.id,
         n.name,
@@ -231,6 +228,7 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
         count_q,
         n.answer_mode as AnswerMode,
         needed,
+        question_keys,
     )
     .execute(&mut *tx)
     .await?;
@@ -250,15 +248,6 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
         .execute(&mut *tx)
         .await?;
     }
-    sqlx::query!(
-        "INSERT INTO cascade_questions (cascade_id, idx, question_key)
-         SELECT $1, * FROM UNNEST($2::int4[], $3::text[])",
-        n.id,
-        &idx,
-        &key_text,
-    )
-    .execute(&mut *tx)
-    .await?;
     // The Source quiz takes a copy of the cascade's options.
     let inserted = sqlx::query!(
         "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, segment_size, progression,
@@ -287,16 +276,7 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
         }
         Err(e) => return Err(e.into()),
     }
-    sqlx::query!(
-        "INSERT INTO quiz_questions (quiz_id, question_idx, position, updated_seq)
-         SELECT $1, * , $4 FROM UNNEST($2::int4[], $3::int4[])",
-        n.source_quiz_id,
-        &idx,
-        &positions,
-        seq,
-    )
-    .execute(&mut *tx)
-    .await?;
+    crate::cards::insert(&mut tx, n.source_quiz_id, &all, true, seq).await?;
     tx.commit().await?;
 
     let mut conn = state.db.acquire().await?;
@@ -461,30 +441,17 @@ async fn cards(
     .fetch_optional(&state.db)
     .await?
     .ok_or(ApiError::NotFound)?;
+    let all = question_keys(&state.db, cascade_id).await?;
     let rows: Vec<(i32, String)> = match &listed {
-        Some(list) => sqlx::query!(
-            "SELECT idx, question_key FROM cascade_questions WHERE cascade_id = $1 AND idx = ANY($2) ORDER BY idx",
-            cascade_id,
-            list,
-        )
-        .fetch_all(&state.db)
-        .await?
-        .into_iter()
-        .map(|r| (r.idx, r.question_key))
-        .collect(),
+        Some(list) => {
+            let mut want: Vec<i32> = list.iter().copied().filter(|&i| i >= 0 && (i as usize) < all.len()).collect();
+            want.sort_unstable();
+            want.dedup();
+            want.into_iter().map(|i| (i, all[i as usize].clone())).collect()
+        }
         None => {
-            let end = from.saturating_add(limit).min(i64::from(i32::MAX));
-            sqlx::query!(
-                "SELECT idx, question_key FROM cascade_questions WHERE cascade_id = $1 AND idx >= $2 AND idx < $3 ORDER BY idx",
-                cascade_id,
-                from.min(i64::from(i32::MAX)) as i32,
-                end as i32,
-            )
-            .fetch_all(&state.db)
-            .await?
-            .into_iter()
-            .map(|r| (r.idx, r.question_key))
-            .collect()
+            let end = (from.saturating_add(limit)).min(all.len() as i64);
+            (from.min(end)..end).map(|i| (i as i32, all[i as usize].clone())).collect()
         }
     };
     let body = if keys_only {
@@ -551,4 +518,18 @@ async fn cards(
     let mut resp = Json(body).into_response();
     resp.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
     Ok(resp)
+}
+
+/// A cascade's question keys, by idx (`cascades.question_keys`).
+pub async fn question_keys(db: &sqlx::PgPool, cascade: Uuid) -> Result<Vec<String>, sqlx::Error> {
+    let text: Option<String> = sqlx::query_scalar("SELECT question_keys FROM cascades WHERE id = $1")
+        .bind(cascade)
+        .fetch_optional(db)
+        .await?;
+    Ok(text.map(|t| split_keys(&t)).unwrap_or_default())
+}
+
+/// The keys of a `question_keys` text, each ending with its line break.
+pub fn split_keys(text: &str) -> Vec<String> {
+    text.split_terminator('\n').map(str::to_owned).collect()
 }
