@@ -51,7 +51,11 @@ test-quick:
 ## a throwaway Postgres it starts itself. Each test has its own database
 ## (#[sqlx::test]); 16 at a time keep well inside max_connections=400.
 ## Without nextest, cargo test runs the binaries one after another.
+## The tests that measure time (registration's equal branches, the reset
+## request's answer, the 130,000-question finish budget) run afterwards on
+## their own: in the pool, the other tests' Argon2 and zxcvbn work skews them.
 NEXTEST_THREADS ?= 16
+TIMED_TESTS = test(=registration_branches_take_the_same_time) | test(=password_reset) | test(=a_130000_question_finish_and_reset)
 test-integration:
 	cid=$$(docker run -d --rm -e POSTGRES_PASSWORD=acrodont -p 127.0.0.1::5432 \
 	  --tmpfs /var/lib/postgresql/data postgres:16 \
@@ -67,7 +71,8 @@ test-integration:
 	# #[sqlx::test] reads DATABASE_URL; each test gets its own database.
 	export DATABASE_URL=$$TEST_DATABASE_URL
 	if cargo nextest --version >/dev/null 2>&1; then
-	  cargo nextest run --locked --test '*' --test-threads $(NEXTEST_THREADS)
+	  cargo nextest run --locked --test '*' --test-threads $(NEXTEST_THREADS) -E 'not ($(TIMED_TESTS))'
+	  cargo nextest run --locked --test '*' --test-threads 1 -E '$(TIMED_TESTS)'
 	else
 	  echo "cargo-nextest not installed (cargo install cargo-nextest --locked): running the binaries one after another" >&2
 	  cargo test --locked --test '*'
