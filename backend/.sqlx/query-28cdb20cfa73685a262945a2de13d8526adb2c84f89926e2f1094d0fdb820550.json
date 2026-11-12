@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT count(*) AS \"n!\" FROM search_condition_words WHERE spec_id = $1",
+  "query": "SELECT coalesce(sum(length(entries) - length(replace(entries, E'\\n', ''))), 0)::int8 AS \"n!\"\n           FROM search_conditions WHERE spec_id = $1",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       null
     ]
   },
-  "hash": "a0ab951135202a7bef6e7c9ce42a93cabc2e27a4f96fb42c0d1dc0e1a9df6bfa"
+  "hash": "28cdb20cfa73685a262945a2de13d8526adb2c84f89926e2f1094d0fdb820550"
 }

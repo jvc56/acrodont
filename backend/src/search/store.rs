@@ -1,7 +1,7 @@
 //! Filter specifications in Postgres (PLAN.md § Schema → Filter
 //! specifications): the AND / OR tree as `search_groups` rows with group 0 at
-//! the top, typed parameter columns per condition, and In Word List entries in
-//! `search_condition_words`.
+//! the top, typed parameter columns per condition, and an In Word List's
+//! entries packed in its condition's `entries`, one per line.
 //!
 //! An In Lexicon row holds the lexicon's id in a cascade's spec (pinning it)
 //! and its name in a saved search's (pinning nothing).
@@ -109,8 +109,6 @@ pub async fn insert_spec(
     .execute(&mut *conn)
     .await?;
 
-    let mut words_pos: Vec<i16> = Vec::new();
-    let mut words_entry: Vec<String> = Vec::new();
     for r in &conds {
         let c = r.cond;
         let (mut text, mut pos, mut other, mut min, mut max, mut lmin, mut lmax, mut lax): (
@@ -123,6 +121,7 @@ pub async fn insert_spec(
             Option<f64>,
             Option<bool>,
         ) = (None, None, None, None, None, None, None, None);
+        let mut words: Option<String> = None;
         match &c.params {
             Params::Pattern(s) | Params::Tiles(s) | Params::Text(s) => text = Some(s.clone()),
             Params::Range { min: a, max: b } => {
@@ -143,15 +142,7 @@ pub async fn insert_spec(
                 SpecKind::Cascade => other = lex.get(name).copied(),
                 SpecKind::SavedSearch => text = Some(name.clone()),
             },
-            Params::Entries(entries) => {
-                let mut uniq: Vec<&String> = entries.iter().collect();
-                uniq.sort();
-                uniq.dedup();
-                for e in uniq {
-                    words_pos.push(r.position);
-                    words_entry.push(e.clone());
-                }
-            }
+            Params::Entries(entries) => words = Some(pack_entries(entries)),
             Params::PartOfSpeech(p) => pos = Some(*p),
             Params::None => {}
             Params::LeaveValue { min: a, max: b } => {
@@ -163,8 +154,8 @@ pub async fn insert_spec(
             "INSERT INTO search_conditions
                (spec_id, position, group_id, order_in_group, condition_type, negated, text_value,
                 part_of_speech_value, other_lexicon_id, min_value, max_value, min_leave_value,
-                max_leave_value, lax)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+                max_leave_value, lax, entries)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
             spec_id,
             r.position,
             r.group,
@@ -179,22 +170,26 @@ pub async fn insert_spec(
             lmin,
             lmax,
             lax,
-        )
-        .execute(&mut *conn)
-        .await?;
-    }
-    if !words_pos.is_empty() {
-        sqlx::query!(
-            "INSERT INTO search_condition_words (spec_id, position, entry)
-             SELECT $1, * FROM UNNEST($2::int2[], $3::text[])",
-            spec_id,
-            &words_pos,
-            &words_entry,
+            words,
         )
         .execute(&mut *conn)
         .await?;
     }
     Ok(spec_id)
+}
+
+/// An In Word List's entries as stored (`search_conditions.entries`):
+/// deduplicated, in byte order, each ending with a line break.
+pub fn pack_entries(entries: &[String]) -> String {
+    let mut uniq: Vec<&String> = entries.iter().collect();
+    uniq.sort();
+    uniq.dedup();
+    uniq.into_iter().flat_map(|e| [e.as_str(), "\n"]).collect()
+}
+
+/// The entries of a stored In Word List, in their stored order.
+pub fn unpack_entries(text: &str) -> Vec<String> {
+    text.split_terminator('\n').map(str::to_owned).collect()
 }
 
 /// Reads a spec back into the wire form. An In Lexicon row stored by id comes
@@ -219,23 +214,13 @@ pub async fn load_spec(conn: &mut PgConnection, spec_id: Uuid) -> Result<Option<
         r#"SELECT c.position, c.group_id, c.order_in_group, c.condition_type AS "ctype: ConditionType",
                   c.negated, c.text_value, c.part_of_speech_value AS "pos: PartOfSpeech",
                   c.other_lexicon_id, l.name AS "other_lexicon_name?", c.min_value, c.max_value,
-                  c.min_leave_value, c.max_leave_value, c.lax
+                  c.min_leave_value, c.max_leave_value, c.lax, c.entries
            FROM search_conditions c LEFT JOIN lexicons l ON l.id = c.other_lexicon_id
            WHERE c.spec_id = $1"#,
         spec_id
     )
     .fetch_all(&mut *conn)
     .await?;
-    let words = sqlx::query!(
-        r#"SELECT position, entry FROM search_condition_words WHERE spec_id = $1 ORDER BY position, entry COLLATE "C""#,
-        spec_id
-    )
-    .fetch_all(&mut *conn)
-    .await?;
-    let mut entries: HashMap<i16, Vec<String>> = HashMap::new();
-    for w in words {
-        entries.entry(w.position).or_default().push(w.entry);
-    }
 
     // Children of each group, ordered by order_in_group.
     enum Child {
@@ -263,7 +248,7 @@ pub async fn load_spec(conn: &mut PgConnection, spec_id: Uuid) -> Result<Option<
             T::ConsistsOf => Params::ConsistsOf { tiles: c.text_value.unwrap_or_default(), min, max },
             T::IncludesLetters | T::TakesPrefix | T::TakesSuffix => Params::Tiles(c.text_value.unwrap_or_default()),
             T::InLexicon => Params::Lexicon(c.other_lexicon_name.or(c.text_value).unwrap_or_default()),
-            T::InWordList => Params::Entries(entries.remove(&c.position).unwrap_or_default()),
+            T::InWordList => Params::Entries(c.entries.as_deref().map(unpack_entries).unwrap_or_default()),
             T::PartOfSpeech => Params::PartOfSpeech(c.pos.unwrap_or(PartOfSpeech::Noun)),
             T::Definition => Params::Text(c.text_value.unwrap_or_default()),
             T::FrontInnerHook | T::BackInnerHook => Params::None,
@@ -291,9 +276,13 @@ pub async fn load_spec(conn: &mut PgConnection, spec_id: Uuid) -> Result<Option<
 
 /// The total In Word List entries of a spec.
 pub async fn word_list_entries(conn: &mut PgConnection, spec_id: Uuid) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar!(r#"SELECT count(*) AS "n!" FROM search_condition_words WHERE spec_id = $1"#, spec_id)
-        .fetch_one(conn)
-        .await
+    sqlx::query_scalar!(
+        r#"SELECT coalesce(sum(length(entries) - length(replace(entries, E'\n', ''))), 0)::int8 AS "n!"
+           FROM search_conditions WHERE spec_id = $1"#,
+        spec_id
+    )
+    .fetch_one(conn)
+    .await
 }
 
 /// Copies a cascade's spec for Start over, `quiz_type` included.
@@ -317,19 +306,11 @@ pub async fn copy_spec(conn: &mut PgConnection, user_id: Uuid, spec_id: Uuid) ->
     sqlx::query!(
         "INSERT INTO search_conditions (spec_id, position, group_id, order_in_group, condition_type, negated,
                                         text_value, part_of_speech_value, other_lexicon_id, min_value,
-                                        max_value, min_leave_value, max_leave_value, lax)
+                                        max_value, min_leave_value, max_leave_value, lax, entries)
          SELECT $1, position, group_id, order_in_group, condition_type, negated, text_value,
                 part_of_speech_value, other_lexicon_id, min_value, max_value, min_leave_value,
-                max_leave_value, lax
+                max_leave_value, lax, entries
          FROM search_conditions WHERE spec_id = $2",
-        new_id,
-        spec_id
-    )
-    .execute(&mut *conn)
-    .await?;
-    sqlx::query!(
-        "INSERT INTO search_condition_words (spec_id, position, entry)
-         SELECT $1, position, entry FROM search_condition_words WHERE spec_id = $2",
         new_id,
         spec_id
     )

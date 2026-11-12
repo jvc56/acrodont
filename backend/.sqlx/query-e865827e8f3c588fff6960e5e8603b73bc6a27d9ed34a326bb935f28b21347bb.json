@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.position, c.group_id, c.order_in_group, c.condition_type AS \"ctype: ConditionType\",\n                  c.negated, c.text_value, c.part_of_speech_value AS \"pos: PartOfSpeech\",\n                  c.other_lexicon_id, l.name AS \"other_lexicon_name?\", c.min_value, c.max_value,\n                  c.min_leave_value, c.max_leave_value, c.lax\n           FROM search_conditions c LEFT JOIN lexicons l ON l.id = c.other_lexicon_id\n           WHERE c.spec_id = $1",
+  "query": "SELECT c.position, c.group_id, c.order_in_group, c.condition_type AS \"ctype: ConditionType\",\n                  c.negated, c.text_value, c.part_of_speech_value AS \"pos: PartOfSpeech\",\n                  c.other_lexicon_id, l.name AS \"other_lexicon_name?\", c.min_value, c.max_value,\n                  c.min_leave_value, c.max_leave_value, c.lax, c.entries\n           FROM search_conditions c LEFT JOIN lexicons l ON l.id = c.other_lexicon_id\n           WHERE c.spec_id = $1",
   "describe": {
     "columns": [
       {
@@ -205,6 +205,17 @@
             "name": "lax"
           }
         }
+      },
+      {
+        "ordinal": 14,
+        "name": "entries",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "search_conditions",
+            "name": "entries"
+          }
+        }
       }
     ],
     "parameters": {
@@ -226,8 +237,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "458825a0ac406fc0d50ec012a6c146aa42fb9f206cce311d2e9a2d8ba4c7d49a"
+  "hash": "e865827e8f3c588fff6960e5e8603b73bc6a27d9ed34a326bb935f28b21347bb"
 }

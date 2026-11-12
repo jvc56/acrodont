@@ -468,7 +468,7 @@ keeping them equal to the fixture:
 | `card_idx` | 4 (a question's index, in every level but the Source quiz) |
 | `attempt_row` | 176 |
 | `spec_row` | 380 (the spec with its groups and conditions) |
-| `spec_word_row` | 100, plus the entry's bytes |
+| `spec_word` | 1 (its line break), plus the entry's bytes |
 
 ```
 cascade = cascade_row
@@ -477,7 +477,7 @@ cascade = cascade_row
                     + question_count × (card + card_idx unless the Source quiz))
         + attempts × attempt_row
         + spec
-spec    = spec_row + Σ In Word List entries (spec_word_row + octet_length(entry))
+spec    = spec_row + Σ In Word List entries (spec_word + octet_length(entry))
 ```
 
 The sizes include index and tuple overhead, and `card` is the graded size, so
@@ -492,7 +492,7 @@ against `pg_total_relation_size`: the whole cascade within ±20% of what Postgre
 measures, and its levels counted at no less than they take and no more than
 twice, so a schema change that makes rows bigger fails the build instead of
 quietly under-counting. A 300,000-question cascade is about 6 MB as created; an
-In Word List entry costs about 110 bytes, so a 300,000-entry list is about 33 MB.
+In Word List entry costs its bytes plus one, so a 300,000-entry list of 8-letter words is about 2.7 MB.
 
 **Where it is kept.** `cascades.storage_bytes`, `saved_searches.storage_bytes`
 and the account's total, `users.storage_bytes`, each changed in the
@@ -1889,7 +1889,7 @@ tiles.
 | 3 | **Subanagram Match** | pattern | ✓ | Every tile of the word can be taken from the pattern; not every pattern tile has to be used. `LX.` → AL, AX, EL, … LAX, LEX, LOX, LUX. A `*` matches everything. |
 | 4 | **Length** | min, max (1–15) | — | The word has min–max tiles. Setting min = max gives an exact length. |
 | 5 | **In Lexicon** | lexicon | ✓ | The word is also valid in a second lexicon that uses the **same letter distribution** as the cascade's lexicon; the dropdown lists only those, and any other is a validation error, so tiles are always compared within one distribution. Negated, it finds words that are new or unique compared with that lexicon, e.g. CSW24 words not in CSW21. |
-| 6 | **In Word List** | list of words | ✓ | The word appears in a list the user pastes or uploads (one word per line, up to 300,000 entries). **300,000 is the limit for a whole filter tree, not for one row**: several In Word List rows share it, and the row that takes the total past it is a field error naming the total, checked on preview, on save and on creation. That is the figure `API_MAX_BODY_BYTES` and the storage estimate under [Capacity](#deployment-and-operations) are both sized against, and without it eight rows of 250,000 entries would fit in one 16 MB body and cost about 220 MB, nearly seven times the 33 MB one list does. The list is saved with the filter, and counts toward the account's [storage](#storage-limit) at about 110 bytes an entry (`spec_word_row` plus the entry's bytes). Entries that are not valid in the cascade's lexicon are ignored. |
+| 6 | **In Word List** | list of words | ✓ | The word appears in a list the user pastes or uploads (one word per line, up to 300,000 entries). **300,000 is the limit for a whole filter tree, not for one row**: several In Word List rows share it, and the row that takes the total past it is a field error naming the total, checked on preview, on save and on creation. That is the figure `API_MAX_BODY_BYTES` and the storage estimate under [Capacity](#deployment-and-operations) are both sized against, and without it eight rows of 250,000 entries would fit in one 16 MB body and cost about 18 MB, nearly seven times the 2.7 MB one list does. The list is saved with the filter, packed into its condition's `entries` (one entry per line, lz4-compressed), and counts toward the account's [storage](#storage-limit) at its bytes plus one an entry (`spec_word`, its line break). Entries that are not valid in the cascade's lexicon are ignored. |
 | 7 | **Number of Vowels** | min, max | — | Count of the distribution's vowel tiles is within min–max. |
 | 8 | **Includes Letters** | tiles | ✓ | Each tile appears in the word at least as many times as it appears in the parameter (`EE` means two or more Es). Negated, as in Zyzzyva, the word does **not** contain all of them: `Not Includes U` matches words without a U, so `Includes Q` plus `Not Includes U` finds Q-without-U words, while `Not Includes AB` matches words that lack an A or lack a B. To exclude every tile of a set, add one Not row per tile; the row's help text says so. |
 | 9 | **Probability Order** | min, max, lax | — | The word's precomputed probability rank among **all words of the same length** in the lexicon is within min–max. Probability always assumes two blanks; there is no blanks parameter. See [Probability](#probability-and-probability-order). |
@@ -3848,14 +3848,18 @@ CREATE TABLE search_groups (
 CREATE TABLE search_conditions (
     spec_id               UUID NOT NULL REFERENCES search_specs (id) ON DELETE CASCADE,
     position              SMALLINT NOT NULL CHECK (position BETWEEN 0 AND 99),
-                              -- row number within the spec; the identity used by
-                              -- search_condition_words
+                              -- row number within the spec
     group_id              SMALLINT NOT NULL,
     order_in_group        SMALLINT NOT NULL CHECK (order_in_group BETWEEN 0 AND 99),
     condition_type        condition_type NOT NULL,
     negated               BOOLEAN NOT NULL DEFAULT false,
 
     -- Parameters. Which ones are set depends on condition_type (see CHECK below).
+    entries               TEXT COMPRESSION lz4,
+                              -- In Word List only: its entries in canonical MAGPIE
+                              -- notation (see Tiles), deduplicated, in byte order,
+                              -- each ending with a line break. Converted to tiles at
+                              -- search time.
     text_value            TEXT CHECK (length(text_value) BETWEEN 1 AND 500),
                               -- pattern, tiles, prefix or suffix in canonical form
                               -- (see Tiles): MAGPIE notation, or space-separated
@@ -3941,7 +3945,7 @@ CREATE TABLE search_conditions (
              AND num_nonnulls(text_value, part_of_speech_value, other_lexicon_id,
                               min_value, max_value, min_leave_value,
                               max_leave_value, lax) = 1
-        WHEN condition_type IN ('in_word_list',   -- entries live in search_condition_words
+        WHEN condition_type IN ('in_word_list',   -- its entries are in entries
                                 'front_inner_hook', 'back_inner_hook')  -- no parameters
             THEN num_nonnulls(text_value, part_of_speech_value, other_lexicon_id,
                               min_value, max_value, min_leave_value,
@@ -3950,20 +3954,11 @@ CREATE TABLE search_conditions (
             THEN num_nonnulls(min_leave_value, max_leave_value) >= 1
              AND num_nonnulls(text_value, part_of_speech_value, other_lexicon_id,
                               min_value, max_value, lax) = 0
-    END)
+    END),
+    CHECK ((condition_type = 'in_word_list') = (entries IS NOT NULL))
 );
 CREATE INDEX search_conditions_other_lexicon_id
     ON search_conditions (other_lexicon_id) WHERE other_lexicon_id IS NOT NULL;
-
--- In Word List entries in canonical MAGPIE notation (see Tiles). Converted to tiles at search time.
-CREATE TABLE search_condition_words (
-    spec_id   UUID NOT NULL,
-    position  SMALLINT NOT NULL,
-    entry     TEXT NOT NULL CHECK (char_length(entry) BETWEEN 1 AND 300),
-    PRIMARY KEY (spec_id, position, entry),
-    FOREIGN KEY (spec_id, position)
-        REFERENCES search_conditions (spec_id, position) ON DELETE CASCADE
-);
 
 CREATE TABLE saved_searches (
     id          UUID PRIMARY KEY,           -- device-generated, so a save can be retried
@@ -4373,8 +4368,8 @@ Notes on the schema:
     a full graded attempt — so the display collapses instead of the rule
     refusing (see [CascadeLadder](#frontend))
   - the counters on `quizzes` match its questions' grades
-  - `search_condition_words` rows belong only to `in_word_list` conditions,
-    their entries are canonical for their spec's `quiz_type`, and one spec holds
+  - `search_conditions.entries` is set exactly on `in_word_list` conditions,
+    its entries are canonical for their spec's `quiz_type`, and one spec holds
     at most 300,000 of them across all its rows
   - every `search_groups` row other than group 0 and every condition has a
     parent that exists, groups nest at most 4 deep, no group is empty, and
@@ -5455,11 +5450,11 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
   the worst case is 10 GB, half the starting allocation, and a realistic
   one is a small fraction of that. The figure is the formula's, of live rows;
   dead row versions from grading wait for vacuum on top of it. Filter specs
-  count toward the same limit: a 300,000-entry In Word List costs about 33 MB
-  of `search_condition_words` rows (about 110 bytes an entry), which is the
-  **most one spec can hold**, since the 300,000 entries are a whole tree's
-  allowance and not one row's (see [In Word List](#filter-reference)), so an
-  account holds at most three such lists, in cascades or saved searches.
+  count toward the same limit: a 300,000-entry In Word List of 8-letter words
+  costs about 2.7 MB of `search_conditions.entries` (its bytes plus a line
+  break an entry), which is the **most one spec can hold**, since the 300,000
+  entries are a whole tree's allowance and not one row's (see
+  [In Word List](#filter-reference)).
   `sync_operations` would have outgrown both: studying emits about two
   operations per card (a grade and, online, its own cursor move), at roughly
   250 bytes a record with its indexes, so keeping every record for 90 days

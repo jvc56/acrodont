@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT s.id, s.name, p.quiz_type AS \"quiz_type: QuizType\",\n                  (SELECT count(*) FROM search_condition_words w WHERE w.spec_id = s.spec_id) AS \"word_list_entries!\",\n                  s.created_at, s.updated_at\n           FROM saved_searches s JOIN search_specs p ON p.id = s.spec_id\n           WHERE s.id = $1 AND s.user_id = $2",
+  "query": "SELECT s.id, s.name, p.quiz_type AS \"quiz_type: QuizType\",\n                  (SELECT coalesce(sum(length(c.entries) - length(replace(c.entries, E'\\n', ''))), 0)::int8\n                   FROM search_conditions c WHERE c.spec_id = s.spec_id) AS \"word_list_entries!\",\n                  s.created_at, s.updated_at\n           FROM saved_searches s JOIN search_specs p ON p.id = s.spec_id\n           WHERE s.user_id = $1 ORDER BY s.name",
   "describe": {
     "columns": [
       {
@@ -78,7 +78,6 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
         "Uuid"
       ]
     },
@@ -91,5 +90,5 @@
       false
     ]
   },
-  "hash": "66bc375ea355b27b412b8a2e6d4c6c1e17856743b9d9723c151c88e555f483a4"
+  "hash": "9473e5037b78ca008370c4edc5efb958b69c0674aaaa52c593cb9531c93446ef"
 }

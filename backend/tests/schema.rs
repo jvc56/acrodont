@@ -109,7 +109,7 @@ async fn the_check_refuses_missing_extra_and_not(pool: sqlx::PgPool) {
         ("subanagram_match", vec![text]),
         ("length", range.to_vec()),
         ("in_lexicon", vec![text]),
-        ("in_word_list", vec![]),
+        ("in_word_list", vec![("entries", "E'QI\\n'")]),
         ("num_vowels", range.to_vec()),
         ("includes_letters", vec![text]),
         ("probability_order", order.to_vec()),

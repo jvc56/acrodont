@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT ($2::int8 + coalesce(sum($3::int8 + octet_length(entry)), 0))::int8 AS \"bytes!\"\n           FROM search_condition_words WHERE spec_id = $1",
+  "query": "SELECT ($2::int8 + coalesce(sum(octet_length(entries)), 0))::int8 AS \"bytes!\"\n           FROM search_conditions WHERE spec_id = $1",
   "describe": {
     "columns": [
       {
@@ -13,7 +13,6 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Int8",
         "Int8"
       ]
     },
@@ -21,5 +20,5 @@
       null
     ]
   },
-  "hash": "ae6f6b5be9ebe4a100b2ca1ed13714567c8953a1e22ed67d2d255dbc472aa8b8"
+  "hash": "a6502c98976c21e8552d33c795f83dcde420a4a2d30ca1d2dfd574e65579a03b"
 }

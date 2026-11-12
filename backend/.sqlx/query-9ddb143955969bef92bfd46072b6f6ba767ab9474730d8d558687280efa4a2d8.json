@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO search_conditions\n               (spec_id, position, group_id, order_in_group, condition_type, negated, text_value,\n                part_of_speech_value, other_lexicon_id, min_value, max_value, min_leave_value,\n                max_leave_value, lax)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+  "query": "INSERT INTO search_conditions\n               (spec_id, position, group_id, order_in_group, condition_type, negated, text_value,\n                part_of_speech_value, other_lexicon_id, min_value, max_value, min_leave_value,\n                max_leave_value, lax, entries)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
   "describe": {
     "columns": [],
     "parameters": {
@@ -67,10 +67,11 @@
         "Int4",
         "Float8",
         "Float8",
-        "Bool"
+        "Bool",
+        "Text"
       ]
     },
     "nullable": []
   },
-  "hash": "e549237e47013202e44b0a563b944d86e659b0b1fbfccf19b65a02e424c27e28"
+  "hash": "9ddb143955969bef92bfd46072b6f6ba767ab9474730d8d558687280efa4a2d8"
 }

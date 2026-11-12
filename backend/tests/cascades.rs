@@ -342,8 +342,13 @@ async fn word_list_totals_on_creation_and_preview(pool: sqlx::PgPool) {
     let r = c.post("/api/cascades", body("EN-FIX", "definition", big)).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
     assert_eq!(r.json()["cascade"]["question_count"], 1);
-    let rows: i64 = count(&app, "search_condition_words").await;
-    assert_eq!(rows, 300_000);
+    let stored: i64 = sqlx::query_scalar(
+        "SELECT coalesce(sum(length(entries) - length(replace(entries, E'\\n', ''))), 0)::int8 FROM search_conditions",
+    )
+    .fetch_one(app.db())
+    .await
+    .unwrap();
+    assert_eq!(stored, 300_000, "every entry stored, one per line");
 
     let eight: Vec<Value> = (0..8)
         .map(|_| json!({ "type": "in_word_list", "negated": false, "entries": vec!["QI"; 250_000] }))
