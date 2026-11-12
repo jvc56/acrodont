@@ -339,7 +339,7 @@ fn eight_letter_words(n: usize) -> Vec<String> {
 }
 
 /// The tables a cascade's rows live in, each with the rows of one cascade.
-const TABLES: [(&str, &str); 8] = [
+const TABLES: [(&str, &str); 7] = [
     ("cascades", "id = $1"),
     ("quizzes", "cascade_id = $1"),
     ("quiz_cards", "quiz_id IN (SELECT id FROM quizzes WHERE cascade_id = $1)"),
@@ -347,7 +347,6 @@ const TABLES: [(&str, &str); 8] = [
     ("search_specs", "id = (SELECT spec_id FROM cascades WHERE id = $1)"),
     ("search_groups", "spec_id = (SELECT spec_id FROM cascades WHERE id = $1)"),
     ("search_conditions", "spec_id = (SELECT spec_id FROM cascades WHERE id = $1)"),
-    ("search_condition_words", "spec_id = (SELECT spec_id FROM cascades WHERE id = $1)"),
 ];
 
 async fn total_size(app: &TestApp, tables: &[String]) -> i64 {

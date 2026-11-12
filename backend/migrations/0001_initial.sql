@@ -254,14 +254,18 @@ CREATE TABLE search_groups (
 CREATE TABLE search_conditions (
     spec_id               UUID NOT NULL REFERENCES search_specs (id) ON DELETE CASCADE,
     position              SMALLINT NOT NULL CHECK (position BETWEEN 0 AND 99),
-                              -- row number within the spec; the identity used by
-                              -- search_condition_words
+                              -- row number within the spec
     group_id              SMALLINT NOT NULL,
     order_in_group        SMALLINT NOT NULL CHECK (order_in_group BETWEEN 0 AND 99),
     condition_type        condition_type NOT NULL,
     negated               BOOLEAN NOT NULL DEFAULT false,
 
     -- Parameters. Which ones are set depends on condition_type (see CHECK below).
+    entries               TEXT COMPRESSION lz4,
+                              -- In Word List only: its entries in canonical MAGPIE
+                              -- notation (see Tiles), deduplicated, in byte order,
+                              -- each ending with a line break. Converted to tiles at
+                              -- search time.
     text_value            TEXT CHECK (length(text_value) BETWEEN 1 AND 500),
                               -- pattern, tiles, prefix or suffix in canonical form
                               -- (see Tiles): MAGPIE notation, or space-separated
@@ -347,7 +351,7 @@ CREATE TABLE search_conditions (
              AND num_nonnulls(text_value, part_of_speech_value, other_lexicon_id,
                               min_value, max_value, min_leave_value,
                               max_leave_value, lax) = 1
-        WHEN condition_type IN ('in_word_list',   -- entries live in search_condition_words
+        WHEN condition_type IN ('in_word_list',   -- its entries are in entries
                                 'front_inner_hook', 'back_inner_hook')  -- no parameters
             THEN num_nonnulls(text_value, part_of_speech_value, other_lexicon_id,
                               min_value, max_value, min_leave_value,
@@ -356,20 +360,11 @@ CREATE TABLE search_conditions (
             THEN num_nonnulls(min_leave_value, max_leave_value) >= 1
              AND num_nonnulls(text_value, part_of_speech_value, other_lexicon_id,
                               min_value, max_value, lax) = 0
-    END)
+    END),
+    CHECK ((condition_type = 'in_word_list') = (entries IS NOT NULL))
 );
 CREATE INDEX search_conditions_other_lexicon_id
     ON search_conditions (other_lexicon_id) WHERE other_lexicon_id IS NOT NULL;
-
--- In Word List entries in canonical MAGPIE notation (see Tiles). Converted to tiles at search time.
-CREATE TABLE search_condition_words (
-    spec_id   UUID NOT NULL,
-    position  SMALLINT NOT NULL,
-    entry     TEXT NOT NULL CHECK (char_length(entry) BETWEEN 1 AND 300),
-    PRIMARY KEY (spec_id, position, entry),
-    FOREIGN KEY (spec_id, position)
-        REFERENCES search_conditions (spec_id, position) ON DELETE CASCADE
-);
 
 CREATE TABLE saved_searches (
     id          UUID PRIMARY KEY,           -- device-generated, so a save can be retried

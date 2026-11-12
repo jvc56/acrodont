@@ -16,7 +16,7 @@ export const STORAGE_COSTS = {
 	card_idx: 4,
 	attempt_row: 176,
 	spec_row: 380,
-	spec_word_row: 100
+	spec_word: 1
 };
 
 /** Questions per stored chunk of a level (the server's `quiz_cards` rows). */

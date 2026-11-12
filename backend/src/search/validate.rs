@@ -26,7 +26,7 @@ pub const MAX_DEPTH: usize = 4;
 pub const MAX_WORD_LIST_ENTRIES: usize = 300_000;
 /// `search_conditions.text_value` holds at most 500 characters.
 pub const MAX_TEXT_CHARS: usize = 500;
-/// `search_condition_words.entry` holds at most 300 characters.
+/// An In Word List entry holds at most 300 characters.
 pub const MAX_ENTRY_CHARS: usize = 300;
 pub const USE_DOT: &str = "use `.` for any single tile";
 
@@ -376,6 +376,11 @@ impl Validator<'_> {
         let leave = self.q.is_leave();
         let mut set: HashSet<Box<[Tile]>> = HashSet::with_capacity(entries.len());
         for e in entries {
+            // Entries are stored one per line.
+            if e.is_empty() || e.contains('\n') {
+                self.err(path, "entries", "An entry is empty or holds a line break.");
+                return None;
+            }
             if e.chars().count() > MAX_ENTRY_CHARS {
                 self.err(path, "entries", format!("An entry is longer than {MAX_ENTRY_CHARS} characters."));
                 return None;

@@ -41,7 +41,8 @@ async fn summary(conn: &mut sqlx::PgConnection, user_id: Uuid, id: Uuid) -> Resu
     sqlx::query_as!(
         Summary,
         r#"SELECT s.id, s.name, p.quiz_type AS "quiz_type: QuizType",
-                  (SELECT count(*) FROM search_condition_words w WHERE w.spec_id = s.spec_id) AS "word_list_entries!",
+                  (SELECT coalesce(sum(length(c.entries) - length(replace(c.entries, E'\n', ''))), 0)::int8
+                   FROM search_conditions c WHERE c.spec_id = s.spec_id) AS "word_list_entries!",
                   s.created_at, s.updated_at
            FROM saved_searches s JOIN search_specs p ON p.id = s.spec_id
            WHERE s.id = $1 AND s.user_id = $2"#,
@@ -58,7 +59,8 @@ async fn list(State(state): State<AppState>, Session(user): Session) -> ApiResul
     let rows = sqlx::query_as!(
         Summary,
         r#"SELECT s.id, s.name, p.quiz_type AS "quiz_type: QuizType",
-                  (SELECT count(*) FROM search_condition_words w WHERE w.spec_id = s.spec_id) AS "word_list_entries!",
+                  (SELECT coalesce(sum(length(c.entries) - length(replace(c.entries, E'\n', ''))), 0)::int8
+                   FROM search_conditions c WHERE c.spec_id = s.spec_id) AS "word_list_entries!",
                   s.created_at, s.updated_at
            FROM saved_searches s JOIN search_specs p ON p.id = s.spec_id
            WHERE s.user_id = $1 ORDER BY s.name"#,

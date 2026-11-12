@@ -34,8 +34,9 @@ pub struct RowBytes {
     pub attempt_row: i64,
     /// A spec's `search_specs` row with its group and condition rows.
     pub spec_row: i64,
-    /// A `search_condition_words` row; its entry's bytes are added on top.
-    pub spec_word_row: i64,
+    /// An In Word List entry in `search_conditions.entries`: its line break;
+    /// its bytes are added on top.
+    pub spec_word: i64,
 }
 
 pub const ROW_BYTES: RowBytes = RowBytes {
@@ -47,7 +48,7 @@ pub const ROW_BYTES: RowBytes = RowBytes {
     card_idx: 4,
     attempt_row: 176,
     spec_row: 380,
-    spec_word_row: 100,
+    spec_word: 1,
 };
 
 /// A level (a quiz) of `question_count` questions; `source` for the Source
@@ -76,7 +77,7 @@ pub fn spec_bytes(tree: &WireGroup) -> i64 {
                         let mut uniq: Vec<&String> = entries.iter().collect();
                         uniq.sort();
                         uniq.dedup();
-                        uniq.iter().map(|e| ROW_BYTES.spec_word_row + e.len() as i64).sum()
+                        uniq.iter().map(|e| ROW_BYTES.spec_word + e.len() as i64).sum()
                     }
                     _ => 0,
                 },
@@ -179,12 +180,13 @@ pub async fn quizzes_bytes(conn: &mut PgConnection, quizzes: &[Uuid]) -> Result<
 
 /// A spec's figure from its stored rows.
 pub async fn measure_spec(conn: &mut PgConnection, spec: Uuid) -> Result<i64, sqlx::Error> {
+    // Each entry ends with its line break, so the text's length is the
+    // entries' bytes plus one `spec_word` for each.
     sqlx::query_scalar!(
-        r#"SELECT ($2::int8 + coalesce(sum($3::int8 + octet_length(entry)), 0))::int8 AS "bytes!"
-           FROM search_condition_words WHERE spec_id = $1"#,
+        r#"SELECT ($2::int8 + coalesce(sum(octet_length(entries)), 0))::int8 AS "bytes!"
+           FROM search_conditions WHERE spec_id = $1"#,
         spec,
         ROW_BYTES.spec_row,
-        ROW_BYTES.spec_word_row,
     )
     .fetch_one(conn)
     .await
@@ -295,7 +297,7 @@ mod tests {
             { "op": "or", "children": [
                 { "type": "in_word_list", "negated": false, "entries": ["QI", "QI", "ZA", "ÉTÉ"] } ] } ] }))
         .unwrap();
-        assert_eq!(spec_bytes(&tree), b.spec_row + 3 * b.spec_word_row + 2 + 2 + 5);
+        assert_eq!(spec_bytes(&tree), b.spec_row + 3 * b.spec_word + 2 + 2 + 5);
     }
 
     #[test]

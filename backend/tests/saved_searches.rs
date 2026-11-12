@@ -158,7 +158,7 @@ async fn saved_searches_count_toward_storage(pool: sqlx::PgPool) {
     let mut body = save_body(Uuid::new_v4(), "a", listed);
     body["overwrite"] = json!(true);
     let r = c.post("/api/searches", body).await;
-    let words = 2 * (acrodont::storage::ROW_BYTES.spec_word_row + 2);
+    let words = 2 * (acrodont::storage::ROW_BYTES.spec_word + 2);
     assert_eq!(r.json(), json!({ "error": "storage_limit", "used": 2 * SIMPLE_BYTES, "limit": 2 * SIMPLE_BYTES, "needed": words }));
     // Deleting one frees its share, and then the list fits.
     let b: Value = c.get("/api/searches").await.json();
