@@ -14,7 +14,8 @@ import { DownloadManager } from '$lib/sync/downloads';
 import { policy } from '$lib/sync/policy';
 
 
-export type OfflineState = 'available' | 'downloading' | 'answers_need_connection' | 'not_downloaded';
+/** `checking` until offlineStates has counted the cascade's rows, which the list does not wait for. */
+export type OfflineState = 'available' | 'downloading' | 'answers_need_connection' | 'not_downloaded' | 'checking';
 
 export interface CascadeSummary {
 	cascade: CascadeRow;
@@ -78,8 +79,14 @@ export async function offlineState(db: UserDb, c: CascadeRow, online: boolean): 
 	return { state: 'downloading', progress: Math.floor(((keys + cards) * 50) / Math.max(1, c.question_count)) };
 }
 
-/** The Cascades page: live cascades, newest activity first. */
-export async function cascadeSummaries(db: UserDb, online: boolean): Promise<CascadeSummary[]> {
+/**
+ * The Cascades page: live cascades, newest activity first. With `offline`
+ * false each one's badge is `checking`: the badge counts the cascade's
+ * downloaded rows, which for a cascade of 100,000 questions takes IndexedDB
+ * a second or more on a phone, so the page draws the list first and fills
+ * the badges in with offlineStates.
+ */
+export async function cascadeSummaries(db: UserDb, online: boolean, offline = true): Promise<CascadeSummary[]> {
 	const out: CascadeSummary[] = [];
 	for (const c of await allCascades(db)) {
 		if (c.trashed_at !== null) continue;
@@ -87,7 +94,7 @@ export async function cascadeSummaries(db: UserDb, online: boolean): Promise<Cas
 		const quizzes = await view.quizzesOf(t, c.id);
 		const attempts: AttemptRow[] = [];
 		for (const q of quizzes) attempts.push(...(await view.attemptsOf(t, q.id)));
-		const { state, progress } = await offlineState(db, c, online);
+		const { state, progress } = offline ? await offlineState(db, c, online) : { state: 'checking' as const, progress: 0 };
 		out.push({
 			cascade: c,
 			options: optionsSummary(c),
@@ -98,6 +105,16 @@ export async function cascadeSummaries(db: UserDb, online: boolean): Promise<Cas
 		});
 	}
 	return out.sort((a, b) => b.cascade.last_activity_at.localeCompare(a.cascade.last_activity_at));
+}
+
+/** Each listed cascade's badge, one at a time, handed over as soon as it is known. */
+export async function offlineStates(
+	db: UserDb,
+	list: CascadeSummary[],
+	online: boolean,
+	each: (id: string, s: { state: OfflineState; progress: number }) => void
+): Promise<void> {
+	for (const s of list) each(s.cascade.id, await offlineState(db, s.cascade, online));
 }
 
 // ---------------------------------------------------------------------------

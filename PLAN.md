@@ -569,12 +569,13 @@ There are two kinds of settings, and they do not overlap:
   cascade has its own; there are no account-wide settings and no defaults for
   new cascades.
 - **This device's settings**: the [display settings](#desktop-layout) and the
-  [controls](#controls), kept in the `meta` store and never synced, since what
-  suits a laptop is wrong on a phone. They apply to every cascade studied on
-  that device.
+  [controls](#controls), kept in the `meta` store, since what suits a laptop
+  is wrong on a phone. They apply to every cascade studied on that device, and
+  reach other devices only when the user asks (see
+  [This device, or all of them](#this-device-or-all-of-them)).
 
 Both are edited in one place only: a cascade's **Settings** dialog in the
-player (the menu's **Settings** on the desktop, ⚙ in the header on a phone; see
+player (the menu's **Settings**, on the desktop and on a phone alike; see
 [Desktop layout](#desktop-layout)), where a change takes effect on the current
 card straight away. There is no settings page and nothing in the site header;
 the Account page says where they are. The dialog has two sections, each with a
@@ -636,6 +637,30 @@ Neither is a new kind of change: "all N cascades" is the ordinary
 judged on the server like any other (a change to a threshold applies to every
 level of each cascade, the pass in progress included). The functions are in
 `lib/settings/cascade.ts`.
+
+#### This device, or all of them
+
+A change to one of this device's settings applies to this device alone, at
+once, and the row then **offers to use it for every device** of the account:
+"✓ Saved on this device · Also use for: all your devices". The controls make
+the same offer after any change, and after **Reset controls to defaults**
+("✓ Reset on this device"), sharing the whole list of bindings as one setting.
+
+The account keeps the shared values on the server, in `users.device_settings`:
+an object of setting name to `{ value, at }`, `at` being when it was shared.
+Sharing writes the value to this device's `meta` store (`shared_device`) as
+pending, and the next sync carries the pending values in the request's
+`device_settings`; the server merges them in, the later `at` winning per
+setting, so two devices sharing the same setting agree on the last one.
+**Every sync response carries the account's `device_settings`**, and a device
+takes each value whose `at` is later than the last it took for that setting
+(also kept in `shared_device`), made valid as a stored value from another
+build is, and an open player shows it at once. A new device therefore starts
+with every shared value once it has synced. A device's own later change stays
+on that device until it, or another, shares again. Sharing works offline: the
+value waits as pending until a sync carries it. The functions are in
+`lib/settings/device.ts`; the server holds at most 64 shared settings per
+account and reads no meaning into a value.
 
 Question order is **not** a setting: questions are always shuffled.
 
@@ -730,7 +755,7 @@ because searching runs on the server.
    the preview's `storage_bytes`, which is exactly what creation will store.
    When it will not fit, or the account is already full, the line says "It
    won't fit: empty the Trash or delete cascades to make room." (linking to
-   `/cascades#trash`) and the button is disabled. The device's figure can be a
+   `/#trash`) and the button is disabled. The device's figure can be a
    sync behind, so the server's check decides: a `409 storage_limit` says what
    the cascade needs and how much is free ("This cascade needs about 2.1 MB,
    and 1.4 MB of your 100 MB is free. Empty the Trash or delete cascades to
@@ -739,7 +764,7 @@ because searching runs on the server.
 
 ### Cascades page
 
-`/cascades` is the landing page: it lists the user's cascades, newest activity
+`/` is the landing page (`/cascades` redirects to it): it lists the user's cascades, newest activity
 first, one compact row each, for a glance, with **New cascade** at the top and
 the [Trash](#trash) below the list. Each cascade shows:
 
@@ -762,8 +787,14 @@ the [Trash](#trash) below the list. Each cascade shows:
 - **Move to Trash**, whose confirmation adds that its storage is freed only
   when it is deleted forever, after the retention period or from the Trash
 
-With no cascades the list is empty under its header (or, with no lexicon on
-the server, says so), and the Trash follows as usual. Selecting a cascade opens the player at its deepest
+**The list is drawn as soon as the device has read it**; each row's download
+badge counts the cascade's rows on the device, which for a cascade of 100,000
+questions takes a phone's IndexedDB a second or more, so the badges follow,
+one by one, rather than hold the list back. Until the device's first sync the
+page says "Getting your cascades…" (offline, that they will appear once the
+device is online), never an empty list. With no cascades the list says "No
+cascades yet. Make one." (or, with no lexicon on the server, says so), and
+the Trash follows as usual. Selecting a cascade opens the player at its deepest
 level, whose **Settings** dialog holds the rest: the ladder with **Export…** per
 level, the cascade's [settings](#settings), **Start over** and
 **Move to Trash**. The header shows the account's
@@ -788,7 +819,7 @@ The Trash is a section of the [Cascades page](#cascades-page), headed
 in the Trash are seen together (`TrashList`). Moving a cascade to the Trash on
 that page shows it in the Trash at once, and a restore or a deletion there
 refreshes the cascades above. `/trash` has no page of its own: it redirects to
-`/cascades#trash`, so an old link lands on the Cascades page scrolled to the
+`/#trash`, so an old link lands on the Cascades page scrolled to the
 Trash. With nothing in it, the section says "The Trash is empty."
 
 The Trash lists finished quizzes and trashed cascades, grouped by cascade. Each
@@ -870,9 +901,10 @@ as the term of the data model and the API.
   fade) as the grade is toggled. Each colour is its own setting, as is the
   width (10 px by default). A visually hidden status line says the grade for screen readers;
   the area carries it as `data-grade` (`correct`, `missed`).
-- **The menu** on the left holds Acrodont (to the Cascades page), Admin (for
-  admins), Account and **Settings** (on a phone, ⚙ in the header, labelled
-  Settings). Settings is the one settings dialog there is: every
+- **The menu** on the left holds Acrodont and Cascades (to the Cascades page),
+  Admin (for admins), Account and **Settings**; on a phone the same menu opens
+  as a sheet over the quiz from **☰**, so there is no separate settings button.
+  Settings is the one settings dialog there is: every
   [setting](#settings), in its two sections, under a header that holds only
   "Settings" and Close. Each section opens with a full-width shaded bar — a
   larger heading, a badge saying whether it syncs, and one line saying what it
@@ -884,7 +916,8 @@ as the term of the data model and the API.
     status — with each level's Export…; the clear threshold (a number, taking
     effect when the field is left, for the pass in progress too); the answer
     mode (anagram cascades); "When an answer is revealed, mark it"; Show
-    definitions and Show hooks (anagram cascades); Round leave values (leave
+    definitions, Show hooks and Show how many anagrams are found in typed
+    mode (anagram cascades); Round leave values (leave
     value cascades); the [options](#quiz-options) of **Level N, the level you
     are studying** (that quiz only, from the current card; "✓ Saved for this
     level" after a change); the options **levels made from now on** start
@@ -897,8 +930,14 @@ as the term of the data model and the API.
     for levels made from now on, says "✓ Saved for this cascade" once changed
     and offers **all N cascades** (see
     [One cascade, or all of them](#one-cascade-or-all-of-them)).
-  - **Device Settings** (not synced): the display settings, then the
-    [controls](#controls) under their own **Controls** subheading.
+  - **Device Settings** (not synced unless asked): the display settings, then
+    the [controls](#controls) under their own **Controls** subheading. Each
+    display setting says "✓ Saved on this device" once changed and offers
+    **all your devices**, as do the controls after a change or after **Reset
+    controls to defaults** ("✓ Reset on this device"); see
+    [This device, or all of them](#this-device-or-all-of-them). Every control
+    is the same width and followed by the same unit column, so the fields,
+    choices and checkboxes line up.
 
   **A cascade always opens with the menu
   hidden**, whatever happened last time: **☰** in the quiz area's corner
@@ -941,10 +980,12 @@ as the term of the data model and the API.
   definition answer is prose, so it takes the answer typeface at a reading
   size; hooks are three quarters of the word's size, and anagram definitions
   have their own. These, the question's
-  position, the borders, whether the status bar is shown, and the repeat
-  guard are per device (the `meta` store's `display` value), never synced,
-  since what suits a laptop is wrong on a phone; they are in the player's
-  Settings, under Device Settings.
+  position, the borders, whether the status bar is shown, a phone's
+  [tap zones](#touch-zones) and the repeat guard are per device (the `meta`
+  store's `display` value), since what suits a laptop is wrong on a phone;
+  they are in the player's Settings, under Device Settings, and reach other
+  devices only when shared (see
+  [This device, or all of them](#this-device-or-all-of-them)).
 - **Every setting is a row with its control at the right end**: a checkbox,
   a choice or a number, in the player's Settings and in the quiz options
   alike (`SettingRow`), so the place to click is
@@ -1081,8 +1122,9 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   area (above the on-screen keyboard on a phone), with a line under it for the
   notes below ("already entered", "not an anagram of the question").
 - **The found count** (`3 of 9 found`) is **off by default**: knowing how many
-  anagrams are left is a hint. A display setting on the device turns it on, and
-  it then shows in the status bar (in the header on a phone) until the reveal.
+  anagrams are left is a hint. A cascade setting (`show_found_count`, synced
+  like the cascade's others) turns it on, and it then shows in the status bar
+  until the reveal.
 - The user types a word and presses **Enter**. Input is upper-cased, trimmed,
   and converted to tiles (see [Tiles](#tiles)).
   - A word that is **one of the answers and not yet entered** joins the found
@@ -1214,82 +1256,77 @@ with **Reset controls to defaults**.
   buttons. The capture box warns when a stroke is one of these.
 - **Wheel bindings** act at most once every 150 ms, so one flick of the wheel is
   one action.
-- **Per device, never synced.** Bindings are kept in the user's `meta` store on
-  the device, beside the display settings, exactly as those are: a laptop's
-  trackpad and a desktop's five-button mouse want different bindings, so one
-  device's choice never changes another's. A new device starts with the
-  defaults; a stored list that is unreadable, or leaves an action with none,
-  is read as the defaults. There is no `set_bindings` operation and no
-  bindings table on the server.
+- **Per device, shared only when asked.** Bindings are kept in the user's
+  `meta` store on the device, beside the display settings, exactly as those
+  are: a laptop's trackpad and a desktop's five-button mouse want different
+  bindings, so one device's choice changes another's only when the user uses
+  it for all their devices (see
+  [This device, or all of them](#this-device-or-all-of-them)), which shares
+  the whole list as one setting. A new device starts with the defaults, or
+  with the account's shared controls once it has synced; a stored or shared
+  list that is unreadable, or leaves an action with none, is read as the
+  defaults. There is no `set_bindings` operation and no bindings table on the
+  server.
 
 #### Touch zones
 
-In the touch layout, the quiz area fills the screen below a slim top bar. The
-bar holds the menu button, level and progress (with the run when the quiz has a
-[segment size](#segments)), and the settings button, and the menu opens a drawer
-with navigation, the ladder, the quiz's [options](#quiz-options) and cascade
-details. The quiz
-area is divided into three tap zones, one per action.
+In the touch layout the quiz area fills the screen above typed mode's input
+and the [status bar](#desktop-layout), which is the desktop's: the level, the
+pass, the card out of the level, the score, the run and the found count,
+wrapping to a second line rather than leave anything out, with the sync
+status at its right end and the same icon to hide it. **☰** in the quiz
+area's top-left corner opens the player's menu as a sheet (Cascades, Admin,
+Account, Settings). The quiz area is divided into three tap zones, one per
+action, laid out by a device setting, **Tap zones on a phone**:
 
-Portrait:
+**Columns** (the default): three columns side by side, Previous, Toggle and
+Show / Next, each a third of the screen's width and the quiz area's full
+height. A tap anywhere in a column is that column's action, the question and
+answer included, and each column's label sits along the bottom, in a row of
+three buttons, with faint lines between the columns.
 
 ```
-┌─────────────────────────────┐
-│ ☰    L2 · 37/250 · 80%    ⚙ │  top bar (not part of the quiz area)
-├─────────────────────────────┤
-│         ↶  Previous         │  15%
-├─────────────────────────────┤
-│                             │
-│           AEINRST           │
-│                             │
-│   ANESTRI ANTSIER NASTIER … │  60%  Show / Next
-│                             │
-│          ✓ Correct          │
-│                             │
-├─────────────────────────────┤
-│       ✓ ⇄ ✗   Toggle        │  25%
+┌─────────┬─────────┬─────────┐
+│☰        │         │         │
+│         AEINRST             │
+│   ANESTRI ANTSIER NASTIER … │
+│         │         │         │
+├─────────┼─────────┼─────────┤
+│↶Previous│✓⇄✗Toggle│ Show ▸  │
+├─────────┴─────────┴─────────┤
+│ Level 2 of 3  Pass 1  37 / 250 (14.80%)  30 ✓ 7 ✗ (81.08%) │
+│                                               ● Synced    │  status bar
 └─────────────────────────────┘
 ```
 
-Landscape:
+**Rows**: three bands stacked, Previous along the top (15%), the question and
+answer in the middle for Show / Next (60%), Toggle along the bottom (25%); in
+landscape they become columns, Previous on the left (20%) and Toggle on the
+right (25%).
 
-```
-┌──────────┬────────────────────────────┬──────────┐
-│    ↶     │          AEINRST           │  ✓ ⇄ ✗   │
-│ Previous │                            │  Toggle  │
-│          │   ANESTRI ANTSIER …        │          │
-│   20%    │     Show / Next · 55%      │   25%    │
-└──────────┴────────────────────────────┴──────────┘
-```
+Why these layouts:
 
-Why the zones are arranged this way:
-
-- **Show / Next** is used twice per card, so it gets the largest zone, in the
-  middle of the screen where the thumb rests when holding a phone in one hand.
-- **Toggle** is only needed on missed cards. It gets the bottom band, within
-  reach without changing grip but separate from the main zone. A mistaken toggle
-  is visible straight away and undone with a second tap.
-- **Previous** is the rarest action and the only one that moves backwards. It gets
-  the smallest zone, along the top edge where it is hardest to hit by accident.
-- **In landscape** the phone is usually held in both hands, so the zones become
-  columns under the thumbs: Previous on the left, Toggle on the right.
+- **Columns** put every action within reach of a thumb along the bottom edge,
+  each a large target, and keep the whole screen tappable.
+- **Rows** give **Show / Next**, used twice per card, the largest zone, in the
+  middle of the screen where the thumb rests; Toggle, only needed on missed
+  cards, the bottom band; and Previous, the rarest action and the only one
+  that moves backwards, the top edge where it is hardest to hit by accident.
 
 Details:
 
-- **Labels.** Each zone shows a faint icon and label, with subtle dividers
-  between zones.
 - **Taps and drags.** A tap acts, and a drag scrolls. Answers are fitted to the
-  Show / Next zone as on a desktop; one too long even at the smallest scale
-  scrolls inside the zone without advancing.
+  quiz area as on a desktop; one too long even at the smallest scale scrolls
+  without acting.
 - **Responsiveness.** `touch-action: manipulation` removes the double-tap-zoom
-  delay. Toggle gives a short vibration where the device supports it.
+  delay. Nothing vibrates.
 - **Typed mode.** The input bar is at the bottom of the page, and the page
   shrinks to the space above the on-screen keyboard (`interactive-widget=resizes-content`),
   so the bar sits just above the keyboard. The keyboard covers the zones, so while
   it is open the bar also holds a row of three buttons: Previous, Show / Next,
-  Toggle, in the same left-to-right order as landscape.
-- **Customization.** The zones are fixed; only mouse and keyboard controls can
-  be customized.
+  Toggle.
+- **Customization.** Columns or rows is the one choice; only mouse and
+  keyboard controls can be rebound.
 
 #### Saving progress
 
@@ -2605,8 +2642,15 @@ brings the server's.
   before clearing the flag and fetches again when they differ, since a fetch
   that stopped a page early would otherwise leave the level looking ready with
   the user's answers missing, and the next `finish` rejected `ungraded`. For any other cascade the same sequence runs the first time
-  the user opens it on this device, behind a short progress indicator, and so
-  needs a connection for whatever it has never fetched. A cascade in the
+  the user opens it on this device, behind a progress bar (the share of the
+  level's rows placed), and so needs a connection for whatever it has never
+  fetched. **The player waits for that sequence only**: the cascade's keys and
+  cards then download in the background at once, while the player fetches the
+  cards it shows, and the 200 after each, on demand, as it does for a cascade
+  just created. So a cascade of 64,000 questions opens in seconds, not minutes,
+  and is studied online until its badge on the Cascades page says "Available
+  offline"; going offline before then leaves the cards not yet fetched showing
+  "answer needs a connection". A cascade in the
   window or kept automatically opens offline, recomputing positions if needed; if
   its cards are gone the question still shows, from the `questions` store, and
   the reveal shows "answer needs a connection", so grading
@@ -3217,6 +3261,7 @@ rows the next pull discards, and re-pulling from the old cursor converges:
 - on the browser's `online` event
 - when the tab becomes visible again
 - every 30 seconds while the app is open
+- **when the server says another device changed something** (below)
 - right after logging in
 - and, while the outbox still holds more than one batch, again as soon as the
   previous response arrives, subject to `429` backoff, so a long offline
@@ -3237,6 +3282,36 @@ acknowledgement's work proportional to its own batch; the
 backoff applies to sync like any other request, and so does `503`: the device
 resends the same batch after `Retry-After`, and nothing is dropped, because
 nothing was recorded.
+
+#### Telling the other devices
+
+Studying on a phone with the desktop open beside it, the desktop would see the
+phone's answers only at its next 30-second sync. So **the server tells an
+account's other devices when something changes**, and they sync at once,
+within a second or two of the change:
+
+- Every change that advances an account's `sync_seq` — a push that applied an
+  operation, shared [device settings](#this-device-or-all-of-them), creating
+  or starting over a cascade, a [purge](#purge-task) — sends a Postgres
+  `NOTIFY` on `acrodont_changes`, naming the account and the device that made
+  it, **in the change's own transaction**, so it goes out only once the change
+  is committed, and to every instance. A sync that applies nothing sends none.
+- Each instance runs one `LISTEN` (started with its first stream) and fans the
+  notes out to the open streams of that account, all but the stream of the
+  device that made the change.
+- The stream is `GET /api/sync/events?user=<id>&device=<id>`, Server-Sent
+  Events, held by the tab that leads the account's syncing. `EventSource`
+  cannot send `X-Acrodont-User`, so `user` carries the same check. It sends
+  `changed` events (with data: `EventSource` drops an event without any), a
+  comment every 20 seconds through the load balancer's and nginx's idle
+  timeouts, and ends after five minutes, when the browser opens it again with
+  the session checked again; the server's shutdown ends every stream, so a
+  deploy is not held open by them.
+- **Nothing depends on a note arriving.** A device still syncs on every
+  trigger above; a stream opened again syncs, since a change may have come
+  while it was closed; a listener that loses its connection tells every stream
+  to sync; and a stream the server refuses (signed out) stays closed, leaving
+  the 30-second sync.
 
 ### Conflicts
 
@@ -3266,7 +3341,7 @@ offline**. Using one device on a plane never conflicts. The rules:
 | A quiz's segment size changed on one device while another device passed a boundary | The `finish_segment` is rejected if its segment end is no longer a multiple of the size the server has. The drill quiz it created locally and the grades on it are dropped, with the usual notice. |
 | The cascade's options changed on one device while another, offline with the old options, finished a quiz or restored one | The server builds the new or restored quiz from the options it has, so the device's local copy of that quiz may carry different options. The rebase replaces it with the server's row, and any `finish_segment` the device sent against a segment size the server's copy does not have is rejected and dropped. |
 | The cursor moved on two devices in the same attempt | A device that had seen the other's cursor (`seen_seq`) wins; otherwise the later `cursor_moved_at`. A device's own moves always apply in order. If the winning cursor is already past a boundary the loser then tries to pass, the loser's `finish_segment` is rejected and its drill quiz dropped, with the usual notice. |
-| This device's settings changed on two devices | Never a conflict: the display settings and controls are per device and never synced. |
+| This device's settings changed on two devices | Never a conflict: the display settings and controls are per device. Shared with all devices from two devices, the later share wins, per setting. |
 
 Rejected operations are never retried. After the rebase, the device shows what
 the server has, and a notice appears only when the user's own work was dropped:
@@ -4471,6 +4546,13 @@ The flows are the conventional ones, built directly on Axum:
   holding that account's data learns of the deletion only when a sync answers
   `401`, where the ordinary rule applies: it keeps its data and shows
   **Log in to sync**, and its Account page still offers the removal.
+  **An account replaced under the same username goes too.** Usernames are
+  unique, so another account with data here under the signed-in account's
+  username was deleted, or its server reset (a local stack's
+  `./scripts/dev.py --reset` makes a new `dev` each time): at every sign-in
+  and app start the device deletes that account's database and row, which
+  would otherwise sit on the Account page forever, since nothing can sign in
+  to it again.
 
 Security generally:
 
@@ -4674,7 +4756,8 @@ person to write it copies names rather than choosing them.
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/grades?from=<idx>&limit=<n>` | The quiz's graded rows for the attempt its row names, which for a cleared quiz is the attempt it finished on, as the parallel arrays a pull uses, in idx order, with the quiz row's `attempt` and `shuffle_seed` so the device can tell whether they belong to the order it holds. `from` is an **index, not an offset**, as on the card pages: the response holds the graded rows whose `question_idx` is in `from … from+limit−1`, `limit` ≤ 50,000, so the device pages the index space by `from += limit` until `from` reaches the cascade's `question_count` and a sparse page — most of a quiz's questions may be ungraded — means nothing is left behind. The questions endpoint below reads `from` the other way, as an offset into a dense list, which is why the two are written `<idx>` and `<n>`. There is no `min_updated_seq` here, which only a pull's fast path needs; the device stamps these rows with the sequence of the sync it made before the fetch. Not cacheable. Fetched when the device materialises a quiz whose rows it dropped on leaving the download window; never part of a pull. If the device's quiz row names a different attempt or seed, the device discards the response, syncs and fetches again. `404` for another user's or a purged quiz. |
 | `POST` | `/api/cascades/:id/export-token` | Body: the export's choices, as the query of the export row below. Checks the session, `X-Acrodont-User`, the cascade and quiz, and `EXPORT_RATE_PER_MINUTE`, answering `401`, `404` and `429` with `Retry-After` exactly as any other request does, which a navigation could not show the page; on success returns `{ url }`, the export URL with a token valid for **60 seconds and one use**, bound to this user and these choices: a PASETO under the HKDF-derived export key, which any task can verify and no session validator can decrypt, its use recorded in `export_tokens_spent` (see [Exporting words](#exporting-words)). The dialog navigates a hidden `<iframe>` to it at once, and mints a new one for any retry |
 | `GET` | `/api/cascades/:id/export?scope=<cascade\|quiz>&quiz_id=<uuid>&which=<all\|correct\|missed\|ungraded>&format=<txt\|csv>&lines=<answers\|questions>&columns=<list>&order=<study\|alphabetical>&definitions=<0\|1>&hooks=<0\|1>&decimals=<0-3>&token=<token>` | The same file the device builds locally (see [Exporting words](#exporting-words)), streamed as `text/plain` or `text/csv` with a `Content-Disposition` filename. Used when the device doesn't have what the export needs. `token` is the single-use, 60-second token the row above issued for exactly these choices; it is the request's proof of account, since a download navigation cannot send a header, and an expired, reused or mismatched token answers `204 No Content`, which the dialog's hidden frame discards. `404` for another user's or a purged cascade, and for a `quiz_id` that is not this cascade's, has been purged, or is unknown. |
-| `POST` | `/api/sync` | Body `{ device_id, app_version, cursor, page_token?, question_rows_for[], ops[] }`, where `app_version` is the frontend build's **monotonic integer build number**, injected into the SPA at build time and compared numerically against `MIN_APP_VERSION` (see [Configuration](#configuration)) — never a hash or a semver string, so "too old to sync" is one comparison and raising the floor is one number in the task definition; the build's git hash is logged beside it for support but decides nothing. `question_rows_for` lists every cascade whose question rows this device holds or wants: in its window and not [budget-dropped](#on-the-device), kept automatically by size, **or whose base already holds question rows** (at most `MAX_QUESTION_ROWS_FOR`, 1,000 cascades, a protocol bound rather than a quota: a device holding rows for more splits them across requests; 1,001 is a `400`). The third case is what keeps a cascade the drop pass spared for its pending operations from going stale: the device holds its rows, so it must keep receiving their changes. A cascade the device holds no rows for and will not open is left out, and stays pending on the device. It is expected on every non-paged request, an omitted field means an empty list, ids that belong to another user or no longer exist are ignored, and the server omits `quiz_questions` rows for every other cascade. `cursor` is `null` for a full pull (a first sync or a resync), whose operations are pushed like any other's → `{ results: [{ op_id, status, reason?, outcome?, new_quiz_question_count?, new_quiz_questions_hash? }], changes: { cascades[], quizzes[], quiz_questions[], quiz_attempts[], tombstones[] }, sync_seq, next_page_token?, resync_required?, storage: { used, limit } }`. `storage` is on every `200` and `426` response: the account's [storage](#storage-limit) and its effective limit, as numbers, read after the push so it counts what the push's finishes and purges changed; the device keeps them in `meta`. Pulled `cascades[]` rows carry `storage_bytes`, decimal text like every 64-bit value. `outcome` is set on an applied `finish` (a `finish_outcome`) or `finish_segment` (`drilled` or `continued`), and `new_quiz_question_count` and `new_quiz_questions_hash` whenever a quiz was created, reset or restored: the created quiz's when one was created, otherwise the reset or restored quiz's own; a repeated operation returns the recorded fields unchanged; pulled `quizzes[]` rows carry `questions_hash`. |
+| `GET` | `/api/sync/events?user=<id>&device=<id>` | Server-Sent Events: a `changed` event whenever another device of the account syncs a change (see [Telling the other devices](#telling-the-other-devices)). The session cookie, and `user` in place of `X-Acrodont-User`, which `EventSource` cannot send; a mismatch or no session is a `401`. Ends after five minutes |
+| `POST` | `/api/sync` | Body `{ device_id, app_version, cursor, page_token?, question_rows_for[], ops[], device_settings? }` (`device_settings`: values shared with all the account's devices, see [This device, or all of them](#this-device-or-all-of-them)), where `app_version` is the frontend build's **monotonic integer build number**, injected into the SPA at build time and compared numerically against `MIN_APP_VERSION` (see [Configuration](#configuration)) — never a hash or a semver string, so "too old to sync" is one comparison and raising the floor is one number in the task definition; the build's git hash is logged beside it for support but decides nothing. `question_rows_for` lists every cascade whose question rows this device holds or wants: in its window and not [budget-dropped](#on-the-device), kept automatically by size, **or whose base already holds question rows** (at most `MAX_QUESTION_ROWS_FOR`, 1,000 cascades, a protocol bound rather than a quota: a device holding rows for more splits them across requests; 1,001 is a `400`). The third case is what keeps a cascade the drop pass spared for its pending operations from going stale: the device holds its rows, so it must keep receiving their changes. A cascade the device holds no rows for and will not open is left out, and stays pending on the device. It is expected on every non-paged request, an omitted field means an empty list, ids that belong to another user or no longer exist are ignored, and the server omits `quiz_questions` rows for every other cascade. `cursor` is `null` for a full pull (a first sync or a resync), whose operations are pushed like any other's → `{ results: [{ op_id, status, reason?, outcome?, new_quiz_question_count?, new_quiz_questions_hash? }], changes: { cascades[], quizzes[], quiz_questions[], quiz_attempts[], tombstones[] }, sync_seq, next_page_token?, resync_required?, storage: { used, limit }, device_settings }`. `storage` is on every `200` and `426` response: the account's [storage](#storage-limit) and its effective limit, as numbers, read after the push so it counts what the push's finishes and purges changed; the device keeps them in `meta`. Pulled `cascades[]` rows carry `storage_bytes`, decimal text like every 64-bit value. `outcome` is set on an applied `finish` (a `finish_outcome`) or `finish_segment` (`drilled` or `continued`), and `new_quiz_question_count` and `new_quiz_questions_hash` whenever a quiz was created, reset or restored: the created quiz's when one was created, otherwise the reset or restored quiz's own; a repeated operation returns the recorded fields unchanged; pulled `quizzes[]` rows carry `questions_hash`. |
 
 On the wire, `quiz_questions` changes are grouped per quiz as parallel arrays
 (`question_idx[]`, `grade[]`, `graded_at[]`), with no positions: the device
@@ -4780,11 +4863,11 @@ SvelteKit static SPA. The routes:
 | `/register`, `/register/check-email`, `/confirm-email`, `/login` | Auth |
 | `/reset-password` | "Reset your password": an address, then "If that address has a confirmed account, a reset link is on its way, with the account's username. The link expires in 30 minutes." |
 | `/reset-password/confirm` | "Choose a new password" (every device will be signed out), one field and **Set new password**. On success it forgets any session this tab holds and goes to `/login` with no message. A `429` says "Too many tries, with this link or from this address. Try again in N minutes, or ask for a new link."; a `503` says the server is busy checking passwords; a spent or expired link says to ask for a new one; a link with no token says so, with a link to ask for a new one, and shows no form |
-| `/cascades` | Cascades page, the landing page: the account's [storage](#storage-limit) against its limit with a meter, New cascade, then one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done, 31.58%)`), its size, its download status and Move to Trash; the rest is in the player's Settings. Below the cascades, the [Trash](#trash) (`#trash`) |
+| `/` | Cascades page, the landing page (an old link to `/cascades` redirects here): the account's [storage](#storage-limit) against its limit with a meter, New cascade, then one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done, 31.58%)`), its size, its download status and Move to Trash; the rest is in the player's Settings. Below the cascades, the [Trash](#trash) (`#trash`) |
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, name, preview with what the cascade will use against the account's storage), with no settings: a note says a new cascade's settings are changed in its Settings once it is created |
 | `/cascades/:id` | Player for the cascade's deepest level, whose Settings dialog holds the ladder and every [setting](#settings), the cascade's and this device's |
-| `/trash` | No page of its own: redirects to `/cascades#trash`, so an old link lands on the Cascades page scrolled to the Trash |
-| `/account` | Log out, sync status, **Storage on this device** (pointing to the Cascades page for the account's storage) with the total rows and keys against the budget and, for each cascade this device holds data for, its answer size and key size, every account with data on this device and **Remove this account's data from this device** for each, sign out everywhere, delete account. No password change: a new password comes only from a [reset](#authentication). No settings: a line says each cascade's settings, and this device's display and controls, are in the cascade's Settings (⚙ in the player) |
+| `/trash` | No page of its own: redirects to `/#trash`, so an old link lands on the Cascades page scrolled to the Trash |
+| `/account` | Log out, sync status, **Storage on this device** (pointing to the Cascades page for the account's storage) with the total rows and keys against the budget and, for each cascade this device holds data for, its answer size and key size, every account with data on this device and **Remove this account's data from this device** for each, sign out everywhere, delete account. No password change: a new password comes only from a [reset](#authentication). No settings: a line says each cascade's settings, and this device's display and controls, are in the cascade's Settings (☰ → Settings in the player) |
 | `/admin` | Catalog overview with delete actions (admins only; others get a not-found page) |
 | `/admin/letter-distributions/new`, `/admin/lexicons/new`, `/admin/leave-sets/new` | Upload forms with validation error lists |
 
@@ -6713,7 +6796,7 @@ through the ordinary endpoints, so there is still no test-only path.
 - **Signed in, `/` is the Cascades page** (`home.spec.ts`): New cascade and
   the Trash ("The Trash is empty.") are on it, a regular user's header has no
   Main nav, Admin appears only for admins, and an old link to `/trash`
-  redirects to `/cascades#trash`.
+  redirects to `/#trash`.
 - As an admin, upload a distribution, lexicon and leave value set, see a
   deliberately broken file rejected with line numbers, build a Leave Value
   cascade from the new set, and see deletion refused while the cascade exists.

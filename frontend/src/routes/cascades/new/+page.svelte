@@ -261,7 +261,7 @@
 <main class="mx-auto grid max-w-5xl gap-4 p-4 md:p-6">
 	<header class="flex items-center justify-between">
 		<h1 class="text-2xl font-semibold">New cascade</h1>
-		<Button href="/cascades" variant="outline">Cancel</Button>
+		<Button href="/" variant="outline">Cancel</Button>
 	</header>
 	{#if loadError}<p class="text-sm text-destructive">{loadError}</p>{/if}
 
@@ -367,7 +367,7 @@
 			<p class="text-sm {wontFit ? 'text-destructive' : 'text-muted-foreground'}" data-storage-estimate>
 				{#if preview?.storageBytes != null && !preview.overCap}This cascade will use about {formatBytes(preview.storageBytes)}.{/if}
 				{formatBytes(used)} of {formatBytes(limit)} used.
-				{#if wontFit}It won’t fit: <a class="underline" href="/cascades#trash">empty the Trash</a> or delete cascades to make room.{/if}
+				{#if wontFit}It won’t fit: <a class="underline" href="/#trash">empty the Trash</a> or delete cascades to make room.{/if}
 			</p>
 			<div>
 				<Button

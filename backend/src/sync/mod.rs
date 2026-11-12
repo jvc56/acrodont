@@ -1,6 +1,7 @@
 //! `POST /api/sync` (PLAN.md § Offline and Sync → The sync cycle, § API →
 //! Cascades and sync): a push, then a pull, in one request.
 
+pub mod notify;
 pub mod ops;
 pub mod pull;
 pub mod routes;

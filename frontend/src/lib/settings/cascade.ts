@@ -16,6 +16,7 @@ export const CASCADE_SETTINGS = [
 	'show_definitions',
 	'show_hooks',
 	'reveal_correct',
+	'show_found_count',
 	'leave_value_decimals',
 	'segment_size',
 	'progression',
@@ -30,6 +31,7 @@ const ONLY_FOR: Partial<Record<CascadeSetting, QuizType>> = {
 	answer_mode: 'anagram',
 	show_definitions: 'anagram',
 	show_hooks: 'anagram',
+	show_found_count: 'anagram',
 	require_alphabetical: 'anagram',
 	leave_value_decimals: 'leave_value'
 };

@@ -72,13 +72,16 @@ export async function newUser(page: Page, prefix = 'e2e'): Promise<{ username: s
 	return { username, email };
 }
 
+/** The site's root, the Cascades page: the origin and `/`, nothing after. */
+export const ROOT_URL = /^https?:\/\/[^/]+\/$/;
+
 export async function login(page: Page, username: string) {
 	await page.goto('/login');
 	await page.getByLabel('Username').fill(username);
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Log in' }).click();
-	// Logging in lands on the Cascades page.
-	await expect(page).toHaveURL(/\/cascades$/);
+	// Logging in lands on the Cascades page, the site's root.
+	await expect(page).toHaveURL(ROOT_URL);
 }
 
 /** A cascade through the builder, with the settings every new cascade starts with; returns its player path. */

@@ -3,6 +3,7 @@
 // and the user is treated as signed in until a sync is answered 401.
 import { ApiError, bindUser, readCookie, CSRF_COOKIE, CSRF_HEADER } from '$lib/api';
 import {
+	forgetReplacedAccounts,
 	getAccount,
 	recordLogin,
 	recordLogout,
@@ -88,6 +89,8 @@ export async function initSession() {
 		session.userId = id;
 		session.username = row?.username ?? '';
 		bindUser(id);
+		// Data here from an earlier account with this username can never sync again (accounts.ts).
+		void forgetReplacedAccounts(id, session.username);
 	} else {
 		await retryQueuedLogout(sendQueuedLogout);
 	}

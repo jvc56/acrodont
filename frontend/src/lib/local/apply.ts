@@ -86,6 +86,7 @@ export type NewOp =
 			show_definitions?: boolean;
 			show_hooks?: boolean;
 			reveal_correct?: boolean;
+			show_found_count?: boolean;
 			leave_value_decimals?: number;
 	  }
 	| {
@@ -500,7 +501,7 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 				if (op.answer_mode !== 'flashcard' && op.answer_mode !== 'typed') throw new Rejected('invalid');
 				next.answer_mode = op.answer_mode;
 			}
-			for (const f of ['show_definitions', 'show_hooks', 'reveal_correct'] as const) {
+			for (const f of ['show_definitions', 'show_hooks', 'reveal_correct', 'show_found_count'] as const) {
 				if (op[f] === undefined) continue;
 				if (typeof op[f] !== 'boolean') throw new Rejected('invalid');
 				next[f] = op[f];

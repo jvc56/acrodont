@@ -3,6 +3,7 @@
 // Locks API; where Web Locks is missing every tab syncs and idempotency keeps
 // that correct. It pushes the outbox in batches of up to BATCH_OPS, pulls
 // every page, rebases, and backs off on 429 and 503 by Retry-After.
+import { pendingShares, takeShared, type SharedSettings } from '$lib/settings/device';
 import { ApiError, request } from '$lib/api';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';
@@ -29,6 +30,8 @@ export interface EngineHooks {
 	onNotices?: (n: Notice[]) => void;
 	/** After every completed pull: the download manager's turn (§ Downloads). */
 	onSynced?: (o: RebaseOutcome) => void | Promise<void>;
+	/** A display setting or the controls changed here, taken from the account's shared ones. */
+	onDeviceSettings?: () => void;
 }
 
 /** POST /api/sync over fetch, with the session cookie, CSRF token and user binding. */
@@ -148,6 +151,8 @@ export class SyncEngine {
 		const { device_id } = await getMeta(this.db, 'device');
 		const server = await getMeta(this.db, 'server');
 		let cursor = sync.cursor;
+		// Device settings shared here and not yet sent go with the first request.
+		let shares: SharedSettings | null = await pendingShares(this.db);
 		for (;;) {
 			const batch: OutboxEntry[] = await this.db.getAll('outbox', undefined, BATCH_OPS);
 			const qrf = await questionRowsFor(this.db, this.now());
@@ -158,6 +163,9 @@ export class SyncEngine {
 				question_rows_for: qrf,
 				ops: batch.map((e) => e.op)
 			};
+			const sent = shares ?? {};
+			if (Object.keys(sent).length) req.device_settings = sent;
+			shares = null;
 			const reply = await this.send(req);
 			if (!reply) return;
 			if (reply.status === 401) {
@@ -175,6 +183,7 @@ export class SyncEngine {
 				const s = await getMeta(this.db, 'server');
 				await this.db.put('meta', { ...s, storage_bytes: body.storage.used, max_storage_bytes: body.storage.limit }, 'server');
 			}
+			if (body.device_settings && (await takeShared(this.db, body.device_settings, sent))) this.hooks.onDeviceSettings?.();
 			const acked = ackedOf(batch, body);
 			const rctx = { device_id, max_quiz_questions: server.max_quiz_questions, now: this.now };
 			if (reply.status === 426) {
@@ -263,6 +272,28 @@ export function startTriggers(engine: SyncEngine): () => void {
 		clearInterval(interval);
 		engine.stop();
 	};
+}
+
+/**
+ * Telling the other devices (PLAN.md § The sync cycle): the server's stream of
+ * `changed` events for this account, each a change another device synced,
+ * which this device syncs at once rather than at its next 30-second sync. A
+ * stream opened again (the server ends each after a few minutes; a network
+ * drops) syncs too, since a change may have come while it was closed. The
+ * browser reconnects by itself; a stream the server refuses (signed out) is
+ * left closed, and the 30-second sync carries on alone.
+ */
+export function listenForChanges(engine: SyncEngine, userId: string, deviceId: string): () => void {
+	if (typeof EventSource === 'undefined') return () => undefined;
+	const q = new URLSearchParams({ user: userId, device: deviceId });
+	const es = new EventSource(`/api/sync/events?${q}`);
+	let opened = false;
+	es.addEventListener('changed', () => engine.schedule(0));
+	es.onopen = () => {
+		if (opened) engine.schedule(0);
+		opened = true;
+	};
+	return () => es.close();
 }
 
 /**

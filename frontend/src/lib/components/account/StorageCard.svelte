@@ -84,7 +84,7 @@
 	<Card.Content class="grid gap-3 text-sm">
 		<p class="text-muted-foreground">
 			What this device has downloaded to study offline. Your account’s storage, which its limit counts, is on the
-			<a class="underline" href="/cascades">Cascades page</a>.
+			<a class="underline" href="/">Cascades page</a>.
 		</p>
 		<p>Rows and question keys: {mb(total)} of {mb(ROW_STORAGE_BUDGET)}.</p>
 		{#if syncState.status === 'no_room'}<p class="text-destructive">Not enough room on this device.</p>{/if}

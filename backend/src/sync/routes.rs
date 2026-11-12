@@ -28,12 +28,20 @@ use crate::extract::ApiJson;
 pub const MAX_INDEX_PAGE: i64 = 50_000;
 
 /// The `set_cascade_options` fields a `set_quiz_options` never carries.
-const CASCADE_ONLY_FIELDS: [&str; 6] =
-    ["clear_threshold", "answer_mode", "show_definitions", "show_hooks", "reveal_correct", "leave_value_decimals"];
+const CASCADE_ONLY_FIELDS: [&str; 7] = [
+    "clear_threshold",
+    "answer_mode",
+    "show_definitions",
+    "show_hooks",
+    "reveal_correct",
+    "show_found_count",
+    "leave_value_decimals",
+];
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/sync", post(sync))
+        .route("/api/sync/events", get(super::notify::events))
         .route("/api/cascades/{id}/quizzes/{quiz_id}/questions", get(questions))
         .route("/api/cascades/{id}/quizzes/{quiz_id}/grades", get(grades))
 }
@@ -59,13 +67,84 @@ struct Request {
     page_token: Option<PageToken>,
     question_rows_for: Vec<Uuid>,
     ops: Vec<IncomingOp>,
+    /// Device settings shared on the device and not yet sent: name -> {value, at}.
+    device_settings: Option<Value>,
+}
+
+/// At most this many shared device settings per account, each name this long.
+const MAX_SHARED_SETTINGS: usize = 64;
+const MAX_SHARED_NAME: usize = 40;
+/// At most this many bytes of shared device settings in one request.
+const MAX_SHARED_BYTES: usize = 16 * 1024;
+
+/// A request's shared device settings (PLAN.md § Settings → This device, or
+/// all of them): an object of setting name to `{value, at}`, the time it was
+/// shared, which is written back in one form so the merge can compare it.
+/// What a value means is the frontend's to check, as it does with values
+/// from an older build.
+fn parse_device_settings(v: Option<&Value>) -> ApiResult<Option<Value>> {
+    let Some(v) = v else { return Ok(None) };
+    if v.is_null() {
+        return Ok(None);
+    }
+    let m = v.as_object().ok_or_else(|| bad("device_settings must be an object"))?;
+    if m.len() > MAX_SHARED_SETTINGS || v.to_string().len() > MAX_SHARED_BYTES {
+        return Err(bad("device_settings is too large"));
+    }
+    let mut out = serde_json::Map::new();
+    for (k, e) in m {
+        if k.is_empty() || k.len() > MAX_SHARED_NAME || !k.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+            return Err(bad("device_settings names a setting it cannot"));
+        }
+        let at = e
+            .get("at")
+            .and_then(Value::as_str)
+            .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+            .ok_or_else(|| bad("device_settings needs each setting's at"))?;
+        let value = e.get("value").ok_or_else(|| bad("device_settings needs each setting's value"))?;
+        out.insert(
+            k.clone(),
+            json!({ "value": value, "at": at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true) }),
+        );
+    }
+    Ok(Some(Value::Object(out)))
+}
+
+/// Merges shared device settings into the account's: per setting, the later
+/// `at` wins, so two devices sharing the same setting agree on the last one.
+/// A merge past MAX_SHARED_SETTINGS settings changes nothing.
+async fn share_device_settings(state: &AppState, user: Uuid, device: Uuid, shared: &Value) -> ApiResult<()> {
+    let mut tx = state.db.begin().await?;
+    let merged = sqlx::query(
+        "UPDATE users SET device_settings = (
+             SELECT coalesce(jsonb_object_agg(k, CASE
+                        WHEN n.v IS NULL THEN o.v
+                        WHEN o.v IS NULL THEN n.v
+                        WHEN (n.v->>'at')::timestamptz >= (o.v->>'at')::timestamptz THEN n.v
+                        ELSE o.v END), '{}'::jsonb)
+             FROM jsonb_each(users.device_settings) AS o(k, v)
+             FULL JOIN jsonb_each($2::text::jsonb) AS n(k, v) USING (k))
+         WHERE id = $1
+           AND (SELECT count(*) FROM jsonb_object_keys(users.device_settings || $2::text::jsonb)) <= $3",
+    )
+    .bind(user)
+    .bind(shared.to_string())
+    .bind(MAX_SHARED_SETTINGS as i64)
+    .execute(&mut *tx)
+    .await?;
+    // The other devices take the shared values at once (sync::notify).
+    if merged.rows_affected() > 0 {
+        super::notify::changed(&mut tx, user, Some(device)).await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 /// The request-level checks, made before anything is locked or applied.
 fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Request> {
     let obj = body.as_object().ok_or_else(|| bad("the body must be an object"))?;
     for k in obj.keys() {
-        if !["device_id", "app_version", "cursor", "page_token", "question_rows_for", "ops"].contains(&k.as_str()) {
+        if !["device_id", "app_version", "cursor", "page_token", "question_rows_for", "ops", "device_settings"].contains(&k.as_str()) {
             return Err(bad(&format!("unexpected field {k}")));
         }
     }
@@ -143,7 +222,8 @@ fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Reques
         });
     }
     ops.sort_by_key(|o| o.device_seq);
-    Ok(Request { device_id, app_version, cursor, page_token, question_rows_for, ops })
+    let device_settings = parse_device_settings(obj.get("device_settings"))?;
+    Ok(Request { device_id, app_version, cursor, page_token, question_rows_for, ops, device_settings })
 }
 
 fn recorded(
@@ -335,6 +415,10 @@ async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, Api
         results.push(result);
     }
     record(&mut tx, user, req.device_id, &recorded_here).await.map_err(transient)?;
+    // The account's other devices hear of it once this commits (sync::notify).
+    if recorded_here.iter().any(|(_, r)| r.status == "applied") {
+        super::notify::changed(&mut tx, user, Some(req.device_id)).await.map_err(transient)?;
+    }
     if let Some(min) = req.ops.iter().map(|o| o.device_seq).filter(|s| *s >= 1).min() {
         let new_mark = sqlx::query_scalar!(
             "INSERT INTO sync_devices (user_id, device_id, acked_below) VALUES ($1, $2, $3)
@@ -371,12 +455,18 @@ async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, Api
     Ok(Pushed::Done { results, seq, floor: u.sync_floor_seq })
 }
 
-/// The account's storage against its limit, which every response carries
-/// (STORAGE_LIMIT_PLAN.md § S1): read after the push, so it counts what the
-/// push's finishes and purges just changed.
-async fn storage(state: &AppState, user: Uuid) -> ApiResult<Value> {
+/// What every response carries about the account: its storage against its
+/// limit (STORAGE_LIMIT_PLAN.md § S1), read after the push so it counts what
+/// the push's finishes and purges just changed, and its shared device settings.
+async fn with_account(state: &AppState, user: Uuid, mut v: Value) -> ApiResult<Value> {
     let mut conn = state.db.acquire().await?;
-    Ok(crate::storage::usage(&mut conn, user, state.config.max_storage_bytes_per_user).await?.json())
+    v["storage"] = crate::storage::usage(&mut conn, user, state.config.max_storage_bytes_per_user).await?.json();
+    let shared: String = sqlx::query_scalar("SELECT device_settings::text FROM users WHERE id = $1")
+        .bind(user)
+        .fetch_one(&mut *conn)
+        .await?;
+    v["device_settings"] = serde_json::from_str(&shared).unwrap_or_else(|_| json!({}));
+    Ok(v)
 }
 
 async fn sync(
@@ -398,20 +488,21 @@ async fn sync(
         // A page request takes no new sequence; its token fixes the ceiling.
         let mut conn = state.db.acquire().await?;
         let (changes, next) = pull::page(&mut conn, token).await?;
-        let mut v = json!({ "results": [], "changes": changes, "sync_seq": token.ceil.to_string(),
-                            "storage": storage(&state, user.id).await? });
+        let mut v = with_account(&state, user.id, json!({ "results": [], "changes": changes, "sync_seq": token.ceil.to_string() })).await?;
         if let Some(n) = next {
             v["next_page_token"] = json!(n.encode());
         }
         return Ok(respond(StatusCode::OK, v));
     }
 
+    if let Some(shared) = &req.device_settings {
+        share_device_settings(&state, user.id, req.device_id, shared).await?;
+    }
     let (results, seq, floor) = match push(&state, user.id, &req).await? {
         Pushed::AheadOfServer { seq } => {
             return Ok(respond(
                 StatusCode::OK,
-                json!({ "results": [], "sync_seq": seq.to_string(), "resync_required": true,
-                        "storage": storage(&state, user.id).await? }),
+                with_account(&state, user.id, json!({ "results": [], "sync_seq": seq.to_string(), "resync_required": true })).await?,
             ));
         }
         Pushed::Done { results, seq, floor } => (results, seq, floor),
@@ -425,15 +516,13 @@ async fn sync(
     if req.cursor.is_some_and(|c| c < floor) {
         return Ok(respond(
             status,
-            json!({ "results": results, "sync_seq": seq.to_string(), "resync_required": true,
-                    "storage": storage(&state, user.id).await? }),
+            with_account(&state, user.id, json!({ "results": results, "sync_seq": seq.to_string(), "resync_required": true })).await?,
         ));
     }
     let token = PageToken { u: user.id, cur: req.cursor, ceil: seq, qrf: req.question_rows_for.clone(), table: 0, after: vec![] };
     let mut conn = state.db.acquire().await?;
     let (changes, next) = pull::page(&mut conn, &token).await?;
-    let mut v = json!({ "results": results, "changes": changes, "sync_seq": seq.to_string(),
-                        "storage": storage(&state, user.id).await? });
+    let mut v = with_account(&state, user.id, json!({ "results": results, "changes": changes, "sync_seq": seq.to_string() })).await?;
     if let Some(n) = next {
         v["next_page_token"] = json!(n.encode());
     }

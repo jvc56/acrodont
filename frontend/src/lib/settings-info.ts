@@ -19,6 +19,8 @@ export const INFO = {
 		'Flashcard: reveal the answer and grade yourself. Typed (anagram cascades only): type each anagram, then press Enter on an empty box when you are finished; the card is correct only if you found them all and typed nothing else.',
 	reveal_correct:
 		'The grade a card gets when you reveal its answer, before you toggle it. “Correct” suits studying words you mostly know; “Missed” makes you mark the ones you got.',
+	found_count:
+		'In typed mode, shows "3 of 9 found" in the status bar. Off by default, since knowing how many anagrams are left is a hint.',
 	clear_threshold:
 		'The score a pass needs to clear a level of this cascade. A change applies at once, to every level, including the pass you are in.',
 	// Quiz options
@@ -37,8 +39,8 @@ export const INFO = {
 	border_missed: 'Draws a red border around the quiz area when a revealed card is marked missed.',
 	border_width: 'How thick the green and red grade borders are, in pixels.',
 	status_bar: 'The bar under the quiz with the level, pass, progress, score and sync status. Hiding it leaves the quiz area the same size.',
-	found_count:
-		'In typed mode, shows "3 of 9 found" in the status bar. Off by default, since knowing how many anagrams are left is a hint.',
+	mobile_buttons:
+		'On a phone or tablet. Columns: Previous, Toggle and Show / Next side by side, each a third of the screen, tapped anywhere in its column. Rows: Previous above the question, the question itself for Show / Next, and Toggle below.',
 	repeat_guard:
 		'Ignores the same action pressed again within this many milliseconds, to stop an accidental double press from skipping a card. 0 turns it off.',
 	// Account

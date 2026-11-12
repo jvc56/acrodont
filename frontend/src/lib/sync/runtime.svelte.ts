@@ -3,11 +3,14 @@
 // read the shared stores, show the leader's status, and ask it to sync after
 // their own writes. A 401 shows "Log in to sync" and studying continues.
 import { session } from '$lib/auth/session.svelte';
+import { controls } from '$lib/player/controls.svelte';
+import { display } from '$lib/player/display.svelte';
 import { recordTotals } from '$lib/local/accounts';
 import type { UserDb } from '$lib/local/db';
+import { getMeta } from '$lib/local/meta';
 import { userDb } from '$lib/local/open';
 import { DownloadManager, openPlayers } from './downloads';
-import { electLeader, startTriggers, SyncEngine, type SyncStatus } from './engine';
+import { electLeader, listenForChanges, startTriggers, SyncEngine, type SyncStatus } from './engine';
 import type { Notice } from './notices';
 
 class SyncState {
@@ -57,8 +60,12 @@ export async function fetchAhead(db: UserDb, cascadeId: string, idx: number[]) {
 	await (downloads ?? new DownloadManager(db)).fetchAhead(cascadeId, idx);
 }
 
-/** A first open's fetch sequence, in whichever tab the player is. */
-export async function ensureCascade(db: UserDb, cascadeId: string) {
+/**
+ * A first open, in whichever tab the player is: the level's rows, which the
+ * player waits for (with `progress`), then the cascade's keys and cards in the
+ * background, which an open cascade is wanted for (PLAN.md § Downloads).
+ */
+export async function ensureCascade(db: UserDb, cascadeId: string, progress?: (fraction: number) => void) {
 	const dm =
 		downloads ??
 		new DownloadManager(db, {
@@ -66,7 +73,30 @@ export async function ensureCascade(db: UserDb, cascadeId: string) {
 				afterLocalWrite();
 			}
 		});
-	await dm.ensureCascade(cascadeId);
+	await dm.ensureLevel(cascadeId, progress);
+	downloadInBackground();
+}
+
+/**
+ * A download pass now rather than after the next sync: in the leader tab its
+ * own manager's (once more if one already running began before this cascade
+ * was wanted), elsewhere the leader's, after a sync.
+ */
+function downloadInBackground() {
+	const dm = downloads;
+	if (!dm) {
+		post({ kind: 'kick' });
+		return;
+	}
+	const again = dm.busy;
+	void dm
+		.run()
+		.then(() => (again ? dm.run() : undefined))
+		.then(() => {
+			syncState.progress += 1;
+			post({ kind: 'progress' });
+		})
+		.catch(() => undefined);
 }
 let channel: BroadcastChannel | null = null;
 let stop: (() => void) | null = null;
@@ -105,6 +135,7 @@ export function startSync(userId: string): () => void {
 	}
 	const release = electLeader(userId, () => {
 		let stopTriggers: (() => void) | null = null;
+		let stopListening: (() => void) | null = null;
 		let cancelled = false;
 		syncState.leader = true;
 		void userDb(userId).then((db) => {
@@ -126,6 +157,11 @@ export function startSync(userId: string): () => void {
 							post({ kind: 'progress' });
 						})
 						.catch(() => undefined);
+				},
+				// A shared display setting or the controls changed: an open player shows them.
+				onDeviceSettings: () => {
+					void display.reload();
+					void controls.reload();
 				},
 				onStatus: (s) => {
 					syncState.status = s;
@@ -149,9 +185,13 @@ export function startSync(userId: string): () => void {
 				}
 			});
 			stopTriggers = startTriggers(e);
+			void getMeta(db, 'device').then(({ device_id }) => {
+				if (!cancelled) stopListening = listenForChanges(e, userId, device_id);
+			});
 		});
 		return () => {
 			cancelled = true;
+			stopListening?.();
 			stopTriggers?.();
 			engine = null;
 			downloads = null;

@@ -142,7 +142,7 @@
 				}
 				if (e instanceof ApiError && e.status === 404) {
 					message = 'This has been deleted, on another device or by the Trash’s retention period.';
-					setTimeout(() => goto('/cascades'), 2000);
+					setTimeout(() => goto('/'), 2000);
 					return;
 				}
 				if (e instanceof ApiError && e.status === 401) {

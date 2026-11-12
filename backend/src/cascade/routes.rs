@@ -95,6 +95,7 @@ struct Display {
     show_definitions: bool,
     show_hooks: bool,
     reveal_correct: bool,
+    show_found_count: bool,
     leave_value_decimals: i16,
 }
 
@@ -200,6 +201,8 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     let seq = sqlx::query_scalar!("UPDATE users SET sync_seq = sync_seq + 1 WHERE id = $1 RETURNING sync_seq", user.id)
         .fetch_one(&mut *tx)
         .await?;
+    // The account's other devices hear of the new cascade once this commits (sync::notify).
+    crate::sync::notify::changed(&mut tx, user.id, Some(n.device_id)).await?;
     let spec_id = match n.copy_of_spec {
         Some(original) => copy_spec(&mut tx, user.id, original).await?,
         None => insert_spec(&mut tx, user.id, p.quiz_type, &p.tree, SpecKind::Cascade).await?,
@@ -234,13 +237,15 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     storage::add_to_user(&mut tx, user.id, needed).await?;
     if let Some(d) = &n.display {
         sqlx::query!(
-            "UPDATE cascades SET show_definitions = $2, show_hooks = $3, reveal_correct = $4, leave_value_decimals = $5
+            "UPDATE cascades SET show_definitions = $2, show_hooks = $3, reveal_correct = $4, leave_value_decimals = $5,
+                                 show_found_count = $6
              WHERE id = $1",
             n.id,
             d.show_definitions,
             d.show_hooks,
             d.reveal_correct,
             d.leave_value_decimals,
+            d.show_found_count,
         )
         .execute(&mut *tx)
         .await?;
@@ -347,7 +352,7 @@ async fn start_over(
     let row = sqlx::query!(
         r#"SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS "progression: Progression",
                   c.require_alphabetical, c.answer_mode AS "answer_mode: AnswerMode", c.show_definitions,
-                  c.show_hooks, c.reveal_correct, c.leave_value_decimals, l.name AS lexicon
+                  c.show_hooks, c.reveal_correct, c.show_found_count, c.leave_value_decimals, l.name AS lexicon
            FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2"#,
         original,
         user.id
@@ -373,6 +378,7 @@ async fn start_over(
             show_definitions: row.show_definitions,
             show_hooks: row.show_hooks,
             reveal_correct: row.reveal_correct,
+            show_found_count: row.show_found_count,
             leave_value_decimals: row.leave_value_decimals,
         }),
         copy_of_spec: Some(row.spec_id),

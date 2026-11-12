@@ -106,6 +106,32 @@ export async function recordLogin(userId: string, username: string, now = new Da
 		await tx.done;
 	});
 	broadcast(userId);
+	await forgetReplacedAccounts(userId, username);
+}
+
+/**
+ * Usernames are unique on the server, so another account here with this
+ * one's username was deleted, or its server reset (a local stack's
+ * `./scripts/dev.py --reset` makes a new `dev` each time). Its data can never
+ * sync again: its row goes from the Account page's list and its database is
+ * deleted, without waiting, since nothing will open it again.
+ */
+export async function forgetReplacedAccounts(userId: string, username: string) {
+	if (!username) return;
+	const name = username.toLowerCase();
+	const gone = await withDb(async (db) => {
+		const tx = db.transaction(['accounts'], 'readwrite');
+		const out: string[] = [];
+		for (const row of await tx.objectStore('accounts').getAll()) {
+			if (row.user_id !== userId && row.username.toLowerCase() === name) {
+				await tx.objectStore('accounts').delete(row.user_id);
+				out.push(row.user_id);
+			}
+		}
+		await tx.done;
+		return out;
+	});
+	for (const id of gone) void deleteDB(userDbName(id)).catch(() => undefined);
 }
 
 /**

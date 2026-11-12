@@ -7,7 +7,7 @@ describe('sameSitePath', () => {
 	});
 	it('refuses anything a browser could read as another host', () => {
 		for (const bad of ['//evil.example', '/\\evil.example', '/\t/evil.example', '/\n/x', 'https://evil.example', 'cascades', '', null, undefined, '/é']) {
-			expect(sameSitePath(bad)).toBe('/cascades');
+			expect(sameSitePath(bad)).toBe('/');
 		}
 	});
 });

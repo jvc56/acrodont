@@ -744,7 +744,7 @@ async fn the_clear_threshold_changes_for_the_pass_in_progress(pool: sqlx::PgPool
 }
 
 /// A cascade's settings (PLAN.md § Settings): `show_definitions`,
-/// `show_hooks`, `reveal_correct` and `leave_value_decimals` start at their
+/// `show_hooks`, `reveal_correct`, `show_found_count` and `leave_value_decimals` start at their
 /// defaults, are set by `set_cascade_options`, any subset at a time, and pull
 /// back on the cascade's row; a quiz's options operation carrying one is a 400.
 #[sqlx::test]
@@ -759,10 +759,11 @@ async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
         (&c["show_definitions"], &c["show_hooks"], &c["reveal_correct"], &c["leave_value_decimals"]),
         (&json!(true), &json!(true), &json!(true), &json!(1)),
     );
+    assert_eq!(c["show_found_count"], json!(false), "the found count is off until asked for");
     let o = d.op(
         "set_cascade_options",
         json!({ "cascade_id": s.cascade_id, "show_definitions": false, "show_hooks": false,
-                "reveal_correct": false, "leave_value_decimals": 3 }),
+                "reveal_correct": false, "leave_value_decimals": 3, "show_found_count": true }),
     );
     assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
     // One field alone leaves the others as they are.
@@ -774,6 +775,7 @@ async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
         (&c["show_definitions"], &c["show_hooks"], &c["reveal_correct"], &c["leave_value_decimals"]),
         (&json!(false), &json!(true), &json!(false), &json!(3)),
     );
+    assert_eq!(c["show_found_count"], json!(true));
     // Out of range or the wrong type: invalid, and nothing changes.
     let bad: Vec<Value> = [json!({ "leave_value_decimals": 4 }), json!({ "leave_value_decimals": "1" }), json!({ "show_hooks": "true" })]
         .into_iter()
@@ -789,7 +791,7 @@ async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
     let decimals: i16 = sqlx::query_scalar("SELECT leave_value_decimals FROM cascades").fetch_one(app.db()).await.unwrap();
     assert_eq!(decimals, 3);
     // The settings are the cascade's alone: a quiz's options operation naming one is refused whole.
-    for field in ["show_definitions", "show_hooks", "reveal_correct", "leave_value_decimals"] {
+    for field in ["show_definitions", "show_hooks", "reveal_correct", "show_found_count", "leave_value_decimals"] {
         let mut f = json!({ "quiz_id": s.source_id });
         f[field] = if field == "leave_value_decimals" { json!(2) } else { json!(false) };
         let o = d.op("set_quiz_options", f);
@@ -798,3 +800,100 @@ async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
     }
 }
 
+
+/// Device settings shared with all of an account's devices (PLAN.md §
+/// Settings → This device, or all of them): a sync carries the ones shared on
+/// the device, every response carries the account's, and per setting the
+/// later `at` wins, whichever device sent it and in whatever order.
+#[sqlx::test]
+async fn shared_device_settings_merge_and_come_back(pool: sqlx::PgPool) {
+    let app = app(pool).await;
+    let mut d = device(&app, "alice").await;
+    let mut other = d.sibling(&app);
+    let body = |dev: &Device, shared: Value| {
+        json!({ "device_id": dev.id, "app_version": 1, "cursor": dev.cursor, "question_rows_for": [], "ops": [],
+                "device_settings": shared })
+    };
+    // Nothing shared yet: an empty object.
+    assert_eq!(d.sync(vec![]).await.json()["device_settings"], json!({}));
+    let r = d
+        .raw_sync(body(&d, json!({ "answer_size_px": { "value": 48, "at": "2026-11-11T10:00:00.000Z" },
+                                   "bindings": { "value": [{ "action": "show_next" }], "at": "2026-11-11T10:00:00Z" } })))
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    // The other device sees both; `at` comes back in one form.
+    let shared = other.sync(vec![]).await.json()["device_settings"].clone();
+    assert_eq!(shared["answer_size_px"], json!({ "value": 48, "at": "2026-11-11T10:00:00.000Z" }));
+    assert_eq!(shared["bindings"]["at"], json!("2026-11-11T10:00:00.000Z"));
+    // An older share of the same setting loses; a newer one wins; others are kept.
+    other.raw_sync(body(&other, json!({ "answer_size_px": { "value": 20, "at": "2026-11-11T09:00:00.000Z" } }))).await;
+    assert_eq!(d.sync(vec![]).await.json()["device_settings"]["answer_size_px"]["value"], json!(48));
+    other.raw_sync(body(&other, json!({ "answer_size_px": { "value": 30, "at": "2026-11-11T11:00:00.000Z" } }))).await;
+    let shared = d.sync(vec![]).await.json()["device_settings"].clone();
+    assert_eq!((&shared["answer_size_px"]["value"], &shared["bindings"]["value"][0]["action"]), (&json!(30), &json!("show_next")));
+    // A malformed share is a 400, and changes nothing.
+    for bad in [
+        json!([]),
+        json!({ "Answer": { "value": 1, "at": "2026-11-11T12:00:00Z" } }),
+        json!({ "answer_size_px": { "value": 1 } }),
+        json!({ "answer_size_px": { "value": 1, "at": "yesterday" } }),
+        json!({ "answer_size_px": { "at": "2026-11-11T12:00:00Z" } }),
+    ] {
+        assert_eq!(d.raw_sync(body(&d, bad.clone())).await.status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    assert_eq!(d.sync(vec![]).await.json()["device_settings"]["answer_size_px"]["value"], json!(30));
+    // Another account sees none of it.
+    let mut bob = device(&app, "bob").await;
+    assert_eq!(bob.sync(vec![]).await.json()["device_settings"], json!({}));
+}
+
+/// The next data an event stream sends, as text, or None if it sends nothing in `wait`.
+async fn next_event(body: &mut axum::body::Body, wait: std::time::Duration) -> Option<String> {
+    use http_body_util::BodyExt;
+    let frame = tokio::time::timeout(wait, body.frame()).await.ok()??;
+    frame.ok()?.into_data().ok().map(|b| String::from_utf8_lossy(&b).into_owned())
+}
+
+/// Telling the other devices (PLAN.md § The sync cycle → Telling the other
+/// devices): a change one device syncs reaches the account's other devices'
+/// event streams at once, not the stream of the device that made it nor
+/// another account's; a sync that changes nothing tells no one; and the
+/// stream checks the session and the account the tab runs as.
+#[sqlx::test]
+async fn other_devices_hear_of_a_change_at_once(pool: sqlx::PgPool) {
+    let app = app(pool).await;
+    let mut d = device(&app, "alice").await;
+    let s = cascade(&app, &mut d, Setup::new(5)).await;
+    let other = d.sibling(&app);
+    let user = d.client.user_id.unwrap();
+    let path = |dev: Uuid| format!("/api/sync/events?user={user}&device={dev}");
+    let (status, mut theirs) = other.client.open_stream(&path(other.id)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, mut mine) = d.client.open_stream(&path(d.id)).await;
+    let mut bob = device(&app, "bob").await;
+    let bob_user = bob.client.user_id.unwrap();
+    let (_, mut bobs) = bob.client.open_stream(&format!("/api/sync/events?user={bob_user}&device={}", bob.id)).await;
+    let short = std::time::Duration::from_millis(700);
+
+    let o = d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "show_hooks": false }));
+    assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
+    let heard = next_event(&mut theirs, std::time::Duration::from_secs(5)).await.expect("the other device hears of it");
+    // With data: EventSource drops an event without any.
+    assert!(heard.contains("event: changed") && heard.contains("data: 1"), "{heard}");
+    assert_eq!(next_event(&mut mine, short).await, None, "not the device that made it");
+    assert_eq!(next_event(&mut bobs, short).await, None, "not another account");
+    // A sync that applies nothing tells no one.
+    d.sync(vec![]).await;
+    assert_eq!(next_event(&mut theirs, short).await, None);
+    // Shared device settings are a change too.
+    let body = json!({ "device_id": d.id, "app_version": 1, "cursor": d.cursor, "question_rows_for": [], "ops": [],
+                       "device_settings": { "border_px": { "value": 4, "at": "2026-11-11T10:00:00Z" } } });
+    assert_eq!(d.raw_sync(body).await.status, StatusCode::OK);
+    assert!(next_event(&mut theirs, std::time::Duration::from_secs(5)).await.is_some());
+    bob.sync(vec![]).await;
+
+    // The account the tab runs as must be the session's, and there must be a session.
+    assert_eq!(d.client.open_stream(&format!("/api/sync/events?user={bob_user}")).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(d.client.open_stream("/api/sync/events").await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.client().open_stream(&path(d.id)).await.0, StatusCode::UNAUTHORIZED);
+}

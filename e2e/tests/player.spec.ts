@@ -99,7 +99,7 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	// Settings is the one dialog: the menu has no Levels, and the ladder is in its Cascade Settings,
 	// apart from the Device Settings, each saying where it applies. There are no other kinds, and no index of them.
 	const menu = page.getByRole('navigation', { name: 'Player menu' });
-	await expect(menu.getByRole('link')).toHaveText(['Acrodont', 'Account']);
+	await expect(menu.getByRole('link')).toHaveText(['Acrodont', 'Cascades', 'Account']);
 	await expect(menu.getByRole('button', { name: 'Levels' })).toHaveCount(0);
 	await menu.getByRole('button', { name: 'Settings' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Settings' });

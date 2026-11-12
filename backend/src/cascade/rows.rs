@@ -84,6 +84,8 @@ pub struct CascadeRow {
     pub show_hooks: bool,
     /// Whether a reveal marks the card correct (else missed) until toggled.
     pub reveal_correct: bool,
+    /// Anagram cascades: typed mode's "3 of 9 found" in the status bar.
+    pub show_found_count: bool,
     /// Leave Value cascades: decimal places shown, 0–3.
     pub leave_value_decimals: i16,
     pub options_changed_at: DateTime<Utc>,
@@ -148,7 +150,7 @@ pub struct QuizRow {
 pub const CASCADE_SELECT: &str = r#"
     SELECT c.id, c.name, c.quiz_type, l.name AS lexicon, d.name AS letter_distribution,
            c.clear_threshold, c.segment_size, c.progression, c.require_alphabetical, c.answer_mode,
-           c.show_definitions, c.show_hooks, c.reveal_correct, c.leave_value_decimals,
+           c.show_definitions, c.show_hooks, c.reveal_correct, c.show_found_count, c.leave_value_decimals,
            c.options_changed_at, c.options_seq, c.options_device_id, c.question_count, c.depth,
            c.peak_depth, c.attempts_since_completion, c.created_at, c.last_activity_at,
            c.completed_at, c.trashed_at, c.storage_bytes, c.updated_seq

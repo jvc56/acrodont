@@ -72,6 +72,8 @@ impl<'a> Device<'a> {
             // resync included, carries the account's storage against its limit.
             let s = &r.json()["storage"];
             assert!(s["used"].is_i64() && s["limit"].is_i64(), "storage on every sync response: {s}");
+            // So does the account's shared device settings (PLAN.md § Settings).
+            assert!(r.json()["device_settings"].is_object(), "device_settings on every sync response");
         }
         r
     }

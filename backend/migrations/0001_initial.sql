@@ -111,6 +111,10 @@ CREATE TABLE users (
     storage_limit_bytes BIGINT CHECK (storage_limit_bytes >= 0),
                             -- set only via SQL: replaces MAX_STORAGE_BYTES_PER_USER
                             -- for this account
+    device_settings     JSONB NOT NULL DEFAULT '{}'::jsonb
+                            CHECK (jsonb_typeof(device_settings) = 'object'),
+                            -- device settings shared with all of the account's
+                            -- devices: setting name -> {value, at} (Settings)
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (sync_floor_seq <= sync_seq)
 );
@@ -409,6 +413,7 @@ CREATE TABLE cascades (
     show_hooks           BOOLEAN NOT NULL DEFAULT true,  -- Anagram: hooks on reveal
     reveal_correct       BOOLEAN NOT NULL DEFAULT true,  -- a reveal marks the card correct
                                  -- (false: missed) until toggled
+    show_found_count     BOOLEAN NOT NULL DEFAULT false, -- Anagram: typed mode's "3 of 9 found"
     leave_value_decimals SMALLINT NOT NULL DEFAULT 1    -- Leave Value: decimal places shown
                              CHECK (leave_value_decimals BETWEEN 0 AND 3),
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest

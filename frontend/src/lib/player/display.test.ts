@@ -10,7 +10,7 @@ describe('display settings', () => {
 		expect([d.question_top_px, d.border_px, d.repeat_guard_ms]).toEqual([8, 10, 0]);
 		expect(d.status_bar_hidden).toBe(false);
 		// Typed mode's found count hints at how many are left: off unless asked for.
-		expect(d.show_found_count).toBe(false);
+		expect(d.mobile_buttons).toBe('columns');
 		// A missed answer shows its red border; a correct one shows none.
 		expect([d.border_correct, d.border_missed]).toEqual([false, true]);
 	});
