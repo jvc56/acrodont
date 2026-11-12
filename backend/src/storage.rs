@@ -26,10 +26,11 @@ pub struct RowBytes {
     pub quiz_row: i64,
     /// A `quiz_cards` row (a chunk of up to 256 questions), without its questions.
     pub chunk_row: i64,
-    /// One question of a level in its chunk, at its graded size, so a level's
-    /// figure does not grow as it is studied.
+    /// One question of a level in its chunk, at its graded size (its grade
+    /// and its record), so a level's figure does not grow as it is studied.
     pub card: i64,
-    /// A level's question index, stored for every level but the Source quiz.
+    /// A level's question index, stored as its difference from the one
+    /// before, for every level but the Source quiz.
     pub card_idx: i64,
     pub attempt_row: i64,
     /// A spec's `search_specs` row with its group and condition rows.
@@ -42,11 +43,11 @@ pub struct RowBytes {
 pub const ROW_BYTES: RowBytes = RowBytes {
     cascade_row: 380,
     question: 1,
-    quiz_row: 420,
-    chunk_row: 160,
-    card: 10,
-    card_idx: 4,
-    attempt_row: 176,
+    quiz_row: 430,
+    chunk_row: 200,
+    card: 8,
+    card_idx: 1,
+    attempt_row: 210,
     spec_row: 380,
     spec_word: 1,
 };
@@ -202,9 +203,9 @@ pub async fn measure_cascade(conn: &mut PgConnection, cascade: Uuid) -> Result<i
                   (SELECT count(*) FROM quizzes WHERE cascade_id = c.id) AS "quizzes!",
                   (SELECT count(*) FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id
                     WHERE q.cascade_id = c.id) AS "chunks!",
-                  (SELECT coalesce(sum(octet_length(k.grades)), 0)::int8 FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id
+                  (SELECT coalesce(sum(k.n), 0)::int8 FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id
                     WHERE q.cascade_id = c.id) AS "cards!",
-                  (SELECT coalesce(sum(cardinality(k.idxs)), 0)::int8 FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id
+                  (SELECT coalesce(sum(k.n) FILTER (WHERE k.idxs IS NOT NULL), 0)::int8 FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id
                     WHERE q.cascade_id = c.id) AS "indexed!",
                   (SELECT count(*) FROM quiz_attempts a JOIN quizzes q ON q.id = a.quiz_id
                     WHERE q.cascade_id = c.id) AS "attempts!"

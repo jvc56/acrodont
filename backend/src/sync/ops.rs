@@ -294,6 +294,8 @@ async fn grade(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult 
     rules::check_attempt(&l.quiz, attempt, attempt_seed)?;
     let (chunk, slot) = cards::chunk_of(conn, quiz, idx).await?.ok_or(OpError::Rejected(Reason::NotFound))?;
     let row = chunk.card(slot);
+    // A stored grade's time is kept to the second, so of two grades in the
+    // same second the one that reaches the server later is the later one.
     let at = clamp(ctx, at);
     // The question is ungraded, or its grade is this device's, or the device
     // had seen it, or this change is later.
@@ -422,6 +424,8 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
             )
             .execute(&mut *conn)
             .await?;
+            // In the Trash it keeps its grades alone.
+            cards::strip(conn, quiz).await?;
             if let Some(n) = replacement {
                 let (c, h) = insert_quiz(conn, ctx, new_id, l.cascade_id, quiz, n, at).await?;
                 added += storage::level_bytes(c.into(), false);

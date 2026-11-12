@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.spec_id,\n                  octet_length(c.question_keys)::int8 AS \"keys_and_breaks!\",\n                  (SELECT count(*) FROM quizzes WHERE cascade_id = c.id) AS \"quizzes!\",\n                  (SELECT count(*) FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id\n                    WHERE q.cascade_id = c.id) AS \"chunks!\",\n                  (SELECT coalesce(sum(octet_length(k.grades)), 0)::int8 FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id\n                    WHERE q.cascade_id = c.id) AS \"cards!\",\n                  (SELECT coalesce(sum(cardinality(k.idxs)), 0)::int8 FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id\n                    WHERE q.cascade_id = c.id) AS \"indexed!\",\n                  (SELECT count(*) FROM quiz_attempts a JOIN quizzes q ON q.id = a.quiz_id\n                    WHERE q.cascade_id = c.id) AS \"attempts!\"\n           FROM cascades c WHERE c.id = $1",
+  "query": "SELECT c.spec_id,\n                  octet_length(c.question_keys)::int8 AS \"keys_and_breaks!\",\n                  (SELECT count(*) FROM quizzes WHERE cascade_id = c.id) AS \"quizzes!\",\n                  (SELECT count(*) FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id\n                    WHERE q.cascade_id = c.id) AS \"chunks!\",\n                  (SELECT coalesce(sum(k.n), 0)::int8 FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id\n                    WHERE q.cascade_id = c.id) AS \"cards!\",\n                  (SELECT coalesce(sum(k.n) FILTER (WHERE k.idxs IS NOT NULL), 0)::int8 FROM quiz_cards k JOIN quizzes q ON q.id = k.quiz_id\n                    WHERE q.cascade_id = c.id) AS \"indexed!\",\n                  (SELECT count(*) FROM quiz_attempts a JOIN quizzes q ON q.id = a.quiz_id\n                    WHERE q.cascade_id = c.id) AS \"attempts!\"\n           FROM cascades c WHERE c.id = $1",
   "describe": {
     "columns": [
       {
@@ -66,5 +66,5 @@
       null
     ]
   },
-  "hash": "be9610e41900e7030496fb4d30ccf6ef457ddb4eda7fc28bdc3a1d0950a931e9"
+  "hash": "4a924e0b42d9078d93de74f7262dd8fdef9e5d401a219bfc26d01c81bda2d380"
 }

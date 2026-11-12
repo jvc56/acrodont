@@ -30,6 +30,7 @@ tower-http = { version = "0.7.1", features = ["compression-gzip", "compression-b
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
 uuid = { version = "1.26.1", features = ["v4", "serde"] }
+zstd = "0.14.4"
 zxcvbn = "3.1.1"
 
 [dev-dependencies]

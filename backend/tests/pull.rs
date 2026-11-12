@@ -407,6 +407,34 @@ async fn pull_contents_and_the_questions_endpoint(pool: sqlx::PgPool) {
     assert_eq!(groups[0]["question_idx"].as_array().unwrap().len(), 1, "graded rows only");
     let (r, _) = play_and_finish(&app, &mut d, l2, "CCC").await;
     assert_eq!(r["outcome"], "cleared");
+    // In the Trash it keeps each question's grade and drops the grades'
+    // times, sequences and devices.
+    let kept: Vec<(Option<String>, bool, bool, bool)> = sqlx::query_as(
+        "SELECT grade::text, graded_at IS NULL, updated_seq IS NULL, graded_by_device_id IS NULL
+         FROM quiz_questions WHERE quiz_id = $1 ORDER BY question_idx",
+    )
+    .bind(l2)
+    .fetch_all(app.db())
+    .await
+    .unwrap();
+    assert_eq!(kept, vec![(Some("correct".to_owned()), true, true, true); 3]);
+    let (packed, devices): (i64, i64) =
+        sqlx::query_as("SELECT sum(octet_length(cards))::int8, sum(cardinality(devices))::int8 FROM quiz_cards WHERE quiz_id = $1")
+            .bind(l2)
+            .fetch_one(app.db())
+            .await
+            .unwrap();
+    assert_eq!((packed, devices), (1, 0), "three grades are one byte");
+    // Its grades are still served, for an export on a device without its
+    // rows, each dated the finish that cleared it.
+    let g = d.client.get(&format!("/api/cascades/{}/quizzes/{l2}/grades?from=0&limit=50000", s.cascade_id)).await;
+    assert_eq!(g.status, StatusCode::OK);
+    assert_eq!(g.json()["grade"], json!(["correct", "correct", "correct"]));
+    let finished: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT last_activity_at FROM quizzes WHERE id = $1").bind(l2).fetch_one(app.db()).await.unwrap();
+    for at in g.json()["graded_at"].as_array().unwrap() {
+        assert_eq!(at.as_str().unwrap().parse::<chrono::DateTime<chrono::Utc>>().unwrap(), finished);
+    }
     let mut fresh = d.sibling(&app);
     fresh.qrf = d.qrf.clone();
     let (_, pages) = fresh.sync_all(vec![]).await;

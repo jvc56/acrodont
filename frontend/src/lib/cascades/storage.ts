@@ -10,11 +10,11 @@
 export const STORAGE_COSTS = {
 	cascade_row: 380,
 	question: 1,
-	quiz_row: 420,
-	chunk_row: 160,
-	card: 10,
-	card_idx: 4,
-	attempt_row: 176,
+	quiz_row: 430,
+	chunk_row: 200,
+	card: 8,
+	card_idx: 1,
+	attempt_row: 210,
 	spec_row: 380,
 	spec_word: 1
 };

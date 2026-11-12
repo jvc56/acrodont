@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO leave_values (leave_set_id, leaves) VALUES ($1, $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3cb4129d87eec5814c064c1daeb6bb7aa8b27cb78911af64e03bc5b27d5013d4"
+}

@@ -588,7 +588,7 @@ async fn grades(
     state.limits.download.check(&user.id)?;
     let (from, limit) = page_params(&q)?;
     let row = sqlx::query!(
-        "SELECT attempt, shuffle_seed FROM quizzes WHERE id = $1 AND cascade_id = $2 AND user_id = $3",
+        "SELECT attempt, shuffle_seed, last_activity_at FROM quizzes WHERE id = $1 AND cascade_id = $2 AND user_id = $3",
         quiz,
         cascade,
         user.id
@@ -600,12 +600,14 @@ async fn grades(
     let start = from.min(i64::from(i32::MAX)) as i32;
     let mut conn = state.db.acquire().await?;
     let chunks = crate::cards::load_range(&mut conn, quiz, start, end as i32).await?;
+    // A cleared quiz keeps its grades without their times: each is given the
+    // quiz's last activity, the finish that cleared it.
     let rows: Vec<(i32, Grade, DateTime<Utc>)> = chunks
         .iter()
         .flat_map(|c| c.cards().collect::<Vec<_>>())
         .filter_map(|c| {
             let i = c.idx as i32;
-            (i >= start && i < end as i32).then_some((i, c.grade?, c.graded_at?))
+            (i >= start && i < end as i32).then_some((i, c.grade?, c.graded_at.unwrap_or(row.last_activity_at)))
         })
         .collect();
     let body = json!({

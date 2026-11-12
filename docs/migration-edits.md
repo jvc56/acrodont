@@ -96,3 +96,20 @@ file no longer matches: `./scripts/dev.py --reset`.
 
 Nothing is deployed, so the edit is in place. A database made by the earlier
 file no longer matches: `./scripts/dev.py --reset`.
+
+## 2026-11-12: packed catalog texts and packed card records
+
+Nothing is deployed, so these are edits in place, measured first against
+Postgres 16 with CSW24 (the sizes are in PLAN.md § Upload limits and
+§ Storage limit):
+
+- `lexicon_words` and `leave_values` are one row per lexicon and per leave set:
+  the words (with playabilities and definitions) and the leaves as one text
+  each, compressed with zstd by the server, in a `BYTEA` stored `EXTERNAL`.
+  The per-row CHECKs on a word, a playability, a definition, a leave and a
+  value went with the rows; upload validation makes the same checks.
+- `quiz_cards` holds a chunk's questions as varint differences (`idxs BYTEA`),
+  its size in `n`, and its grades and their records in one `cards BYTEA`, NULL
+  while nothing is graded; `grades`, `graded_at`, `graded_seq` and `graded_by`
+  are gone. A grade's time is kept to the second. `quiz_card_rows` decodes a
+  chunk for the `quiz_questions` view, whose columns are unchanged.
