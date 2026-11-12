@@ -1,7 +1,8 @@
 // How the player looks and responds on this device: the question's and the
 // answers' typefaces, sizes and letter spacing, how far down the question
-// sits, the grade border's width, whether the desktop player's menu and status
-// bar are hidden, a phone's tap zones (columns or rows), and the repeat guard against an accidental double press.
+// sits, the grade border's width, whether the player's status bar and sync
+// status are hidden, whether a definition has a column of its own and a word
+// shows its probability order, a phone's tap zones (columns or rows), and the repeat guard against an accidental double press.
 // Kept in the user's `meta` store, per device and user like the other `meta`
 // values, and never synced: what suits a laptop is wrong on a phone.
 //
@@ -53,6 +54,9 @@ export function defaultDisplay(): Display {
 		border_correct: false,
 		border_missed: true,
 		status_bar_hidden: false,
+		sync_status_hidden: false,
+		definition_column: true,
+		show_probability: false,
 		mobile_buttons: 'columns',
 		mobile_row_px: LIMITS.mobile_row_px.default,
 		version: DISPLAY_VERSION
@@ -114,6 +118,9 @@ export function normalizeDisplay(stored: Stored | undefined): Display {
 		border_correct: d.border_correct === undefined ? false : !!d.border_correct,
 		border_missed: d.border_missed === undefined ? true : !!d.border_missed,
 		status_bar_hidden: !!d.status_bar_hidden,
+		sync_status_hidden: !!d.sync_status_hidden,
+		definition_column: d.definition_column === undefined ? true : !!d.definition_column,
+		show_probability: !!d.show_probability,
 		mobile_buttons: d.mobile_buttons === 'rows' ? 'rows' : 'columns',
 		mobile_row_px: clampSetting('mobile_row_px', d.mobile_row_px),
 		version: DISPLAY_VERSION

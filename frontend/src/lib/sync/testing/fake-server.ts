@@ -272,7 +272,7 @@ export class FakeServer {
 	}
 
 	/** The account's storage as every response reports it: each cascade's figure, summed. */
-	storageLimit = 100_000_000;
+	storageLimit = 10_000_000;
 	storage() {
 		let used = 0;
 		for (const e of this.cascades.values()) used += Number(this.cascadeRow(e).storage_bytes);
@@ -514,7 +514,7 @@ export class FakeServer {
 		return k.keys.map((key, i) => ({
 			idx: from + i,
 			key,
-			answer: [{ word: `WORD${from + i}`, ...(hooks ? { front_hooks: 'S' } : {}), ...(definitions ? { definition: 'a word' } : {}) }]
+			answer: [{ word: `WORD${from + i}`, ...(hooks ? { probability_order: from + i + 1, front_hooks: 'S' } : {}), ...(definitions ? { definition: 'a word' } : {}) }]
 		}));
 	}
 

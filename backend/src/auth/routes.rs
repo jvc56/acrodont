@@ -120,7 +120,7 @@ const REGISTER_LOCK: i64 = 0x5746_5245_4749_5354;
 /// release. A stack with `DEV_LOGIN` on (local only; production refuses it)
 /// does not apply it, since the end-to-end journeys register an account per
 /// spec on a stack that is kept between runs.
-pub const MAX_ACCOUNTS: i64 = 100;
+pub const MAX_ACCOUNTS: i64 = 750;
 
 /// The same answer for a new account and an address already in use.
 fn registered() -> Response {

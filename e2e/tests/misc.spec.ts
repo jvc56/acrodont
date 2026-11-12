@@ -52,6 +52,59 @@ test('hooks read Zyzzyva-style in lower case, and a Catalan multi-character hook
 	await expect(page.getByRole('listitem').filter({ hasText: /ny/ })).toHaveCount(0);
 });
 
+test('a word row is probability, front hooks, word, back hooks, definition; each is this device\'s choice, as is the sync status', async ({ page }) => {
+	await newUser(page, 'columns');
+	const port = await apiCascade(page, { name: 'Port', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'O P R T' }] } });
+	await page.goto(port);
+	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
+	await press(page, 'Space');
+	const word = page.locator('[data-answer]').filter({ hasText: /^\W*PORT\W*$/ });
+	const definition = page.locator('[data-definition]').filter({ hasText: 'a harbour' });
+	const probability = page.getByRole('listitem').filter({ hasText: /PORT/ }).locator('[data-probability]');
+	const backHooks = page.getByRole('listitem').filter({ hasText: /PORT/ }).locator('[data-hooks="back"]');
+	const frontHooks = page.getByRole('listitem').filter({ hasText: /PORT/ }).locator('[data-hooks="front"]');
+	await expect(definition).toBeVisible({ timeout: 30_000 });
+	const box = async (l: typeof word) => (await l.boundingBox())!;
+	// By default the definition is a column of its own, after the back hooks on the word's line.
+	let [w, d, b] = [await box(word), await box(definition), await box(backHooks)];
+	expect(d.x).toBeGreaterThanOrEqual(b.x + b.width);
+	expect(d.y).toBeLessThan(w.y + w.height);
+	// The word stays in the middle of the quiz area, whatever sits either side of it.
+	const area = (await page.locator('[data-fit-area]').first().boundingBox())!;
+	expect(Math.abs(w.x + w.width / 2 - (area.x + area.width / 2))).toBeLessThan(3);
+	// No probability order until asked for; then it sits before the front hooks.
+	await expect(probability).toHaveText('');
+	await playerSetting(page, 'Show each word’s probability order', true);
+	await expect(probability).toHaveText(/^\s*\d+\s*$/);
+	const [p, f] = [await box(probability), await box(frontHooks)];
+	expect(p.x + p.width).toBeLessThanOrEqual(f.x);
+	w = await box(word);
+	expect(Math.abs(w.x + w.width / 2 - (area.x + area.width / 2))).toBeLessThan(3);
+	// Turned off, the definition is centred under the word.
+	await playerSetting(page, 'Definitions in their own column', false);
+	[w, d] = [await box(word), await box(definition)];
+	expect(d.y).toBeGreaterThanOrEqual(w.y + w.height - 1);
+	expect(Math.abs(d.x + d.width / 2 - (w.x + w.width / 2))).toBeLessThan(3);
+
+	// The two sections of Settings carry no "Synced" / "Not synced" badge.
+	await openPlayerSettings(page);
+	const dialog = page.getByRole('dialog', { name: 'Settings' });
+	await expect(dialog.getByRole('heading', { name: 'Device Settings' })).toBeVisible();
+	await expect(dialog.getByText('Not synced', { exact: true })).toHaveCount(0);
+	await expect(dialog.getByText('Synced', { exact: true })).toHaveCount(0);
+	await dialog.getByRole('button', { name: 'Close' }).click();
+	// The sync status shows by default; hiding the status bar hides it too, and it has a setting of its own.
+	const synced = page.getByRole('status').filter({ hasText: /^Synced$/ });
+	await expect(synced).toBeVisible({ timeout: 30_000 });
+	await page.getByRole('button', { name: 'Hide status bar' }).click();
+	await expect(synced).toHaveCount(0);
+	await page.getByRole('button', { name: 'Show status bar' }).click();
+	await expect(synced).toBeVisible();
+	await playerSetting(page, 'Show the sync status below the quiz', false);
+	await expect(synced).toHaveCount(0);
+	await expect(page.getByText('1 / 1')).toBeVisible();
+});
+
 test('a cascade trashed offline is listed in the Trash with "deleted forever 30 days after this syncs"', async ({ page, context }) => {
 	await newUser(page, 'trashoff');
 	await createCascade(page, { name: 'Offline trash' });

@@ -89,7 +89,7 @@ async fn the_preview_reports_what_a_cascade_holds_as_created(pool: sqlx::PgPool)
     let (_, pages) = d.sync_all(vec![]).await;
     let pulled: i64 = rows(&pages, "cascades").iter().map(bytes_of).sum();
     assert_eq!(pulled, total);
-    assert_eq!(pages[0]["storage"], json!({ "used": total, "limit": 100_000_000 }));
+    assert_eq!(pages[0]["storage"], json!({ "used": total, "limit": 10_000_000 }));
 }
 
 /// Creation and Start over past the limit are `409 storage_limit` with the

@@ -369,7 +369,7 @@ describe('the sync engine', () => {
 		const { server, a } = await setup();
 		const before = await getMeta(a.db, 'server');
 		expect(before.storage_bytes).toBe(server.storage().used);
-		expect(before.max_storage_bytes).toBe(100_000_000);
+		expect(before.max_storage_bytes).toBe(10_000_000);
 		expect((await a.db.get('cascades', C1))!.storage_bytes).toBe(server.storage().used);
 		// A finish with misses makes a level: the server's figure grows, and the device follows.
 		await a.play(Q1, 'XXCCC');

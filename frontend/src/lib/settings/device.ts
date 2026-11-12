@@ -33,6 +33,9 @@ export const SHAREABLE = new Set<string>([
 	'border_correct',
 	'border_missed',
 	'status_bar_hidden',
+	'sync_status_hidden',
+	'definition_column',
+	'show_probability',
 	'mobile_buttons',
 	'mobile_row_px',
 	'bindings'

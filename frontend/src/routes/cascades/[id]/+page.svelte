@@ -602,6 +602,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 							size={dsp.answer_size_px}
 							spacing={dsp.answer_spacing}
 							definition={{ font: dsp.definition_font, size: dsp.definition_size_px, spacing: dsp.definition_spacing }}
+							definitionColumn={dsp.definition_column}
+							probability={dsp.show_probability}
 							word={card.word}
 						/>
 					{/if}
@@ -748,8 +750,9 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 {/snippet}
 
 {#snippet statusBar()}
-	<!-- The status bar keeps its place when hidden, with only its Show button and the
-	     sync status, so hiding it never changes the quiz area or its grade border. -->
+	<!-- The status bar keeps its place when hidden, with only its Show button (and the sync
+	     status when something needs attention), so hiding it never changes the quiz area
+	     or its grade border. -->
 	<footer class="shrink-0 border-t text-sm" class:border-transparent={dsp.status_bar_hidden}>
 		<div class="h-0.5" class:bg-muted={!dsp.status_bar_hidden} aria-hidden="true">
 			{#if !dsp.status_bar_hidden}<div class="h-full bg-foreground/50" style={`width: ${progress}%`}></div>{/if}
@@ -791,7 +794,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 					{#if run}<p class="text-muted-foreground">{run}</p>{/if}
 					{#if foundCount}<p>{foundCount}</p>{/if}
 				{/if}
-				<div class="ml-auto"><SyncStatus /></div>
+				<div class="ml-auto"><SyncStatus quiet={dsp.status_bar_hidden || dsp.sync_status_hidden} /></div>
 			</div>
 		</div>
 	</footer>
@@ -919,12 +922,11 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	{/if}
 {/snippet}
 
-{#snippet scopeHead(id: string, title: string, badge: string, text: string)}
+{#snippet scopeHead(id: string, title: string, text: string)}
 	<!-- Each of the two sections opens with a bar of its own, so they read as separate. -->
 	<div class="-mx-6 space-y-1 border-y bg-muted/60 px-6 py-3">
 		<div class="flex flex-wrap items-center gap-2">
 			<h3 {id} class="text-lg font-semibold tracking-tight">{title}</h3>
-			<span class="rounded-full border bg-background px-2 py-0.5 text-xs text-muted-foreground">{badge}</span>
 			<InfoTip {text} label="About these settings" />
 		</div>
 	</div>
@@ -961,7 +963,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 					{@const c = v.cascade}
 					{@const q = v.quiz}
 					<section class="space-y-4" aria-labelledby="settings-cascade">
-						{@render scopeHead('settings-cascade', 'Cascade Settings', 'Synced', SCOPE.cascade)}
+						{@render scopeHead('settings-cascade', 'Cascade Settings', SCOPE.cascade)}
 						<div class="overflow-x-auto"><CascadeLadder {rows} onExport={(r) => goto(`/cascades/${id}/export?quiz=${r.quiz.id}`)} /></div>
 						<SettingRow label="Clear threshold (%)" info={INFO.clear_threshold} for="cascade-threshold">
 							<input
@@ -1106,7 +1108,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 					</section>
 				{/if}
 				<section class="space-y-4" aria-labelledby="settings-device">
-					{@render scopeHead('settings-device', 'Device Settings', 'Not synced', SCOPE.device)}
+					{@render scopeHead('settings-device', 'Device Settings', SCOPE.device)}
 					<DisplaySettings />
 					{@render subHead('settings-controls', 'Controls', SECTION.controls)}
 					<ControlsEditor />

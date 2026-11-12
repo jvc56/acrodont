@@ -473,6 +473,9 @@ async fn cards(
                             let mut o = serde_json::Map::new();
                             o.insert("word".into(), json!(dist.to_magpie(&w.tiles)));
                             if hooks {
+                                // The word's rank by probability among the words of
+                                // its length, which a device can show beside its hooks.
+                                o.insert("probability_order".into(), json!(w.probability_order));
                                 o.insert("front_hooks".into(), json!(dist.to_magpie(&w.front_hooks)));
                                 o.insert("back_hooks".into(), json!(dist.to_magpie(&w.back_hooks)));
                                 o.insert("front_inner".into(), json!(w.has_front_inner_hook));
@@ -504,6 +507,7 @@ async fn cards(
                 if let Some(w) = lex.find(&tiles) {
                     card["word"] = json!({
                         "word": dist.to_magpie(&w.tiles),
+                        "probability_order": w.probability_order,
                         "front_hooks": dist.to_magpie(&w.front_hooks),
                         "back_hooks": dist.to_magpie(&w.back_hooks),
                         "front_inner": w.has_front_inner_hook,

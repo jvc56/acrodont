@@ -52,9 +52,9 @@ A cascade's Source quiz can hold up to **300,000 questions**: any word search
 over a whole lexicon fits.
 
 **Scale assumptions (2026-11).** Acrodont is sized for its owner alone at
-first, perhaps ten more people within months, and **at most 100
+first, perhaps ten more people within months, and **at most 750
 accounts** (`MAX_ACCOUNTS`, after which registration closes), each holding at
-most **100 MB** of cascades and saved searches on the server (the [storage
+most **10 MB** of cascades and saved searches on the server (the [storage
 limit](#storage-limit)), in cascades of at most **300,000 questions**. There is
 no limit on how many cascades an account has. The production stack is sized
 and costed for that (see [Deployment and Operations](#deployment-and-operations)).
@@ -432,18 +432,28 @@ Moving on from the last question of a run that is not the last run:
 
 ### Storage limit
 
-An account may hold at most **100 MB** on the server
-(`MAX_STORAGE_BYTES_PER_USER`, default 100,000,000 bytes). That is the one
+An account may hold at most **10 MB** on the server
+(`MAX_STORAGE_BYTES_PER_USER`, default 10,000,000 bytes). That is the one
 limit on what an account owns: there is no limit on how many cascades or saved
 searches it has, only on how much they hold. Storage figures are in decimal
-units wherever they are shown, on the Cascades page and in the builder alike: 1 MB is 1,000,000 bytes. The default was sized from three cascades the owner named
-(PQ-023): every CSW24 anagram of 7 and 8 letters (64,353 questions, 18.64 MB as
-created), every CSW24 definition of 7 and 8 letters (76,847 questions,
-22.25 MB) and 10,000 leave values (2.88 MB). The three came to 43.77 MB as
-created and 72.20 MB studied hard (levels made from misses adding up to a
-second Source quiz each) when every question of every level was a row of its
-own. Stored packed, as below, the same three are 2.61 MB as created (1.12 MB,
-1.33 MB and 0.16 MB) and 4.09 MB studied hard. An
+units wherever they are shown, on the Cascades page and in the builder alike: 1 MB is 1,000,000 bytes. The default was sized from four CSW24 cascades the
+owner named, which one account should be able to hold all at once, by the
+formula below:
+
+| Cascade | Questions | As created | Studied hard |
+|---|---|---|---|
+| Anagrams of 2 to 8 letters | 94,684 | 1.58 MB | 2.52 MB |
+| Definitions of 2 to 8 letters | 120,145 | 1.99 MB | 3.17 MB |
+| 10,000 leave values | 10,000 | 0.16 MB | 0.27 MB |
+| Anagrams of 2 to 15 letters with four or more anagrams | 1,952 | 0.03 MB | 0.06 MB |
+| **All four** | | **3.76 MB** | **6.02 MB** |
+
+Studied hard is levels made from misses adding up to a second Source quiz
+each (half missed on every pass), with their quiz and attempt rows. 10 MB is
+1.66 times that, leaving room for a Start over of both large cascades at
+once. (The first sizing, PQ-023, was 100 MB for three cascades that came to
+72.20 MB studied hard when every question of every level was a row of its
+own; packed, those three are 4.09 MB.) An
 account's own limit can replace the default: `users.storage_limit_bytes`, NULL
 unless set, is set only through SQL.
 
@@ -554,7 +564,7 @@ creating a cascade, Start over and saving a search are refused.
 - **The Trash counts**, because its rows are still stored and can be restored.
   Only purging frees storage, either automatically after the retention period
   or with **Delete forever**, whose buttons and confirmation say how much.
-- **Visibility.** The [Cascades page](#cascades-page) shows `43 MB of 100 MB
+- **Visibility.** The [Cascades page](#cascades-page) shows `4.3 MB of 10 MB
   used` with a meter, each cascade's size, and the Trash's; the
   [builder](#creating-a-cascade) shows what a new cascade will use against what
   is free.
@@ -596,8 +606,8 @@ player (the menu's **Settings**, on the desktop and on a phone alike; see
 [Desktop layout](#desktop-layout)), where a change takes effect on the current
 card straight away. There is no settings page and nothing in the site header
 or on the Account page. The dialog has two sections, each with a
-heading, a badge saying whether it syncs (*Synced*, *Not synced*) and one line
-saying what it reaches: **Cascade Settings** and **Device Settings**.
+heading and an ⓘ saying what it reaches and whether it syncs: **Cascade
+Settings** and **Device Settings**. Neither heading carries a badge.
 
 **Every setting is saved as soon as it is changed**: a choice or a checkbox
 when it changes, a number when its field is left or Enter is pressed. There is
@@ -772,14 +782,14 @@ because searching runs on the server.
    quiz, saves the cascade, starts downloading it for offline use, and goes
    straight to the first card. Under the preview count the builder shows what
    the cascade will use against the account's [storage](#storage-limit):
-   "This cascade will use about 18 MB. 43 MB of 100 MB used." The figure is
+   "This cascade will use about 1.8 MB. 4.3 MB of 10 MB used." The figure is
    the preview's `storage_bytes`, which is exactly what creation will store.
    When it will not fit, or the account is already full, the line says "It
    won't fit: empty the Trash or delete cascades to make room." (linking to
    `/#trash`) and the button is disabled. The device's figure can be a
    sync behind, so the server's check decides: a `409 storage_limit` says what
    the cascade needs and how much is free ("This cascade needs about 2.1 MB,
-   and 1.4 MB of your 100 MB is free. Empty the Trash or delete cascades to
+   and 1.4 MB of your 10 MB is free. Empty the Trash or delete cascades to
    make room."). Save Search… past the limit says the same for the search,
    adding saved searches to what can be deleted.
 
@@ -822,7 +832,7 @@ the Trash follows as usual. Selecting a cascade opens the player at its deepest
 level, whose **Settings** dialog holds the rest: the ladder with **Export…** per
 level, the cascade's [settings](#settings), **Start over** and
 **Move to Trash**. The header shows the account's
-[storage](#storage-limit) against its limit, `43 MB of 100 MB used`, with a
+[storage](#storage-limit) against its limit, `4.3 MB of 10 MB used`, with a
 meter (`data-storage` is `ok`, `almost` from 90%, or `over`). From 90% it adds
 "Almost full: empty the Trash or delete cascades to make room"; over the limit
 it says "Over your storage by 12 MB: you can keep studying, but can't create
@@ -931,8 +941,8 @@ as the term of the data model and the API.
   Settings is the one settings dialog there is: every
   [setting](#settings), in its two sections, under a header that holds only
   "Settings" and Close. Each section opens with a full-width shaded bar — a
-  larger heading, a badge saying whether it syncs, and an ⓘ saying what it
-  reaches (`SCOPE` in `settings-info.ts`) — so the two read as separate. Every
+  larger heading and an ⓘ saying what it reaches and whether it syncs
+  (`SCOPE` in `settings-info.ts`) — so the two read as separate. Every
   setting is saved as soon as it is changed:
   - **Cascade Settings** (synced; other cascades keep their own), in order: the ladder as a
     table whose columns line up — level, questions, pass, last pass's score,
@@ -976,8 +986,8 @@ as the term of the data model and the API.
   The clear threshold, which rarely changes, is not on the bar: it is in
   Settings (where it is changed) and in the score's tooltip. An icon at the bar's left end hides it,
   and the same icon brings it back: hidden, the bar keeps its place with only
-  that icon and the sync status, so the quiz area and its grade border look
-  the same either way.
+  that icon, so the quiz area and its grade border look
+  the same either way. Hiding the bar quiets the sync status too.
 - **The sync status** sits at the very bottom right: the right end of the
   status bar, shown or hidden.
 - **The sync status shows what is happening**: "Waiting to sync" after an
@@ -985,6 +995,11 @@ as the term of the data model and the API.
   within about a second of a write), then "Synced"; offline, log in, reload
   and no room as they arise. It has a fixed width with its label flush right,
   so a changing label never shifts what is beside it.
+- **The sync status can be hidden**, with the status bar or by its own
+  setting on the device (shown by default). Hidden, it is quiet rather than
+  gone: "Synced", "Syncing…" and "Waiting to sync" are not shown, and what
+  needs the user's attention still is — offline, log in, reload, no room on
+  this device, signed out in another tab.
 - **On this device.** The question's and the answers' typeface is a choice of
   the few every device can show offline (Inter, bundled and the default; the
   system font; serif; monospace). **Definitions** — a Definition quiz's
@@ -1003,7 +1018,9 @@ as the term of the data model and the API.
   definition answer is prose, so it takes the answer typeface at a reading
   size; hooks are three quarters of the word's size, and anagram definitions
   have their own. These, the question's
-  position, the borders, whether the status bar is shown, a phone's
+  position, the borders, whether the status bar and the sync status are
+  shown, whether a definition has a column of its own (on) and whether each
+  word shows its probability order (off; see [Answers](#answers)), a phone's
   [tap zones](#touch-zones) and the repeat guard are per device (the `meta`
   store's `display` value), since what suits a laptop is wrong on a phone;
   they are in the player's Settings, under Device Settings, and reach other
@@ -1102,10 +1119,18 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
 
 - **Anagram**: each valid anagram, one per line, in alphabetical order. The
   card carries the words already in that order, and the device never re-sorts
-  them. The words sit in **one straight column**: each line is a row of three
-  columns — front hooks, right-aligned; the word; back hooks, left-aligned —
-  with the two hook columns equally wide, so every word starts at the same
-  place and the column is centred.
+  them. The words sit in **one straight column**: each line is a row of five
+  columns — the word's probability order, right-aligned; front hooks,
+  right-aligned; the word, with its inner-hook dots; back hooks, left-aligned;
+  the definition, left-aligned — with the two hook columns equally wide and
+  the outer two sharing the rest equally, so every word starts at the same
+  place and the column is centred whatever the others hold.
+  - **The probability order** is the word's rank by
+    [probability](#probability-and-probability-order) among the lexicon's
+    words of its length (1 is the likeliest). The column is empty unless the
+    device's *Show each word's probability order* is on (off by default). The
+    card carries it with the hooks (`probability_order`), so a cascade with
+    *show hooks* off has none to show.
   - With *show hooks* on (the default), each word is written Zyzzyva-style with its front
     hooks to the left and back hooks to the right, e.g. `bcfm ·AA· hls`, and
     its **inner hooks** as a dot before the word (the word less its first tile
@@ -1119,9 +1144,14 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
     playing that tile" everywhere else in Acrodont and is an error in an upload
     file. So a Catalan front hook reads `NY`, never `ny`.
   - With *show definitions* on (the default), each word's definition appears
-    beneath it, in the definitions' own typeface and size.
-- **Definition**: the word, written like an anagram's with its hooks and inner
-  hooks, then the full definition text beneath it. A Definition cascade's cards
+    in the definitions' own typeface and size: in its own column after the
+    back hooks, on the word's line (the device's *Definitions in their own
+    column*, on by default), or, with that off, centred beneath the word. A
+    window narrower than 640 px has no room for the column and always puts
+    the definition beneath the word.
+- **Definition**: the word, written like an anagram's with its probability
+  order, hooks and inner hooks, and the full definition text in its column
+  or beneath it, as above. A Definition cascade's cards
   are always fetched with hooks; the card carries its word's (`word`) beside the
   definition, which stays the answer.
 - **Leave Value**: the value rounded to the cascade's decimal places (half away
@@ -4573,7 +4603,7 @@ The flows are the conventional ones, built directly on Axum:
   and that check runs before anything below, so a `400` never also sends an
   email. An email already in use gets the same response as a successful
   registration.
-  **Registration closes at `MAX_ACCOUNTS`, 100 accounts.** The number is a
+  **Registration closes at `MAX_ACCOUNTS`, 750 accounts.** The number is a
   constant in the backend (`backend/src/auth/routes.rs`), deliberately not a
   setting: raising it is a release. It counts accounts that hold a place:
   confirmed, or with a confirmation code still valid. The count and the check
@@ -4920,7 +4950,7 @@ person to write it copies names rather than choosing them.
 |---|---|---|
 | `POST` | `/api/cascades` | Body `{ id, source_quiz_id, device_id, at, name, lexicon, quiz_type, clear_threshold, segment_size, progression, require_alphabetical, answer_mode, filters }`. `name` is required, 1–200 Unicode scalar values; the device builds the default summary itself (see [Creating a cascade](#creating-a-cascade)). `device_id` is recorded as `options_device_id` on the cascade and the Source quiz, so the creating device's option changes never compete on timestamps. `id` and `source_quiz_id` are device-generated UUIDs minted when the button is pressed and reused for any retry of that press, never regenerated on retry; a request whose `id` the server already holds for this user returns the existing cascade and Source quiz unchanged, so a lost response never makes a duplicate or counts its storage twice, and an `id` or `source_quiz_id` held by another user is refused with `409` (`invalid`), never that user's row. `at` is the device's timestamp, used for `options_changed_at` on the cascade and the Source quiz exactly as operations' `at` is, so the creating device's first option change is never `stale` against a server clock. Runs the search **before opening any transaction**, then in one short transaction locks the user's row, checks the [storage limit](#storage-limit) against what the new cascade will hold, stores the question index and shuffles the Source quiz with a server-generated seed, and returns `{ cascade, source_quiz, sync_seq }`, whose `cascade` carries `storage_bytes` as a pulled row does, and adds that to `users.storage_bytes`. A cheap check before the search refuses an account already at or over its limit without spending one (`needed` 0), and the lock therefore never covers the search's CPU or its wait for a `SEARCH_CONCURRENCY` permit, so a creation can never block the [purge task](#purge-task) on the same user's row for the length of a search. `source_quiz` carries its `shuffle_seed` rather than its positions: the device derives the Source quiz's order with the shared [shuffle](#deterministic-shuffles) over `idx` 0…count−1, and writes the cascade, the Source quiz and its question rows straight into its base stores from this response, so its first pull finds nothing to rebuild. `sync_seq` is informational; the device does **not** advance its sync cursor from this response, so its next sync pulls the rows the creation stamped. The cascade's private spec is stored with this request's `quiz_type`, which is what an In Word List row's entries were canonicalised under and what Start over copies. `422` if the search is empty or over the cap. `409` with `{ error: "storage_limit", used, limit, needed }` when the cascade does not fit (see [Storage limit](#storage-limit)). A `5xx`, such as a deadlock or timeout inside the creation transaction, is retried by the device with the same body, which the device-minted ids make safe, and so is a `429`, after `Retry-After`, since this endpoint shares `SEARCH_RATE_PER_MINUTE` with the builder's preview. The threshold, the three [quiz options](#quiz-options) and the answer mode are required, so an omitted one is a `400`: the builder sends the defaults every new cascade starts with (`CASCADE_SETTING_DEFAULTS`; see [Settings](#settings)). The other settings (`show_definitions`, `show_hooks`, `reveal_correct`, `leave_value_decimals`) are not in the request and take their column defaults; Start over copies all of them from the original. The Source quiz is created with a copy of the options. |
 | `POST` | `/api/cascades/:id/start-over` | Body `{ id, source_quiz_id, device_id, at }`, minted per press exactly as for creation and subject to the same repeat, timestamp and `options_device_id` rules. New cascade with a copy of the spec and the same threshold and options; returns the same shape. Subject to the [storage limit](#storage-limit), with the original's questions and a copy of its spec as what it needs. |
-| `GET` | `/api/cascades/:id/cards?from=<idx>&limit=<n>&hooks=<0\|1>&definitions=<0\|1>&keys=<0\|1>`, or `?idx=<i,j,…>&hooks=…&definitions=…` | Answer cards `[{ idx, key, answer }]` for question indexes `from`…`from+limit−1` (`limit` ≤ 10,000), or for the comma-separated indexes in `idx` (at most 1,000, returned in idx order; never with `from`, `limit` or `keys`, else `400 invalid_idx`) — the player's read-ahead, which asks for the next cards in its quiz's own order. With `hooks=1`, an Anagram answer's words carry `front_hooks`, `back_hooks` and the booleans `front_inner` and `back_inner` (the word less its first, or last, tile is a word), and a Definition card carries `word`: `{ word, front_hooks, back_hooks, front_inner, back_inner }` beside its answer. The device splits each row between its `questions` store (the `key`) and its `cards` store (the rest), so eviction can take the answer and leave the question (see [On the device](#on-the-device)). With `keys=1` the response is `{ from, keys: [...] }` — the keys alone, in idx order, since the range makes every index implied — and **`limit` ≤ 100,000**, which at about 10 bytes a key is roughly the size of one 10,000-card page: a 300,000-question cascade's keys are three requests where its answers are thirty, a tenth of the cost in the shared rate bucket, and about a quarter of the bytes of cards without definitions (see [Downloads](#on-the-device)). It is what the download manager fetches first, so a cascade becomes playable and self-gradable before its answers arrive; `hooks` and `definitions` are then a `400`. A Leave Value `answer` is a JSON number written as the shortest text that round-trips the stored `f64`, which `JSON.parse` reads back exactly. Card pages are served `Cache-Control: private, no-store`, because the device keeps every byte it fetches in IndexedDB and a second copy in the browser's HTTP cache would sit outside every budget the plan states; only the questions endpoint, whose index lists are small and refetched by the pending path, keeps immutable caching. Responses are compressed. |
+| `GET` | `/api/cascades/:id/cards?from=<idx>&limit=<n>&hooks=<0\|1>&definitions=<0\|1>&keys=<0\|1>`, or `?idx=<i,j,…>&hooks=…&definitions=…` | Answer cards `[{ idx, key, answer }]` for question indexes `from`…`from+limit−1` (`limit` ≤ 10,000), or for the comma-separated indexes in `idx` (at most 1,000, returned in idx order; never with `from`, `limit` or `keys`, else `400 invalid_idx`) — the player's read-ahead, which asks for the next cards in its quiz's own order. With `hooks=1`, an Anagram answer's words carry `probability_order` (the word's rank by probability among the lexicon's words of its length), `front_hooks`, `back_hooks` and the booleans `front_inner` and `back_inner` (the word less its first, or last, tile is a word), and a Definition card carries `word`: `{ word, probability_order, front_hooks, back_hooks, front_inner, back_inner }` beside its answer. The device splits each row between its `questions` store (the `key`) and its `cards` store (the rest), so eviction can take the answer and leave the question (see [On the device](#on-the-device)). With `keys=1` the response is `{ from, keys: [...] }` — the keys alone, in idx order, since the range makes every index implied — and **`limit` ≤ 100,000**, which at about 10 bytes a key is roughly the size of one 10,000-card page: a 300,000-question cascade's keys are three requests where its answers are thirty, a tenth of the cost in the shared rate bucket, and about a quarter of the bytes of cards without definitions (see [Downloads](#on-the-device)). It is what the download manager fetches first, so a cascade becomes playable and self-gradable before its answers arrive; `hooks` and `definitions` are then a `400`. A Leave Value `answer` is a JSON number written as the shortest text that round-trips the stored `f64`, which `JSON.parse` reads back exactly. Card pages are served `Cache-Control: private, no-store`, because the device keeps every byte it fetches in IndexedDB and a second copy in the browser's HTTP cache would sit outside every budget the plan states; only the questions endpoint, whose index lists are small and refetched by the pending path, keeps immutable caching. Responses are compressed. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/questions?from=<n>&limit=<n>` | The quiz's question indexes `[idx…]` in idx order, `limit` ≤ 50,000. A quiz's question set never changes, so it is served with the same immutable caching. Fetched when the device materialises a quiz; never part of a pull. `404` for another user's, a purged, or a Source quiz, whose indexes are implied. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/grades?from=<idx>&limit=<n>` | The quiz's graded rows for the attempt its row names, which for a cleared quiz is the attempt it finished on (its grades each dated that finish, the quiz's `last_activity_at`, since a cleared quiz keeps no grade times), as the parallel arrays a pull uses, in idx order, with the quiz row's `attempt` and `shuffle_seed` so the device can tell whether they belong to the order it holds. `from` is an **index, not an offset**, as on the card pages: the response holds the graded rows whose `question_idx` is in `from … from+limit−1`, `limit` ≤ 50,000, so the device pages the index space by `from += limit` until `from` reaches the cascade's `question_count` and a sparse page — most of a quiz's questions may be ungraded — means nothing is left behind. The questions endpoint below reads `from` the other way, as an offset into a dense list, which is why the two are written `<idx>` and `<n>`. There is no `min_updated_seq` here, which only a pull's fast path needs; the device stamps these rows with the sequence of the sync it made before the fetch. Not cacheable. Fetched when the device materialises a quiz whose rows it dropped on leaving the download window; never part of a pull. If the device's quiz row names a different attempt or seed, the device discards the response, syncs and fetches again. `404` for another user's or a purged quiz. |
 | `POST` | `/api/cascades/:id/export-token` | Body: the export's choices, as the query of the export row below. Checks the session, `X-Acrodont-User`, the cascade and quiz, and `EXPORT_RATE_PER_MINUTE`, answering `401`, `404` and `429` with `Retry-After` exactly as any other request does, which a navigation could not show the page; on success returns `{ url }`, the export URL with a token valid for **60 seconds and one use**, bound to this user and these choices: a PASETO under the HKDF-derived export key, which any task can verify and no session validator can decrypt, its use recorded in `export_tokens_spent` (see [Exporting words](#exporting-words)). The dialog navigates a hidden `<iframe>` to it at once, and mints a new one for any retry |
@@ -5238,7 +5268,7 @@ startup rather than falling back to a default.
 | `MAIL_FROM` | `no-reply@acrodont.local` | |
 | `PUBLIC_URL` | `http://localhost:5173` | Base URL for email links |
 | `MAX_QUIZ_QUESTIONS` | `300000` | May be lowered; a value above 300,000 fails startup. Lowering it bounds **new** values only: cascades and quizzes already holding a larger segment size keep working and are never rewritten, and the forms clamp what they prefill (see [Quiz options](#quiz-options)) |
-| `MAX_STORAGE_BYTES_PER_USER` | `100000000` (100 MB) | The [storage limit](#storage-limit): what an account's cascades (the Trash included) and saved searches may hold on the server, in bytes, by the storage formula. Checked inside the creation, Start over and save transactions; reported by `/api/auth/me` as `max_storage_bytes`. Must be at least 1. An account's `users.storage_limit_bytes`, set only through SQL, replaces it for that account. There is no limit on how many cascades or saved searches an account has |
+| `MAX_STORAGE_BYTES_PER_USER` | `10000000` (10 MB) | The [storage limit](#storage-limit): what an account's cascades (the Trash included) and saved searches may hold on the server, in bytes, by the storage formula. Checked inside the creation, Start over and save transactions; reported by `/api/auth/me` as `max_storage_bytes`. Must be at least 1. An account's `users.storage_limit_bytes`, set only through SQL, replaces it for that account. There is no limit on how many cascades or saved searches an account has |
 | `SEARCH_TIMEOUT_MS` | `2000` | Production sets 4,000: on half a vCPU a search runs at half a core's speed |
 | `SEARCH_CONCURRENCY` | `2` | Searches running at once per instance, sized to the task's vCPUs. A request waiting longer than `SEARCH_TIMEOUT_MS` for a permit gets `503` with `Retry-After`, never `422` |
 | `EXPORT_CONCURRENCY` | `2` | Server-streamed exports at once per instance (production sets 1). A permit is held for the whole stream and taken before the token is spent; a request waits up to 50 seconds for one, then gets `503` with `Retry-After`. It is what bounds peak memory (the catalog plus this many exports) whatever the number of users |
@@ -5534,12 +5564,15 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
 - **Backups** have their own section: see [Backups](#backups).
 - **Capacity**: RDS storage autoscaling is on (20 GiB, growing up to five
   times that), with RDS storage events mailed, because large cascades (about
-  6 MB at 300,000 questions as created, plus about 4.4 MB for each full-size
+  5 MB at 300,000 questions as created, plus about 2.9 MB for each full-size
   level) are the main driver of database growth. The
-  [storage limit](#storage-limit) bounds them: at 100 accounts at the limit
-  the worst case is 10 GB, half the starting allocation, and a realistic
-  one is a small fraction of that. The figure is the formula's, of live rows;
-  dead row versions from grading wait for vacuum on top of it. Filter specs
+  [storage limit](#storage-limit) bounds them: at 750 accounts at the limit
+  the worst case is 7.5 GB by the formula, of live rows. Dead row versions
+  from grading wait for vacuum on top of it, and sync records are not
+  counted: allowing twice the live figure, 15 GB, the worst case still fits
+  the starting allocation with the tenth that autoscaling keeps free and
+  about 3 GB for Postgres itself, which is where the 750 comes from. A
+  realistic one is a small fraction of that. Filter specs
   count toward the same limit: a 300,000-entry In Word List of 8-letter words
   costs about 2.7 MB of `search_conditions.entries` (its bytes plus a line
   break an entry), which is the **most one spec can hold**, since the 300,000
@@ -5925,7 +5958,7 @@ Pure functions and in-memory structures, no database and no network.
   what fits, nothing past a full or over account, a change adding nothing
   never refused, and the account's own limit replacing the default.
 - **Configuration**: `MAX_QUIZ_QUESTIONS` defaults to 300,000 and 300,001
-  fails startup; `MAX_STORAGE_BYTES_PER_USER` defaults to 100,000,000 and `0`
+  fails startup; `MAX_STORAGE_BYTES_PER_USER` defaults to 10,000,000 and `0`
   or a non-number fails startup.
 
 **Frontend** (`npm run check`, then Vitest): `lib/cascade` against the shared
@@ -6891,7 +6924,7 @@ through the ordinary endpoints, so there is still no test-only path.
   page say "Over your storage by …" with New cascade disabled; move that
   cascade to the Trash and see it still over; Delete forever and see room
   again, with Create Cascade enabled in the builder.
-- The Cascades page shows the account's storage (`… of 100 MB used`) and no
+- The Cascades page shows the account's storage (`… of 10 MB used`) and no
   cascade count, each cascade's size, the Trash's total ("The Trash holds … of
   your storage.") and what Delete forever frees ("Delete forever (…)").
 - Paste a 10,001-entry word list into an In Word List row and see the live

@@ -23,7 +23,7 @@ export const STORAGE_COSTS = {
 export const CHUNK = 256;
 
 /** MAX_STORAGE_BYTES_PER_USER's default, used until the server has reported the account's own. */
-export const DEFAULT_STORAGE_LIMIT = 100_000_000;
+export const DEFAULT_STORAGE_LIMIT = 10_000_000;
 
 /** From this share of the limit, the page says the account is almost full. */
 export const ALMOST_FULL = 0.9;

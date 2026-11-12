@@ -21,7 +21,7 @@ test('the Cascades page lists a cascade, the Trash takes it and gives it back', 
 	await expect(row).toBeVisible();
 	// No cascade count: the account's storage against its one limit, and each cascade's own figure.
 	await expect(page.getByText(/of \d+ cascades/)).toHaveCount(0);
-	await expect(page.getByText(/^[\d.]+ (B|KB|MB) of 100 MB used$/)).toBeVisible({ timeout: 30_000 });
+	await expect(page.getByText(/^[\d.]+ (B|KB|MB) of 10 MB used$/)).toBeVisible({ timeout: 30_000 });
 	await expect(row.locator('[data-cascade-storage]')).toHaveText(/^[\d.]+ (B|KB|MB)$/);
 	await expect(row.getByText('Available offline')).toBeVisible({ timeout: 30_000 });
 	// Moving to the Trash asks first: Cancel keeps it.
