@@ -147,8 +147,9 @@ DNS and the GitHub repository.
 
     Upload the licensed catalog at `/admin` from your own files:
     distributions, then lexicons, then leave values. They are stored only as
-    rows. Then compare the index sizes `/admin` shows with `task_memory` (2 GiB
-    by default). The `acrodont-backend-memory-high` alarm watches this from now
+    rows. Then compare the in-memory index sizes `/admin` shows (hover a
+    lexicon's or leave value set's Storage) with `task_memory` (2 GiB by
+    default). The `acrodont-backend-memory-high` alarm watches this from now
     on.
 
 ## Deploying
@@ -267,7 +268,7 @@ All alarms go to the `acrodont-alarms` SNS topic and on to `alarm_email`.
 | `acrodont-down` | No healthy target for 10 minutes | The service's events and the newest stopped task's reason. A Spot interruption replaces the task within minutes; if Spot capacity cannot place one, `scripts/set-setting.sh use_fargate_spot=false` |
 | `acrodont-api-5xx` | The load balancer answered 5xx for 15 minutes | The log group, `level = ERROR` |
 | `acrodont-backend-cpu-high` | Over 85% CPU for 15 minutes | Searches or exports? Consider `task_cpu=1024` (and `search_concurrency`) |
-| `acrodont-backend-memory-high` | Over 85% memory for 10 minutes | The index sizes in `/admin` against `task_memory`; raise it |
+| `acrodont-backend-memory-high` | Over 85% memory for 10 minutes | The in-memory index sizes in `/admin` (hover each Storage) against `task_memory`; raise it |
 | `acrodont-db-cpu-high` | Database over 80% CPU for 15 minutes | Raise `db_instance_class`; the change applies at once with a short restart |
 | `acrodont-db-events` (RDS events) | Low storage, failure, or allocation near the autoscaling ceiling | Raise `db_allocated_storage` |
 | `acrodont-no-dump-36h` | No successful dump in 36 hours | The last `backup` log stream; the `acrodont-backup-failed` mail says why |
@@ -289,7 +290,7 @@ TypeScript rules.
 
 ## What it costs
 
-The stack is sized for one user at first and about 50 accounts at most: 20
+The stack is sized for one user at first and 100 accounts at most (`MAX_ACCOUNTS`): 20
 cascades each, 130,000 questions per quiz. Approximate us-east-1 prices:
 
 | Item | Monthly |

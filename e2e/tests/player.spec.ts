@@ -119,10 +119,10 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await expect(levels.getByRole('columnheader')).toHaveText(['Level', 'Questions', 'Pass', 'Last pass', 'Status', 'Actions']);
 	// The clear threshold changes there, for the pass in progress too; out of range is put back.
 	const threshold = levels.getByLabel('Clear threshold (%)', { exact: true });
-	await expect(threshold).toHaveValue('80');
+	await expect(threshold).toHaveValue('90');
 	await threshold.fill('0');
 	await threshold.press('Tab');
-	await expect(threshold).toHaveValue('80');
+	await expect(threshold).toHaveValue('90');
 	await threshold.fill('55');
 	await threshold.press('Tab');
 	await expect(levels.getByText(/at least\s+55%\s+correct/)).toBeVisible();

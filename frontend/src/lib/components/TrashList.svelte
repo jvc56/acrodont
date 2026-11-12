@@ -90,7 +90,7 @@
 				<button class="flex w-full items-baseline justify-between text-left" onclick={() => (open[g.cascade.id] = n ? 0 : PAGE)}>
 					<span class="font-medium">{g.trashed ? `${g.cascade.name} (cascade in the Trash)` : g.cascade.name}</span>
 					<span class="text-sm text-muted-foreground">
-						{`${g.entries.length} ${g.entries.length === 1 ? 'entry' : 'entries'} · ${formatBytes(g.bytes)}${g.earliest ? ` · deleted forever from ${date(g.earliest)}` : ''}`}
+						{`${g.entries.length} ${g.entries.length === 1 ? 'entry' : 'entries'} · ${formatBytes(g.bytes)}${g.earliest ? ` · deleted forever on ${date(g.earliest)}` : ''}`}
 					</span>
 				</button>
 				{#if n}

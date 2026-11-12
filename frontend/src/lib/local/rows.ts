@@ -50,7 +50,7 @@ export interface CascadeRow {
 
 /** The per-cascade settings every new cascade starts with (PLAN.md § Settings). */
 export const CASCADE_SETTING_DEFAULTS = {
-	clear_threshold: 80,
+	clear_threshold: 90,
 	segment_size: 0,
 	progression: 'ladder',
 	require_alphabetical: false,

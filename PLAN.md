@@ -52,7 +52,7 @@ A cascade's Source quiz can hold up to **300,000 questions**: any word search
 over a whole lexicon fits.
 
 **Scale assumptions (2026-11).** Acrodont is sized for its owner alone at
-first, perhaps ten more people within months, and **at most about 50
+first, perhaps ten more people within months, and **at most 100
 accounts** (`MAX_ACCOUNTS`, after which registration closes), each holding at
 most **100 MB** of cascades and saved searches on the server (the [storage
 limit](#storage-limit)), in cascades of at most **300,000 questions**. There is
@@ -79,7 +79,7 @@ when they land. See [Offline and Sync](#offline-and-sync).
 | **Attempt** | One pass through a quiz's questions, identified by its number and the shuffle seed that produced its order. A quiz that is reset or restored starts a new attempt with a new shuffle. |
 | **Segment** (or **run**) | A fixed-size run of questions inside an attempt, the length of one sitting. Finishing a run drills its misses before the attempt goes on. Off by default. |
 | **Finish** | Move on from the last question of an attempt. Finishing always either sends the quiz to the Trash, sends the user down a level, or resets the quiz in place. |
-| **Clear threshold** | The score (X%) needed to clear a quiz. It is a setting of each cascade, 80% when the cascade is created, and can be changed in the cascade's Settings in the player, under Cascade Settings; a change applies to every level, the pass in progress included. |
+| **Clear threshold** | The score (X%) needed to clear a quiz. It is a setting of each cascade, 90% when the cascade is created, and can be changed in the cascade's Settings in the player, under Cascade Settings; a change applies to every level, the pass in progress included. |
 | **Quiz options** | Segment size, progression and alphabetical order. They are held by the cascade, copied to each new quiz, and editable on either. |
 | **Progression** | What finishing a quiz below the clear threshold does: **Ladder** (keep the quiz and go down a level) or **Drill** (replace the quiz with its misses). |
 | **Clear** | Finish an attempt with a score of at least the clear threshold. The quiz goes to the Trash. The Source quiz is never cleared; see **Complete**. |
@@ -592,7 +592,7 @@ cascade's Settings.
 
 | Setting of a cascade | Applies to | Default | Options |
 |---|---|---|---|
-| **Clear threshold** (`clear_threshold`) | Every level of the cascade, the pass in progress included | `80`% | 1–100 |
+| **Clear threshold** (`clear_threshold`) | Every level of the cascade, the pass in progress included | `90`% | 1–100 |
 | **Answer mode** (`answer_mode`) | Anagram cascades (see [Typed mode](#typed-mode-anagram-quizzes-only)) | **Flashcard** | Flashcard / Typed |
 | **When an answer is revealed, mark it** (`reveal_correct`) | Flashcard cards (a typed card is graded by what was typed) | **Correct** | Correct / Missed: the grade a card starts with when its answer is shown, before any toggle |
 | **Show definitions** (`show_definitions`) | Anagram answers | **on** | on / off |
@@ -670,7 +670,7 @@ because searching runs on the server.
    Leave Value differ (see
    [Filter applicability](#filter-applicability-by-quiz-type)).
 5. **Settings**: none here. Every new cascade starts with the same
-   [settings](#settings) (an 80% clear threshold, flashcards, no segments,
+   [settings](#settings) (a 90% clear threshold, flashcards, no segments,
    Ladder, and the rest at their defaults), and a note under the form says so:
    the cascade's settings, such as its clear threshold, answer mode and
    segments, can be changed in its Settings once it is created. The create
@@ -814,7 +814,7 @@ on the device from the same per-row costs (its attempt rows, 176 bytes each,
 are left out of the label but freed with it).
 **Entries are grouped and not all rendered.** A cascade's group shows its name,
 how many entries it holds, its size and the earliest date among them that one is deleted
-forever ("deleted forever from …"), collapsed;
+forever ("deleted forever on …"), collapsed;
 expanding it renders a virtualized list in pages of 100 behind a **Show more**
 control. A group holding one entry is rendered expanded, since collapsing a
 single row hides nothing. One segmented attempt can leave tens of thousands of cleared quizzes
@@ -879,7 +879,7 @@ as the term of the data model and the API.
   reaches (`SCOPE` in `settings-info.ts`) — so the two read as separate. Every
   setting is saved as soon as it is changed:
   - **Cascade Settings** (synced; other cascades keep their own), in order: "a
-    level clears when a pass ends with at least 80% correct", the ladder as a
+    level clears when a pass ends with at least 90% correct", the ladder as a
     table whose columns line up — level, questions, pass, last pass's score,
     status — with each level's Export…; the clear threshold (a number, taking
     effect when the field is left, for the pass in progress too); the answer
@@ -1451,8 +1451,14 @@ the offline fallback, which would fail for the same reason.
 ## Admin
 
 Admins manage the catalog from `/admin`. It lists every letter distribution,
-lexicon and leave value set, with its size, uploader, upload time and how many
-cascades reference it. Admin status is the `users.is_admin`
+lexicon and leave value set, with its size, uploader, upload time, how many
+cascades reference it, and its **Storage**: everything the server keeps for it,
+which is its rows in Postgres (the item's own row and its tiles, words with
+definitions, or leave values: each row as stored, TOASTed values at their
+compressed size, plus its share of the tables' indexes) and, for a lexicon or
+leave value set, its in-memory index on the instance answering. Hovering the
+figure splits it into the database's part and the in-memory part with the
+index's build time. Nothing about an item is kept on disk outside Postgres. Admin status is the `users.is_admin`
 flag. **No endpoint can set it**; it is granted with SQL (`scripts/dev.py` does
 this for the local dev user), so no bug in the web API can create an admin.
 
@@ -2108,7 +2114,8 @@ catalog offered, and each index's size is logged when it is built and shown in
 **Where those two figures are checked.** Neither the few seconds nor the 100 MB
 means anything on [the fixture catalog](#the-fixture-catalog), and licensed data
 never reaches CI, so no unit or scale test holds them to a budget. Every index's
-build time and resident size are logged when it is built and shown in `/admin`,
+build time and resident size are logged when it is built and shown in `/admin`
+(on hovering its Storage),
 the [parity run](#zyzzyva-parity) records both for a real CSW24 upload and its
 leave value set, and the runbook compares the recorded total against the task's
 memory reservation before a catalog is offered in production.
@@ -4326,13 +4333,20 @@ The flows are the conventional ones, built directly on Axum:
   and that check runs before anything below, so a `400` never also sends an
   email. An email already in use gets the same response as a successful
   registration.
-  **Registration closes at `MAX_ACCOUNTS`** (50 in production). It counts
-  accounts that hold a place: confirmed, or with a confirmation code still
-  valid. At the limit every registration gets `403 registration_closed` and
-  sends nothing, a new address and a known one alike; the check runs before
-  the address is looked up, so a closed site reveals nothing about which
-  addresses have accounts. The register page says Acrodont is not taking new
-  accounts.
+  **Registration closes at `MAX_ACCOUNTS`, 100 accounts.** The number is a
+  constant in the backend (`backend/src/auth/routes.rs`), deliberately not a
+  setting: raising it is a release. It counts accounts that hold a place:
+  confirmed, or with a confirmation code still valid. The count and the check
+  run inside the registration's transaction, after it takes a
+  transaction-scoped advisory lock that every registration takes in turn, so
+  concurrent registrations cannot pass the limit together. At the limit every
+  registration gets `403 registration_closed` and sends nothing, a new address
+  and a known one alike; the check runs before the address is looked up, so a
+  closed site reveals nothing about which addresses have accounts. The
+  register page says "Acrodont isn't taking new accounts right now." A stack
+  with `DEV_LOGIN` on, which only a local one can have, does not apply the
+  limit, since the end-to-end journeys register an account per spec on a stack
+  kept between runs.
   The password is hashed on every path, whether or not the hash is stored, so
   the response takes the same time whichever branch runs.
   If that email belongs to a **confirmed** account, its owner is emailed a
@@ -4743,7 +4757,7 @@ out of `segment_size`, `progression` and `require_alphabetical`, and for
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/admin/catalog` | Every distribution, lexicon and leave value set, with sizes, uploader, upload time, reference counts and per-instance load status |
+| `GET` | `/api/admin/catalog` | Every distribution, lexicon and leave value set, with sizes, uploader, upload time, reference counts and per-instance load status. Each item's `storage_bytes` is its [storage](#admin); a lexicon's and a leave value set's `index_bytes` and `build_ms` are its in-memory index on this instance (`null` until built) |
 | `POST` | `/api/admin/letter-distributions` | Multipart `name`, `file`. `201` with the distribution, or `400` with `{ errors: [{ line, message }], total_errors }`. |
 | `DELETE` | `/api/admin/letter-distributions/:id` | `409` with what still uses it |
 | `POST` | `/api/admin/lexicons` | Multipart `name`, `letter_distribution`, `file` |
@@ -4973,7 +4987,6 @@ startup rather than falling back to a default.
 | `PUBLIC_URL` | `http://localhost:5173` | Base URL for email links |
 | `MAX_QUIZ_QUESTIONS` | `300000` | May be lowered; a value above 300,000 fails startup. Lowering it bounds **new** values only: cascades and quizzes already holding a larger segment size keep working and are never rewritten, and the forms clamp what they prefill (see [Quiz options](#quiz-options)) |
 | `MAX_STORAGE_BYTES_PER_USER` | `100000000` (100 MB) | The [storage limit](#storage-limit): what an account's cascades (the Trash included) and saved searches may hold on the server, in bytes, by the storage formula. Checked inside the creation, Start over and save transactions; reported by `/api/auth/me` as `max_storage_bytes`. Must be at least 1. An account's `users.storage_limit_bytes`, set only through SQL, replaces it for that account. There is no limit on how many cascades or saved searches an account has |
-| `MAX_ACCOUNTS` | `50` | Registration closes once this many accounts hold a place (confirmed, or with a confirmation code still valid). Every registration is then answered `403 registration_closed` alike, before the address is looked up, so a closed site reveals nothing about which addresses have accounts. Registrations take turns under a transaction-scoped advisory lock, so two at the limit cannot both pass it. Local stacks set it far higher (`docker/backend.defaults.env`), since the end-to-end journeys register an account per spec |
 | `SEARCH_TIMEOUT_MS` | `2000` | Production sets 4,000: on half a vCPU a search runs at half a core's speed |
 | `SEARCH_CONCURRENCY` | `2` | Searches running at once per instance, sized to the task's vCPUs. A request waiting longer than `SEARCH_TIMEOUT_MS` for a permit gets `503` with `Retry-After`, never `422` |
 | `EXPORT_CONCURRENCY` | `2` | Server-streamed exports at once per instance (production sets 1). A permit is held for the whole stream and taken before the token is spent; a request waits up to 50 seconds for one, then gets `503` with `Retry-After`. It is what bounds peak memory (the catalog plus this many exports) whatever the number of users |
@@ -5140,8 +5153,8 @@ manual walk through a `dev.py` instance that precedes a launch.
 
 ## Deployment and Operations
 
-Sized for the [scale assumptions](#overview): one user at first, at most about
-50 accounts. The stack costs about $53 a month (docs/runbook.md, "What it
+Sized for the [scale assumptions](#overview): one user at first, at most 100
+accounts. The stack costs about $53 a month (docs/runbook.md, "What it
 costs"). Birdtest, a sibling app on the same stack that has been live since
 October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
 
@@ -5271,8 +5284,8 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
   times that), with RDS storage events mailed, because large cascades (about
   87 MB at 300,000 questions as created, plus about 56 MB for each full-size
   level) are the main driver of database growth. The
-  [storage limit](#storage-limit) bounds them: at 50 accounts of 100 MB each
-  the worst case is 5 GB, a quarter of the starting allocation, and a realistic
+  [storage limit](#storage-limit) bounds them: at 100 accounts of 100 MB each
+  the worst case is 10 GB, half the starting allocation, and a realistic
   one is a small fraction of that. The figure is the formula's, of live rows;
   dead row versions from grading wait for vacuum on top of it. Filter specs
   count toward the same limit: a 300,000-entry In Word List costs about 33 MB
@@ -6452,7 +6465,7 @@ through the ordinary endpoints, so there is still no test-only path.
 
 #### The journeys
 
-- Register, confirm, log in, create an anagram cascade (with the 80%
+- Register, confirm, log in, create an anagram cascade (with the 90%
   threshold every new cascade starts with), and see every cascade rule applied
   as expected:
   - Finish Level 1 below the threshold and go down to Level 2.

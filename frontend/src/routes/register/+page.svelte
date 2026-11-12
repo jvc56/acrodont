@@ -26,7 +26,7 @@
 		} catch (err) {
 			if (err instanceof ApiError && err.fieldErrors.length) errors = err.fieldErrors;
 			else if (err instanceof ApiError && err.code === 'registration_closed')
-				error = 'Acrodont is not taking new accounts at the moment.';
+				error = "Acrodont isn't taking new accounts right now.";
 			else error = describe(err);
 		} finally {
 			busy = false;

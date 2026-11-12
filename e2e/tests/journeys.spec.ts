@@ -95,8 +95,8 @@ test('trash: export a cleared quiz’s missed words offline, see purge dates, re
 	test.setTimeout(240_000);
 	await newUser(page, 'trashj');
 	const player = await createCascade(page, { name: 'Trash journey' });
-	expect(await playLevel(page, (i) => i < 5)).toMatch(/^Level 1/);
-	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2 cleared with 80%. Its 1 missed questions are now Level 2.');
+	expect(await playLevel(page, (i) => i < 10)).toMatch(/^Level 1/);
+	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2 cleared with 90%. Its 1 missed questions are now Level 2.');
 	await availableOffline(page, 'Trash journey');
 	// The clear must have synced: until the server's cleared time arrives, the
 	// Trash says "deleted forever 30 days after this syncs" instead of a date.
@@ -123,7 +123,7 @@ test('trash: export a cleared quiz’s missed words offline, see purge dates, re
 	await expect(page.getByText('The Trash is empty.')).toBeVisible();
 	await page.goto(player);
 	await expect(page.getByText('Level 3 of 3')).toBeVisible({ timeout: 30_000 });
-	await expect(page.getByText('1 / 5')).toBeVisible();
+	await expect(page.getByText('1 / 10')).toBeVisible();
 });
 
 // @serial: it stops the backend under every other journey on the stack.

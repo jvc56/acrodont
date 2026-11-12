@@ -156,12 +156,6 @@ variable "export_concurrency" {
   }
 }
 
-variable "max_accounts" {
-  description = "MAX_ACCOUNTS: registration closes once this many accounts exist."
-  type        = number
-  default     = 50
-}
-
 variable "mail_max_per_second" {
   description = "MAIL_MAX_PER_SECOND: the SES account's maximum send rate. 1 in the sandbox; raise it (usually 14) once production access is granted."
   type        = number

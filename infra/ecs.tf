@@ -38,7 +38,6 @@ locals {
     SEARCH_CONCURRENCY  = tostring(var.search_concurrency)
     SEARCH_TIMEOUT_MS   = tostring(var.search_timeout_ms)
     EXPORT_CONCURRENCY  = tostring(var.export_concurrency)
-    MAX_ACCOUNTS        = tostring(var.max_accounts)
     MIN_APP_VERSION     = tostring(var.min_app_version)
     TRUSTED_PROXY_HOPS  = "1"
     AWS_REGION          = var.region

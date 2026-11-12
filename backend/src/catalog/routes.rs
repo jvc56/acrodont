@@ -198,6 +198,7 @@ async fn admin_catalog(
         (by, loading)
     };
     let snap = state.catalog.snapshot();
+    let rows = RowBytes::read(&state.db).await?;
 
     let dists = sqlx::query!(
         r#"SELECT d.id, d.name, d.uploaded_at, u.username::text AS "uploaded_by?",
@@ -231,9 +232,11 @@ async fn admin_catalog(
         .into_iter()
         .map(|d| {
             let (by, loading) = load(ItemKind::LetterDistribution, i32::from(d.id));
+            // Its in-memory copy, a few hundred bytes, is not counted.
+            let storage = RowBytes::of(&rows.distributions, d.id.into());
             json!({ "id": d.id, "name": d.name, "tile_count": d.tile_count, "uploaded_by": d.uploaded_by,
                     "uploaded_at": d.uploaded_at, "lexicon_count": d.lexicon_count,
-                    "loaded_by": by, "loading": loading })
+                    "loaded_by": by, "loading": loading, "storage_bytes": storage })
         })
         .collect();
     let lexicons: Vec<_> = lexicons
@@ -241,10 +244,12 @@ async fn admin_catalog(
         .map(|l| {
             let (by, loading) = load(ItemKind::Lexicon, i32::from(l.id));
             let idx = snap.lexicons.get(&l.id);
+            let storage = RowBytes::of(&rows.lexicons, l.id.into())
+                + idx.map_or(0, |i| i.approx_bytes as i64);
             json!({ "id": l.id, "name": l.name, "letter_distribution": l.dist, "word_count": l.word_count,
                     "uploaded_by": l.uploaded_by, "uploaded_at": l.uploaded_at,
                     "has_leave_set": l.has_leave_set, "cascade_count": l.cascade_count,
-                    "loaded_by": by, "loading": loading,
+                    "loaded_by": by, "loading": loading, "storage_bytes": storage,
                     "index_bytes": idx.map(|i| i.approx_bytes), "build_ms": idx.map(|i| i.build_ms) })
         })
         .collect();
@@ -253,10 +258,12 @@ async fn admin_catalog(
         .map(|s| {
             let (by, loading) = load(ItemKind::LeaveSet, s.id);
             let idx = snap.leave_sets.get(&s.id);
+            let storage = RowBytes::of(&rows.leave_sets, s.id.into())
+                + idx.map_or(0, |i| i.approx_bytes as i64);
             json!({ "id": s.id, "lexicon": s.lexicon, "leave_count": s.leave_count,
                     "uploaded_by": s.uploaded_by, "uploaded_at": s.uploaded_at,
                     "cascade_count": s.cascade_count, "loaded_by": by, "loading": loading,
-                    "index_bytes": idx.map(|i| i.approx_bytes), "build_ms": idx.map(|i| i.build_ms) })
+                    "storage_bytes": storage, "index_bytes": idx.map(|i| i.approx_bytes), "build_ms": idx.map(|i| i.build_ms) })
         })
         .collect();
     Ok(Json(json!({
@@ -266,6 +273,82 @@ async fn admin_catalog(
         "lexicons": lexicons,
         "leave_sets": leave_sets,
     })))
+}
+
+/// What each catalog item's rows take in Postgres, keyed by item id.
+///
+/// An item's `storage_bytes` in the overview is everything the server keeps
+/// for it: these rows, plus its in-memory search index on this instance
+/// (`index_bytes`, the index's own estimate; nothing is written to disk). The
+/// rows are the item's own row in `letter_distributions`, `lexicons` or
+/// `leave_sets`, and its rows in `letter_distribution_tiles`, `lexicon_words`
+/// (words, playabilities, definitions) or `leave_values`. In each table an
+/// item counts
+///
+/// - every row as stored: `pg_column_size` of the whole row, which includes
+///   the tuple header and counts a TOASTed definition at its stored,
+///   compressed size, plus the row's 4-byte line pointer; and
+/// - its share of the table's indexes (primary key and unique constraints) by
+///   row count, since every row has one entry in each.
+///
+/// Page headers, padding between rows and dead rows not yet vacuumed are left
+/// out, so the figures add up to a little less than the tables' size on disk.
+/// Each table is scanned once per request (about 50 ms per 300,000 words),
+/// which keeps the figure exact without storing a derived column.
+struct RowBytes {
+    distributions: HashMap<i64, i64>,
+    lexicons: HashMap<i64, i64>,
+    leave_sets: HashMap<i64, i64>,
+}
+
+impl RowBytes {
+    async fn read(db: &sqlx::PgPool) -> Result<Self, sqlx::Error> {
+        let mut out = RowBytes {
+            distributions: HashMap::new(),
+            lexicons: HashMap::new(),
+            leave_sets: HashMap::new(),
+        };
+        for (table, key) in [
+            ("letter_distributions", "id"),
+            ("letter_distribution_tiles", "letter_distribution_id"),
+        ] {
+            add_table_bytes(db, table, key, &mut out.distributions).await?;
+        }
+        for (table, key) in [("lexicons", "id"), ("lexicon_words", "lexicon_id")] {
+            add_table_bytes(db, table, key, &mut out.lexicons).await?;
+        }
+        for (table, key) in [("leave_sets", "id"), ("leave_values", "leave_set_id")] {
+            add_table_bytes(db, table, key, &mut out.leave_sets).await?;
+        }
+        Ok(out)
+    }
+
+    fn of(items: &HashMap<i64, i64>, id: i64) -> i64 {
+        items.get(&id).copied().unwrap_or(0)
+    }
+}
+
+/// Adds what each item's rows take in `table` (see [`RowBytes`]), the item
+/// being the `key` column. Both names are constants here, never input.
+async fn add_table_bytes(
+    db: &sqlx::PgPool,
+    table: &'static str,
+    key: &'static str,
+    into: &mut HashMap<i64, i64>,
+) -> Result<(), sqlx::Error> {
+    let sql = format!(
+        "WITH per AS (SELECT {key}::bigint AS id, count(*) AS n,
+                             sum(pg_column_size(t.*) + 4) AS b
+                      FROM {table} t GROUP BY 1)
+         SELECT id, (b + pg_indexes_size('{table}') * n / sum(n) OVER ())::bigint FROM per"
+    );
+    let rows: Vec<(i64, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .fetch_all(db)
+        .await?;
+    for (id, bytes) in rows {
+        *into.entry(id).or_default() += bytes;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

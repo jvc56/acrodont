@@ -8,6 +8,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import * as Table from '$lib/components/ui/table';
 	import { api, ApiError } from '$lib/api';
+	import { formatBytes } from '$lib/cascades/storage';
 	import NotFound from '$lib/components/NotFound.svelte';
 
 	interface Item {
@@ -25,6 +26,8 @@
 		lexicon_count?: number;
 		cascade_count?: number;
 		has_leave_set?: boolean;
+		/** Everything the server keeps for it: its rows and their indexes, and its in-memory index. */
+		storage_bytes: number;
 		index_bytes?: number | null;
 		build_ms?: number | null;
 	}
@@ -64,7 +67,12 @@
 	}
 
 	const when = (s: string) => new Date(s).toLocaleString();
-	const mb = (b: number | null | undefined) => (b == null ? '—' : `${(b / 1e6).toFixed(1)} MB`);
+	// The in-memory part, on hover: what the task's memory is sized from.
+	function storageTitle(i: Item): string | undefined {
+		if (i.index_bytes == null) return undefined;
+		const built = i.build_ms != null ? `, built in ${i.build_ms} ms` : '';
+		return `${formatBytes(i.storage_bytes - i.index_bytes)} in the database, ${formatBytes(i.index_bytes)} in memory${built}`;
+	}
 
 	function lexiconBlocker(l: Item): string | null {
 		const parts = [];
@@ -102,7 +110,7 @@
 							<Table.Row>
 								<Table.Head>Name</Table.Head><Table.Head>Tiles</Table.Head>
 								<Table.Head>Uploaded</Table.Head><Table.Head>Lexicons</Table.Head>
-								<Table.Head></Table.Head>
+								<Table.Head>Storage</Table.Head><Table.Head></Table.Head>
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
@@ -115,6 +123,7 @@
 									<Table.Cell>{d.tile_count}</Table.Cell>
 									<Table.Cell>{when(d.uploaded_at)} by {d.uploaded_by ?? 'a deleted user'}</Table.Cell>
 									<Table.Cell>{d.lexicon_count}</Table.Cell>
+									<Table.Cell>{formatBytes(d.storage_bytes)}</Table.Cell>
 									<Table.Cell class="text-right">
 										<Button
 											size="sm"
@@ -142,7 +151,7 @@
 							<Table.Row>
 								<Table.Head>Name</Table.Head><Table.Head>Distribution</Table.Head>
 								<Table.Head>Words</Table.Head><Table.Head>Uploaded</Table.Head>
-								<Table.Head>Cascades</Table.Head><Table.Head>Index</Table.Head>
+								<Table.Head>Cascades</Table.Head><Table.Head>Storage</Table.Head>
 								<Table.Head></Table.Head>
 							</Table.Row>
 						</Table.Header>
@@ -158,7 +167,7 @@
 									<Table.Cell>{l.word_count?.toLocaleString()}</Table.Cell>
 									<Table.Cell>{when(l.uploaded_at)} by {l.uploaded_by ?? 'a deleted user'}</Table.Cell>
 									<Table.Cell>{l.cascade_count}</Table.Cell>
-									<Table.Cell>{mb(l.index_bytes)}{l.build_ms != null ? `, ${l.build_ms} ms` : ''}</Table.Cell>
+									<Table.Cell title={storageTitle(l)}>{formatBytes(l.storage_bytes)}</Table.Cell>
 									<Table.Cell class="text-right">
 										<Button
 											size="sm"
@@ -186,7 +195,7 @@
 							<Table.Row>
 								<Table.Head>Lexicon</Table.Head><Table.Head>Leaves</Table.Head>
 								<Table.Head>Uploaded</Table.Head><Table.Head>Cascades</Table.Head>
-								<Table.Head>Index</Table.Head><Table.Head></Table.Head>
+								<Table.Head>Storage</Table.Head><Table.Head></Table.Head>
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
@@ -199,7 +208,7 @@
 									<Table.Cell>{s.leave_count?.toLocaleString()}</Table.Cell>
 									<Table.Cell>{when(s.uploaded_at)} by {s.uploaded_by ?? 'a deleted user'}</Table.Cell>
 									<Table.Cell>{s.cascade_count}</Table.Cell>
-									<Table.Cell>{mb(s.index_bytes)}{s.build_ms != null ? `, ${s.build_ms} ms` : ''}</Table.Cell>
+									<Table.Cell title={storageTitle(s)}>{formatBytes(s.storage_bytes)}</Table.Cell>
 									<Table.Cell class="text-right">
 										<Button
 											size="sm"

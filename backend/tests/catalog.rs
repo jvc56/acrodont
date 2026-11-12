@@ -1110,5 +1110,18 @@ async fn admin_catalog_shows_sizes_uploaders_and_load_status(pool: sqlx::PgPool)
     assert_eq!(en["loading"], false);
     assert_eq!(en["loaded_by"], json!([app.state.catalog.instance_id]));
     assert!(en["index_bytes"].as_u64().unwrap() > 0);
+    // Storage is the rows (154 words with definitions) plus the index.
+    let en_storage = en["storage_bytes"].as_u64().unwrap();
+    assert!(en_storage > en["index_bytes"].as_u64().unwrap() + 154 * 30);
+    for d in c["letter_distributions"].as_array().unwrap() {
+        assert!(d["storage_bytes"].as_u64().unwrap() > 0, "{d}");
+    }
+    let leaves = c["leave_sets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["lexicon"] == "EN-FIX")
+        .unwrap();
+    assert!(leaves["storage_bytes"].as_u64().unwrap() > leaves["index_bytes"].as_u64().unwrap());
     assert_eq!(c["instances"].as_array().unwrap().len(), 1);
 }
