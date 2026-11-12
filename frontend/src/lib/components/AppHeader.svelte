@@ -6,6 +6,7 @@
 	import { page } from '$app/state';
 	import { session } from '$lib/auth/session.svelte';
 	import SyncStatus from '$lib/components/SyncStatus.svelte';
+	import OfflineStatus from '$lib/components/OfflineStatus.svelte';
 
 	const links = $derived([
 		...(session.isAdmin ? [{ href: '/admin', label: 'Admin' }] : [])
@@ -35,6 +36,7 @@
 			{/each}
 		</nav>{/if}
 		<div class="ml-auto flex items-center gap-3 sm:gap-4">
+			<OfflineStatus />
 			<SyncStatus />
 			<a
 				href="/account"

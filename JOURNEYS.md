@@ -67,6 +67,7 @@ as a link (`[mail] confirm …`).
 - [ ] **S-7** **Do** go offline (DevTools Offline, or `docker compose stop backend`) and keep studying, then reload. **Expect** the app still loads and studies; SyncStatus says changes are waiting; back online, it says "Synced".
 - [ ] **S-8** **Do** `./scripts/dev.py --two-devices`, grade in one profile, then switch to the other. **Expect** the grades arrive within the sync interval (about 30 s) or at once on focus.
 - [ ] **S-9** **Do** the same quiz on both devices offline, then bring both online. **Expect** a notice naming what wasn't kept, never a silent loss.
+- [ ] **S-10** **Do** in Chrome or Edge on a desktop, open `localhost:5173`, wait for the header's drive icon to turn green, and press **Install** (or the icon, then Install Acrodont). Then go offline, close the app and the browser, and open Acrodont from its own icon. **Expect** the browser's install dialog; the installed app opens with no connection on the Cascades page, with no Install button and the cascades available offline playable. Hovering the icon says Acrodont opens on this device with no connection.
 
 ## Part 3: cascades, Trash, export, account
 
@@ -108,6 +109,7 @@ as a link (`[mail] confirm …`).
 - Real mail delivery, SES's sandbox and the bounce and complaint alarms (docs/runbook.md, One-time setup).
 - Spot interruptions and the circuit breaker (`scripts/check-alerts.sh` tests the alert path).
 - TLS, HSTS and Secure cookies: the local stack is plain HTTP.
+- Installing on a phone: a phone reaches the local stack over plain HTTP, where browsers register no service worker and offer no install. The iPhone tip and Add to Home Screen need the deployed site (or a phone emulator on `localhost`).
 
 ## Known quirks
 

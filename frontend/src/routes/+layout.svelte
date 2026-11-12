@@ -7,6 +7,8 @@
 	import { initSession, session } from '$lib/auth/session.svelte';
 	import { startSync } from '$lib/sync/runtime.svelte';
 	import { applyUpdate, updates, watchUpdates } from '$lib/sw/client.svelte';
+	import { askToKeepData, watchOffline } from '$lib/sw/offline.svelte';
+	import InstallTip from '$lib/components/InstallTip.svelte';
 	import Notices from '$lib/components/Notices.svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -36,6 +38,12 @@
 	onMount(() => {
 		initSession();
 		void watchUpdates();
+		watchOffline();
+	});
+
+	// Signed in, there is study to keep: ask the browser to keep it.
+	$effect(() => {
+		if (session.userId) void askToKeepData();
 	});
 
 	// Sync runs while an account is signed in and this tab still belongs to it.
@@ -59,7 +67,7 @@
 </script>
 
 <svelte:head>
-	<link rel="icon" href={favicon} />
+	<link rel="icon" href={favicon} type="image/svg+xml" />
 	<title>Acrodont</title>
 </svelte:head>
 
@@ -79,6 +87,7 @@
 	<Notices />
 	{#if session.ready}
 		{#if showHeader}<AppHeader />{/if}
+		{#if showHeader}<InstallTip />{/if}
 		{@render children()}
 	{/if}
 	<ConfirmDialog />
