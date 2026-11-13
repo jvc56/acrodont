@@ -17,6 +17,7 @@ import type { RwTx } from '$lib/local/view';
 import { nextBoundary, Rejected, runIndicator, type Grade } from '$lib/cascade/rules';
 import { Distribution } from '$lib/tiles';
 import { finishBanner, runBanner } from './banner';
+import { statusRows, type StatusRows } from './segment';
 import { emptyTyped, submitTyped, typedGrade, type Submit, type TypedState } from './typed';
 
 export interface Card {
@@ -59,6 +60,8 @@ export interface PlayerView {
 	fetchingCard: boolean;
 	/** A first open's share done, 0 to 1, while the status is `downloading`; null when not known. */
 	downloadProgress: number | null;
+	/** The status bar's Level row and, on a level studied in segments, its Segment row. */
+	bar: StatusRows | null;
 }
 
 export interface PlayerOptions {
@@ -109,7 +112,8 @@ export class Player {
 		completion: null,
 		distributionMissing: false,
 		fetchingCard: false,
-		downloadProgress: null
+		downloadProgress: null,
+		bar: null
 	};
 	/** Keys and answers of the cards around the current one, by idx: Next and Previous draw from here. */
 	private cache = new Map<number, { key: string; answer: unknown; word: WordHooks | null }>();
@@ -151,7 +155,12 @@ export class Player {
 	}
 
 	private emit() {
-		this.v = { ...this.v };
+		const quiz = this.v.quiz;
+		// The grades of this pass, by position: the rows in memory are the quiz's own.
+		const bar = quiz
+			? statusRows(quiz, this.v.quizzes, this.v.card?.pos ?? quiz.cursor, (p) => this.rows.get(this.order[p])?.grade)
+			: null;
+		this.v = { ...this.v, bar };
 		for (const fn of this.listeners) fn(this.v);
 	}
 
@@ -608,7 +617,7 @@ export class Player {
 		const end = this.runEnd(q);
 		let missing = 0;
 		for (let p = start; p < end; p++) if (!this.rows.get(this.order[p])?.grade) missing++;
-		this.v.message = `Some questions in this run still need a connection (${Math.max(missing, 1)}).`;
+		this.v.message = `Some questions in this segment still need a connection (${Math.max(missing, 1)}).`;
 		this.emit();
 	}
 

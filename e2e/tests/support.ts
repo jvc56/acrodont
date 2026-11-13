@@ -283,8 +283,15 @@ export async function press(page: Page, key: string) {
 }
 
 /** The progress on the right rail, `37 / 250`. */
+/**
+ * The card shown and the count, of the quiz being played: the Level row's
+ * position, or the Segment row's while a segment's misses are drilled (the
+ * Level row then stays on the level above, which waits).
+ */
+const played = (page: Page) => page.locator('[data-played-position]');
+
 export async function progress(page: Page): Promise<[number, number]> {
-	const t = await page.getByText(/^\d+ \/ \d+$/).first().textContent();
+	const t = await played(page).first().textContent();
 	const [a, b] = t!.split(' / ').map(Number);
 	return [a, b];
 }
@@ -302,9 +309,9 @@ export async function playLevel(page: Page, miss: (i: number) => boolean): Promi
 		await expect(page.getByText('Synced', { exact: true })).toBeVisible({ timeout: 15_000 }).catch(() => undefined);
 	}
 	const [pos, count] = await progress(page);
-	const banner = page.getByRole('status').filter({ hasText: /^(Level \d|Run \d)/ }).first();
+	const banner = page.getByRole('status').filter({ hasText: /^(Level \d|Segment \d|Drill)/ }).first();
 	for (let i = pos - 1; i < count; i++) {
-		await expect(page.getByText(new RegExp(`^${i + 1} / ${count}$`)).first()).toBeVisible({ timeout: 15_000 });
+		await expect(played(page).filter({ hasText: new RegExp(`^${i + 1} / ${count}$`) }).first()).toBeVisible({ timeout: 15_000 });
 		// The card is ready once it shows unrevealed: the progress can change a
 		// moment before, and a press in that moment is dropped.
 		await expect(page.locator('[data-grade="correct"], [data-grade="missed"]')).toHaveCount(0, { timeout: 15_000 });
@@ -313,7 +320,8 @@ export async function playLevel(page: Page, miss: (i: number) => boolean): Promi
 		if (miss(i - (pos - 1))) await press(page, 'KeyX');
 		await press(page, 'Space');
 		// Either the next card or a banner (the attempt or the run is over).
-		if (i + 1 < count) await expect(banner.or(page.getByText(new RegExp(`^${i + 2} / ${count}$`))).first()).toBeVisible({ timeout: 15_000 });
+		if (i + 1 < count)
+			await expect(banner.or(played(page).filter({ hasText: new RegExp(`^${i + 2} / ${count}$`) })).first()).toBeVisible({ timeout: 15_000 });
 		if (await banner.isVisible()) break;
 	}
 	await expect(banner).toBeVisible({ timeout: 15_000 });
@@ -321,7 +329,7 @@ export async function playLevel(page: Page, miss: (i: number) => boolean): Promi
 	// The level the finish led to renders after the banner: wait for the last
 	// card's progress to go, so the next call reads the new level's.
 	const [now] = await progress(page);
-	await expect(page.getByText(new RegExp(`^${now} / ${count}$`))).toHaveCount(0, { timeout: 5_000 }).catch(() => undefined);
+	await expect(played(page).filter({ hasText: new RegExp(`^${now} / ${count}$`) })).toHaveCount(0, { timeout: 5_000 }).catch(() => undefined);
 	return text;
 }
 

@@ -3,10 +3,9 @@
 // ones between the Source quiz and the deepest few collapse into one row with
 // their count, behind Show more; the Cascades page's compact ladder keeps
 // Level 1 and the deepest level with "+N more" between.
-import { runIndicator, runIndicatorText } from '$lib/cascade/rules';
-import { quizState } from '$lib/local/apply';
 import type { AttemptRow, QuizRow } from '$lib/local/rows';
 import { percent } from './banner';
+import { segmentText } from './segment';
 
 export const COLLAPSE_ABOVE = 12;
 export const DEEPEST_KEPT = 3;
@@ -18,6 +17,7 @@ export interface LevelRow {
 	attempt: number;
 	/** The last finished attempt's score, as a whole percent. */
 	lastScore: number | null;
+	/** `segment 2 of 6`, on a level studied in segments. */
 	run: string | null;
 	current: boolean;
 	waiting: boolean;
@@ -30,14 +30,13 @@ export function levelRows(quizzes: QuizRow[], depth: number, attempts: AttemptRo
 	const active = quizzes.filter((q) => q.status === 'active').sort((a, b) => a.level - b.level);
 	return active.map((q) => {
 		const last = attempts.filter((a) => a.quiz_id === q.id).sort((a, b) => b.attempt - a.attempt)[0];
-		const ri = runIndicator(quizState(q));
 		return {
 			level: q.level,
 			quiz: q,
 			size: q.question_count,
 			attempt: q.attempt,
 			lastScore: last ? percent(last.correct_count, last.question_count) : null,
-			run: ri ? runIndicatorText(ri) : null,
+			run: segmentText(q),
 			current: q.level === depth,
 			waiting: q.level < depth,
 			downloading: !!q.pending

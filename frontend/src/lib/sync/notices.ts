@@ -64,10 +64,10 @@ function levelSentence(op: OutboxEntry, reason: string, ctx: NoticeContext): str
 		case 'not_found':
 			return DELETED;
 		case 'duplicate_segment':
-			return `This run of Level ${n} was finished on another device.`;
+			return `This segment of Level ${n} was finished on another device.`;
 		case 'bad_segment':
 			return ctx.passedRun(op)
-				? `This run of Level ${n} was finished on another device.`
+				? `This segment of Level ${n} was finished on another device.`
 				: `Level ${n}’s segment size or place was changed on another device.`;
 		case 'ungraded':
 			return `Level ${n} has answers the server did not get. Finish it again.`;

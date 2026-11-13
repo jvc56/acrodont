@@ -372,7 +372,9 @@ Moving on from the last question of a run that is not the last run:
   A size change
   mid-attempt therefore renumbers them, which is expected: the 250-question
   quiz above, at `run_start` 100 after switching to S = 30, reads
-  `run 4 of 9 · 1 of 20`.
+  `run 4 of 9 · 1 of 20` (the run indicator the two rule modules agree on;
+  the status bar shows it as its
+  [Segment row](#desktop-layout), `Segment 4 of 9` and `1 / 20`).
 - **Segments never clear a quiz**, never change its attempt number and never
   touch the clear threshold. Only a finish does those.
 
@@ -832,7 +834,7 @@ the [Trash](#trash) below the list. Each cascade shows:
   drill`, nothing when all are at their defaults), and "complete" with the
   date once the Source quiz has been finished with no misses; and a compact
   ladder of its levels, the current one with its progress and that progress
-  as a percentage to two places, e.g. `L1 · 250 (waiting, run 3 of 7) → L2 ·
+  as a percentage to two places, e.g. `L1 · 250 (waiting, segment 3 of 7) → L2 ·
   38 (waiting) → L3 · 9 (4/9 done, 44.44%)`
 - how much [storage](#storage-limit) it holds on the server, e.g. `4.2 MB`,
   the server's figure for it; hovering it shows the split between its
@@ -1008,9 +1010,38 @@ as the term of the data model and the API.
   in this pass in parentheses (with a thin progress line above it), the score
   with the share of graded questions correct in parentheses — green when it is
   at or above the clear threshold, so the pass is on track to clear the level,
-  red when it is below — and the run indicator when the quiz has a
-  [segment size](#segments) (`run 2 of 3 · 37 of 100`, numbered as
-  [Segments](#segments) defines). Percentages show two decimal places, rounded.
+  red when it is below. Percentages show two decimal places, rounded.
+  - **A level studied in [segments](#segments) has a second row, the Segment
+    row,** under that Level row:
+
+    ```
+    Level 2 of 3     Pass 1   9 / 27 (29.63%)   5 ✓ 3 ✗ (62.50%)
+    Segment 2 of 6   Pass 1   4 / 5 (60.00%)    2 ✓ 1 ✗ (66.67%)
+    ```
+
+    It gives the same four figures for the segment the user is in (a
+    **run**, in the rules' word; the interface says *segment* throughout): the
+    segment's number as [Segments](#segments) numbers runs, the card shown out
+    of the segment's questions with the share of them graded, and the grades
+    within the segment with the share correct. The figures of the two rows
+    sit in the same columns, so they read against each other. On a phone each
+    row's name takes a line of its own with its figures in columns under it.
+    The segment's percentage has no colour: a segment has no threshold, and
+    whatever it misses is drilled.
+  - **A drill is its segment's next pass, not a level the bar speaks of.**
+    The drill of a segment's misses is a quiz one level down (see
+    [Segments](#segments)), but to the user it belongs to the segment. While
+    one is played the Level row stays on the segmented level above, which
+    waits at the next segment's first card, and the Segment row shows the
+    drill: the same `Segment 2 of 6`, with `Pass 2` (then 3, 4, … for each
+    further pass of what is still missed), the card shown out of the drill's
+    questions, and the drill's grades. The level list in Settings still lists
+    the drill as the level it is. If the level above stops being studied in
+    segments while a drill is under way, the drill is shown as a level of its
+    own, as any other.
+  - Both rows are worked out on the device, from the question rows and quiz
+    rows it already holds (`lib/player/segment.ts`); nothing is stored for
+    them.
   The clear threshold, which rarely changes, is not on the bar: it is in
   Settings (where it is changed) and in the score's tooltip. An icon at the bar's left end hides it,
   and the same icon brings it back: hidden, the bar keeps its place with only
@@ -1463,9 +1494,13 @@ Moving on from the last card of a **run** that is not the last run does not
 finish anything; it drills that run's misses (see [Segments](#segments)) and
 says so:
 
-- `Run 2 of 3 done, 9 missed. Down to Level 3 to drill them.`
-- `Run 2 of 3 done, nothing missed. On to run 3.`
-- `Level 3 done. Back to Level 2, run 3 of 3.`
+- `Segment 2 of 3 done, 9 missed. Now drilling them.`
+- `Segment 2 of 3 done, nothing missed. On to segment 3.`
+- `Drill done. Back to Level 2, segment 3 of 3.`
+
+A drill's own passes speak of the drill, never of its level, as the status
+bar does: `Drill: 50%. Now drilling its 3 missed questions.` when some are
+still missed, and `Drill: 0%. Reshuffled. Try again.`
 
 All of this works offline.
 
@@ -2919,7 +2954,7 @@ brings the server's.
   finished until the keys arrive, which the ordinary "every question is graded"
   rule already enforces. At the last card of a run, or of the attempt, the
   device therefore emits no `finish_segment` and no `finish`: Show / Next does
-  nothing and the player says "some questions in this run still need a
+  nothing and the player says "some questions in this segment still need a
   connection", with the count, so the user is never left pressing a dead
   control. The ladder marks such a level as still downloading. **Cards record
   which of definitions and hooks they hold.** When a cascade's settings ask
@@ -3599,7 +3634,7 @@ follows the rejected or replay-dropped operation and its reason. For a `finish` 
 another device."; `not_deepest` "Another level was added below Level N on another device.
 Finish it first."; `trashed` "This cascade was moved to the Trash on another
 device."; `not_found` "This cascade was deleted, on another device or by the
-Trash's retention period."; `duplicate_segment` "This run of Level N was
+Trash's retention period."; `duplicate_segment` "This segment of Level N was
 finished on another device.", **and so does a `bad_segment` whose cause was
 that the segment end is not past the cursor**, because that is the same
 situation seen through a different check: a run that missed nothing creates no
@@ -7044,8 +7079,12 @@ through the ordinary endpoints, so there is still no test-only path.
   new quiz take it while a quiz in progress keeps its own. Change a quiz's
   segment size in Settings mid-attempt (saved when Enter is pressed) and see
   the next boundary move. Then set
-  the size to 0 mid-attempt and see the run indicator disappear while Previous
+  the size to 0 mid-attempt and see the Segment row disappear while Previous
   still refuses to go back into the finished run, with the reason shown.
+  Throughout, the status bar's two rows read as [Desktop layout](#desktop-layout)
+  says: the Segment row under the Level row with its own figures, a drill
+  shown as the segment's second pass with the Level row still on the level
+  above, and at phone width each row's name on its own line.
 - **Export:** download the missed words of a level as a word list and the whole
   cascade as a CSV, offline, and check the contents; then ask for definitions
   that were never downloaded, while offline, and see the fallback notice. With

@@ -60,7 +60,7 @@
 <div class="grid gap-3">
 	{#if segmentChain}
 		<p class="text-sm text-muted-foreground">
-			This quiz drills a run's misses: it always uses Drill progression and is never split into
+			This quiz drills a segment's misses: it always uses Drill progression and is never split into
 			segments.
 		</p>
 	{:else}

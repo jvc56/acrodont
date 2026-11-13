@@ -309,8 +309,16 @@ describe('the player', () => {
 		const p = player();
 		await p.load();
 		const banners: string[] = [];
+		// The status bar's rows, as each card is first shown: the level the Level row is on, then the Segment row.
+		const bars: string[] = [];
+		const bar = () => {
+			const b = p.v.bar!;
+			const s = b.segment!;
+			return `L${b.level.level}${b.played ? '' : ' (waiting)'} · segment ${s.segment}/${s.total} pass ${s.pass} · ${s.position}/${s.length} · ${s.correct}✓ ${s.missed}✗`;
+		};
 		for (let step = 0; step < 60 && p.v.status === 'ready'; step++) {
 			const q = p.v.quiz!;
+			if (p.v.bar?.segment) bars.push(bar());
 			await p.showNext();
 			// Miss the first card of each Level 1 run.
 			if (q.level === 1 && p.v.card!.pos % 5 === 0) await p.toggle();
@@ -319,9 +327,24 @@ describe('the player', () => {
 			if (p.v.banner?.startsWith('Level 1:')) break;
 		}
 		expect(banners).toEqual([
-			'Run 1 of 2 done, 1 missed. Down to Level 2 to drill them.',
-			'Level 2 done. Back to Level 1, run 2 of 2.',
+			'Segment 1 of 2 done, 1 missed. Now drilling them.',
+			'Drill done. Back to Level 1, segment 2 of 2.',
 			'Level 1: 80%. Reshuffled, and its 2 missed questions are now Level 2.'
+		]);
+		// The Segment row counts within the segment; the drill of its one miss is the segment's
+		// second pass, with the Level row still on Level 1, which waits at the next segment.
+		expect(bars).toEqual([
+			'L1 · segment 1/2 pass 1 · 1/5 · 0✓ 0✗',
+			'L1 · segment 1/2 pass 1 · 2/5 · 0✓ 1✗',
+			'L1 · segment 1/2 pass 1 · 3/5 · 1✓ 1✗',
+			'L1 · segment 1/2 pass 1 · 4/5 · 2✓ 1✗',
+			'L1 · segment 1/2 pass 1 · 5/5 · 3✓ 1✗',
+			'L1 (waiting) · segment 1/2 pass 2 · 1/1 · 0✓ 0✗',
+			'L1 · segment 2/2 pass 1 · 1/5 · 0✓ 0✗',
+			'L1 · segment 2/2 pass 1 · 2/5 · 0✓ 1✗',
+			'L1 · segment 2/2 pass 1 · 3/5 · 1✓ 1✗',
+			'L1 · segment 2/2 pass 1 · 4/5 · 2✓ 1✗',
+			'L1 · segment 2/2 pass 1 · 5/5 · 3✓ 1✗'
 		]);
 	});
 
@@ -344,7 +367,7 @@ describe('the player', () => {
 			}
 		}
 		expect(await ops()).not.toContain('finish');
-		expect(p.v.message).toMatch(/^Some questions in this run still need a connection \(1\)\.$/);
+		expect(p.v.message).toMatch(/^Some questions in this segment still need a connection \(1\)\.$/);
 	});
 
 	it('a typed card whose answer is gone falls back to flashcard mode: Correct to start, Toggle decides, with the reveal saying so', async () => {

@@ -38,8 +38,8 @@ export const INFO = {
 		'The score a pass needs to clear a level of this cascade. A change applies at once, to every level, including the pass you are in.',
 	// Quiz options
 	segmented:
-		'Studies a level a run at a time. After each run, the cards you missed are drilled before the next run starts: a segment of 40 means you study 40 at a time and drill what you missed before going on.',
-	segment_size: 'How many cards each run holds.',
+		'Studies a level a segment at a time. After each segment, the cards you missed are drilled before the next segment starts: a segment size of 40 means you study 40 at a time and drill what you missed before going on.',
+	segment_size: 'How many cards each segment holds.',
 	progression:
 		'What a pass below the clear threshold does. Ladder: keep the quiz and go down a level with the misses; come back up to clear it. Drill: replace the quiz with its misses and keep going until nothing is missed.',
 	alphabetical: 'In typed mode, each anagram must be entered after the ones before it in alphabetical order. One typed out of order marks the card missed at once.',
