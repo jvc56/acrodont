@@ -165,7 +165,10 @@ When the user finishes an attempt of the Source quiz:
   so a Drill cascade is the Source quiz plus a drill chain at Level 2.
 - A cascade can be completed more than once; each finish with no misses
   records a new `completed_at`. The Cascades page marks complete cascades, and
-  the completion screen offers **Start over** and **Move to Trash**.
+  the completion screen offers **Start over** and **Move to Trash**. While it
+  is in front, the reset Source quiz under it takes no action: a key bound to
+  Show / Next neither shows nor grades its cards, and Space or Enter presses
+  the screen's focused button.
 - **What the completion screen counts.** *Levels* is the deepest level the
   cascade reached since the previous completion (`cascades.peak_depth`, reset
   to 1 at each completion), and *attempts* is the number of attempts finished
@@ -1156,7 +1159,9 @@ Every quiz is driven by three actions, whatever the device:
   device, since how much a button bounces belongs to the hardware.
   Settings saved before the default changed with the old default, 50, read as
   0. The wheel's own 150 ms guard against one flick firing many
-  steps is separate.
+  steps is separate. A key held down is one press whatever the guard: the
+  keyboard's own repeats are ignored, since they would show and grade cards
+  nobody saw.
 - **Instant at any size.** Show / Next and Previous never wait for IndexedDB,
   however large the quiz and however slow the browser's storage (Firefox
   commits each read-write transaction more carefully than Chromium):

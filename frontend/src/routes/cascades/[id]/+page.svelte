@@ -57,7 +57,9 @@
 	import { clampPrefill, type QuizOptions } from '$lib/options';
 	import { confirmAction, confirmState } from '$lib/confirm.svelte';
 
-	const id = $derived(page.params.id as string);
+	// The cascade this player was made for. The layout beside this page makes a
+	// new page for another id, so it never changes under the player.
+	const id = page.params.id as string;
 
 	let db = $state<UserDb | null>(null);
 	let player = $state<Player | null>(null);
@@ -167,16 +169,22 @@
 			const d = await userDb(session.userId, session.username);
 			if (cancelled) return;
 			db = d;
-			maxQuiz = (await getMeta(d, 'server')).max_quiz_questions;
+			const max = (await getMeta(d, 'server')).max_quiz_questions;
+			if (cancelled) return;
+			maxQuiz = max;
 			await display.load(d);
 			await controls.load(d);
+			if (cancelled) return;
 			// Navigating to the player is an open (§ Downloads).
 			const tx = d.transaction(['meta'], 'readwrite');
 			await recordOpen(tx as unknown as RwTx, id, new Date().toISOString());
 			await tx.done;
+			// The page was left while those ran: no lock, no open cascade, no player.
+			if (cancelled) return;
 			// Each player tab holds a Web Lock named for its cascade, so no drop pass takes it.
+			// A lock granted after the page is left is given straight back.
 			if (navigator.locks) {
-				void navigator.locks.request(PLAYER_LOCK + id, () => new Promise<void>((r) => (release = r)));
+				void navigator.locks.request(PLAYER_LOCK + id, () => (cancelled ? undefined : new Promise<void>((r) => (release = r))));
 			}
 			syncState.openCascade = id;
 			const p = new Player(d, id, {
@@ -227,7 +235,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	 * its writes are saved (PLAN.md § Taking a quiz → Instant at any size).
 	 */
 	function act(a: Action) {
-		if (!player || !actions.pass(a, performance.now())) return;
+		// The completion screen is in front: the new pass under it takes no action.
+		if (!player || v?.completion || !actions.pass(a, performance.now())) return;
 		const card = v?.card;
 		// Before the reveal, Show / Next on a typed card focuses the input instead of giving up.
 		if (a === 'show_next' && card?.typed && !card.revealed && !typedFocused) {
@@ -264,7 +273,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 			if (e.key === 'Escape') settingsOpen = false;
 			return;
 		}
-		if (!v || v.status !== 'ready') return;
+		// The completion screen keeps its keys: Space or Enter presses its focused button.
+		if (!v || v.status !== 'ready' || v.completion) return;
 		const t = e.target as HTMLElement | null;
 		const inTyped = t === typedInput;
 		// Text fields outside the quiz area keep their keys.
@@ -273,6 +283,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		const a = actionFor(controls.value, keyStroke(e));
 		if (!a) return;
 		e.preventDefault();
+		// A key held down is one press: its repeats would show and grade cards unseen.
+		if (e.repeat) return;
 		void act(a);
 	}
 
