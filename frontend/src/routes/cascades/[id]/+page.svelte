@@ -28,8 +28,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { display, textStyle } from '$lib/player/display.svelte';
 	import { controls } from '$lib/player/controls.svelte';
-	import { runIndicator, runIndicatorText } from '$lib/cascade/rules';
-	import { applyLocally, quizState, type NewOp } from '$lib/local/apply';
+	import { applyLocally, type NewOp } from '$lib/local/apply';
 	import { storeCreated, type Created } from '$lib/local/created';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta, recordOpen } from '$lib/local/meta';
@@ -84,11 +83,12 @@
 	const wheel = new Debounce(150);
 
 	let rows = $derived<LevelRow[]>(v?.cascade ? levelRows(v.quizzes, v.cascade.depth, attempts) : []);
-	let run = $derived.by(() => {
-		if (!v?.quiz) return null;
-		const ri = runIndicator(quizState(v.quiz));
-		return ri ? runIndicatorText(ri) : null;
-	});
+	/** The quiz the status bar's Level row describes: the one played, or the segmented level whose segment it drills. */
+	let levelQuiz = $derived(v?.bar?.level ?? v?.quiz ?? null);
+	/** The Segment row, on a level studied in segments (PLAN.md § Desktop layout). */
+	let segment = $derived(v?.bar?.segment ?? null);
+	/** The position the Level row shows: the card shown, or the waiting level's cursor while its segment is drilled. */
+	let levelPos = $derived(!levelQuiz ? 0 : v?.bar && !v.bar.played ? levelQuiz.cursor : (v?.card?.pos ?? levelQuiz.cursor));
 	let dsp = $derived(display.value);
 /** Typed mode's "3 of 9 found", when the cascade's setting asks for it and the card is still being typed. */
 	let foundCount = $derived.by(() => {
@@ -97,14 +97,17 @@
 		return `${card.typed.found.length} of ${player.words(card).length} found`;
 	});
 	/** How far through the pass the current card is, for the status bar's line. */
-	let progress = $derived(v?.quiz ? (((v.card?.pos ?? v.quiz.cursor) + 1) / Math.max(1, v.quiz.question_count)) * 100 : 0);
+	let progress = $derived(levelQuiz ? ((levelPos + 1) / Math.max(1, levelQuiz.question_count)) * 100 : 0);
 	/** Of the level's questions, the share graded in this pass; of those, the share correct. */
-	let gradedPct = $derived(v?.quiz ? ((v.quiz.correct_count + v.quiz.missed_count) / Math.max(1, v.quiz.question_count)) * 100 : 0);
+	let gradedPct = $derived(levelQuiz ? ((levelQuiz.correct_count + levelQuiz.missed_count) / Math.max(1, levelQuiz.question_count)) * 100 : 0);
 	let correctPct = $derived(
-		v?.quiz && v.quiz.correct_count + v.quiz.missed_count > 0
-			? (v.quiz.correct_count / (v.quiz.correct_count + v.quiz.missed_count)) * 100
+		levelQuiz && levelQuiz.correct_count + levelQuiz.missed_count > 0
+			? (levelQuiz.correct_count / (levelQuiz.correct_count + levelQuiz.missed_count)) * 100
 			: null
 	);
+	/** The same two shares within the segment, or its drill. */
+	let segmentGradedPct = $derived(segment ? ((segment.correct + segment.missed) / Math.max(1, segment.length)) * 100 : 0);
+	let segmentCorrectPct = $derived(segment && segment.correct + segment.missed > 0 ? (segment.correct / (segment.correct + segment.missed)) * 100 : null);
 	/** A percentage to two decimal places, rounded. */
 	const pct = (p: number) => `${p.toFixed(2)}%`;
 	/** Whether the share correct so far would clear the level: green on track, red not; nothing before a grade. */
@@ -418,7 +421,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		copied = null;
 		copyFrom = '';
 		if (db) {
-			// Start over makes a new cascade, which needs room; the server checks the exact figure.
+			// Duplicate makes a new cascade, which needs room; the server checks the exact figure.
 			const server = await getMeta(db, 'server');
 			atLimit = (server.storage_bytes ?? 0) >= (server.max_storage_bytes ?? DEFAULT_STORAGE_LIMIT);
 			sources = c ? await copySources(db, c) : [];
@@ -535,12 +538,13 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 
 	let starting = $state<{ stage: 'server' | 'device'; progress: number; count: number | null } | null>(null);
 
-	async function startOver() {
+	/** Settings → Duplicate cascade: a new cascade from the same filters and settings, at Level 1. */
+	async function duplicate() {
 		if (!db || !session.userId) return;
 		const ok = await confirmAction({
-			title: `Start “${v?.cascade?.name ?? 'this cascade'}” over?`,
-			body: `This makes a new cascade of the same words, with the same threshold and options, starting at Level 1. This cascade isn’t changed. You’ll have both, and each counts toward your storage until it is deleted from the Trash.`,
-			action: 'Start over'
+			title: `Duplicate “${v?.cascade?.name ?? 'this cascade'}”?`,
+			body: `This makes a new cascade from the same filters, with the same threshold and options, starting at Level 1. It takes this cascade’s name with the next free number after it. This cascade isn’t changed. You’ll have both, and each counts toward your storage until it is deleted from the Trash.`,
+			action: 'Duplicate'
 		});
 		if (!ok) return;
 		const { device_id } = await getMeta(db, 'device');
@@ -548,7 +552,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		starting = { stage: 'server', progress: 0, count: null };
 		cascadeError = null;
 		try {
-			const created = await api.post<Created>(`/api/cascades/${id}/start-over`, body);
+			const created = await api.post<Created>(`/api/cascades/${id}/duplicate`, body);
 			starting = { stage: 'device', progress: 0, count: Number(created.source_quiz.question_count) };
 			await storeCreated(db, created, new Date(), (f) => starting && (starting.progress = f));
 			settingsOpen = false;
@@ -556,14 +560,15 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		} catch (e) {
 			if (e instanceof ApiError && e.code === 'storage_limit') {
 				const b = e.body as { used: number; limit: number; needed: number };
-				cascadeError = `Starting over needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your storage is free. Empty the Trash or delete cascades to make room.`;
-			} else cascadeError = 'Start over needs a connection.';
+				cascadeError = `Duplicating needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your storage is free. Empty the Trash or delete cascades to make room.`;
+			} else cascadeError = 'Duplicating a cascade needs a connection.';
 		} finally {
 			starting = null;
 		}
 	}
 
-	function keepStudying() {
+	/** The completion screen's Start over: another pass of this cascade, whose Source quiz the finish has reset. */
+	function startOver() {
 		player?.dismissCompletion();
 	}
 </script>
@@ -777,21 +782,49 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 				>
 			{/if}
 			<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 leading-7 max-sm:gap-x-3">
-				{#if !dsp.status_bar_hidden && v?.quiz && v.cascade}
-					<p class="font-medium">Level {v.quiz.level} of {v.cascade.depth}</p>
-					<p class="text-muted-foreground">Pass {v.quiz.attempt}</p>
-					<p title="The card shown, and the share of the level graded in this pass">
-						<!-- The count in its own element, apart from its percentage: it is read on its own. -->
-						<span>{(v.card?.pos ?? v.quiz.cursor) + 1} / {v.quiz.question_count}</span>
-						<span class="text-muted-foreground">({pct(gradedPct)})</span>
-					</p>
-					<p title={`Correct and missed in this pass, and the share correct: the level clears at ${v.cascade.clear_threshold}%`}>
-						<span>{v.quiz.correct_count} ✓ {v.quiz.missed_count} ✗</span>
-						{#if correctPct !== null}
-							<span class:text-green-600={onTrack} class:text-red-600={onTrack === false} data-on-track={onTrack}>({pct(correctPct)})</span>
-						{/if}
-					</p>
-					{#if run}<p class="text-muted-foreground">{run}</p>{/if}
+				{#if !dsp.status_bar_hidden && v?.quiz && v.cascade && levelQuiz}
+					{#snippet levelRow(cell: string)}
+						<p class="font-medium {cell}" data-status-row="level">Level {levelQuiz.level} of {v!.cascade!.depth}</p>
+						<p class="text-muted-foreground {cell ? 'whitespace-nowrap' : ''}">Pass {levelQuiz.attempt}</p>
+						<p class={cell ? 'whitespace-nowrap' : ''} title="The card shown, and the share of the level graded in this pass">
+							<!-- The count in its own element, apart from its percentage: it is read on its own. -->
+							<!-- data-played-position marks the position of the quiz being played: this one, or the Segment row's during a drill. -->
+							<span data-played-position={v?.bar?.played === false ? undefined : ''}>{levelPos + 1} / {levelQuiz.question_count}</span>
+							<span class="text-muted-foreground">({pct(gradedPct)})</span>
+						</p>
+						<p
+							class={cell ? 'whitespace-nowrap' : ''}
+							title={`Correct and missed in this pass, and the share correct: the level clears at ${v!.cascade!.clear_threshold}%`}
+						>
+							<span>{levelQuiz.correct_count} ✓ {levelQuiz.missed_count} ✗</span>
+							{#if correctPct !== null}
+								<span class:text-green-600={onTrack} class:text-red-600={onTrack === false} data-on-track={onTrack}>({pct(correctPct)})</span>
+							{/if}
+						</p>
+					{/snippet}
+					{#if segment}
+						<!-- A level studied in segments: the Segment row under the Level row, its figures in
+						     the same columns so the two read against each other. On a phone each row's name
+						     takes a line of its own and the figures stay in columns under it. A drill of the
+						     segment's misses is the segment's next pass: the Level row stays on the level. -->
+						<div class="grid grid-cols-[auto_auto_auto] justify-start gap-x-3 tabular-nums sm:grid-cols-[auto_auto_auto_auto] sm:gap-x-5" data-status-rows>
+							{@render levelRow('max-sm:col-span-full whitespace-nowrap')}
+							<p class="font-medium whitespace-nowrap max-sm:col-span-full" data-status-row="segment">Segment {segment.segment} of {segment.total}</p>
+							<p class="whitespace-nowrap text-muted-foreground" title="1 is the segment itself; each drill of its misses is the next pass">
+								Pass {segment.pass}
+							</p>
+							<p class="whitespace-nowrap" title="The card shown, and the share of the segment graded in this pass">
+								<span data-played-position={v?.bar?.played === false ? '' : undefined}>{segment.position} / {segment.length}</span>
+								<span class="text-muted-foreground">({pct(segmentGradedPct)})</span>
+							</p>
+							<p class="whitespace-nowrap" title="Correct and missed in this segment, and the share correct: what is missed is drilled before the next segment">
+								<span>{segment.correct} ✓ {segment.missed} ✗</span>
+								{#if segmentCorrectPct !== null}<span class="text-muted-foreground">({pct(segmentCorrectPct)})</span>{/if}
+							</p>
+						</div>
+					{:else}
+						{@render levelRow('')}
+					{/if}
 					{#if foundCount}<p>{foundCount}</p>{/if}
 				{/if}
 				<div class="ml-auto"><SyncStatus quiet={dsp.status_bar_hidden || dsp.sync_status_hidden} /></div>
@@ -1121,8 +1154,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 							<Button
 								variant="outline"
 								disabled={atLimit}
-								title={atLimit ? 'Start over: your storage is full' : 'A new cascade of the same questions, from Level 1'}
-								onclick={startOver}>Start over</Button
+								title={atLimit ? 'Duplicate cascade: your storage is full' : 'A new cascade from the same filters and settings, at Level 1'}
+								onclick={duplicate}>Duplicate cascade</Button
 							>
 							<Button variant="outline" class="hover:text-destructive" onclick={moveToTrash}>Move to Trash</Button>
 						</div>
@@ -1145,8 +1178,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 			<h2 class="text-xl font-semibold">Cascade complete</h2>
 			<p>After {v.completion.levels} levels and {v.completion.attempts} {v.completion.attempts === 1 ? 'pass' : 'passes'}.</p>
 			<div class="flex flex-col gap-2">
-				<Button onclick={keepStudying}>Keep studying</Button>
-				<Button variant="outline" onclick={startOver}>Start over</Button>
+				<Button onclick={startOver}>Start over</Button>
 				<Button variant="outline" onclick={moveToTrash}>Move to Trash</Button>
 			</div>
 		</div>
@@ -1154,5 +1186,5 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 {/if}
 
 {#if starting}
-	<CreatingCascade title="Starting over" stage={starting.stage} progress={starting.progress} count={starting.count} />
+	<CreatingCascade title="Duplicating" stage={starting.stage} progress={starting.progress} count={starting.count} />
 {/if}

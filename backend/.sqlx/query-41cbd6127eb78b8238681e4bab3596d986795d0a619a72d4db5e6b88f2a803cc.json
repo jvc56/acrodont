@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE lexicons SET definitions_revision = definitions_revision + 1\n         WHERE id = $1 AND definitions_revision = $2 RETURNING definitions_revision",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "definitions_revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "lexicons",
+            "name": "definitions_revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "41cbd6127eb78b8238681e4bab3596d986795d0a619a72d4db5e6b88f2a803cc"
+}

@@ -88,6 +88,67 @@ test('admin uploads, a broken file, a Leave Value cascade from the new set, dele
 	await page.goto(leaves);
 	await expect(page.getByText(/^1 \/ \d+$/)).toBeVisible({ timeout: 60_000 });
 
+	// The lexicon's definitions replaced: the same words and playabilities with one definition
+	// corrected (PLAN.md § Immutability and deletion → Replacing definitions). The overview then
+	// shows the revision. Tried again while the upload limit says to wait, as above.
+	await expect(async () => {
+		await upload(
+			page,
+			'/admin/lexicons/definitions',
+			async () => {
+				await page.getByLabel('Lexicon').selectOption({ label: lex });
+			},
+			'corrected.tsv',
+			bigLexicon().replace('a made-up word [n]', 'a corrected word [n]')
+		);
+		await expect(page.getByText('1 of 11,000 definitions changed. This is revision 2 of its definitions.')).toBeVisible({ timeout: 60_000 });
+	}).toPass({ timeout: 240_000, intervals: [15_000] });
+	await page.goto('/admin');
+	await expect(page.getByRole('row').filter({ hasText: lex }).first().getByText('revision 2')).toBeVisible({ timeout: 30_000 });
+
+	// And the leave values replaced the same way: the same leaves, one value changed.
+	await expect(async () => {
+		await upload(
+			page,
+			'/admin/leave-sets/values',
+			async () => {
+				await page.getByLabel('Lexicon').selectOption({ label: lex });
+			},
+			'new-values.csv',
+			readFileSync(path.join(fixtures, 'EN-FIX-leaves.csv'), 'utf8').replace('?S,32.400', '?S,12.5')
+		);
+		await expect(page.getByText('1 of 35 values changed. This is revision 2 of its leave values.')).toBeVisible({ timeout: 60_000 });
+	}).toPass({ timeout: 240_000, intervals: [15_000] });
+	// The Leave Value cascade made above keeps its questions and shows the new value, with no reload of the app:
+	// its cards are fetched again once this device has pulled the row at the new revision.
+	await page.goto(leaves);
+	await expect
+		.poll(
+			() =>
+				page.evaluate(async () => {
+					const open = (name: string) =>
+						new Promise<IDBDatabase>((res, rej) => {
+							const r = indexedDB.open(name);
+							r.onsuccess = () => res(r.result);
+							r.onerror = () => rej(r.error);
+						});
+					const all = <T>(db: IDBDatabase, store: string) =>
+						new Promise<T[]>((res) => {
+							const r = db.transaction(store).objectStore(store).getAll();
+							r.onsuccess = () => res(r.result as T[]);
+						});
+					const pointer = (await all<{ user_id: string }>(await open('acrodont'), 'pointer'))[0];
+					const db = await open(`acrodont-user-${pointer.user_id}`);
+					const keys = await all<{ cascade_id: string; idx: number; key: string }>(db, 'questions');
+					const cards = await all<{ cascade_id: string; idx: number; answer: number; rev?: number }>(db, 'cards');
+					const q = keys.find((k) => k.key === '?S');
+					const card = q && cards.find((c) => c.cascade_id === q.cascade_id && c.idx === q.idx);
+					return card ? [card.answer, card.rev] : null;
+				}),
+			{ timeout: 90_000 }
+		)
+		.toEqual([12.5, 2]);
+
 	// Deletion refused while the cascade exists: the button is disabled and says what uses it
 	// (PLAN.md § Catalog: "the admin page disables the delete button and explains what is still using the item").
 	await page.goto('/admin');

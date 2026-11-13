@@ -685,7 +685,7 @@ async fn an_options_change_right_after_creation_from_a_slow_clock(pool: sqlx::Pg
     let r = d
         .client
         .post("/api/cascades", json!({
-            "id": id, "source_quiz_id": Uuid::new_v4(), "device_id": d.id, "at": at, "name": "A cascade",
+            "id": id, "source_quiz_id": Uuid::new_v4(), "device_id": d.id, "at": at, "name": format!("A cascade {}", Uuid::new_v4().simple()),
             "lexicon": "EN-FIX", "quiz_type": "anagram", "clear_threshold": 80, "segment_size": 0,
             "progression": "ladder", "require_alphabetical": false, "answer_mode": "flashcard",
             "filters": { "op": "and", "children": [{ "type": "length", "negated": false, "min": 7, "max": 7 }] },

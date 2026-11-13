@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE leave_values SET leaves = $2 WHERE leave_set_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8db203a994b82596f23ede55f67e224376988de362c1ed7c0870e0aca4f0d606"
+}

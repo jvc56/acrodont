@@ -238,7 +238,7 @@ pub async fn reconcile(state: &AppState) -> anyhow::Result<()> {
 
     // Drop what the database no longer has, leaving its status rows at once.
     for &id in snap.leave_sets.keys() {
-        if !items.leave_sets.iter().any(|&(s, _)| s == id) {
+        if !items.leave_sets.iter().any(|&(s, _, _)| s == id) {
             state.catalog.update(|s| {
                 s.leave_sets.remove(&id);
             });
@@ -246,7 +246,7 @@ pub async fn reconcile(state: &AppState) -> anyhow::Result<()> {
         }
     }
     for &id in snap.lexicons.keys() {
-        if !items.lexicons.iter().any(|&(l, _)| l == id) {
+        if !items.lexicons.iter().any(|&(l, _, _)| l == id) {
             state.catalog.update(|s| {
                 s.lexicons.remove(&id);
             });
@@ -275,8 +275,10 @@ pub async fn reconcile(state: &AppState) -> anyhow::Result<()> {
         });
         write_status(state, ItemKind::LetterDistribution, i32::from(id)).await?;
     }
-    for &(id, dist_id) in &items.lexicons {
-        if state.catalog.snapshot().lexicons.contains_key(&id) {
+    for &(id, dist_id, revision) in &items.lexicons {
+        // Built once, and again when its definitions have been replaced: the
+        // index in use serves until the new one takes its place.
+        if state.catalog.snapshot().lexicons.get(&id).is_some_and(|l| l.definitions_revision >= revision) {
             continue;
         }
         let Some(dist) = state
@@ -288,28 +290,37 @@ pub async fn reconcile(state: &AppState) -> anyhow::Result<()> {
         else {
             continue;
         };
-        let Some((name, raw)) = store::load_lexicon(&state.db, id, &dist).await? else {
+        let Some((name, read_at, raw)) = store::load_lexicon(&state.db, id, &dist).await? else {
             continue;
         };
-        let index =
-            tokio::task::spawn_blocking(move || LexiconIndex::build(id, &name, dist, raw)).await?;
+        let index = tokio::task::spawn_blocking(move || {
+            let mut index = LexiconIndex::build(id, &name, dist, raw);
+            index.definitions_revision = read_at;
+            index
+        })
+        .await?;
         state.catalog.update(|s| {
             s.lexicons.insert(id, Arc::new(index));
         });
         write_status(state, ItemKind::Lexicon, i32::from(id)).await?;
     }
-    for &(id, lexicon_id) in &items.leave_sets {
-        if state.catalog.snapshot().leave_sets.contains_key(&id) {
+    for &(id, lexicon_id, revision) in &items.leave_sets {
+        // Built once, and again when its values have been replaced.
+        if state.catalog.snapshot().leave_sets.get(&id).is_some_and(|s| s.values_revision >= revision) {
             continue;
         }
         let Some(lexicon) = state.catalog.snapshot().lexicons.get(&lexicon_id).cloned() else {
             continue;
         };
-        let Some(raw) = store::load_leaves(&state.db, id, &lexicon.distribution).await? else {
+        let Some((read_at, raw)) = store::load_leaves(&state.db, id, &lexicon.distribution).await? else {
             continue;
         };
-        let index =
-            tokio::task::spawn_blocking(move || LeaveSetIndex::build(id, &lexicon, raw)).await?;
+        let index = tokio::task::spawn_blocking(move || {
+            let mut index = LeaveSetIndex::build(id, &lexicon, raw);
+            index.values_revision = read_at;
+            index
+        })
+        .await?;
         state.catalog.update(|s| {
             s.leave_sets.insert(id, Arc::new(index));
         });

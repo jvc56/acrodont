@@ -147,7 +147,9 @@ DNS and the GitHub repository.
 
     Upload the licensed catalog at `/admin` from your own files:
     distributions, then lexicons, then leave values. They are stored only as
-    rows. Then compare the in-memory index sizes `/admin` shows (hover a
+    rows. Later corrections need no new lexicon: **Replace definitions** and
+    **Replace values** on `/admin` take the same file with new definitions,
+    or new leave values, and every cascade then shows them. Then compare the in-memory index sizes `/admin` shows (hover a
     lexicon's or leave value set's Storage) with `task_memory` (2 GiB by
     default). The `acrodont-backend-memory-high` alarm watches this from now
     on.

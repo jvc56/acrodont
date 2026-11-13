@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT s.id, l.name AS lexicon, s.leave_count, s.uploaded_at, u.username::text AS \"uploaded_by?\",\n                  (SELECT count(*) FROM cascades c WHERE c.leave_set_id = s.id) AS \"cascade_count!\"\n           FROM leave_sets s JOIN lexicons l ON l.id = s.lexicon_id\n           LEFT JOIN users u ON u.id = s.uploaded_by ORDER BY l.name",
+  "query": "SELECT s.id, l.name AS lexicon, s.leave_count, s.values_revision, s.uploaded_at, u.username::text AS \"uploaded_by?\",\n                  (SELECT count(*) FROM cascades c WHERE c.leave_set_id = s.id) AS \"cascade_count!\"\n           FROM leave_sets s JOIN lexicons l ON l.id = s.lexicon_id\n           LEFT JOIN users u ON u.id = s.uploaded_by ORDER BY l.name",
   "describe": {
     "columns": [
       {
@@ -38,6 +38,17 @@
       },
       {
         "ordinal": 3,
+        "name": "values_revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "leave_sets",
+            "name": "values_revision"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "uploaded_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -48,13 +59,13 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "uploaded_by?",
         "type_info": "Text",
         "origin": "Expression"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "cascade_count!",
         "type_info": "Int8",
         "origin": "Expression"
@@ -68,9 +79,10 @@
       false,
       false,
       false,
+      false,
       null,
       null
     ]
   },
-  "hash": "2af6798445346dc8552fae201ffea51fbaa802eb1354c564623addb63f8874dc"
+  "hash": "9329af2daf38b7fa5042955cfb50059f3998966fdb1ffcbd8a8ab88186fe51d1"
 }

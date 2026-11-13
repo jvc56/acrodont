@@ -1,4 +1,4 @@
-// Create Cascade, Start over and Save Search… retry a 5xx, a 429 (after
+// Create Cascade, Duplicate and Save Search… retry a 5xx, a 429 (after
 // Retry-After) or a lost connection with the same body, which their
 // device-minted ids make safe; the button reads "the server is busy" meanwhile
 // (PLAN.md § Creating a cascade, § Authentication → Security generally).

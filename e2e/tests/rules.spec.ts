@@ -17,7 +17,7 @@ test('every cascade rule, from a new account', async ({ page }) => {
 	// Level 1 with no misses: the completion screen.
 	expect(await playLevel(page, () => false)).toBe('Level 1: 100%. Cascade complete after 2 levels and 4 passes.');
 	await expect(page.getByRole('dialog', { name: 'Cascade complete' })).toBeVisible();
-	await page.getByRole('button', { name: 'Keep studying' }).click();
+	await page.getByRole('button', { name: 'Start over' }).click();
 	await expect(page.getByText('Level 1 of 1')).toBeVisible();
 	await expect(page.getByText('1 / 18')).toBeVisible();
 	await expect(page.getByRole('paragraph').filter({ hasText: /^Pass 3$/ })).toBeVisible();

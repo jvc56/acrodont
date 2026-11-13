@@ -73,6 +73,11 @@ pub struct CascadeRow {
     pub quiz_type: QuizType,
     pub lexicon: String,
     pub letter_distribution: String,
+    /// The lexicon's definitions revision: a device fetches again the answers
+    /// it holds from an older one.
+    pub definitions_revision: i32,
+    /// A Leave Value cascade's: its leave values' revision, likewise.
+    pub leave_values_revision: Option<i32>,
     pub clear_threshold: i16,
     pub segment_size: i32,
     pub progression: Progression,
@@ -153,6 +158,7 @@ pub struct QuizRow {
 
 pub const CASCADE_SELECT: &str = r#"
     SELECT c.id, c.name, c.quiz_type, l.name AS lexicon, d.name AS letter_distribution,
+           l.definitions_revision, ls.values_revision AS leave_values_revision,
            c.clear_threshold, c.segment_size, c.progression, c.require_alphabetical, c.answer_mode,
            c.show_definitions, c.show_hooks, c.reveal_correct, c.show_found_count, c.show_probability, c.definition_column,
            c.leave_value_decimals,
@@ -161,7 +167,8 @@ pub const CASCADE_SELECT: &str = r#"
            c.completed_at, c.trashed_at, c.storage_bytes, c.updated_seq
     FROM cascades c
     JOIN lexicons l ON l.id = c.lexicon_id
-    JOIN letter_distributions d ON d.id = l.letter_distribution_id"#;
+    JOIN letter_distributions d ON d.id = l.letter_distribution_id
+    LEFT JOIN leave_sets ls ON ls.id = c.leave_set_id"#;
 
 pub const QUIZ_SELECT: &str = r#"
     SELECT q.id, q.cascade_id, q.level, q.origin, q.origin_quiz_id, q.origin_attempt,

@@ -27,6 +27,14 @@ export function percent(correct: number, count: number): number {
 export function finishBanner(f: FinishFacts): string {
 	const p = percent(f.correct, f.count);
 	const n = f.level;
+	// A drill of a segment's misses is part of its segment, not a level the user is told of
+	// (the status bar keeps to the segmented level above it): its banners say "Drill".
+	if (f.segmentChain) {
+		if (f.outcome === 'reshuffled') return 'Drill: 0%. Reshuffled. Try again.';
+		if (f.outcome === 'replaced' || (f.outcome === 'cleared' && f.misses > 0))
+			return `Drill: ${p}%. Now drilling its ${f.misses} missed ${f.misses === 1 ? 'question' : 'questions'}.`;
+		if (f.outcome === 'cleared' && f.back) return `Drill done. Back to Level ${f.back.level}, segment ${f.back.run} of ${f.back.runs}.`;
+	}
 	switch (f.outcome) {
 		case 'completed':
 			return `Level 1: 100%. Cascade complete after ${f.completion!.levels} levels and ${f.completion!.attempts} ${f.completion!.attempts === 1 ? 'pass' : 'passes'}.`;
@@ -39,7 +47,6 @@ export function finishBanner(f: FinishFacts): string {
 			return `Level ${n}: ${p}%. Replaced with its ${f.misses} missed questions.`;
 		case 'cleared':
 			if (f.misses > 0) return `Level ${n} cleared with ${p}%. Its ${f.misses} missed questions are now Level ${n}.`;
-			if (f.segmentChain && f.back) return `Level ${n} done. Back to Level ${f.back.level}, run ${f.back.run} of ${f.back.runs}.`;
 			return `Level ${n} cleared with 100%. Back to Level ${n - 1}.`;
 		default:
 			return '';
@@ -47,6 +54,6 @@ export function finishBanner(f: FinishFacts): string {
 }
 
 export function runBanner(o: { outcome: string; run: number; runs: number; misses: number; level: number }): string {
-	if (o.outcome === 'drilled') return `Run ${o.run} of ${o.runs} done, ${o.misses} missed. Down to Level ${o.level + 1} to drill them.`;
-	return `Run ${o.run} of ${o.runs} done, nothing missed. On to run ${o.run + 1}.`;
+	if (o.outcome === 'drilled') return `Segment ${o.run} of ${o.runs} done, ${o.misses} missed. Now drilling them.`;
+	return `Segment ${o.run} of ${o.runs} done, nothing missed. On to segment ${o.run + 1}.`;
 }

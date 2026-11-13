@@ -7,6 +7,7 @@ node_modules/
 /e2e/playwright-report/
 /.stack/
 /fixtures/licensed/
+/catalog/
 *.pyc
 __pycache__/
 /infra/.terraform/
@@ -25,3 +26,4 @@ __pycache__/
 
 # Personal notes, kept out of the repo
 todo.txt
+LAUNCH_PLAN.md

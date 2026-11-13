@@ -115,7 +115,7 @@ export const api = {
 
 /**
  * Retries a request after 429 or 5xx, waiting out Retry-After, with the same
- * body. For Create Cascade, Start over and Save Search…, whose device-minted
+ * body. For Create Cascade, Duplicate and Save Search…, whose device-minted
  * ids make a retry safe (PLAN.md § Authentication → Security generally).
  */
 export async function withRetry<T>(

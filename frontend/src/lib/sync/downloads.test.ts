@@ -11,7 +11,7 @@ import { openUserDb, type UserDb } from '$lib/local/db';
 import { getMeta, initMeta, recordOpen, writeMeta } from '$lib/local/meta';
 import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
-import { DownloadManager, ROW_BYTES, type DownloadApi, wantsDefinitions, wantsHooks } from './downloads';
+import { DownloadManager, ROW_BYTES, type DownloadApi, answerRevision, holdsDefinitions, wantsDefinitions, wantsHooks } from './downloads';
 import { SyncEngine } from './engine';
 import { policy } from './policy';
 import { FakeServer } from './testing/fake-server';
@@ -505,6 +505,41 @@ describe('the download manager', () => {
 		await b.dl.run();
 		expect(b.calls.some((c) => c.kind === 'cards' && c.definitions)).toBe(true);
 		expect((await b.db.get('cards', [C1, 0]))!.definitions).toBe(true);
+	});
+
+	it('cards that carry definitions are fetched again once the lexicon’s definitions are replaced, and no others', async () => {
+		const server = new FakeServer();
+		server.create({ id: C1, source_id: Q1, count: 3 });
+		server.create({ id: C2, source_id: Q2, count: 3 });
+		// C2 shows no definitions: its cards hold nothing a replacement changes.
+		server.cascades.get(C2)!.settings.show_definitions = false;
+		const b = await Dev.make(server);
+		await b.open(C1);
+		await b.open(C2);
+		await b.sync();
+		expect((await b.db.get('cards', [C1, 0]))!.rev).toBeUndefined();
+		const cards = () => b.calls.filter((c) => c.kind === 'cards').map((c) => c.cascade);
+		const before = cards().length;
+		// Nothing replaced: a pass fetches nothing again.
+		await b.dl.run();
+		expect(cards().length).toBe(before);
+		// The pull after a replacement brings both rows at the new revision.
+		for (const id of [C1, C2]) await b.db.put('cascades', { ...(await b.db.get('cascades', id))!, definitions_revision: 2 });
+		await b.dl.run();
+		expect(cards().slice(before)).toEqual([C1]);
+		expect((await b.db.get('cards', [C1, 0]))!.rev).toBe(2);
+		expect((await b.db.get('cards', [C1, 2]))!.rev).toBe(2);
+		// Held at the new revision, they are not fetched a third time.
+		await b.dl.run();
+		expect(cards().length).toBe(before + 1);
+		expect(holdsDefinitions({ quiz_type: 'definition', show_definitions: false })).toBe(true);
+		expect(holdsDefinitions({ quiz_type: 'leave_value', show_definitions: true })).toBe(false);
+		// A Leave Value cascade's cards follow its leave values' revision, never the definitions'.
+		const leave = { quiz_type: 'leave_value', show_definitions: true, definitions_revision: 7 } as const;
+		expect(answerRevision(leave)).toBe(1);
+		expect(answerRevision({ ...leave, leave_values_revision: 3 })).toBe(3);
+		expect(answerRevision({ quiz_type: 'definition', show_definitions: false, definitions_revision: 2, leave_values_revision: null })).toBe(2);
+		expect(answerRevision({ quiz_type: 'anagram', show_definitions: false, definitions_revision: 2 })).toBeNull();
 	});
 
 	it('a QuotaExceededError runs the drop pass, then eviction, and retries once; a second failure says there is no room', async () => {

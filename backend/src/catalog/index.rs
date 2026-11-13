@@ -55,6 +55,9 @@ pub struct RawWord {
 pub struct LexiconIndex {
     pub id: i16,
     pub name: String,
+    /// The `lexicons.definitions_revision` these definitions were read at: 1
+    /// as built, set by the loader.
+    pub definitions_revision: i32,
     pub distribution: Arc<Distribution>,
     /// Sorted in alphabetical (tile) order; a word's id is its index here.
     pub words: Vec<WordEntry>,
@@ -263,6 +266,7 @@ impl LexiconIndex {
         );
         LexiconIndex {
             id,
+            definitions_revision: 1,
             name: name.to_owned(),
             distribution,
             words,
@@ -323,6 +327,9 @@ pub struct LeaveEntry {
 #[derive(Debug)]
 pub struct LeaveSetIndex {
     pub id: i32,
+    /// The `leave_sets.values_revision` these values were read at: 1 as
+    /// built, set by the loader.
+    pub values_revision: i32,
     pub lexicon_id: i16,
     pub distribution: Arc<Distribution>,
     /// Sorted by canonical leave.
@@ -418,6 +425,7 @@ impl LeaveSetIndex {
         );
         LeaveSetIndex {
             id,
+            values_revision: 1,
             lexicon_id: lexicon.id,
             distribution: d,
             leaves,

@@ -5,7 +5,7 @@
 //   interval expires, so the count is never left behind the filters.
 // - Keeps a reserve: it stops once this tab has spent all but two of
 //   SEARCH_RATE_PER_MINUTE in the rolling minute, reading "the server is busy",
-//   so Create Cascade, Start over and Save Search… still get through.
+//   so Create Cascade, Duplicate and Save Search… still get through.
 // - A 503 or a 429 is not a row error: the last count stays with "the server
 //   is busy", and one retry follows after Retry-After. Only a 400 marks rows.
 

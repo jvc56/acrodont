@@ -179,6 +179,11 @@ CREATE TABLE lexicons (
     name                    TEXT NOT NULL UNIQUE CHECK (name ~ '^[A-Za-z0-9_-]{1,32}$'),
     letter_distribution_id  SMALLINT NOT NULL REFERENCES letter_distributions (id),
     word_count              INTEGER NOT NULL CHECK (word_count > 0),
+    definitions_revision    INTEGER NOT NULL DEFAULT 1 CHECK (definitions_revision >= 1),
+                                -- raised by each replacement of the lexicon's definitions,
+                                -- the one part of a lexicon that can change (Immutability
+                                -- and deletion); a cascade row carries it, and a device
+                                -- fetches again the answers it holds from an older one
     uploaded_by             UUID REFERENCES users (id) ON DELETE SET NULL,
     uploaded_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -189,7 +194,9 @@ CREATE INDEX lexicons_letter_distribution_id ON lexicons (letter_distribution_id
 -- notation, in upload order, compressed with zstd by the server (so Postgres
 -- stores it as it is: STORAGE EXTERNAL). Every instance reads the whole
 -- lexicon into memory and nothing queries a word in SQL; a row per word took
--- five times the space. Upload validation checks each word, playability and
+-- five times the space. The words and playabilities never change; the
+-- definitions are replaced whole by a definitions upload, which raises
+-- lexicons.definitions_revision. Upload validation checks each word, playability and
 -- definition (see File formats); a text that does not parse fails the load.
 CREATE TABLE lexicon_words (
     lexicon_id  SMALLINT PRIMARY KEY REFERENCES lexicons (id) ON DELETE CASCADE,
@@ -202,6 +209,10 @@ CREATE TABLE leave_sets (
     id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     lexicon_id   SMALLINT NOT NULL UNIQUE REFERENCES lexicons (id),
     leave_count  INTEGER NOT NULL CHECK (leave_count > 0),
+    values_revision INTEGER NOT NULL DEFAULT 1 CHECK (values_revision >= 1),
+                     -- raised by each replacement of the set's values, as
+                     -- lexicons.definitions_revision is by its definitions'; the
+                     -- leaves themselves never change
     uploaded_by  UUID REFERENCES users (id) ON DELETE SET NULL,
     uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (id, lexicon_id)   -- target of cascades' composite foreign key
@@ -210,6 +221,8 @@ CREATE TABLE leave_sets (
 -- A leave set's leaves, packed as a lexicon's words are: one row per set, the
 -- text one line per leave, `leave TAB value LF`, the leave in canonical MAGPIE
 -- notation (1–6 tiles in distribution order, blanks first), compressed with zstd.
+-- The values are replaced whole by a values upload, which raises
+-- leave_sets.values_revision.
 CREATE TABLE leave_values (
     leave_set_id  INTEGER PRIMARY KEY REFERENCES leave_sets (id) ON DELETE CASCADE,
     leaves        BYTEA NOT NULL CHECK (octet_length(leaves) > 0)
@@ -227,7 +240,7 @@ CREATE TABLE search_specs (
                             -- canonicalised under: a leave is sorted into tile order and
                             -- a word is not, so loading the spec under a type on the
                             -- other side of Leave Value flags that row rather than
-                            -- silently reading leaves as words. Start over copies it
+                            -- silently reading leaves as words. Duplicate copies it
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX search_specs_user_id ON search_specs (user_id);
@@ -391,7 +404,7 @@ CREATE TABLE cascades (
     leave_set_id      INTEGER,                    -- Leave Value cascades only
     spec_id           UUID NOT NULL REFERENCES search_specs (id),
                           -- a private copy, never a saved search's or another
-                          -- cascade's spec; Start over copies it again
+                          -- cascade's spec; Duplicate copies it again
     clear_threshold   SMALLINT NOT NULL CHECK (clear_threshold BETWEEN 1 AND 100),
 
     -- Quiz options: what every quiz created for this cascade starts with.
@@ -445,6 +458,10 @@ CREATE TABLE cascades (
 
     -- The leave value set must belong to the cascade's lexicon.
     FOREIGN KEY (leave_set_id, lexicon_id) REFERENCES leave_sets (id, lexicon_id),
+
+    -- An account's cascades each have their own name, the Trash included: a
+    -- purged cascade's name is free again.
+    UNIQUE (user_id, name),
 
     CHECK ((quiz_type = 'leave_value') = (leave_set_id IS NOT NULL))
 );

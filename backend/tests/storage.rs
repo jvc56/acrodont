@@ -1,5 +1,5 @@
 //! STORAGE_LIMIT_PLAN.md § Tests, the server's half: the per-account storage
-//! limit refusing creation, Start over and saved searches with what they
+//! limit refusing creation, Duplicate and saved searches with what they
 //! need; two creations racing for the last space; studying past the limit;
 //! purges freeing exactly what was counted; the preview's estimate; the
 //! purge task's recount; and the calibration of `contract-fixtures/storage.json`
@@ -22,13 +22,13 @@ fn length(min: i64, max: i64) -> Value {
 fn body(lexicon: &str, quiz_type: &str, filters: Value) -> Value {
     json!({
         "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
-        "at": "2026-01-01T00:00:00Z", "name": "A cascade", "lexicon": lexicon, "quiz_type": quiz_type,
+        "at": "2026-01-01T00:00:00Z", "name": format!("A cascade {}", Uuid::new_v4().simple()), "lexicon": lexicon, "quiz_type": quiz_type,
         "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false,
         "answer_mode": "flashcard", "filters": filters,
     })
 }
 
-fn start_over_body() -> Value {
+fn duplicate_body() -> Value {
     json!({ "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(), "at": "2026-01-01T00:00:00Z" })
 }
 
@@ -92,12 +92,12 @@ async fn the_preview_reports_what_a_cascade_holds_as_created(pool: sqlx::PgPool)
     assert_eq!(pages[0]["storage"], json!({ "used": total, "limit": 10_000_000 }));
 }
 
-/// Creation and Start over past the limit are `409 storage_limit` with the
+/// Creation and Duplicate past the limit are `409 storage_limit` with the
 /// account's figure, its limit and what the new cascade needs, writing
 /// nothing; an account already at its limit is refused before any search,
 /// with `needed` 0.
 #[sqlx::test]
-async fn creation_and_start_over_are_refused_past_the_limit(pool: sqlx::PgPool) {
+async fn creation_and_duplicate_are_refused_past_the_limit(pool: sqlx::PgPool) {
     let app = TestApp::with(pool, &[("MAX_STORAGE_BYTES_PER_USER", "3000")]).await;
     let mut c = app.seed_fixture_catalog("root").await;
     let user = c.user_id.unwrap();
@@ -111,8 +111,8 @@ async fn creation_and_start_over_are_refused_past_the_limit(pool: sqlx::PgPool) 
     let r = c.post("/api/cascades", body("EN-FIX", "definition", length(7, 7))).await;
     assert_eq!(r.status, StatusCode::CONFLICT);
     assert_eq!(r.json(), json!({ "error": "storage_limit", "used": anagrams, "limit": 3_000, "needed": definitions }));
-    let path = format!("/api/cascades/{}/start-over", first["id"].as_str().unwrap());
-    let r = c.post(&path, start_over_body()).await;
+    let path = format!("/api/cascades/{}/duplicate", first["id"].as_str().unwrap());
+    let r = c.post(&path, duplicate_body()).await;
     assert_eq!(r.status, StatusCode::CONFLICT);
     assert_eq!(r.json(), json!({ "error": "storage_limit", "used": anagrams, "limit": 3_000, "needed": anagrams }));
     assert_eq!((count(&app, "cascades").await, count(&app, "search_specs").await), (1, specs), "nothing written");
@@ -120,7 +120,7 @@ async fn creation_and_start_over_are_refused_past_the_limit(pool: sqlx::PgPool) 
 
     // The account's own limit replaces the configured one, both ways.
     set_limit(&app, user, Some(2 * anagrams)).await;
-    let r = c.post(&path, start_over_body()).await;
+    let r = c.post(&path, duplicate_body()).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
     assert_eq!(used(&app, user).await, 2 * anagrams);
     // At the limit exactly: refused before the search.

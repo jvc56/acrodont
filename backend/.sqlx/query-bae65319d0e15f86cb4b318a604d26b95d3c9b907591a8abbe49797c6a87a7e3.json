@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH owners AS (SELECT id FROM users WHERE id IN (SELECT user_id FROM cascades WHERE leave_set_id = $1)\n                         ORDER BY id FOR UPDATE),\n              bumped AS (UPDATE users u SET sync_seq = u.sync_seq + 1 FROM owners o WHERE u.id = o.id\n                         RETURNING u.id, u.sync_seq),\n              touched AS (UPDATE cascades c SET updated_seq = b.sync_seq FROM bumped b\n                          WHERE c.user_id = b.id AND c.leave_set_id = $1 RETURNING c.user_id)\n         SELECT DISTINCT user_id AS \"user_id!\" FROM touched",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "cascades",
+            "name": "user_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bae65319d0e15f86cb4b318a604d26b95d3c9b907591a8abbe49797c6a87a7e3"
+}

@@ -216,7 +216,7 @@ pub async fn insert_cascade(app: &TestApp, user: Uuid, s: &Setup) {
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, spec_id, clear_threshold, segment_size,
                                progression, require_alphabetical, options_changed_at, options_seq, options_device_id,
                                question_count, depth, updated_seq, storage_bytes, question_keys)
-         VALUES ($1, $2, 'test', 'anagram', $3, $4, $5, $6, $7::quiz_progression, $8, now() - interval '1 day', $9, $10,
+         VALUES ($1, $2, 'test ' || gen_random_uuid(), 'anagram', $3, $4, $5, $6, $7::quiz_progression, $8, now() - interval '1 day', $9, $10,
                  $11, 1, $9, 0, (SELECT string_agg(format('K%s', lpad(g::text, 6, '0')) || E'\n', '' ORDER BY g)
                                  FROM generate_series(0, $11 - 1) AS g))",
     )

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE leave_sets SET values_revision = values_revision + 1\n         WHERE id = $1 AND values_revision = $2 RETURNING values_revision",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "values_revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "leave_sets",
+            "name": "values_revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fe4f86bdcbcae3745305e2cbad9e4b416134201b6d07f12db6cae9cdc990a5a9"
+}

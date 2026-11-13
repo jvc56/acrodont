@@ -36,7 +36,7 @@ export function optionsSummary(o: { segment_size: number; progression: string; r
 	return parts.join(' · ');
 }
 
-/** `L1 · 250 (waiting, run 3 of 7) → L2 · 38 (waiting) → L3 · 9 (4/9 done, 44.44%)`. */
+/** `L1 · 250 (waiting, segment 3 of 7) → L2 · 38 (waiting) → L3 · 9 (4/9 done, 44.44%)`. */
 export function ladderText(rows: LevelRow[]): string {
 	return rows
 		.map((r) => {
@@ -45,7 +45,7 @@ export function ladderText(rows: LevelRow[]): string {
 			const pct = ((done / Math.max(1, r.size)) * 100).toFixed(2);
 			let state = r.current ? `${done}/${r.size} done, ${pct}%` : 'waiting';
 			if (r.downloading) state = 'waiting for download';
-			const run = r.run ? `, ${r.run.split(' · ')[0]}` : '';
+			const run = r.run ? `, ${r.run}` : '';
 			return `L${r.level} · ${r.size} (${state}${run})`;
 		})
 		.join(' → ');

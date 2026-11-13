@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.quiz_type AS \"quiz_type: QuizType\", c.lexicon_id, l.definitions_revision,\n                  ls.values_revision AS \"leave_values_revision?\"\n           FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id\n           LEFT JOIN leave_sets ls ON ls.id = c.leave_set_id\n           WHERE c.id = $1 AND c.user_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "quiz_type: QuizType",
+        "type_info": {
+          "Custom": {
+            "name": "quiz_type",
+            "kind": {
+              "Enum": [
+                "anagram",
+                "definition",
+                "leave_value"
+              ]
+            }
+          }
+        },
+        "origin": {
+          "Table": {
+            "table": "cascades",
+            "name": "quiz_type"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "lexicon_id",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "cascades",
+            "name": "lexicon_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "definitions_revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "lexicons",
+            "name": "definitions_revision"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "leave_values_revision?",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "leave_sets",
+            "name": "values_revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "b22146808b1886ccdad379c9ffcbc0795819926f0bdfa2c49ef3d327acfd6d61"
+}

@@ -9,27 +9,27 @@ use super::upload::ParsedDistribution;
 
 pub struct Items {
     pub distributions: Vec<i16>,
-    /// (lexicon id, distribution id)
-    pub lexicons: Vec<(i16, i16)>,
-    /// (leave set id, lexicon id)
-    pub leave_sets: Vec<(i32, i16)>,
+    /// (lexicon id, distribution id, definitions revision)
+    pub lexicons: Vec<(i16, i16, i32)>,
+    /// (leave set id, lexicon id, values revision)
+    pub leave_sets: Vec<(i32, i16, i32)>,
 }
 
 pub async fn list_items(db: &PgPool) -> Result<Items, sqlx::Error> {
     let distributions = sqlx::query_scalar!("SELECT id FROM letter_distributions ORDER BY id")
         .fetch_all(db)
         .await?;
-    let lexicons = sqlx::query!("SELECT id, letter_distribution_id FROM lexicons ORDER BY id")
+    let lexicons = sqlx::query!("SELECT id, letter_distribution_id, definitions_revision FROM lexicons ORDER BY id")
         .fetch_all(db)
         .await?
         .into_iter()
-        .map(|r| (r.id, r.letter_distribution_id))
+        .map(|r| (r.id, r.letter_distribution_id, r.definitions_revision))
         .collect();
-    let leave_sets = sqlx::query!("SELECT id, lexicon_id FROM leave_sets ORDER BY id")
+    let leave_sets = sqlx::query!("SELECT id, lexicon_id, values_revision FROM leave_sets ORDER BY id")
         .fetch_all(db)
         .await?
         .into_iter()
-        .map(|r| (r.id, r.lexicon_id))
+        .map(|r| (r.id, r.lexicon_id, r.values_revision))
         .collect();
     Ok(Items {
         distributions,
@@ -141,18 +141,21 @@ pub async fn load_lexicon(
     db: &PgPool,
     id: i16,
     dist: &Distribution,
-) -> anyhow::Result<Option<(String, Vec<RawWord>)>> {
-    let Some(name) = sqlx::query_scalar!("SELECT name FROM lexicons WHERE id = $1", id)
-        .fetch_optional(db)
-        .await?
+) -> anyhow::Result<Option<(String, i32, Vec<RawWord>)>> {
+    // One statement, so the words read are the revision's own.
+    let Some(row) = sqlx::query!(
+        r#"SELECT l.name, l.definitions_revision, w.words AS "words?"
+           FROM lexicons l LEFT JOIN lexicon_words w ON w.lexicon_id = l.id WHERE l.id = $1"#,
+        id
+    )
+    .fetch_optional(db)
+    .await?
     else {
         return Ok(None);
     };
-    let Some(packed) = sqlx::query_scalar!("SELECT words FROM lexicon_words WHERE lexicon_id = $1", id)
-        .fetch_optional(db)
-        .await?
-    else {
-        return Ok(Some((name, Vec::new())));
+    let (name, revision) = (row.name, row.definitions_revision);
+    let Some(packed) = row.words else {
+        return Ok(Some((name, revision, Vec::new())));
     };
     let dist = dist.clone();
     // Decompressing and parsing a whole lexicon is CPU work.
@@ -168,25 +171,79 @@ pub async fn load_lexicon(
         Ok(words)
     })
     .await??;
-    Ok(Some((name, words)))
+    Ok(Some((name, revision, words)))
+}
+
+/// A lexicon's stored words and the revision they are, read together.
+pub async fn lexicon_words(db: &PgPool, id: i16) -> Result<Option<(i32, Vec<u8>)>, sqlx::Error> {
+    Ok(sqlx::query!(
+        "SELECT l.definitions_revision, w.words FROM lexicons l JOIN lexicon_words w ON w.lexicon_id = l.id WHERE l.id = $1",
+        id
+    )
+    .fetch_optional(db)
+    .await?
+    .map(|r| (r.definitions_revision, r.words)))
+}
+
+/// Stores a lexicon's words with new definitions as its next revision, if it
+/// is still at `from_revision`: `None` when another replacement got there
+/// first. Every cascade on the lexicon is given a new `updated_seq` in its
+/// account's sequence, so each device's next pull brings the row with the new
+/// revision and the device fetches those cascades' answers again. Returns the
+/// new revision and the accounts whose devices are to be told.
+pub async fn replace_definitions(
+    tx: &mut PgConnection,
+    id: i16,
+    from_revision: i32,
+    packed: &[u8],
+) -> Result<Option<(i32, Vec<Uuid>)>, sqlx::Error> {
+    let Some(revision) = sqlx::query_scalar!(
+        "UPDATE lexicons SET definitions_revision = definitions_revision + 1
+         WHERE id = $1 AND definitions_revision = $2 RETURNING definitions_revision",
+        id,
+        from_revision
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Ok(None);
+    };
+    sqlx::query!("UPDATE lexicon_words SET words = $2 WHERE lexicon_id = $1", id, packed).execute(&mut *tx).await?;
+    // The users' rows first, in id order, as every other writer of an account's sequence locks them.
+    let users = sqlx::query_scalar!(
+        "WITH owners AS (SELECT id FROM users WHERE id IN (SELECT user_id FROM cascades WHERE lexicon_id = $1)
+                         ORDER BY id FOR UPDATE),
+              bumped AS (UPDATE users u SET sync_seq = u.sync_seq + 1 FROM owners o WHERE u.id = o.id
+                         RETURNING u.id, u.sync_seq),
+              touched AS (UPDATE cascades c SET updated_seq = b.sync_seq FROM bumped b
+                          WHERE c.user_id = b.id AND c.lexicon_id = $1 RETURNING c.user_id)
+         SELECT DISTINCT user_id AS \"user_id!\" FROM touched",
+        id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    Ok(Some((revision, users)))
 }
 
 pub async fn load_leaves(
     db: &PgPool,
     id: i32,
     dist: &Distribution,
-) -> anyhow::Result<Option<Vec<(Vec<Tile>, f64)>>> {
-    let exists = sqlx::query_scalar!("SELECT 1 AS \"one!\" FROM leave_sets WHERE id = $1", id)
-        .fetch_optional(db)
-        .await?;
-    if exists.is_none() {
-        return Ok(None);
-    }
-    let Some(packed) = sqlx::query_scalar!("SELECT leaves FROM leave_values WHERE leave_set_id = $1", id)
-        .fetch_optional(db)
-        .await?
+) -> anyhow::Result<Option<(i32, Vec<(Vec<Tile>, f64)>)>> {
+    // One statement, so the values read are the revision's own.
+    let Some(row) = sqlx::query!(
+        r#"SELECT s.values_revision, v.leaves AS "leaves?"
+           FROM leave_sets s LEFT JOIN leave_values v ON v.leave_set_id = s.id WHERE s.id = $1"#,
+        id
+    )
+    .fetch_optional(db)
+    .await?
     else {
-        return Ok(Some(Vec::new()));
+        return Ok(None);
+    };
+    let revision = row.values_revision;
+    let Some(packed) = row.leaves else {
+        return Ok(Some((revision, Vec::new())));
     };
     let dist = dist.clone();
     let out = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<(Vec<Tile>, f64)>> {
@@ -201,7 +258,57 @@ pub async fn load_leaves(
         Ok(out)
     })
     .await??;
-    Ok(Some(out))
+    Ok(Some((revision, out)))
+}
+
+/// A leave value set's lexicon, its stored leaves and the revision they are, read together.
+pub async fn leave_set_values(db: &PgPool, id: i32) -> Result<Option<(i16, i32, Vec<u8>)>, sqlx::Error> {
+    Ok(sqlx::query!(
+        "SELECT s.lexicon_id, s.values_revision, v.leaves FROM leave_sets s JOIN leave_values v ON v.leave_set_id = s.id
+         WHERE s.id = $1",
+        id
+    )
+    .fetch_optional(db)
+    .await?
+    .map(|r| (r.lexicon_id, r.values_revision, r.leaves)))
+}
+
+/// Stores a leave value set's leaves with new values as its next revision,
+/// exactly as [`replace_definitions`] does a lexicon's words: `None` when
+/// another replacement got there first; otherwise the new revision and the
+/// accounts whose Leave Value cascades on the set were given a new
+/// `updated_seq`.
+pub async fn replace_leave_values(
+    tx: &mut PgConnection,
+    id: i32,
+    from_revision: i32,
+    packed: &[u8],
+) -> Result<Option<(i32, Vec<Uuid>)>, sqlx::Error> {
+    let Some(revision) = sqlx::query_scalar!(
+        "UPDATE leave_sets SET values_revision = values_revision + 1
+         WHERE id = $1 AND values_revision = $2 RETURNING values_revision",
+        id,
+        from_revision
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Ok(None);
+    };
+    sqlx::query!("UPDATE leave_values SET leaves = $2 WHERE leave_set_id = $1", id, packed).execute(&mut *tx).await?;
+    let users = sqlx::query_scalar!(
+        "WITH owners AS (SELECT id FROM users WHERE id IN (SELECT user_id FROM cascades WHERE leave_set_id = $1)
+                         ORDER BY id FOR UPDATE),
+              bumped AS (UPDATE users u SET sync_seq = u.sync_seq + 1 FROM owners o WHERE u.id = o.id
+                         RETURNING u.id, u.sync_seq),
+              touched AS (UPDATE cascades c SET updated_seq = b.sync_seq FROM bumped b
+                          WHERE c.user_id = b.id AND c.leave_set_id = $1 RETURNING c.user_id)
+         SELECT DISTINCT user_id AS \"user_id!\" FROM touched",
+        id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    Ok(Some((revision, users)))
 }
 
 pub async fn insert_distribution(

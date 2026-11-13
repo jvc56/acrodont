@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE lexicon_words SET words = $2 WHERE lexicon_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ad0d59fad0a870acee2279775da596aab308c3f63c188ea0d34ae904ce398369"
+}

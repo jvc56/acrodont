@@ -131,3 +131,20 @@ Nothing is deployed, so the edit is in place: `./scripts/dev.py --reset`.
 - `cascades.leave_value_decimals` defaults to `0` (was `1`).
 
 Nothing is deployed, so the edits are in place: `./scripts/dev.py --reset`.
+
+## 2026-11-13: definitions and leave values can be replaced; unique cascade names
+
+Nothing is deployed, so these are still edits in place, the last before the
+first deploy freezes the file.
+
+- `lexicons` gains `definitions_revision INTEGER NOT NULL DEFAULT 1 CHECK
+  (definitions_revision >= 1)`, and `leave_sets` gains `values_revision` of the
+  same shape. An admin upload can now replace a lexicon's definitions, or a
+  leave value set's values (PLAN.md § Replacing definitions and leave values).
+  Each replacement raises the revision; a cascade row carries it, and a device
+  fetches again the answers it holds from an older one. Words, playabilities
+  and the leaves themselves stay immutable, and a lexicon still has at most
+  one leave value set.
+- `cascades` gains `UNIQUE (user_id, name)`: an account's cascades each have
+  their own name, the Trash included (PLAN.md § Creating a cascade). Start
+  over, which used to copy the name, numbers it instead.

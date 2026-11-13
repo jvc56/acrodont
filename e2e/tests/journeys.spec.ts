@@ -86,7 +86,7 @@ test('answers gone, questions kept; a download stopped part way', async ({ page,
 	for (let i = 4; i < 18; i++) await press(page, 'Space');
 	await expect(page.getByText('18 / 18')).toBeVisible();
 	await press(page, 'Space');
-	await expect(page.getByText('Some questions in this run still need a connection (16).')).toBeVisible();
+	await expect(page.getByText('Some questions in this segment still need a connection (16).')).toBeVisible();
 	await expect(page.getByText('18 / 18')).toBeVisible();
 	await context.setOffline(false);
 });

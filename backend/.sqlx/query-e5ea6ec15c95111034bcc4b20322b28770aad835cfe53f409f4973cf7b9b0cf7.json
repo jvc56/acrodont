@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.lexicon_id, s.values_revision, v.leaves FROM leave_sets s JOIN leave_values v ON v.leave_set_id = s.id\n         WHERE s.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lexicon_id",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "leave_sets",
+            "name": "lexicon_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "values_revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "leave_sets",
+            "name": "values_revision"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "leaves",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "leave_values",
+            "name": "leaves"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e5ea6ec15c95111034bcc4b20322b28770aad835cfe53f409f4973cf7b9b0cf7"
+}

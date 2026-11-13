@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, lexicon_id FROM leave_sets ORDER BY id",
+  "query": "SELECT id, lexicon_id, values_revision FROM leave_sets ORDER BY id",
   "describe": {
     "columns": [
       {
@@ -24,6 +24,17 @@
             "name": "lexicon_id"
           }
         }
+      },
+      {
+        "ordinal": 2,
+        "name": "values_revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "leave_sets",
+            "name": "values_revision"
+          }
+        }
       }
     ],
     "parameters": {
@@ -31,8 +42,9 @@
     },
     "nullable": [
       false,
+      false,
       false
     ]
   },
-  "hash": "9d2bd8ece74d2c234928bfe7d02e1351cba7bafa905eed494c2100f005af567d"
+  "hash": "057ad3bf872a5b11a351873affa4ba1e2b55acdd61334388d085d0897d7007f4"
 }

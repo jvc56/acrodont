@@ -816,6 +816,8 @@ async fn non_admins_get_not_found_on_every_admin_route(pool: sqlx::PgPool) {
         ("POST", "/api/admin/letter-distributions"),
         ("POST", "/api/admin/lexicons"),
         ("POST", "/api/admin/leave-sets"),
+        ("POST", "/api/admin/lexicons/1/definitions"),
+        ("POST", "/api/admin/leave-sets/1/values"),
         ("DELETE", "/api/admin/letter-distributions/1"),
         ("DELETE", "/api/admin/lexicons/1"),
         ("DELETE", "/api/admin/leave-sets/1"),
@@ -933,7 +935,7 @@ async fn insert_cascade(
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, leave_set_id, spec_id, clear_threshold,
                                options_changed_at, options_seq, options_device_id, question_count, depth, updated_seq,
                                storage_bytes, question_keys)
-         VALUES ($1, $2, 'c', $3::quiz_type, $4, $5, $6, 80, now(), 1, gen_random_uuid(), 1, 1, 1, 0, E'K\\n')",
+         VALUES ($1, $2, 'c ' || gen_random_uuid(), $3::quiz_type, $4, $5, $6, 80, now(), 1, gen_random_uuid(), 1, 1, 1, 0, E'K\\n')",
     )
     .bind(id)
     .bind(user)
@@ -1124,4 +1126,195 @@ async fn admin_catalog_shows_sizes_uploaders_and_load_status(pool: sqlx::PgPool)
         .unwrap();
     assert!(leaves["storage_bytes"].as_u64().unwrap() > leaves["index_bytes"].as_u64().unwrap());
     assert_eq!(c["instances"].as_array().unwrap().len(), 1);
+}
+
+/// A cascade made straight through the API on the fixture catalog.
+async fn api_cascade(c: &mut Client<'_>, quiz_type: &str, name: &str) -> String {
+    let r = c
+        .post(
+            "/api/cascades",
+            json!({
+                "id": uuid::Uuid::new_v4(), "source_quiz_id": uuid::Uuid::new_v4(), "device_id": uuid::Uuid::new_v4(),
+                "at": "2026-01-01T00:00:00Z", "name": name, "lexicon": "EN-FIX", "quiz_type": quiz_type,
+                "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false,
+                "answer_mode": "flashcard",
+                "filters": { "op": "and", "children": [{ "type": "length", "negated": false, "min": 2, "max": 2 }] },
+            }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    r.json()["cascade"]["id"].as_str().unwrap().to_owned()
+}
+
+#[sqlx::test]
+async fn definitions_are_replaced_whole_and_nothing_else(pool: sqlx::PgPool) {
+    // More uploads than a minute's default allowance.
+    let app = TestApp::with(pool, &[("ADMIN_UPLOAD_RATE_PER_MINUTE", "100")]).await;
+    let mut a = app.seed_fixture_catalog("root").await;
+    let lexicon: i16 = sqlx::query_scalar("SELECT id FROM lexicons WHERE name = 'EN-FIX'").fetch_one(app.db()).await.unwrap();
+    let path = format!("/api/admin/lexicons/{lexicon}/definitions");
+    let file = std::fs::read_to_string(fixture_path("EN-FIX.tsv")).unwrap();
+    let definition = api_cascade(&mut a, "definition", "Twos by definition").await;
+    let anagram = api_cascade(&mut a, "anagram", "Twos").await;
+    let leaves_owner_seq: i64 = sqlx::query_scalar("SELECT sync_seq FROM users WHERE username = 'root'").fetch_one(app.db()).await.unwrap();
+    let answer_of = |cards: &Value, key: &str| cards.as_array().unwrap().iter().find(|k| k["key"] == key).unwrap()["answer"].clone();
+    let before = a.get(&format!("/api/cascades/{definition}/cards?from=0&limit=1000")).await.json();
+    assert_eq!(answer_of(&before, "AA"), "a rough, cindery lava [n -S]");
+
+    // Only definitions may differ: every other difference is refused, by line where the file has one.
+    for (what, changed, lines) in [
+        ("a word the lexicon lacks", format!("{file}ZZZZZZZ\t1\tnot a word [n]\n"), vec![json!(file.lines().count() + 1)]),
+        ("a word left out", file.replacen("AA\t3811\ta rough, cindery lava [n -S]\n", "", 1), vec![Value::Null]),
+        ("a playability changed", file.replacen("AA\t3811\t", "AA\t3812\t", 1), vec![json!(2)]),
+        ("a file that does not parse", file.replacen("AA\t3811\t", "AA\tmany\t", 1), vec![json!(2)]),
+        ("nothing changed", file.clone(), vec![Value::Null]),
+    ] {
+        let r = a.upload(&path, &[], "new.tsv", changed.as_bytes()).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{what}: {:?}", r.json());
+        assert_eq!(error_lines(&r), lines, "{what}: {:?}", r.json());
+    }
+    assert_eq!(a.upload("/api/admin/lexicons/32000/definitions", &[], "new.tsv", file.as_bytes()).await.status, StatusCode::NOT_FOUND);
+    let revision = || async {
+        sqlx::query_scalar::<_, i32>("SELECT definitions_revision FROM lexicons WHERE id = $1").bind(lexicon).fetch_one(app.db()).await.unwrap()
+    };
+    assert_eq!(revision().await, 1);
+
+    // The words in another order, one definition corrected.
+    let mut lines: Vec<&str> = file.lines().collect();
+    lines.reverse();
+    let corrected = lines.join("\n").replacen("a rough, cindery lava [n -S]", "rough, cindery lava [n AAS]", 1) + "\n";
+    let r = a.upload(&path, &[], "new.tsv", corrected.as_bytes()).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!(r.json()["definitions_changed"], 1);
+    assert_eq!(r.json()["definitions_revision"], 2);
+    assert_eq!(r.json()["word_count"], 154);
+    assert_eq!(revision().await, 2);
+    app.reconcile().await;
+
+    // Every cascade on the lexicon answers with the new text and carries the new revision
+    // under a new sequence, so each device pulls the row and fetches its answers again.
+    let after = a.get(&format!("/api/cascades/{definition}/cards?from=0&limit=1000")).await.json();
+    assert_eq!(answer_of(&after, "AA"), "rough, cindery lava [n AAS]");
+    assert_eq!(answer_of(&after, "AB"), answer_of(&before, "AB"));
+    let cards = a.get(&format!("/api/cascades/{anagram}/cards?from=0&limit=1000&definitions=1")).await.json();
+    assert_eq!(answer_of(&cards, "AA")[0]["definition"], "rough, cindery lava [n AAS]");
+    let rows: Vec<(i64,)> = sqlx::query_as("SELECT updated_seq FROM cascades WHERE lexicon_id = $1").bind(lexicon).fetch_all(app.db()).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|r| r.0 == leaves_owner_seq + 1), "{rows:?}");
+    // The words, their playabilities and their stored order are as uploaded.
+    let packed: Vec<u8> = sqlx::query_scalar("SELECT words FROM lexicon_words WHERE lexicon_id = $1").bind(lexicon).fetch_one(app.db()).await.unwrap();
+    let stored = acrodont::catalog::store::unpack_words(&packed).unwrap();
+    let original: Vec<(&str, &str)> = file.lines().map(|l| { let mut f = l.split('\t'); (f.next().unwrap(), f.next().unwrap()) }).collect();
+    assert_eq!(stored.iter().map(|w| (w.0.clone(), w.1)).collect::<Vec<_>>(), original.iter().map(|w| (w.0.to_owned(), w.1.parse::<f64>().unwrap())).collect::<Vec<_>>());
+    // The overview shows the revision; a search reads the new text.
+    let c = a.get("/api/admin/catalog").await.json();
+    let en = c["lexicons"].as_array().unwrap().iter().find(|l| l["name"] == "EN-FIX").unwrap();
+    assert_eq!(en["definitions_revision"], 2);
+    let r = a
+        .post(
+            "/api/search/preview",
+            json!({ "lexicon": "EN-FIX", "quiz_type": "anagram",
+                    "filters": { "op": "and", "children": [{ "type": "definition", "negated": false, "text": "AAS" }] } }),
+        )
+        .await;
+    assert_eq!((r.status, r.json()["count"].as_i64()), (StatusCode::OK, Some(1)), "{:?}", r.json());
+
+    // While an instance still holds an older index, cards that carry definitions wait for it.
+    sqlx::query("UPDATE lexicons SET definitions_revision = 9 WHERE id = $1").bind(lexicon).execute(app.db()).await.unwrap();
+    assert_eq!(a.get(&format!("/api/cascades/{definition}/cards?from=0&limit=10")).await.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(a.get(&format!("/api/cascades/{anagram}/cards?from=0&limit=10&definitions=1")).await.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(a.get(&format!("/api/cascades/{anagram}/cards?from=0&limit=10&hooks=1")).await.status, StatusCode::OK);
+    assert_eq!(a.get(&format!("/api/cascades/{definition}/cards?from=0&limit=10&keys=1")).await.status, StatusCode::OK);
+    app.reconcile().await;
+    assert_eq!(a.get(&format!("/api/cascades/{definition}/cards?from=0&limit=10")).await.status, StatusCode::OK);
+
+    // Admins only.
+    let mut user = app.signed_in("someone").await;
+    assert_eq!(user.upload(&path, &[], "new.tsv", corrected.as_bytes()).await.status, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test]
+async fn leave_values_are_replaced_whole_and_no_leaf_added_or_dropped(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("ADMIN_UPLOAD_RATE_PER_MINUTE", "100")]).await;
+    let mut a = app.seed_fixture_catalog("root").await;
+    let set: i32 = sqlx::query_scalar("SELECT s.id FROM leave_sets s JOIN lexicons l ON l.id = s.lexicon_id WHERE l.name = 'EN-FIX'")
+        .fetch_one(app.db())
+        .await
+        .unwrap();
+    let path = format!("/api/admin/leave-sets/{set}/values");
+    let file = std::fs::read_to_string(fixture_path("EN-FIX-leaves.csv")).unwrap();
+    // A Leave Value cascade of the leaves worth 30 or more, and an anagram cascade beside it.
+    let r = a
+        .post(
+            "/api/cascades",
+            json!({
+                "id": uuid::Uuid::new_v4(), "source_quiz_id": uuid::Uuid::new_v4(), "device_id": uuid::Uuid::new_v4(),
+                "at": "2026-01-01T00:00:00Z", "name": "Good leaves", "lexicon": "EN-FIX", "quiz_type": "leave_value",
+                "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false,
+                "answer_mode": "flashcard",
+                "filters": { "op": "and", "children": [{ "type": "leave_value", "negated": false, "min": 30.0, "max": null }] },
+            }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!(r.json()["cascade"]["leave_values_revision"], 1);
+    let leaves = r.json()["cascade"]["id"].as_str().unwrap().to_owned();
+    let anagram = api_cascade(&mut a, "anagram", "Twos").await;
+    let seq: i64 = sqlx::query_scalar("SELECT sync_seq FROM users WHERE username = 'root'").fetch_one(app.db()).await.unwrap();
+    let cards = |c: &Value| -> Vec<(String, f64)> {
+        c.as_array().unwrap().iter().map(|k| (k["key"].as_str().unwrap().to_owned(), k["answer"].as_f64().unwrap())).collect()
+    };
+    let before = cards(&a.get(&format!("/api/cascades/{leaves}/cards?from=0&limit=100")).await.json());
+    assert!(before.contains(&("?S".to_owned(), 32.4)), "{before:?}");
+
+    // Only values may differ.
+    for (what, changed, lines) in [
+        ("a leave the set lacks", format!("{file}ZZ,1\n"), vec![json!(file.lines().count() + 1)]),
+        ("a leave left out", file.replacen("?S,32.400\n", "", 1), vec![Value::Null]),
+        ("a file that does not parse", file.replacen("?S,32.400", "?S,lots", 1), vec![json!(3)]),
+        ("nothing changed", file.clone(), vec![Value::Null]),
+    ] {
+        let r = a.upload(&path, &[], "new.csv", changed.as_bytes()).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{what}: {:?}", r.json());
+        assert_eq!(error_lines(&r), lines, "{what}: {:?}", r.json());
+    }
+    assert_eq!(a.upload("/api/admin/leave-sets/2000000/values", &[], "new.csv", file.as_bytes()).await.status, StatusCode::NOT_FOUND);
+
+    // One value lowered below the cascade's filter, the tiles of another leave written in another order.
+    let corrected = file.replacen("?S,32.400", "S?,12.5", 1);
+    let r = a.upload(&path, &[], "new.csv", corrected.as_bytes()).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!((r.json()["values_changed"].as_i64(), r.json()["values_revision"].as_i64()), (Some(1), Some(2)));
+    assert_eq!(r.json()["leave_count"], 35);
+    app.reconcile().await;
+
+    // The cascade keeps the questions it was created with and answers with the new value;
+    // its row is at the new revision under a new sequence, and no other cascade's is.
+    let after = cards(&a.get(&format!("/api/cascades/{leaves}/cards?from=0&limit=100")).await.json());
+    assert_eq!(after.len(), before.len());
+    assert!(after.contains(&("?S".to_owned(), 12.5)), "{after:?}");
+    let rows: Vec<(String, i64)> = sqlx::query_as("SELECT name, updated_seq FROM cascades ORDER BY name").fetch_all(app.db()).await.unwrap();
+    assert_eq!(rows, [("Good leaves".to_owned(), seq + 1), ("Twos".to_owned(), seq)]);
+    let pulled: Value = sqlx::query_scalar("SELECT to_jsonb(s.values_revision) FROM leave_sets s WHERE s.id = $1").bind(set).fetch_one(app.db()).await.unwrap();
+    assert_eq!(pulled, json!(2));
+    // A search runs on the new values, and the overview shows the revision.
+    let r = a
+        .post(
+            "/api/search/preview",
+            json!({ "lexicon": "EN-FIX", "quiz_type": "leave_value",
+                    "filters": { "op": "and", "children": [{ "type": "leave_value", "negated": false, "min": 30.0, "max": null }] } }),
+        )
+        .await;
+    assert_eq!(r.json()["count"].as_i64(), Some(before.len() as i64 - 1));
+    let c = a.get("/api/admin/catalog").await.json();
+    let listed = c["leave_sets"].as_array().unwrap().iter().find(|s| s["lexicon"] == "EN-FIX").unwrap();
+    assert_eq!(listed["values_revision"], 2);
+
+    // While an instance still holds the older index, the cascade's cards wait for it; its keys do not.
+    sqlx::query("UPDATE leave_sets SET values_revision = 9 WHERE id = $1").bind(set).execute(app.db()).await.unwrap();
+    assert_eq!(a.get(&format!("/api/cascades/{leaves}/cards?from=0&limit=10")).await.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(a.get(&format!("/api/cascades/{leaves}/cards?from=0&limit=10&keys=1")).await.status, StatusCode::OK);
+    assert_eq!(a.get(&format!("/api/cascades/{anagram}/cards?from=0&limit=10")).await.status, StatusCode::OK);
+    app.reconcile().await;
+    assert_eq!(a.get(&format!("/api/cascades/{leaves}/cards?from=0&limit=10")).await.status, StatusCode::OK);
 }

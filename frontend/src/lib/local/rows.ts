@@ -15,6 +15,10 @@ export interface CascadeRow {
 	quiz_type: QuizType;
 	lexicon: string;
 	letter_distribution: string;
+	/** The lexicon's definitions revision (1 until an admin replaces them); answers held from an older one are fetched again. */
+	definitions_revision?: number;
+	/** A Leave Value cascade's: its leave values' revision, likewise. */
+	leave_values_revision?: number | null;
 	clear_threshold: number;
 	segment_size: number;
 	progression: Progression;
@@ -162,6 +166,8 @@ export interface CardRow {
 	inner?: boolean;
 	/** A Definition card's word, with its hooks, shown above the definition. */
 	word?: WordHooks;
+	/** The cascade's `definitions_revision` when this card was fetched; absent on cards stored before it was kept, which are revision 1's. */
+	rev?: number;
 }
 
 export type AnswerMode = 'flashcard' | 'typed';

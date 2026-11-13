@@ -1,7 +1,7 @@
 //! Telling an account's other devices that something changed (PLAN.md § The
 //! sync cycle → Telling the other devices). Every change that advances an
 //! account's `sync_seq` — a push that applied an operation, shared device
-//! settings, creating or starting over a cascade, a purge — sends a Postgres
+//! settings, creating or duplicating a cascade, a purge — sends a Postgres
 //! `NOTIFY` on CHANNEL in its own transaction, so it goes out only once the
 //! change is committed, and to every instance. Each instance runs one
 //! `LISTEN`, started with the first stream, and fans the notes out to the
