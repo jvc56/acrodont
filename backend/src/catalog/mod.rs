@@ -58,10 +58,19 @@ impl Snapshot {
         self.lexicons.values().find(|l| l.name == name)
     }
 
-    pub fn leave_set_for(&self, lexicon_id: i16) -> Option<&Arc<LeaveSetIndex>> {
+    /// The lexicon's newest leave value set: what a new Leave Value cascade
+    /// uses unless it names another.
+    pub fn newest_leave_set(&self, lexicon_id: i16) -> Option<&Arc<LeaveSetIndex>> {
         self.leave_sets
             .values()
-            .find(|s| s.lexicon_id == lexicon_id)
+            .filter(|s| s.lexicon_id == lexicon_id)
+            .max_by_key(|s| s.id)
+    }
+
+    pub fn leave_set_named(&self, lexicon_id: i16, name: &str) -> Option<&Arc<LeaveSetIndex>> {
+        self.leave_sets
+            .values()
+            .find(|s| s.lexicon_id == lexicon_id && s.name == name)
     }
 }
 
@@ -305,11 +314,11 @@ pub async fn reconcile(state: &AppState) -> anyhow::Result<()> {
         let Some(lexicon) = state.catalog.snapshot().lexicons.get(&lexicon_id).cloned() else {
             continue;
         };
-        let Some(raw) = store::load_leaves(&state.db, id, &lexicon.distribution).await? else {
+        let Some((name, raw)) = store::load_leaves(&state.db, id, &lexicon.distribution).await? else {
             continue;
         };
         let index =
-            tokio::task::spawn_blocking(move || LeaveSetIndex::build(id, &lexicon, raw)).await?;
+            tokio::task::spawn_blocking(move || LeaveSetIndex::build(id, &name, &lexicon, raw)).await?;
         state.catalog.update(|s| {
             s.leave_sets.insert(id, Arc::new(index));
         });

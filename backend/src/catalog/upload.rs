@@ -265,6 +265,12 @@ pub fn parse_distribution(bytes: &[u8]) -> Result<ParsedDistribution, UploadErro
 // Lexicon
 // ---------------------------------------------------------------------------
 
+/// A leave value set's name, unique within its lexicon: the rule a letter
+/// distribution's name follows.
+pub fn is_valid_leave_set_name(name: &str) -> bool {
+    is_valid_distribution_name(name)
+}
+
 pub fn is_valid_lexicon_name(name: &str) -> bool {
     (1..=32).contains(&name.len())
         && name

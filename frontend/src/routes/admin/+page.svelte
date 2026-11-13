@@ -140,8 +140,8 @@
 						noun: 'leave values',
 						items: catalog.leave_sets,
 						name: (s) => s.lexicon ?? '',
-						label: (s) => `the leave values of ${s.lexicon}`,
-						cols: [{ head: 'Leaves', cell: (s) => count(s.leave_count) }, uploaded, { head: 'Cascades', cell: (s) => count(s.cascade_count) }, storage],
+						label: (s) => `the leave values ${s.name} of ${s.lexicon}`,
+						cols: [{ head: 'Name', cell: (s) => s.name ?? '' }, { head: 'Leaves', cell: (s) => count(s.leave_count) }, uploaded, { head: 'Cascades', cell: (s) => count(s.cascade_count) }, storage],
 						blocker: (s) => (s.cascade_count ? 'In use: Leave Value cascades refer to it.' : null)
 					}
 				]

@@ -1,13 +1,15 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Card from '$lib/components/ui/card';
 	import UploadForm from '$lib/components/admin/UploadForm.svelte';
 	import { loadAdminCatalog, type AdminCatalog } from '$lib/admin/catalog';
 
 	let lexicon = $state('');
+	let name = $state('');
 	let catalog = $state<AdminCatalog | null>(null);
-	let choices = $derived((catalog?.lexicons ?? []).filter((l) => !l.has_leave_set));
+	let choices = $derived(catalog?.lexicons ?? []);
 
 	onMount(async () => {
 		catalog = await loadAdminCatalog();
@@ -21,12 +23,13 @@
 		<Card.Header>
 			<Card.Title>Upload leave values</Card.Title>
 			<Card.Description>
-				A comma-separated file: leave, value. A lexicon has at most one set; to replace it,
-				delete the existing set first.
+				A comma-separated file: leave, value. A lexicon can hold several sets, each under its
+				own name. New Leave Value cascades use the newest unless another is chosen; existing
+				cascades keep the set they were built on.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			<UploadForm path="/api/admin/leave-sets" accept=".csv,text/csv" fields={() => ({ lexicon })}>
+			<UploadForm path="/api/admin/leave-sets" accept=".csv,text/csv" fields={() => ({ lexicon, name })}>
 				<div class="grid gap-1.5">
 					<Label for="lexicon">Lexicon</Label>
 					<select id="lexicon" class="h-9 rounded-md border bg-transparent px-3 text-sm" bind:value={lexicon}>
@@ -35,8 +38,16 @@
 						{/each}
 					</select>
 				</div>
+				<div class="grid gap-1.5">
+					<Label for="name">Name</Label>
+					<Input id="name" bind:value={name} placeholder="2026-11" maxlength={32} />
+					<p class="text-xs text-muted-foreground">
+						Letters, digits, spaces, underscores and hyphens. Left empty, the file's name is used.
+					</p>
+				</div>
 				{#snippet created(item)}
-					Leave values for <strong>{item.lexicon}</strong>: {Number(item.leave_count).toLocaleString()} leaves.
+					Leave values <strong>{item.name}</strong> for <strong>{item.lexicon}</strong>:
+					{Number(item.leave_count).toLocaleString()} leaves.
 				{/snippet}
 			</UploadForm>
 		</Card.Content>

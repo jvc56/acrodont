@@ -13,6 +13,7 @@ import {
 	parseCondition,
 	rangeError,
 	summaryName,
+	withLeaveSet,
 	type CeilingContext,
 	type LexiconInfo,
 	type WireCondition
@@ -125,6 +126,20 @@ describe('ceilings', () => {
 		max_leave_order_rank: 300_000
 	};
 	const ctx: CeilingContext = { quizType: 'anagram', lexicon, maxTileValue: 10 };
+
+	it('a Leave Value search takes its ceilings from the set of leave values it runs on', () => {
+		const older = { name: 'Gen 1', leave_count: 500, max_num_anagrams: 4, max_order_rank: 120 };
+		const on = (l: LexiconInfo, type: Parameters<typeof filterDef>[0]) => ceilingOf(filterDef(type), { quizType: 'leave_value', lexicon: l, maxTileValue: 10 });
+		// No set picked: the lexicon's own figures, which are its newest set's.
+		expect(withLeaveSet(lexicon, null)).toBe(lexicon);
+		expect(on(lexicon, 'num_anagrams')).toBe(9);
+		const picked = withLeaveSet(lexicon, older);
+		expect(on(picked, 'num_anagrams')).toBe(4);
+		expect(on(picked, 'probability_order')).toBe(120);
+		expect(on(picked, 'limit_by_probability_order')).toBe(500);
+		// The words' ceilings are the lexicon's, whatever the set.
+		expect(ceilingOf(filterDef('num_anagrams'), { ...ctx, lexicon: picked })).toBe(13);
+	});
 
 	it('opens each row at its floor and its own ceiling, refused there, and names the ceiling above it', () => {
 		for (const [type, ceiling] of [

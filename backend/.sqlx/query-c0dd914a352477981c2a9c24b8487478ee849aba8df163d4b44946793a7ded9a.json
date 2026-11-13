@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO leave_sets (lexicon_id, leave_count, uploaded_by) VALUES ($1, $2, $3) RETURNING id",
+  "query": "INSERT INTO leave_sets (lexicon_id, name, leave_count, uploaded_by) VALUES ($1, $2, $3, $4) RETURNING id",
   "describe": {
     "columns": [
       {
@@ -18,6 +18,7 @@
     "parameters": {
       "Left": [
         "Int2",
+        "Text",
         "Int4",
         "Uuid"
       ]
@@ -26,5 +27,5 @@
       false
     ]
   },
-  "hash": "7dee70fdc02170af2d20f1375cc5c7bbd5dd325705f88e2b8d6f14ce6ea1b895"
+  "hash": "c0dd914a352477981c2a9c24b8487478ee849aba8df163d4b44946793a7ded9a"
 }

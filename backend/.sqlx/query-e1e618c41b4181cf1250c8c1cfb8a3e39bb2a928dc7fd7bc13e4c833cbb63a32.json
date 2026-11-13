@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT name, quiz_type::text AS \"quiz_type!\", lexicon_id FROM cascades WHERE id = $1",
+  "query": "SELECT name, quiz_type::text AS \"quiz_type!\", lexicon_id, leave_set_id FROM cascades WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -30,6 +30,17 @@
             "name": "lexicon_id"
           }
         }
+      },
+      {
+        "ordinal": 3,
+        "name": "leave_set_id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "cascades",
+            "name": "leave_set_id"
+          }
+        }
       }
     ],
     "parameters": {
@@ -40,8 +51,9 @@
     "nullable": [
       false,
       null,
-      false
+      false,
+      true
     ]
   },
-  "hash": "c214fdc53152cc61c50db915b3d61fbe292528d83bc85d400c50662837127d99"
+  "hash": "e1e618c41b4181cf1250c8c1cfb8a3e39bb2a928dc7fd7bc13e4c833cbb63a32"
 }

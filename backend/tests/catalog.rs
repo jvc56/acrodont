@@ -313,7 +313,8 @@ async fn leave_upload_rules(pool: sqlx::PgPool) {
         ["?", "?ES"],
         "stored in canonical order, blank first"
     );
-    // The lexicon must not already have leave values.
+    assert_eq!(r.json()["name"], "x", "the name defaults to the file's");
+    // A lexicon holds any number of sets, each under its own name.
     let r = a
         .upload(
             "/api/admin/leave-sets",
@@ -323,6 +324,36 @@ async fn leave_upload_rules(pool: sqlx::PgPool) {
         )
         .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.json()["errors"][0]["message"], "LX already has leave values named \"x\"");
+    for bad in ["semi;colon", "a/b", "0123456789012345678901234567890123"] {
+        let r = a
+            .upload("/api/admin/leave-sets", &[("lexicon", "LX"), ("name", bad)], "x.csv", b"A,1\n")
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    let r = a
+        .upload(
+            "/api/admin/leave-sets",
+            &[("lexicon", "LX"), ("name", "Gen 2")],
+            "x.csv",
+            b"A,1\nE,2\n",
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!(r.json()["name"], "Gen 2");
+    assert_eq!(count(&app, "leave_sets").await, 2);
+    app.reconcile().await;
+    // Listed newest first; the single figures are the newest set's.
+    let listed = a.get("/api/lexicons").await.json();
+    let lx = listed.as_array().unwrap().iter().find(|l| l["name"] == "LX").unwrap();
+    let names: Vec<&str> = lx["leave_sets"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Gen 2", "x"]);
+    assert_eq!(lx["leave_sets"][0]["leave_count"], 2);
+    assert_eq!(lx["leave_sets"][1]["leave_count"], 2);
+    assert_eq!(lx["leave_count"], 2);
+    let c = a.get("/api/admin/catalog").await.json();
+    let names: Vec<&str> = c["leave_sets"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Gen 2", "x"]);
 }
 
 #[sqlx::test]
@@ -752,6 +783,10 @@ async fn lexicons_reports_the_four_maxima(pool: sqlx::PgPool) {
         .find(|l| l["name"] == "EN-FIX-OLD")
         .unwrap();
     assert!(old["leave_count"].is_null() && old["max_leave_order_rank"].is_null());
+    assert_eq!(old["leave_sets"], json!([]));
+    assert_eq!(en["leave_sets"].as_array().unwrap().len(), 1);
+    assert_eq!(en["leave_sets"][0]["name"], "EN-FIX-leaves");
+    assert_eq!(en["leave_sets"][0]["leave_count"], en["leave_count"]);
 }
 
 #[sqlx::test]

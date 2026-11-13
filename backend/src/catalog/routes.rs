@@ -54,13 +54,25 @@ pub fn router(state: &AppState) -> Router<AppState> {
 // ---------------------------------------------------------------------------
 
 #[derive(Serialize)]
+pub struct LeaveSetListing {
+    name: String,
+    leave_count: i32,
+    max_num_anagrams: u32,
+    max_order_rank: u32,
+}
+
+#[derive(Serialize)]
 pub struct LexiconListing {
     name: String,
     letter_distribution: String,
     word_count: i32,
-    leave_count: Option<i32>,
     max_num_anagrams: u32,
     max_order_rank: u32,
+    /// The lexicon's sets of leave values, newest first. The first is what a
+    /// Leave Value search uses unless it names another.
+    leave_sets: Vec<LeaveSetListing>,
+    /// The newest set's figures, as `leave_sets[0]` has them; null without one.
+    leave_count: Option<i32>,
     max_leave_num_anagrams: Option<u32>,
     max_leave_order_rank: Option<u32>,
 }
@@ -76,22 +88,30 @@ async fn lexicons(
         r#"WITH live AS (
              SELECT DISTINCT instance_id FROM catalog_instance_status
              WHERE heartbeat_at > now() - interval '3 minutes')
-           SELECT l.id, l.name, d.name AS dist, l.word_count, ls.id AS "leave_set_id?",
-                  ls.leave_count AS "leave_count?",
+           SELECT l.id, l.name, d.name AS dist, l.word_count,
                   NOT EXISTS (SELECT 1 FROM live WHERE NOT EXISTS (
                       SELECT 1 FROM catalog_instance_status s
                       WHERE s.instance_id = live.instance_id AND s.item_kind = 'lexicon'
                         AND s.item_id = l.id
-                        AND s.heartbeat_at > now() - interval '3 minutes')) AS "lexicon_loaded!",
-                  ls.id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM live WHERE NOT EXISTS (
+                        AND s.heartbeat_at > now() - interval '3 minutes')) AS "lexicon_loaded!"
+           FROM lexicons l
+           JOIN letter_distributions d ON d.id = l.letter_distribution_id
+           ORDER BY l.name"#
+    )
+    .fetch_all(&state.db)
+    .await?;
+    // Every leave set each live instance has built, newest first.
+    let sets = sqlx::query!(
+        r#"WITH live AS (
+             SELECT DISTINCT instance_id FROM catalog_instance_status
+             WHERE heartbeat_at > now() - interval '3 minutes')
+           SELECT ls.id, ls.lexicon_id FROM leave_sets ls
+           WHERE NOT EXISTS (SELECT 1 FROM live WHERE NOT EXISTS (
                       SELECT 1 FROM catalog_instance_status s
                       WHERE s.instance_id = live.instance_id AND s.item_kind = 'leave_set'
                         AND s.item_id = ls.id
-                        AND s.heartbeat_at > now() - interval '3 minutes')) AS "leaves_loaded!"
-           FROM lexicons l
-           JOIN letter_distributions d ON d.id = l.letter_distribution_id
-           LEFT JOIN leave_sets ls ON ls.lexicon_id = l.id
-           ORDER BY l.name"#
+                        AND s.heartbeat_at > now() - interval '3 minutes'))
+           ORDER BY ls.id DESC"#
     )
     .fetch_all(&state.db)
     .await?;
@@ -104,19 +124,28 @@ async fn lexicons(
         let Some(lex) = snap.lexicons.get(&r.id) else {
             continue;
         };
-        let leaves = r
-            .leave_set_id
-            .filter(|_| r.leaves_loaded)
-            .and_then(|id| snap.leave_sets.get(&id));
+        let leave_sets: Vec<LeaveSetListing> = sets
+            .iter()
+            .filter(|s| s.lexicon_id == r.id)
+            .filter_map(|s| snap.leave_sets.get(&s.id))
+            .map(|s| LeaveSetListing {
+                name: s.name.clone(),
+                leave_count: s.leave_count() as i32,
+                max_num_anagrams: s.max_num_anagrams,
+                max_order_rank: s.max_order_rank,
+            })
+            .collect();
+        let newest = leave_sets.first();
         out.push(LexiconListing {
             name: r.name,
             letter_distribution: r.dist,
             word_count: r.word_count,
-            leave_count: leaves.map(|s| s.leave_count() as i32),
             max_num_anagrams: lex.max_num_anagrams,
             max_order_rank: lex.max_order_rank,
-            max_leave_num_anagrams: leaves.map(|s| s.max_num_anagrams),
-            max_leave_order_rank: leaves.map(|s| s.max_order_rank),
+            leave_count: newest.map(|s| s.leave_count),
+            max_leave_num_anagrams: newest.map(|s| s.max_num_anagrams),
+            max_leave_order_rank: newest.map(|s| s.max_order_rank),
+            leave_sets,
         });
     }
     Ok(Json(out))
@@ -220,10 +249,10 @@ async fn admin_catalog(
     .fetch_all(&state.db)
     .await?;
     let leave_sets = sqlx::query!(
-        r#"SELECT s.id, l.name AS lexicon, s.leave_count, s.uploaded_at, u.username::text AS "uploaded_by?",
+        r#"SELECT s.id, s.name, l.name AS lexicon, s.leave_count, s.uploaded_at, u.username::text AS "uploaded_by?",
                   (SELECT count(*) FROM cascades c WHERE c.leave_set_id = s.id) AS "cascade_count!"
            FROM leave_sets s JOIN lexicons l ON l.id = s.lexicon_id
-           LEFT JOIN users u ON u.id = s.uploaded_by ORDER BY l.name"#
+           LEFT JOIN users u ON u.id = s.uploaded_by ORDER BY l.name, s.id DESC"#
     )
     .fetch_all(&state.db)
     .await?;
@@ -260,7 +289,7 @@ async fn admin_catalog(
             let idx = snap.leave_sets.get(&s.id);
             let storage = RowBytes::of(&rows.leave_sets, s.id.into())
                 + idx.map_or(0, |i| i.approx_bytes as i64);
-            json!({ "id": s.id, "lexicon": s.lexicon, "leave_count": s.leave_count,
+            json!({ "id": s.id, "name": s.name, "lexicon": s.lexicon, "leave_count": s.leave_count,
                     "uploaded_by": s.uploaded_by, "uploaded_at": s.uploaded_at,
                     "cascade_count": s.cascade_count, "loaded_by": by, "loading": loading,
                     "storage_bytes": storage, "index_bytes": idx.map(|i| i.approx_bytes), "build_ms": idx.map(|i| i.build_ms) })
@@ -563,23 +592,36 @@ async fn upload_leaves(
 ) -> ApiResult<Response> {
     state.limits.admin_upload.check(&user.id)?;
     let form = read_form(&mut mp).await?;
-    let (_, bytes) = form.file.ok_or_else(|| form_error("choose a file"))?;
+    let (filename, bytes) = form.file.ok_or_else(|| form_error("choose a file"))?;
     let lexicon = form.fields.get("lexicon").cloned().unwrap_or_default();
+    // The name defaults to the file name without `.csv`, as a distribution's does.
+    let name = match form.fields.get("name").filter(|n| !n.is_empty()) {
+        Some(n) => n.clone(),
+        None => filename
+            .strip_suffix(".csv")
+            .unwrap_or(&filename)
+            .to_owned(),
+    };
+    if !upload::is_valid_leave_set_name(&name) {
+        return Err(form_error(
+            "the name must be 1–32 letters, digits, spaces, underscores or hyphens",
+        ));
+    }
     let Some(row) = sqlx::query!(
         "SELECT l.id, l.letter_distribution_id,
-                EXISTS (SELECT 1 FROM leave_sets s WHERE s.lexicon_id = l.id) AS \"has_leaves!\"
+                EXISTS (SELECT 1 FROM leave_sets s WHERE s.lexicon_id = l.id AND s.name = $2) AS \"taken!\"
          FROM lexicons l WHERE l.name = $1",
-        lexicon
+        lexicon,
+        name
     )
     .fetch_optional(&state.db)
     .await?
     else {
         return Err(form_error(format!("there is no lexicon named {lexicon:?}")));
     };
-    if row.has_leaves {
-        return Err(form_error(format!(
-            "{lexicon} already has leave values; delete them first to replace them"
-        )));
+    let taken = || form_error(format!("{lexicon} already has leave values named {name:?}"));
+    if row.taken {
+        return Err(taken());
     }
     let dist = store::load_distribution(&state.db, row.letter_distribution_id)
         .await?
@@ -595,10 +637,10 @@ async fn upload_leaves(
     .map_err(upload_errors)?;
     let packed = packed.map_err(|e| ApiError::Internal(e.into()))?;
     let mut tx = state.db.begin().await?;
-    let id = match store::insert_leave_set(&mut tx, row.id, user.id, leave_count, &packed).await {
+    let id = match store::insert_leave_set(&mut tx, row.id, &name, user.id, leave_count, &packed).await {
         Ok(id) => id,
-        Err(sqlx::Error::Database(d)) if d.constraint() == Some("leave_sets_lexicon_id_key") => {
-            return Err(form_error(format!("{lexicon} already has leave values")));
+        Err(sqlx::Error::Database(d)) if d.constraint() == Some("leave_sets_lexicon_id_name_key") => {
+            return Err(taken());
         }
         Err(e) => return Err(e.into()),
     };
@@ -607,7 +649,7 @@ async fn upload_leaves(
     trigger_reconcile(&state);
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "id": id, "lexicon": lexicon, "leave_count": leave_count })),
+        Json(json!({ "id": id, "name": name, "lexicon": lexicon, "leave_count": leave_count })),
     )
         .into_response())
 }

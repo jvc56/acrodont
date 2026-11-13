@@ -146,8 +146,11 @@ DNS and the GitHub repository.
     ```
 
     Upload the licensed catalog at `/admin` from your own files:
-    distributions, then lexicons, then leave values. They are stored only as
-    rows. Then compare the in-memory index sizes `/admin` shows (hover a
+    distributions, then lexicons, then leave values, giving the leave values
+    a name (for example the month they were generated). They are stored only as
+    rows. Better leave values later are uploaded as a second set under a new
+    name: new cascades use the newest, existing cascades keep theirs, and a
+    set no cascade uses can be deleted to free its index's memory. Then compare the in-memory index sizes `/admin` shows (hover a
     lexicon's or leave value set's Storage) with `task_memory` (2 GiB by
     default). The `acrodont-backend-memory-high` alarm watches this from now
     on.

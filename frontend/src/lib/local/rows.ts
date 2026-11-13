@@ -15,6 +15,8 @@ export interface CascadeRow {
 	quiz_type: QuizType;
 	lexicon: string;
 	letter_distribution: string;
+	/** A Leave Value cascade's set of leave values, by its name in the lexicon; absent on rows stored before the server sent it. */
+	leave_set?: string | null;
 	clear_threshold: number;
 	segment_size: number;
 	progression: Progression;

@@ -176,7 +176,8 @@ def explain(err: "stack.StackFailed", args) -> None:
 
 def real_catalog(directory: Path) -> "stack.Catalog":
     """Licensed files listed in DIR/manifest.json, in the fixture manifest's
-    form: [{"kind": "distribution"|"lexicon"|"leaves", "name", "file", "parent"}].
+    form: [{"kind": "distribution"|"lexicon"|"leaves", "name", "file", "parent"}],
+    with an optional "set" naming a leave set (else it takes its file's name).
     The files and the manifest stay outside the repository."""
     manifest = directory / "manifest.json"
     if not manifest.is_file():
@@ -186,7 +187,7 @@ def real_catalog(directory: Path) -> "stack.Catalog":
     for entry in json.loads(manifest.read_text()):
         items.append(stack.CatalogItem(kind=entry["kind"], name=entry["name"],
                                        path=(directory / entry["file"]).expanduser(),
-                                       parent=entry.get("parent")))
+                                       parent=entry.get("parent"), set=entry.get("set")))
     return stack.Catalog(items)
 
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS \"progression: Progression\",\n                  c.require_alphabetical, c.answer_mode AS \"answer_mode: AnswerMode\", c.show_definitions,\n                  c.show_hooks, c.reveal_correct, c.show_found_count, c.show_probability, c.definition_column,\n                  c.leave_value_decimals, l.name AS lexicon\n           FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2",
+  "query": "SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS \"progression: Progression\",\n                  c.require_alphabetical, c.answer_mode AS \"answer_mode: AnswerMode\", c.show_definitions,\n                  c.show_hooks, c.reveal_correct, c.show_found_count, c.show_probability, c.definition_column,\n                  c.leave_value_decimals, c.leave_set_id, l.name AS lexicon\n           FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2",
   "describe": {
     "columns": [
       {
@@ -179,6 +179,17 @@
       },
       {
         "ordinal": 14,
+        "name": "leave_set_id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "cascades",
+            "name": "leave_set_id"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
         "name": "lexicon",
         "type_info": "Text",
         "origin": {
@@ -210,8 +221,9 @@
       false,
       false,
       false,
+      true,
       false
     ]
   },
-  "hash": "c463e05fc2e93072fce767bea663a4ec2446e835fb076528880f5f722ec0f4c3"
+  "hash": "7eef84d6133a079a437857cec08f5983cf4c06b6c7b7d1e681360708c6cda474"
 }

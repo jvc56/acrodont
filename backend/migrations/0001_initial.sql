@@ -197,13 +197,18 @@ CREATE TABLE lexicon_words (
 );
 ALTER TABLE lexicon_words ALTER COLUMN words SET STORAGE EXTERNAL;
 
--- At most one per lexicon. Leaves use the lexicon's letter distribution.
+-- A lexicon's leave value sets: any number, each named within its lexicon. A
+-- new Leave Value cascade uses the newest (the highest id) unless it names
+-- another; a cascade keeps the set it was built on. Leaves use the lexicon's
+-- letter distribution.
 CREATE TABLE leave_sets (
     id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    lexicon_id   SMALLINT NOT NULL UNIQUE REFERENCES lexicons (id),
+    lexicon_id   SMALLINT NOT NULL REFERENCES lexicons (id),
+    name         TEXT NOT NULL CHECK (name ~ '^[A-Za-z0-9 _-]{1,32}$'),
     leave_count  INTEGER NOT NULL CHECK (leave_count > 0),
     uploaded_by  UUID REFERENCES users (id) ON DELETE SET NULL,
     uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (lexicon_id, name),
     UNIQUE (id, lexicon_id)   -- target of cascades' composite foreign key
 );
 

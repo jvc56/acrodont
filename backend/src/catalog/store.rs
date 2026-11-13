@@ -175,18 +175,18 @@ pub async fn load_leaves(
     db: &PgPool,
     id: i32,
     dist: &Distribution,
-) -> anyhow::Result<Option<Vec<(Vec<Tile>, f64)>>> {
-    let exists = sqlx::query_scalar!("SELECT 1 AS \"one!\" FROM leave_sets WHERE id = $1", id)
+) -> anyhow::Result<Option<(String, Vec<(Vec<Tile>, f64)>)>> {
+    let Some(name) = sqlx::query_scalar!("SELECT name FROM leave_sets WHERE id = $1", id)
         .fetch_optional(db)
-        .await?;
-    if exists.is_none() {
+        .await?
+    else {
         return Ok(None);
-    }
+    };
     let Some(packed) = sqlx::query_scalar!("SELECT leaves FROM leave_values WHERE leave_set_id = $1", id)
         .fetch_optional(db)
         .await?
     else {
-        return Ok(Some(Vec::new()));
+        return Ok(Some((name, Vec::new())));
     };
     let dist = dist.clone();
     let out = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<(Vec<Tile>, f64)>> {
@@ -201,7 +201,7 @@ pub async fn load_leaves(
         Ok(out)
     })
     .await??;
-    Ok(Some(out))
+    Ok(Some((name, out)))
 }
 
 pub async fn insert_distribution(
@@ -264,13 +264,15 @@ pub async fn insert_lexicon(
 pub async fn insert_leave_set(
     tx: &mut PgConnection,
     lexicon_id: i16,
+    name: &str,
     uploaded_by: Uuid,
     leave_count: usize,
     packed: &[u8],
 ) -> Result<i32, sqlx::Error> {
     let id = sqlx::query_scalar!(
-        "INSERT INTO leave_sets (lexicon_id, leave_count, uploaded_by) VALUES ($1, $2, $3) RETURNING id",
+        "INSERT INTO leave_sets (lexicon_id, name, leave_count, uploaded_by) VALUES ($1, $2, $3, $4) RETURNING id",
         lexicon_id,
+        name,
         leave_count as i32,
         uploaded_by
     )

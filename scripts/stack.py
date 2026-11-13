@@ -52,6 +52,7 @@ class CatalogItem:
     name: str
     path: Path
     parent: Optional[str] = None  # a lexicon's distribution, a leave set's lexicon
+    set: Optional[str] = None  # a leave set's own name (manifest "set"); else the file's
 
 
 @dataclass
@@ -298,7 +299,7 @@ def fixture_catalog() -> Catalog:
     for entry in json.loads(manifest.read_text()):
         items.append(CatalogItem(kind=entry["kind"], name=entry["name"],
                                  path=FIXTURE_CATALOG / entry["file"],
-                                 parent=entry.get("parent")))
+                                 parent=entry.get("parent"), set=entry.get("set")))
     return Catalog(items)
 
 
@@ -401,8 +402,10 @@ def _upload_catalog(http: Http, catalog: Catalog) -> None:
         elif item.kind == "leaves":
             if item.name in have_leaves:
                 continue
-            status, body = http.multipart("/api/admin/leave-sets", {"lexicon": item.name},
-                                          "file", item.path)
+            fields = {"lexicon": item.name}
+            if item.set:
+                fields["name"] = item.set
+            status, body = http.multipart("/api/admin/leave-sets", fields, "file", item.path)
         else:
             raise ValueError(f"unknown catalog kind {item.kind}")
         if status != 201:

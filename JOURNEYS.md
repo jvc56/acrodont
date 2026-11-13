@@ -97,6 +97,8 @@ as a link (`[mail] confirm …`).
 - [ ] **A-3** **Do** upload a lexicon file with an error on some lines. **Expect** a list of errors with line numbers, and nothing stored.
 - [ ] **A-4** **Do** `./scripts/dev.py --stats` with the launch catalog in `fixtures/licensed/`. **Expect** the uploads succeed, and the printed index sizes and memory stay well inside `task_memory` (2 GiB).
 - [ ] **A-5** **Do** try to delete a lexicon a cascade uses. **Expect** the delete is disabled, with the reason shown.
+- [ ] **A-6** **Do** upload a second set of leave values for a lexicon that has one, first with no name and the same file name, then named "Gen 2". **Expect** the first is refused, saying the lexicon already has leave values of that name; the second is stored, and `/admin` lists both sets under Leave values, newest first, each with its own name, cascade count and Delete.
+- [ ] **A-7** **Do** in the builder, choose Leave Value and that lexicon. **Expect** a **Leave values** select under the lexicon, "Gen 2 (newest)" chosen; picking the older set changes the count; a cascade created from it shows the set's name after the lexicon in its row's tooltip on the Cascades page, and Start over keeps it. A lexicon with one set shows no select, and neither does an Anagram or Definition cascade.
 
 ## Part 5: from the command line
 

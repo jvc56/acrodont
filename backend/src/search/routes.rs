@@ -40,17 +40,55 @@ pub struct Prepared {
     pub tree: WireGroup,
 }
 
-/// Parses and validates `filters` against the named lexicon (and its leave
-/// values for a Leave Value quiz). Errors are `400 { errors: [{ path, field, message }] }`.
-pub fn prepare(state: &AppState, lexicon: &str, quiz_type: QuizType, filters: &Value) -> ApiResult<Prepared> {
+/// Which of a lexicon's leave value sets a Leave Value search runs on.
+#[derive(Clone, Copy)]
+pub enum LeaveChoice<'a> {
+    /// The lexicon's newest set.
+    Newest,
+    /// The set of this name: what the builder's choice sends.
+    Named(&'a str),
+    /// The set a cascade already uses: Start over keeps it.
+    Id(i32),
+}
+
+/// Parses and validates `filters` against the named lexicon (and, for a Leave
+/// Value quiz, the chosen set of its leave values; the choice means nothing to
+/// the other quiz types). Errors are `400 { errors: [{ path, field, message }] }`.
+pub fn prepare(
+    state: &AppState,
+    lexicon: &str,
+    quiz_type: QuizType,
+    filters: &Value,
+    choice: LeaveChoice,
+) -> ApiResult<Prepared> {
     let snap = state.catalog.snapshot();
     let Some(lex) = snap.lexicon_by_name(lexicon).cloned() else {
         return Err(path_errors(vec![PathError::new(&[], "lexicon", format!("There is no lexicon named {lexicon}."))]));
     };
-    let leaves = snap.leave_set_for(lex.id).cloned();
-    if quiz_type.is_leave() && leaves.is_none() {
-        return Err(path_errors(vec![PathError::new(&[], "lexicon", format!("{lexicon} has no leave values."))]));
-    }
+    let leaves = if !quiz_type.is_leave() {
+        snap.newest_leave_set(lex.id).cloned()
+    } else {
+        match choice {
+            LeaveChoice::Newest => Some(snap.newest_leave_set(lex.id).cloned().ok_or_else(|| {
+                path_errors(vec![PathError::new(&[], "lexicon", format!("{lexicon} has no leave values."))])
+            })?),
+            LeaveChoice::Named(name) => Some(snap.leave_set_named(lex.id, name).cloned().ok_or_else(|| {
+                path_errors(vec![PathError::new(
+                    &[],
+                    "leave_set",
+                    format!("{lexicon} has no leave values named {name}."),
+                )])
+            })?),
+            // The cascade pins the set, so it exists; this instance may not have built it yet.
+            LeaveChoice::Id(id) => Some(
+                snap.leave_sets
+                    .get(&id)
+                    .filter(|s| s.lexicon_id == lex.id)
+                    .cloned()
+                    .ok_or(ApiError::Unavailable { retry_after_secs: 5 })?,
+            ),
+        }
+    };
     let tree = parse_tree(filters).map_err(path_errors)?;
     let info = TargetInfo { lexicon: &lex, leaves: leaves.as_ref(), snapshot: &snap };
     let spec = validate(&tree, quiz_type, Some(&info)).map_err(path_errors)?.expect("a target gives a spec");
@@ -93,6 +131,15 @@ pub struct PreviewBody {
     lexicon: String,
     quiz_type: QuizType,
     filters: Value,
+    /// A Leave Value search: the lexicon's set of this name. Absent: its newest.
+    #[serde(default)]
+    leave_set: Option<String>,
+}
+
+impl PreviewBody {
+    fn choice(&self) -> LeaveChoice<'_> {
+        self.leave_set.as_deref().map_or(LeaveChoice::Newest, LeaveChoice::Named)
+    }
 }
 
 async fn preview(
@@ -101,7 +148,7 @@ async fn preview(
     ApiJson(body): ApiJson<PreviewBody>,
 ) -> ApiResult<Json<Value>> {
     state.limits.search.check(&user.id)?;
-    let prepared = prepare(&state, &body.lexicon, body.quiz_type, &body.filters)?;
+    let prepared = prepare(&state, &body.lexicon, body.quiz_type, &body.filters, body.choice())?;
     let keys = run(&state, &prepared).await?;
     let dist = &prepared.lexicon.distribution;
     let sample: Vec<String> = keys.iter().take(SAMPLE_SIZE).map(|k| dist.to_magpie(k)).collect();

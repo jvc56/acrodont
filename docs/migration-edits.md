@@ -131,3 +131,19 @@ Nothing is deployed, so the edit is in place: `./scripts/dev.py --reset`.
 - `cascades.leave_value_decimals` defaults to `0` (was `1`).
 
 Nothing is deployed, so the edits are in place: `./scripts/dev.py --reset`.
+
+## 2026-11-13: a lexicon holds any number of named leave value sets
+
+Nothing is deployed, so this is still an edit in place, the last before the
+first deploy freezes the file.
+
+- `leave_sets.lexicon_id` is no longer UNIQUE, and `leave_sets` gains
+  `name TEXT NOT NULL CHECK (name ~ '^[A-Za-z0-9 _-]{1,32}$')` with
+  `UNIQUE (lexicon_id, name)`.
+- Why: improved leave values for a lexicon could only be shipped by deleting
+  the old set, which every Leave Value cascade on it blocks, or by uploading the
+  whole lexicon again under a new name. A new set now sits beside the old one;
+  new cascades use the newest unless they name another, and each cascade keeps
+  the set its `leave_set_id` already recorded (PLAN.md § Uploads, § Immutability
+  and deletion).
+- `cascades` is unchanged: its composite foreign key already pinned one set.

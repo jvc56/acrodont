@@ -277,7 +277,7 @@ async fn export(
 /// The formatter's input from the database and the catalog.
 async fn load(state: &AppState, cascade: Uuid, p: &Parsed) -> ApiResult<(ExportInput, String)> {
     let c = sqlx::query!(
-        r#"SELECT name, quiz_type::text AS "quiz_type!", lexicon_id FROM cascades WHERE id = $1"#,
+        r#"SELECT name, quiz_type::text AS "quiz_type!", lexicon_id, leave_set_id FROM cascades WHERE id = $1"#,
         cascade
     )
     .fetch_one(&state.db)
@@ -291,7 +291,11 @@ async fn load(state: &AppState, cascade: Uuid, p: &Parsed) -> ApiResult<(ExportI
     let snap = state.catalog.snapshot();
     let lex = snap.lexicons.get(&c.lexicon_id).ok_or(ApiError::Unavailable { retry_after_secs: 5 })?;
     let dist = &lex.distribution;
-    let leaves = snap.leave_set_for(lex.id);
+    // The set the cascade was built on, whatever has been uploaded since.
+    let leaves = match c.leave_set_id {
+        Some(id) => Some(snap.leave_sets.get(&id).ok_or(ApiError::Unavailable { retry_after_secs: 5 })?),
+        None => None,
+    };
     let tiles: Vec<String> = dist.tiles.iter().map(|t| t.letter.clone()).collect();
     let mut questions = Vec::with_capacity(keys.len());
     for (idx, key) in keys.iter().enumerate() {
