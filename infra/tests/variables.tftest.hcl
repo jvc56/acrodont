@@ -59,6 +59,10 @@ run "defaults_plan" {
     condition     = aws_db_instance.main.backup_retention_period == 7 && aws_db_instance.main.allocated_storage == 20
     error_message = "the database defaults changed"
   }
+  assert {
+    condition     = one(aws_lb_target_group.web.health_check).interval * one(aws_lb_target_group.web.health_check).unhealthy_threshold >= 300
+    error_message = "the target group's health check must ride out a five-minute database restart before the task is replaced"
+  }
 }
 
 run "on_demand_and_no_tasks" {

@@ -30,14 +30,18 @@ resource "aws_lb_target_group" "web" {
   protocol    = "HTTP"
   target_type = "ip"
   vpc_id      = aws_vpc.main.id
-  # /health includes the catalog indexes being loaded.
+  # /health includes the catalog indexes being loaded, and the database. ECS
+  # replaces a task whose target is unhealthy, so ten misses at 30 s, like
+  # the container's own check (ecs.tf): a database restart is ridden out
+  # rather than answered by killing a task that has the catalog in memory.
+  # acrodont-down still waits its ten minutes either way.
   health_check {
     path                = "/health"
     matcher             = "200"
-    interval            = 10
+    interval            = 30
     timeout             = 5
     healthy_threshold   = 2
-    unhealthy_threshold = 3
+    unhealthy_threshold = 10
   }
   # Spent before SIGTERM reaches the old task; the 300 s default made every
   # deploy minutes slower (birdtest f2fda4c).

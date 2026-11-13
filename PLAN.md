@@ -5696,7 +5696,13 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
       task cannot start, and an EventBridge rule mails why. `stopTimeout` is
       120 s so graceful shutdown can finish a streaming export. The container
       health check's `startPeriod` (240 s) must stay at least twice the measured
-      catalog load, which the backend logs as `load_ms`.
+      catalog load, which the backend logs as `load_ms`. `/health` fails
+      while the database is away, so the container's check and the target
+      group's each allow ten misses 30 seconds apart before the task is
+      replaced: a database restart (the weekly maintenance window, a minor
+      upgrade, a class change) is ridden out by a task that keeps its catalog
+      in memory, where a replacement could not start until the database was
+      back and would then index everything again.
   - An **ops task definition** on the ops image (Postgres 16 client and
     server, python3, `restore.py`, `acrodont-master-psql`). Every SQL step of
     the runbook runs from it, by `scripts/prod-sql.sh` and

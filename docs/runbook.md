@@ -274,7 +274,7 @@ All alarms go to the `acrodont-alarms` SNS topic and on to `alarm_email`.
 | `acrodont-app-5xx` | The application answered 5xx for 15 minutes, though `/health` may still pass | The log group, `level = ERROR` |
 | `acrodont-backend-cpu-high` | Over 85% CPU for 15 minutes | Searches or exports? Consider `task_cpu=1024` (and `search_concurrency`) |
 | `acrodont-backend-memory-high` | Over 85% memory for 10 minutes | The in-memory index sizes in `/admin` (hover each Storage) against `task_memory`; raise it |
-| `acrodont-db-cpu-high` | Database over 80% CPU for 15 minutes | Raise `db_instance_class`; the change applies at once with a short restart |
+| `acrodont-db-cpu-high` | Database over 80% CPU for 15 minutes | Raise `db_instance_class`; the change applies at once with a short restart, during which the API answers errors and the task stays up (its health checks allow five minutes) |
 | `acrodont-db-events` (RDS events) | Low storage, failure, or allocation near the autoscaling ceiling | Raise `db_allocated_storage` |
 | `acrodont-no-dump-36h` | No successful dump in 36 hours | The last `backup` log stream; the `acrodont-backup-failed` mail says why |
 | `acrodont-dump-shrank` | A dump at least 30% smaller than the one before | Check the database size first. A truncated run leaves a small object |

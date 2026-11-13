@@ -78,11 +78,17 @@ resource "aws_ecs_task_definition" "app" {
       # The 30 s default SIGKILLs graceful shutdown's in-flight work (a
       # streaming export, a large sync batch); 120 is Fargate's maximum.
       stopTimeout = 120
+      # /health fails while the database is away. Ten tries at 30 s ride out
+      # a restart of it (the weekly maintenance window, a minor upgrade, a
+      # class change): at three tries of 10 s the task was killed after half
+      # a minute, its replacements exited until the database was back, and
+      # the one that stayed had the whole catalog to index again. The target
+      # group's check (alb.tf) allows the same five minutes.
       healthCheck = {
         command     = ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
-        interval    = 10
+        interval    = 30
         timeout     = 5
-        retries     = 3
+        retries     = 10
         startPeriod = var.health_check_start_period
       }
       logConfiguration = local.log_config
