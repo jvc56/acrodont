@@ -3,8 +3,9 @@
 # above idle_timeout, or the ALB reuses connections Nginx has closed and
 # answers 502 (EDGE-1; frontend/src/lib/nginx-config.test.ts pins it).
 resource "aws_acm_certificate" "site" {
-  domain_name       = var.domain_name
-  validation_method = "DNS"
+  domain_name               = var.domain_name
+  subject_alternative_names = var.redirect_www ? ["www.${var.domain_name}"] : []
+  validation_method         = "DNS"
   lifecycle {
     create_before_destroy = true
   }
@@ -58,6 +59,28 @@ resource "aws_lb_listener" "http" {
       port        = "443"
       protocol    = "HTTPS"
       status_code = "HTTP_301"
+    }
+  }
+}
+
+# www.<domain> is not the site: both listeners send it to the bare domain,
+# path and query kept (redirect_www).
+resource "aws_lb_listener_rule" "www" {
+  for_each     = var.redirect_www ? { http = aws_lb_listener.http.arn, https = aws_lb_listener.https.arn } : {}
+  listener_arn = each.value
+  priority     = 1
+  action {
+    type = "redirect"
+    redirect {
+      host        = var.domain_name
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+  condition {
+    host_header {
+      values = ["www.${var.domain_name}"]
     }
   }
 }

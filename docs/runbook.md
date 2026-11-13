@@ -69,11 +69,15 @@ DNS and the GitHub repository.
 
    ```bash
    export AWS_PAGER=""
-   aws rds describe-orderable-db-instance-options --engine postgres --engine-version 16 \
-     --db-instance-class db.t4g.micro --query 'OrderableDBInstanceOptions[0].DBInstanceClass'
+   aws rds describe-orderable-db-instance-options --engine postgres \
+     --db-instance-class db.t4g.micro --output text \
+     --query 'OrderableDBInstanceOptions[?starts_with(EngineVersion,`16.`)].EngineVersion'
    ```
 
-   If it prints `null`, set `db_instance_class = "db.t3.micro"`.
+   If it prints nothing, set `db_instance_class = "db.t3.micro"`. (The
+   command takes no `--engine-version 16`: AWS wants a full version there.)
+
+   To have `www.` redirect to the bare domain, add `redirect_www = true`.
 
 4. **Onboard.** Run `scripts/onboard-deployer.sh`. It writes `~/.acrodont-env`,
    initialises Terraform against the state bucket and fetches `prod.tfvars`.
@@ -93,7 +97,8 @@ DNS and the GitHub repository.
      `DomainValidationOptions`).
    - `ses_dns_records`: three DKIM CNAMEs, the `mail.` MX and SPF TXT for the
      MAIL FROM domain, and a `_dmarc` TXT.
-   - The domain itself: an alias (or CNAME) to `alb_dns_name`.
+   - The domain itself: an alias (or CNAME) to `alb_dns_name`; with
+     `redirect_www`, another for `www`.
 
 7. **Confirm the alarm subscription.** SNS mails `alarm_email` a confirmation
    link. Until it is clicked, every alarm goes nowhere.
@@ -112,15 +117,19 @@ DNS and the GitHub repository.
    activate the `Project` cost allocation tag in Billing, so the budget and the
    monitor count only acrodont's resources.
 
-9. **Database roles and secrets.** Run `scripts/init-db-roles.sh`. It creates
-   the three SSM parameters if they don't exist yet (it never overwrites one).
-   Then, as the RDS master user, it creates the `acrodont_app` and
-   `acrodont_backup` roles from those values. Terraform never sees a secret.
+9. **The first release.** Run `scripts/deploy.sh`. It builds and pushes the
+   backend, ops and frontend images, sets `image_tag` and applies. The
+   service is still at no tasks, so nothing starts and it needs no secret.
+   It comes before the roles because they are made from an ops task, and
+   the ops task's image is one this builds: under the placeholder
+   `image_tag` there is none to run.
 
-10. **The first release.** Run `scripts/deploy.sh`. It builds and pushes the
-    backend, ops and frontend images, sets `image_tag` and applies. Then start
-    the service, and pin the zones the first apply chose (a subnet cannot
-    change zone later):
+10. **Database roles and secrets.** Run `scripts/init-db-roles.sh`. It creates
+    the three SSM parameters if they don't exist yet (it never overwrites
+    one). Then, as the RDS master user, it creates the `acrodont_app` and
+    `acrodont_backup` roles from those values. Terraform never sees a secret.
+    Then start the service, and pin the zones the first apply chose (a subnet
+    cannot change zone later):
 
     ```bash
     scripts/set-setting.sh desired_count=1

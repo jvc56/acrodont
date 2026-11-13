@@ -56,12 +56,35 @@ run "defaults_plan" {
     error_message = "a running service has its down alarm and its application 5xx alarm"
   }
   assert {
+    condition     = length(aws_lb_listener_rule.www) == 0
+    error_message = "www is answered only when redirect_www asks for it"
+  }
+  assert {
     condition     = aws_db_instance.main.backup_retention_period == 7 && aws_db_instance.main.allocated_storage == 20
     error_message = "the database defaults changed"
   }
   assert {
     condition     = one(aws_lb_target_group.web.health_check).interval * one(aws_lb_target_group.web.health_check).unhealthy_threshold >= 300
     error_message = "the target group's health check must ride out a five-minute database restart before the task is replaced"
+  }
+}
+
+run "www_redirects_to_the_bare_domain" {
+  command = plan
+  variables {
+    redirect_www = true
+  }
+  assert {
+    condition     = contains(aws_acm_certificate.site.subject_alternative_names, "www.acrodont.example.org")
+    error_message = "redirect_www must put www on the certificate"
+  }
+  assert {
+    condition = length(aws_lb_listener_rule.www) == 2 && alltrue([
+      for r in aws_lb_listener_rule.www :
+      one(one(r.action).redirect).host == "acrodont.example.org" && one(one(r.action).redirect).status_code == "HTTP_301"
+      && contains(one(one(r.condition).host_header).values, "www.acrodont.example.org")
+    ])
+    error_message = "redirect_www must answer www on both listeners with a 301 to the bare domain"
   }
 }
 

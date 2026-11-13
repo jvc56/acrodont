@@ -5697,6 +5697,9 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
     timeout for admin uploads, and invalid header fields dropped. Nginx's
     `keepalive_timeout` (130 s) must outlast the idle timeout, or the ALB
     reuses connections Nginx has closed and answers 502; a Vitest test pins it.
+    With `redirect_www` the certificate also names `www.<domain>` and both
+    listeners answer that host with a `301` to the bare domain, which is the
+    site's one address.
   - ECS cluster (Container Insights off; ECS Exec sessions never logged), one
     service of **one task** with backend and Nginx containers, at **0.5 vCPU
     and 2 GiB**, on **Fargate Spot** by default (`use_fargate_spot`).
