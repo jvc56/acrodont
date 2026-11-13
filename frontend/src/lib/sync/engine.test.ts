@@ -12,7 +12,7 @@ import type { QuizRow } from '$lib/local/rows';
 import { storeCreated, type Created } from '$lib/local/created';
 import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
-import { SyncEngine } from './engine';
+import { electLeader, SyncEngine } from './engine';
 import type { Notice } from './notices';
 import type { Reply, SyncRequest, SyncResponse } from './protocol';
 import { FakeServer, type NewCascade } from './testing/fake-server';
@@ -884,5 +884,74 @@ describe('authentication while offline', () => {
 		a.tamper = null;
 		await a.sync();
 		expect(await a.db.count('outbox')).toBe(0);
+	});
+});
+
+/** Web Locks as far as the election uses them: one holder a name, the rest queued in order. */
+class FakeLocks {
+	private held = new Set<string>();
+	private queue: { name: string; grant: () => void; signal?: AbortSignal }[] = [];
+
+	request(name: string, options: { signal?: AbortSignal }, callback: () => Promise<void> | void): Promise<void> {
+		return new Promise<void>((resolve, reject) => {
+			const grant = () => {
+				this.held.add(name);
+				void Promise.resolve(callback()).then(() => {
+					this.held.delete(name);
+					resolve();
+					this.next(name);
+				});
+			};
+			options.signal?.addEventListener('abort', () => {
+				const i = this.queue.findIndex((q) => q.grant === grant);
+				if (i < 0) return;
+				this.queue.splice(i, 1);
+				reject(new DOMException('The request was aborted.', 'AbortError'));
+			});
+			if (this.held.has(name)) this.queue.push({ name, grant, signal: options.signal });
+			else grant();
+		});
+	}
+
+	private next(name: string) {
+		const i = this.queue.findIndex((q) => q.name === name);
+		if (i >= 0) this.queue.splice(i, 1)[0].grant();
+	}
+}
+
+describe('the leader election', () => {
+	const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+	const withLocks = async (run: () => Promise<void>) => {
+		const before = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+		Object.defineProperty(globalThis, 'navigator', { value: { locks: new FakeLocks() }, configurable: true });
+		try {
+			await run();
+		} finally {
+			if (before) Object.defineProperty(globalThis, 'navigator', before);
+		}
+	};
+
+	it('a tab that stops waiting for the lock never leads, and the next tab in line does', async () => {
+		await withLocks(async () => {
+			const leading: string[] = [];
+			const tab = (name: string) =>
+				electLeader(USER, () => {
+					leading.push(name);
+					return () => leading.splice(leading.indexOf(name), 1);
+				});
+			const first = tab('first');
+			const second = tab('second');
+			const third = tab('third');
+			await tick();
+			expect(leading).toEqual(['first']);
+			// The second tab logs out while it waits; then the leader goes.
+			second();
+			first();
+			await tick();
+			expect(leading).toEqual(['third']);
+			third();
+			await tick();
+			expect(leading).toEqual([]);
+		});
 	});
 });

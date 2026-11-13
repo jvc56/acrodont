@@ -22,8 +22,7 @@ export type SyncStatus =
 	/** A 401: studying continues; "Log in to sync". */
 	| 'needs_login'
 	/** A 426: "reload to keep syncing". */
-	| 'reload'
-	| 'no_room';
+	| 'reload';
 
 export interface EngineHooks {
 	onStatus?: (s: SyncStatus) => void;
@@ -303,18 +302,28 @@ export function listenForChanges(engine: SyncEngine, userId: string, deviceId: s
 
 /**
  * Runs `lead` while this tab holds the account's sync lock, for the tab's
- * life; where Web Locks is missing, every tab leads.
+ * life; where Web Locks is missing, every tab leads. The function returned
+ * gives the lock up, or, while this tab is still waiting for it, takes back
+ * the request: left queued, it would be granted later and lead for an account
+ * this tab no longer runs as, keeping the lock from the tab that does.
  */
 export function electLeader(userId: string, lead: () => () => void): () => void {
 	const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
 	if (!locks) return lead();
 	let release: (() => void) | null = null;
 	let stopLeading: (() => void) | null = null;
-	void locks.request(`acrodont-sync-${userId}`, () => {
-		stopLeading = lead();
-		return new Promise<void>((r) => (release = r));
-	});
+	const waiting = new AbortController();
+	locks
+		.request(`acrodont-sync-${userId}`, { signal: waiting.signal }, () => {
+			// Granted in the same moment it was taken back.
+			if (waiting.signal.aborted) return;
+			stopLeading = lead();
+			return new Promise<void>((r) => (release = r));
+		})
+		// The request taken back while it waited.
+		.catch(() => undefined);
 	return () => {
+		waiting.abort();
 		stopLeading?.();
 		release?.();
 	};
