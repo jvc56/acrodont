@@ -3,8 +3,10 @@
 # above idle_timeout, or the ALB reuses connections Nginx has closed and
 # answers 502 (EDGE-1; frontend/src/lib/nginx-config.test.ts pins it).
 resource "aws_acm_certificate" "site" {
-  domain_name               = var.domain_name
-  subject_alternative_names = var.redirect_www ? ["www.${var.domain_name}"] : []
+  domain_name = var.domain_name
+  # null, not []: AWS reads the names back with the domain's own among them,
+  # and an empty list set here could show as a change on every plan.
+  subject_alternative_names = var.redirect_www ? ["www.${var.domain_name}"] : null
   validation_method         = "DNS"
   lifecycle {
     create_before_destroy = true

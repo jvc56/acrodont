@@ -330,6 +330,10 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
 
 ## PQ-020 — Two kinds of settings, no defaults for new cascades (decided)
 
+- **Since then:** a device's settings are no longer "never synced". Each
+  can be shared with **all your devices**: shared values travel in the sync
+  request and response and are kept in `users.device_settings` (PLAN.md §
+  Settings). The rest of this decision stands.
 - **Plan:** User Experience → Preferences, as it stood before this decision:
   four scopes (this cascade, every cascade, new cascades, this device), an
   account-level `user_preferences` row changed by `set_preferences` and pulled
@@ -369,6 +373,12 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
 
 ## PQ-021 — Explanations inline, the Trash on the Cascades page, a smaller header (decided)
 
+- **Since then:** three parts of this decision were reversed. Explanations
+  are behind an ⓘ again (`InfoTip`, in `SettingRow` and the section
+  headings); nothing is written under a setting. The Cascades page is `/`,
+  so `/trash` redirects to `/#trash` and `/cascades` to `/`. The Settings
+  sections' headings no longer carry "(Synced)" and "(Not synced)", since
+  device settings can be shared. PLAN.md § User Experience has today's.
 - **Plan:** User Experience, as it stood before this decision: each setting's
   explanation behind an ⓘ beside its name (`InfoTip`), shown on hover or
   focus; the Trash its own page at `/trash`; the site header and the player's
@@ -408,6 +418,11 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
 
 ## PQ-022 — Password changes and resets match birdtest (decided)
 
+- **Since then:** the first point was reversed. **Change password** is back
+  on `/account` (`POST /api/account/password`, the current password and a
+  new one), limited per account with Sign out everywhere and Delete account
+  (`RESET_RATE_PER_HOUR`, the `pw:` bucket). A reset by email is the way to
+  change a password without a session, not the one way. The rest stands.
 - **Plan:** Authentication, as it stood before this decision: **Change
   password** on `/account` (`POST /api/account/password`, the current and the
   new password, bumping `session_generation` and re-issuing this session)
@@ -456,6 +471,12 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
 
 ## PQ-023 — One storage limit instead of cascade limits (decided)
 
+- **Since then:** the default limit is **10 MB** (`MAX_STORAGE_BYTES_PER_USER`
+  = 10,000,000), not 100 MB: each level's questions were packed into chunks
+  and the same cascades came to a small fraction of the sizes below (a
+  300,000-question cascade is no longer 87 MB). `MAX_ACCOUNTS` is 750, not
+  50. The figures below are those of the day; PLAN.md § Storage limit has
+  today's sizing.
 - **Plan:** § Cascade limit and § Configuration, as they stood before this
   decision: at most 20 cascades an account, the Trash included
   (`MAX_CASCADES_PER_USER`, reported as `max_cascades_per_user`, refused with

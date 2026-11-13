@@ -2,6 +2,12 @@
 
 Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
 
+The phase records below are of their day. Where a figure or a decision in
+them has changed since, PLAN.md has today's: in particular the storage limit
+is 10 MB (not 100 MB), `MAX_ACCOUNTS` is 750 (not 50), Change password is
+back on the Account page, and the player's Settings disable Duplicate
+cascade (not Start over) when storage is full.
+
 ## Current
 
 - **Phase:** 8 — Production, prepared up to the steps that need credentials

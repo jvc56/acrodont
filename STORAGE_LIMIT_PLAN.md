@@ -12,7 +12,10 @@ is `10000000`), once each level's questions were packed into chunks and the
 same cascades came to a small fraction of the sizes below, and `MAX_ACCOUNTS`
 was raised from 50 to 750. Every "100 MB" and "50" in this file is the
 figure of the day it was written; PLAN.md § Storage limit has today's
-sizing.
+sizing. The per-row sizes under "Implementation status" are of that day too:
+`contract-fixtures/storage.json` has today's (a quiz's questions are counted
+by chunk and card, not by `quiz_question_row`, and an attempt row is 210
+bytes), and "Start over" in this file is today's Duplicate cascade.
 
 ### Implementation status
 

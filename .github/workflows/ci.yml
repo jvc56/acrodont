@@ -302,7 +302,9 @@ jobs:
   # scripts/deploy.sh warns.
   nightly-failure:
     needs: [lint, unit-backend, unit-frontend, integration, e2e-core, e2e-main, seeding, ops-image, terraform, scripts, scale]
-    if: failure() && github.event_name == 'schedule'
+    # A job that runs out its timeout-minutes may end as cancelled, which
+    # failure() does not count: a hung scale run must open the issue too.
+    if: ${{ always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-24.04
     permissions:
       issues: write
