@@ -8,8 +8,9 @@
 #   2. acrodont-no-dump-36h is forced to ALARM and back to OK: an ALARM mail
 #      should arrive (it returns to its real state at its next evaluation);
 #   3. the EventBridge rules acrodont-deploy-failed, acrodont-backup-failed and
-#      acrodont-drill-failed match a sample failure and not a sample success
-#      (aws events test-event-pattern: nothing is sent);
+#      acrodont-drill-failed match a sample failure (a non-zero exit, and a
+#      task that never started) and not a sample success (aws events
+#      test-event-pattern: nothing is sent);
 #   4. the RDS event subscription acrodont-db-events is active.
 # Checking the inbox is yours.
 set -euo pipefail
@@ -76,6 +77,11 @@ task_event() {  # family, exit code
       stopCode: "EssentialContainerExited", stoppedReason: "Essential container in task exited",
       containers: [{name: ($f | sub("^acrodont-"; "")), lastStatus: "STOPPED", exitCode: $code}]}')"
 }
+unstarted_event() {  # family: a task that could not pull its image or its secret has no exit code
+  task_event "$1" 0 | jq -c '.detail.stopCode = "TaskFailedToStart"
+    | .detail.stoppedReason = "ResourceInitializationError: unable to pull secrets or registry auth"
+    | .detail.containers |= map(del(.exitCode))'
+}
 check_rule() {  # rule, expected True|False, event, description
   local pattern match
   pattern=$(aws events describe-rule --name "$1" --query EventPattern --output text 2>/dev/null) || pattern=""
@@ -96,9 +102,11 @@ check_rule acrodont-deploy-failed False "$(deploy_event SERVICE_DEPLOYMENT_COMPL
 check_rule acrodont-backup-failed True "$(task_event acrodont-backup 1)" "a backup task exiting 1"
 check_rule acrodont-backup-failed False "$(task_event acrodont-backup 0)" "a backup task exiting 0"
 check_rule acrodont-backup-failed False "$(task_event acrodont-drill 1)" "a drill task exiting 1"
+check_rule acrodont-backup-failed True "$(unstarted_event acrodont-backup)" "a backup task that never started"
 check_rule acrodont-drill-failed True "$(task_event acrodont-drill 1)" "a drill task exiting 1"
 check_rule acrodont-drill-failed False "$(task_event acrodont-drill 0)" "a drill task exiting 0"
 check_rule acrodont-drill-failed False "$(task_event acrodont-backup 1)" "a backup task exiting 1"
+check_rule acrodont-drill-failed True "$(unstarted_event acrodont-drill)" "a drill task that never started"
 
 # 4. RDS events.
 status=$(aws rds describe-event-subscriptions --subscription-name acrodont-db-events \

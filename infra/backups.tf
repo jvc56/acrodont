@@ -304,12 +304,14 @@ resource "aws_scheduler_schedule" "tasks" {
   }
 }
 
-# A backup or drill task that exits non-zero mails within minutes, rather than
-# leaving it to the 36-hour staleness alarm (BAK-2).
+# A backup or drill task that exits non-zero, or never starts, mails within
+# minutes, rather than leaving it to the 36-hour staleness alarm (BAK-2). A
+# task that cannot pull its image or read its secret stops with no exit code
+# at all, which "anything-but 0" does not match: hence the second branch.
 resource "aws_cloudwatch_event_rule" "task_failed" {
   for_each    = { backup = "acrodont-backup", drill = "acrodont-drill" }
   name        = "acrodont-${each.key}-failed"
-  description = "The ${each.key} task stopped with a non-zero exit code"
+  description = "The ${each.key} task stopped with a non-zero exit code, or failed to start"
   event_pattern = jsonencode({
     source      = ["aws.ecs"]
     detail-type = ["ECS Task State Change"]
@@ -317,7 +319,10 @@ resource "aws_cloudwatch_event_rule" "task_failed" {
       clusterArn = [aws_ecs_cluster.main.arn]
       group      = ["family:${each.value}"]
       lastStatus = ["STOPPED"]
-      containers = { exitCode = [{ "anything-but" = 0 }] }
+      "$or" = [
+        { containers = { exitCode = [{ "anything-but" = 0 }] } },
+        { stopCode = ["TaskFailedToStart"] },
+      ]
     }
   })
 }

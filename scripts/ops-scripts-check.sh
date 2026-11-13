@@ -629,7 +629,7 @@ run check-alerts.sh || fail "check-alerts.sh failed"
 in_order "set-alarm-state --alarm-name acrodont-no-dump-36h --state-value OK" \
          "set-alarm-state --alarm-name acrodont-no-dump-36h --state-value ALARM" \
          "set-alarm-state --alarm-name acrodont-no-dump-36h --state-value OK"
-[[ "$(grep -c "test-event-pattern" "$FAKE_DIR/calls.log")" == 8 ]] || fail "not every pattern case was tested"
+[[ "$(grep -c "test-event-pattern" "$FAKE_DIR/calls.log")" == 10 ]] || fail "not every pattern case was tested"
 called "aws rds describe-event-subscriptions --subscription-name acrodont-db-events" || fail "the RDS subscription was not checked"
 fresh "$B"
 if FAKE_SNS_PENDING=1 run check-alerts.sh; then fail "an unconfirmed subscription passed"; fi
@@ -638,8 +638,11 @@ fresh "$B"
 if FAKE_RULE_BROKEN=acrodont-backup-failed run check-alerts.sh; then fail "a rule matching successes passed"; fi
 said "acrodont-backup-failed: a backup task exiting 0 -> True, expected False" || fail "the broken rule is not reported"
 fresh "$B"
+if FAKE_RULE_EXIT_CODE_ONLY=acrodont-drill-failed run check-alerts.sh; then fail "a rule blind to a task that never starts passed"; fi
+said "acrodont-drill-failed: a drill task that never started -> False, expected True" || fail "the blind rule is not reported"
+fresh "$B"
 if FAKE_RDS_SUB_STATUS=creating run check-alerts.sh; then fail "an inactive RDS subscription passed"; fi
-pass "check-alerts.sh: subscription confirmed, alarm forced ALARM then OK, patterns positive and negative, RDS subscription"
+pass "check-alerts.sh: subscription confirmed, alarm forced ALARM then OK, patterns positive and negative (a task that never started included), RDS subscription"
 
 fresh "$B"
 run prod-shell.sh || fail "prod-shell.sh failed"

@@ -5862,8 +5862,9 @@ Acrodont never stores as files, only as rows, and those rows are in the dump.
 - No successful dump in **36 hours**.
 - A dump more than 30% smaller than the previous one, which catches a truncated
   or partial run.
-- A backup or drill task that exits non-zero, within minutes (an EventBridge
-  rule on the task's exit code).
+- A backup or drill task that exits non-zero or never starts (no image to
+  pull, no secret to read), within minutes (an EventBridge rule on the task's
+  exit code and its stop code: a task that never started has no exit code).
 - RDS storage events: low storage, failure, and allocation near the
   autoscaling ceiling. A fixed free-storage threshold is meaningless under
   storage autoscaling, since free space is measured against the current

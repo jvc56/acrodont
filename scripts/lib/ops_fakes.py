@@ -363,7 +363,8 @@ def cloudwatch(op, pos, opt, q):
 def task_pattern(family):
     return {"source": ["aws.ecs"], "detail-type": ["ECS Task State Change"],
             "detail": {"lastStatus": ["STOPPED"], "group": ["family:" + family],
-                       "containers": {"exitCode": [{"anything-but": 0}]}}}
+                       "$or": [{"containers": {"exitCode": [{"anything-but": 0}]}},
+                               {"stopCode": ["TaskFailedToStart"]}]}}
 
 
 RULES = {
@@ -391,6 +392,10 @@ def leaf(rule, v, present):
 def matches(pattern, event):
     """EventBridge's matching, as far as these rules use it."""
     for k, pv in pattern.items():
+        if k == "$or":
+            if not any(matches(alt, event) for alt in pv):
+                return False
+            continue
         present = isinstance(event, dict) and k in event
         ev = event.get(k) if present else None
         if isinstance(pv, dict):
@@ -412,6 +417,9 @@ def events(op, pos, opt, q):
         p = RULES[name]
         if os.environ.get("FAKE_RULE_BROKEN") == name:
             p = {"source": ["aws.ecs"]}
+        if os.environ.get("FAKE_RULE_EXIT_CODE_ONLY") == name:
+            p = json.loads(json.dumps(p))
+            p["detail"]["containers"] = p["detail"].pop("$or")[0]["containers"]
         out(json.dumps(p))
     elif op == "test-event-pattern":
         event = json.loads(opt["--event"])
