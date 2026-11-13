@@ -537,7 +537,10 @@ export class Player {
 		}
 	}
 
-	/** The completion screen's Start over: it closes and stays closed, and the cascade is studied again. */
+	/**
+	 * The completion screen's Start over: it closes and stays closed, and the cascade is studied again.
+	 * Until then the new pass under the screen takes no action, the ones queued behind the finish included.
+	 */
 	dismissCompletion() {
 		this.v.completion = null;
 		this.emit();
@@ -574,6 +577,7 @@ export class Player {
 
 	/** Show / Next. Resolves once its writes are saved; the screen changes before that. */
 	async showNext(): Promise<void> {
+		if (this.v.completion) return;
 		const card = this.v.card;
 		if (card && !card.revealed && card.key !== null && this.v.quiz && this.canActNow()) {
 			this.v.banner = null;
@@ -601,7 +605,7 @@ export class Player {
 	private async showNextNow(): Promise<void> {
 		const card = this.v.card;
 		const q = this.v.quiz;
-		if (!card || !q || this.v.status !== 'ready' || this.v.storage) return;
+		if (!card || !q || this.v.status !== 'ready' || this.v.storage || this.v.completion) return;
 		this.v.banner = null;
 		if (card.key === null) {
 			// Moved past with nothing emitted; the end of a run waits for its keys.
@@ -720,7 +724,7 @@ export class Player {
 		const flip = () => {
 			const card = this.v.card;
 			// Before the answer is shown there is no grade to toggle: nothing happens.
-			if (!card || card.key === null || this.v.status !== 'ready' || !card.revealed) return;
+			if (!card || card.key === null || this.v.status !== 'ready' || !card.revealed || this.v.completion) return;
 			this.v.card = { ...card, grade: card.grade === 'correct' ? 'missed' : 'correct' };
 			this.emit();
 		};
@@ -743,7 +747,7 @@ export class Player {
 	private async previousNow(): Promise<void> {
 		const card = this.v.card;
 		const q = this.v.quiz;
-		if (!card || !q || this.v.status !== 'ready' || this.v.storage) return;
+		if (!card || !q || this.v.status !== 'ready' || this.v.storage || this.v.completion) return;
 		const target = card.pos - 1;
 		if (target < q.run_start) {
 			// A blocked Previous always has a visible cause.
@@ -769,7 +773,7 @@ export class Player {
 	/** Enter in the typed input; returns what happened for the input to show. */
 	async enter(text: string): Promise<Submit | null> {
 		const card = this.v.card;
-		if (!card?.typed || card.revealed || !this.dist || !card.key) return null;
+		if (!card?.typed || card.revealed || !this.dist || !card.key || this.v.completion) return null;
 		const words = this.words(card);
 		const { state, result } = submitTyped(
 			card.typed,

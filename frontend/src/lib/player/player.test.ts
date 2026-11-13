@@ -304,6 +304,30 @@ describe('the player', () => {
 		expect(p.v.quiz!.level).toBe(2);
 	});
 
+	it('presses queued behind the finish that completes the cascade do not act on the new pass', async () => {
+		await cascade(2);
+		const p = player();
+		await p.load();
+		await p.showNext();
+		await p.showNext();
+		await p.showNext();
+		// The last card's Next, and a Space rhythm kept up while its finish is written: none awaited.
+		const all = [p.showNext(), p.showNext(), p.showNext(), p.toggle(), p.previous(), p.showNext()];
+		await Promise.all(all);
+		expect(p.v.completion).toEqual({ levels: 1, attempts: 1 });
+		expect((await ops()).at(-1)).toBe('finish');
+		expect([p.v.card!.pos, p.v.card!.revealed]).toEqual([0, false]);
+		const q = (await db.get('overlay_quizzes', p.v.quiz!.id))!;
+		expect([q.cursor, q.correct_count, q.missed_count]).toEqual([0, 0, 0]);
+		// The screen is still up: a press made now does nothing either.
+		await p.showNext();
+		expect(p.v.card!.revealed).toBe(false);
+		// Start over closes it, and the new pass is studied.
+		p.dismissCompletion();
+		await p.showNext();
+		expect(p.v.card!.revealed).toBe(true);
+	});
+
 	it('a segmented attempt played as the player emits it: runs, drills and the finish, with no rejection', async () => {
 		await cascade(10, { segment_size: 5 });
 		const p = player();
