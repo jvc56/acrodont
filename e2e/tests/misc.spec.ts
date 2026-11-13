@@ -123,6 +123,10 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	expect(Math.abs(atBack.width - taBack.width)).toBeLessThan(1);
 	expect(Math.abs(atBack.x - taBack.x)).toBeLessThan(1);
 	expect(atFront.width).toBeGreaterThan(atBack.width + 10);
+	// The hooks, smaller than the word, are centred on it, not sat on its baseline.
+	const atWord = await box(page.locator('[data-answer]').filter({ hasText: /^\W*AT\W*$/ }));
+	for (const h of [atFront, atBack]) expect(Math.abs(h.y + h.height / 2 - (atWord.y + atWord.height / 2))).toBeLessThan(1.5);
+	expect(atFront.height).toBeLessThan(atWord.height - 5);
 	// The words are still in the middle, though the hooks either side are not equally wide.
 	const [ta, area] = [await box(page.locator('[data-answer]').filter({ hasText: /^\W*TA\W*$/ })), (await page.locator('[data-fit-area]').first().boundingBox())!];
 	expect(Math.abs(ta.x + ta.width / 2 - (area.x + area.width / 2))).toBeLessThan(3);

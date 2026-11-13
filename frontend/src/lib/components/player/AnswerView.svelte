@@ -9,9 +9,10 @@
 	// the word instead (and a narrow screen always does). The word is in the
 	// middle of the row whatever sits either side; each hook column is as wide
 	// as its widest hooks and no wider; the definition takes the room that is
-	// left, up to this device's limit. The probability order, hooks and word
-	// share one line, and that line and the definition are centred on each
-	// other however many lines the definition wraps to; a short part of
+	// left, up to this device's limit. The probability order and the hooks,
+	// smaller than the word, are centred on it, not sat on its baseline, and
+	// the word and the definition are centred on each other however many
+	// lines the definition wraps to; a short part of
 	// speech ("[n -S]") is never split.
 	// Unfound words are highlighted after a typed-mode reveal; before it, only the
 	// words typed so far show, bare: no hooks, inner hooks or definitions, which
@@ -81,14 +82,8 @@
 	);
 	let answerStyle = $derived(fitted(textStyle(font, size, spacing)));
 	let hookStyle = $derived(`font-size: calc(${hookSize}px * var(--fit, 1));`);
-	/**
-	 * For the rows' stylesheet: the definition column's limit, and the two sizes
-	 * a word's line holds, which every cell of the line is given (see .strut).
-	 */
-	let rowVars = $derived(
-		`--answer-size: calc(${size}px * var(--fit, 1)); --hook-size: calc(${hookSize}px * var(--fit, 1));` +
-			(definitionWidth > 0 ? ` --definition-width: ${definitionWidth}px;` : '')
-	);
+	/** The definition column's limit, for the rows' stylesheet. */
+	let rowVars = $derived(definitionWidth > 0 ? `--definition-width: ${definitionWidth}px;` : '');
 
 	let all = $derived(Array.isArray(answer) ? (answer as Word[]) : []);
 	let words = $derived(typing ? all.filter((w) => typing.includes(w.word)) : all);
@@ -118,7 +113,7 @@
 
 {#snippet hookCell(mine: string | undefined, sizes: string, side: 'front' | 'back')}
 	<span class="hooks inline-grid font-normal text-muted-foreground" class:justify-items-end={side === 'front'} style={hookStyle} data-hooks={side}>
-		<span style="grid-area: 1 / 1;"><span class="strut"></span>{#if mine}<TileText text={mine} lower />{/if}</span>
+		<span style="grid-area: 1 / 1;">{#if mine}<TileText text={mine} lower />{/if}</span>
 		{#if sizes}<span class="sizer" style="grid-area: 1 / 1;" data-sizes={sizes} aria-hidden="true"></span>{/if}
 	</span>
 {/snippet}
@@ -135,7 +130,7 @@
 	<!-- Left of the word: the probability order, then the front hooks, right-aligned against the word. -->
 	<span class="left">
 		<span class="justify-self-end font-normal text-muted-foreground tabular-nums" style={hookStyle} data-probability>
-			<span class="strut"></span>{#if showProbability && w.probability_order}{w.probability_order}{/if}
+			{#if showProbability && w.probability_order}{w.probability_order}{/if}
 		</span>
 		{@render hookCell(hooks ? w.front_hooks : undefined, hooks ? widest(peers, 'front_hooks') : '', 'front')}
 	</span>
@@ -146,7 +141,7 @@
 		class:text-destructive={missing}
 		class:text-green-600={last}
 	>
-		<span class="strut"></span><span class:invisible={!(hooks && w.front_inner)} aria-hidden={!(hooks && w.front_inner)}>·</span><TileText text={w.word} /><span
+		<span class:invisible={!(hooks && w.front_inner)} aria-hidden={!(hooks && w.front_inner)}>·</span><TileText text={w.word} /><span
 			class:invisible={!(hooks && w.back_inner)}
 			aria-hidden={!(hooks && w.back_inner)}>·</span
 		>
@@ -192,7 +187,8 @@
 
 <style>
 	/* Left of the word | the word | right of the word: the outer two share what is left equally, so the word is in the middle.
-	   A row's cells are centred on each other: the word's line on its definition, however tall that is. */
+	   A row's cells are centred on each other: the smaller probability order and hooks on the word, and
+	   the word on its definition, however tall that is. */
 	.rows {
 		display: grid;
 		width: 100%;
@@ -209,19 +205,6 @@
 	}
 	.word {
 		grid-column: 2;
-	}
-	/* Every cell of a word's line (probability, hooks, word) holds a letter's height at the word's size and
-	   at the hooks' size, unseen and without width. So the cells' lines are equally tall with their baselines
-	   at the same height, and centring the cells puts their text on one baseline, whichever size is larger. */
-	.strut::before,
-	.strut::after {
-		content: '\200b';
-	}
-	.strut::before {
-		font-size: var(--answer-size);
-	}
-	.strut::after {
-		font-size: var(--hook-size);
 	}
 	/* Under the word: the back hooks stay on the word's line, and the definition has a row of its own across every column. */
 	.right {

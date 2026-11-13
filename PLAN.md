@@ -1160,8 +1160,9 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
     column after the back hooks (the cascade's *Definitions in their own
     column*, on by default), or, with that off, centred beneath the word. The
     column runs to the right edge of the page, or to the device's *Definition
-    column width* when that is not 0. The word's line (probability order,
-    hooks and word, on one baseline) and the definition are **centred on each
+    column width* when that is not 0. The probability order and the hooks, which are
+    smaller than the word, are centred on it vertically, not sat on its
+    baseline, and the word and the definition are **centred on each
     other**, however many lines the definition takes or wraps to: a
     definition of three lines has its second beside the word. A short part of speech (`[n -S]`, up to 16 characters)
     is never split across lines, nor an inflection from its hyphen (`-S`). A window narrower than 640 px has no room for the column and always
