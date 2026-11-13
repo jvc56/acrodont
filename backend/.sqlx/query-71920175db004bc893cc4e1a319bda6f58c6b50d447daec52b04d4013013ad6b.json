@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT l.id, l.letter_distribution_id,\n                EXISTS (SELECT 1 FROM leave_sets s WHERE s.lexicon_id = l.id AND s.name = $2) AS \"taken!\"\n         FROM lexicons l WHERE l.name = $1",
+  "query": "SELECT l.id, l.letter_distribution_id,\n                EXISTS (SELECT 1 FROM leave_sets s WHERE s.lexicon_id = l.id) AS \"has_leaves!\"\n         FROM lexicons l WHERE l.name = $1",
   "describe": {
     "columns": [
       {
@@ -27,14 +27,13 @@
       },
       {
         "ordinal": 2,
-        "name": "taken!",
+        "name": "has_leaves!",
         "type_info": "Bool",
         "origin": "Expression"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
         "Text"
       ]
     },
@@ -44,5 +43,5 @@
       null
     ]
   },
-  "hash": "21a14ab8cfd8fe2d8b49b15195a87ef472d9d8265e7277e2c713608959a98cf8"
+  "hash": "71920175db004bc893cc4e1a319bda6f58c6b50d447daec52b04d4013013ad6b"
 }

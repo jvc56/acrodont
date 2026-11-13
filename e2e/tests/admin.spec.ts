@@ -88,57 +88,6 @@ test('admin uploads, a broken file, a Leave Value cascade from the new set, dele
 	await page.goto(leaves);
 	await expect(page.getByText(/^1 \/ \d+$/)).toBeVisible({ timeout: 60_000 });
 
-	// A second set for the same lexicon, under its own name. The builder then offers the choice,
-	// newest first, and the count follows the set picked (PLAN.md § Uploads).
-	// This is the journey's fifth upload within a minute of the seeding's own, so the admin
-	// upload limit may answer "Too many uploads" first: tried again until the minute has passed.
-	await expect(async () => {
-		await upload(
-			page,
-			'/admin/leave-sets/new',
-			async () => {
-				await page.getByLabel('Lexicon').selectOption(lex);
-				await page.getByLabel('Name').fill('Gen 2');
-			},
-			'gen2.csv',
-			'?,1\nA,40\nE,45.5\n'
-		);
-		await expect(page.getByText('Uploaded')).toBeVisible({ timeout: 15_000 });
-	}).toPass({ timeout: 150_000, intervals: [15_000] });
-	await expect
-		.poll(
-			async () =>
-				((await (await page.request.get('/api/lexicons')).json()) as { name: string; leave_sets: { name: string }[] }[])
-					.find((l) => l.name === lex)
-					?.leave_sets.map((s) => s.name),
-			{ timeout: 120_000 }
-		)
-		.toEqual(['Gen 2', 'leaves']);
-	await page.goto('/cascades/new');
-	// The radio inputs are visually hidden; their labels are the segments a person clicks.
-	await page.getByRole('radiogroup', { name: 'Quiz type' }).getByText('Leave Value').click();
-	await page.getByLabel('Lexicon').selectOption(lex);
-	// A leave is 1–6 tiles: the row the builder opens with is sized for words.
-	await page.getByLabel('Minimum').first().fill('1');
-	await page.getByLabel('Maximum').first().fill('6');
-	const sets = page.getByLabel('Leave values', { exact: true });
-	await expect(sets).toHaveValue('Gen 2');
-	await expect(sets.getByRole('option')).toHaveText(['Gen 2 (newest)', 'leaves']);
-	await expect(page.getByText('3 questions').first()).toBeVisible({ timeout: 60_000 });
-	await sets.selectOption('leaves');
-	await expect(page.getByText('35 questions').first()).toBeVisible({ timeout: 60_000 });
-	await page.getByLabel('Cascade name').fill('Older leaves');
-	await page.getByRole('button', { name: 'Create Cascade' }).click();
-	await expect(page).toHaveURL(/\/cascades\/[0-9a-f-]{36}$/, { timeout: 60_000 });
-	await expect(page.getByText(/^1 \/ 35$/)).toBeVisible({ timeout: 60_000 });
-	// The Cascades page names the set each Leave Value cascade was built on.
-	await page.goto('/');
-	await expect(page.getByTitle(new RegExp(`Older leaves\\n.*${lex} \\(leaves\\)`))).toHaveCount(1);
-	// An anagram cascade has no such choice.
-	await page.goto('/cascades/new');
-	await page.getByLabel('Lexicon').selectOption(lex);
-	await expect(page.getByLabel('Leave values', { exact: true })).toHaveCount(0);
-
 	// The lexicon's definitions replaced: the same words and playabilities with one definition
 	// corrected (PLAN.md § Immutability and deletion → Replacing definitions). The overview then
 	// shows the revision. Tried again while the upload limit says to wait, as above.
@@ -152,18 +101,60 @@ test('admin uploads, a broken file, a Leave Value cascade from the new set, dele
 			'corrected.tsv',
 			bigLexicon().replace('a made-up word [n]', 'a corrected word [n]')
 		);
-		await expect(page.getByText('Uploaded')).toBeVisible({ timeout: 60_000 });
+		await expect(page.getByText('1 of 11,000 definitions changed. This is revision 2 of its definitions.')).toBeVisible({ timeout: 60_000 });
 	}).toPass({ timeout: 240_000, intervals: [15_000] });
-	await expect(page.getByText('1 of 11,000 definitions changed. This is revision 2 of its definitions.')).toBeVisible();
 	await page.goto('/admin');
 	await expect(page.getByRole('row').filter({ hasText: lex }).first().getByText('revision 2')).toBeVisible({ timeout: 30_000 });
+
+	// And the leave values replaced the same way: the same leaves, one value changed.
+	await expect(async () => {
+		await upload(
+			page,
+			'/admin/leave-sets/values',
+			async () => {
+				await page.getByLabel('Lexicon').selectOption({ label: lex });
+			},
+			'new-values.csv',
+			readFileSync(path.join(fixtures, 'EN-FIX-leaves.csv'), 'utf8').replace('?S,32.400', '?S,12.5')
+		);
+		await expect(page.getByText('1 of 35 values changed. This is revision 2 of its leave values.')).toBeVisible({ timeout: 60_000 });
+	}).toPass({ timeout: 240_000, intervals: [15_000] });
+	// The Leave Value cascade made above keeps its questions and shows the new value, with no reload of the app:
+	// its cards are fetched again once this device has pulled the row at the new revision.
+	await page.goto(leaves);
+	await expect
+		.poll(
+			() =>
+				page.evaluate(async () => {
+					const open = (name: string) =>
+						new Promise<IDBDatabase>((res, rej) => {
+							const r = indexedDB.open(name);
+							r.onsuccess = () => res(r.result);
+							r.onerror = () => rej(r.error);
+						});
+					const all = <T>(db: IDBDatabase, store: string) =>
+						new Promise<T[]>((res) => {
+							const r = db.transaction(store).objectStore(store).getAll();
+							r.onsuccess = () => res(r.result as T[]);
+						});
+					const pointer = (await all<{ user_id: string }>(await open('acrodont'), 'pointer'))[0];
+					const db = await open(`acrodont-user-${pointer.user_id}`);
+					const keys = await all<{ cascade_id: string; idx: number; key: string }>(db, 'questions');
+					const cards = await all<{ cascade_id: string; idx: number; answer: number; rev?: number }>(db, 'cards');
+					const q = keys.find((k) => k.key === '?S');
+					const card = q && cards.find((c) => c.cascade_id === q.cascade_id && c.idx === q.idx);
+					return card ? [card.answer, card.rev] : null;
+				}),
+			{ timeout: 90_000 }
+		)
+		.toEqual([12.5, 2]);
 
 	// Deletion refused while the cascade exists: the button is disabled and says what uses it
 	// (PLAN.md § Catalog: "the admin page disables the delete button and explains what is still using the item").
 	await page.goto('/admin');
 	const row = page.getByRole('row').filter({ hasText: lex }).first();
 	await expect(row.getByRole('button', { name: 'Delete' })).toBeDisabled({ timeout: 30_000 });
-	await expect(row.getByText('In use: it has leave values and 2 cascades use it.')).toBeVisible();
+	await expect(row.getByText('In use: it has leave values and 1 cascade uses it.')).toBeVisible();
 
 	// More than 2,000 levels: warned about in a level's options, in Settings.
 	await page.goto('/cascades/new');

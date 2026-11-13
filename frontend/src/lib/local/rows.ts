@@ -15,10 +15,10 @@ export interface CascadeRow {
 	quiz_type: QuizType;
 	lexicon: string;
 	letter_distribution: string;
-	/** A Leave Value cascade's set of leave values, by its name in the lexicon; absent on rows stored before the server sent it. */
-	leave_set?: string | null;
 	/** The lexicon's definitions revision (1 until an admin replaces them); answers held from an older one are fetched again. */
 	definitions_revision?: number;
+	/** A Leave Value cascade's: its leave values' revision, likewise. */
+	leave_values_revision?: number | null;
 	clear_threshold: number;
 	segment_size: number;
 	progression: Progression;

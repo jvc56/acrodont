@@ -122,9 +122,7 @@
 	/** A row's tooltip: the name, its options, and its ladder. */
 	function details(s: CascadeSummary): string {
 		const c = s.cascade;
-		// A Leave Value cascade names the set of leave values it was built on.
-		const lexicon = c.leave_set ? `${c.lexicon} (${c.leave_set})` : c.lexicon;
-		const opts = [c.quiz_type.replace('_', ' '), lexicon, `clear at ${c.clear_threshold}%`];
+		const opts = [c.quiz_type.replace('_', ' '), c.lexicon, `clear at ${c.clear_threshold}%`];
 		if (s.options) opts.push(s.options);
 		if (s.completedAt) opts.push(`complete ${new Date(s.completedAt).toLocaleDateString()}`);
 		return `${c.name}\n${opts.join(' · ')}\n${ladderText(s.levels)}`;

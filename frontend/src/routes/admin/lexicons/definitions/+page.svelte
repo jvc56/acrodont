@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Replacing a lexicon's definitions (PLAN.md § Immutability and deletion →
-	// Replacing definitions): the one part of an uploaded lexicon that can change.
+	// Replacing definitions and leave values): the one part of an uploaded lexicon that can change.
 	import { onMount } from 'svelte';
 	import { Label } from '$lib/components/ui/label';
 	import * as Card from '$lib/components/ui/card';

@@ -36,10 +36,9 @@ Word study data comes in three kinds, all uploaded by admins:
 - **Lexicons** (CSW24, NWL23, …) are word lists. Every word has a definition and
   a playability value. Each lexicon refers to one letter distribution.
 - **Leave values** are sets of leave → value pairs. Each set belongs to one
-  lexicon and uses that lexicon's letter distribution. A lexicon may have none,
-  one, or several, each under its own name: better values are uploaded as a new
-  set beside the old. A new Leave Value cascade uses the newest set unless
-  another is chosen, and every cascade keeps the set it was built on.
+  lexicon and uses that lexicon's letter distribution. A lexicon has at most one
+  set of leave values, and may have none. The set's values can be replaced
+  later, as a lexicon's definitions can; its leaves cannot.
 
 Each cascade also carries a few **quiz options**: how long a study run is
 (**segment size**), what happens to a quiz that isn't cleared (**progression**),
@@ -713,11 +712,7 @@ because searching runs on the server.
 2. **Lexicon**: e.g. `CSW24`, a select under it. Each label sits in a column
    of its own on a wide screen and above its control on a phone, where both
    controls take the full width. When the type is Leave Value, lexicons without
-   leave values are disabled, with a tooltip saying why; and when the chosen
-   lexicon has more than one set of leave values, a **Leave values** select
-   appears under it, listing the sets newest first with the newest chosen
-   ("Gen 2 (newest)"). The preview counts, the rows' ceilings and the cascade
-   created all follow the set picked. A lexicon with one set shows no select.
+   leave values are disabled, with a tooltip saying why.
 3. **Filters**: a tree of condition rows in AND / OR [groups](#groups). Each
    row has a `+` menu (add a row or a group below), a `−` button (remove this
    row), a **Not** checkbox, a filter type dropdown, and inputs that change with
@@ -1613,14 +1608,7 @@ Each upload is a form plus one file:
 |---|---|---|
 | **Letter distribution** | name (defaults to the file name without `.csv`, e.g. `english`) | [Letter distribution CSV](#letter-distribution-file) |
 | **Lexicon** | name (e.g. `CSW24`), letter distribution | [Lexicon TSV](#lexicon-file) |
-| **Leave values** | lexicon, name (unique within the lexicon; defaults to the file name without `.csv`; 1–32 letters, digits, spaces, underscores or hyphens) | [Leave values CSV](#leave-values-file) |
-
-A lexicon can hold any number of sets of leave values. An upload never replaces
-one: a second set for the same lexicon sits beside the first under its own
-name, and becomes what new Leave Value cascades use, being the newest. Existing
-cascades are untouched (see [Immutability and deletion](#immutability-and-deletion)).
-Each set is a whole index in memory (see [Catalog Indexes](#catalog-indexes)),
-so a set no cascade uses is worth deleting.
+| **Leave values** | lexicon | [Leave values CSV](#leave-values-file) |
 
 Every upload is validated in full before anything is written. If there are
 problems, nothing is stored and the page lists them with line numbers: the first
@@ -1757,8 +1745,8 @@ Catalog data is **immutable once uploaded**. There are no edit endpoints; a
 corrected word list is a new lexicon with a new name (`CSW24` → `CSW24-fixed` or
 `CSW27`). Immutability is what lets a cascade store only question keys, lets
 downloaded answers be cached forever, and makes re-running a stored search always
-give the same questions. There is one exception, made deliberately:
-[a lexicon's definitions can be replaced](#replacing-definitions).
+give the same questions. There are two exceptions, made deliberately:
+[a lexicon's definitions and a leave value set's values can be replaced](#replacing-definitions-and-leave-values).
 
 An admin can delete an item only when nothing references it. The foreign keys
 enforce this, and the admin page disables the delete button and explains what is
@@ -1778,18 +1766,19 @@ still using the item:
   without comment: a name is what the user chose, a re-uploaded name is almost
   always a corrected list, and a corrected list is meant to get a new name in
   any case (see above). The distribution check still flags a mismatch.
-- **A set of leave values** is in use while any Leave Value cascade refers to
-  it. A cascade refers to the one set it was built on, recorded at creation and
-  kept by Start over, so its answers, exports and stored questions never
-  change when another set is uploaded for the same lexicon; each of a lexicon's
-  sets is deleted on its own, once its own cascades are gone.
+- **A lexicon's leave values** are in use while any Leave Value cascade refers
+  to them.
 
-#### Replacing definitions
+#### Replacing definitions and leave values
 
-Definitions are text that keeps being corrected, and a correction is wanted by
-every cascade already studying the word, so they are the one part of a lexicon
-that can change after upload. An admin uploads, at
-`/admin/lexicons/definitions`, the lexicon's own file with new definitions:
+Two things an answer shows keep being improved after upload, and each
+improvement is wanted by the cascades already studying it: a word's
+**definition**, and a leave's **value**. Both can be replaced in place, by
+the same mechanism. What a question *is* never changes: a lexicon's words and
+playabilities, and a set's leaves.
+
+**Definitions.** An admin uploads, at `/admin/lexicons/definitions`, the
+lexicon's own file with new definitions:
 
 - **Only definitions may differ.** The file is a [lexicon file](#lexicon-file)
   and is validated as one. It must hold exactly the lexicon's words, in any
@@ -1825,7 +1814,33 @@ that can change after upload. An admin uploads, at
   matched when it was created. Start over runs the search again and takes
   what matches now.
 
-Words and playabilities stay immutable: changing either changes what searches
+**Leave values.** An admin uploads, at `/admin/leave-sets/values`, the
+lexicon's leave values file with new values. Everything above holds with the
+names changed:
+
+- **Only values may differ.** The file is a
+  [leave values file](#leave-values-file), validated as one, holding exactly
+  the set's leaves in any order (and with a leave's tiles in any order). A
+  leave the set lacks or a leave left out is reported and nothing is stored;
+  so is a file whose values are all the stored ones.
+- **The set's `values_revision` rises by one**, every instance rebuilds the
+  set's index, and every Leave Value cascade on the set is given a new
+  `updated_seq`, so its row reaches its devices with the new
+  `leave_values_revision`.
+- **A device fetches a Leave Value cascade's cards again** when they are from
+  an older revision, and an instance still holding the older index answers
+  `503` to a request for them meanwhile.
+- **A cascade keeps its questions**, and this matters more here than for
+  definitions: the Leave Value filter is the usual way to build a Leave Value
+  cascade, so after a replacement a cascade of "leaves worth 5 or more" may
+  hold a leave now worth less and lack one now worth more. Its answers are
+  the new values; its questions are the ones chosen at creation, until Start
+  over chooses again. The values upload page says so.
+- **A lexicon still has at most one set.** A different list of leaves is a
+  different catalog item: the old set is deleted once no cascade uses it, or
+  the lexicon is uploaded again under a new name.
+
+Words, playabilities and the leaves stay immutable: changing any changes what searches
 return, which is what a new lexicon name is for.
 
 ### Loading changes into running servers
@@ -2149,8 +2164,7 @@ Zyzzyva does, and the limited words are then collapsed to alphagrams.
 **Definition quizzes** search over words, and each matching word is one
 question.
 
-**Leave Value quizzes** search over **one set of the lexicon's leave values**:
-the newest, or the one the request names. A leave has
+**Leave Value quizzes** search over the **lexicon's leave values**. A leave has
 no word-only attributes (validity, definition, playability, hooks), so filters
 that depend on those do not apply. Leave probability uses the lexicon's letter
 distribution, with the blank treated as an ordinary tile.
@@ -2908,11 +2922,11 @@ brings the server's.
   on the same schedule as index lists: at once for cascades in the window or
   kept automatically, on first open otherwise, behind the same progress. The
   settings are read from the cascade as the device sees it, overlay included,
-  so a change not yet sent already refetches. Cards also record the
-  lexicon's definitions revision they were fetched at, and a cascade whose
-  cards carry definitions from an older revision than its row names has them
-  fetched again the same way (see
-  [Replacing definitions](#replacing-definitions)). Until they
+  so a change not yet sent already refetches. Cards also record the revision
+  of what an admin can replace in them (the lexicon's definitions, or a Leave
+  Value cascade's leave values), and a cascade whose cards are from an older
+  revision than its row names has them fetched again the same way (see
+  [Replacing definitions and leave values](#replacing-definitions-and-leave-values)). Until they
   arrive the player shows the words without the missing part, with one line
   in the answer area saying definitions are downloading, or need a
   connection. No confirmation is asked for the size; the window is already
@@ -3965,24 +3979,25 @@ CREATE TABLE lexicon_words (
 );
 ALTER TABLE lexicon_words ALTER COLUMN words SET STORAGE EXTERNAL;
 
--- A lexicon's leave value sets: any number, each named within its lexicon. A
--- new Leave Value cascade uses the newest (the highest id) unless it names
--- another; a cascade keeps the set it was built on. Leaves use the lexicon's
--- letter distribution.
+-- At most one per lexicon. Leaves use the lexicon's letter distribution.
 CREATE TABLE leave_sets (
     id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    lexicon_id   SMALLINT NOT NULL REFERENCES lexicons (id),
-    name         TEXT NOT NULL CHECK (name ~ '^[A-Za-z0-9 _-]{1,32}$'),
+    lexicon_id   SMALLINT NOT NULL UNIQUE REFERENCES lexicons (id),
     leave_count  INTEGER NOT NULL CHECK (leave_count > 0),
+    values_revision INTEGER NOT NULL DEFAULT 1 CHECK (values_revision >= 1),
+                     -- raised by each replacement of the set's values, as
+                     -- lexicons.definitions_revision is by its definitions'; the
+                     -- leaves themselves never change
     uploaded_by  UUID REFERENCES users (id) ON DELETE SET NULL,
     uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (lexicon_id, name),
     UNIQUE (id, lexicon_id)   -- target of cascades' composite foreign key
 );
 
 -- A leave set's leaves, packed as a lexicon's words are: one row per set, the
 -- text one line per leave, `leave TAB value LF`, the leave in canonical MAGPIE
 -- notation (1–6 tiles in distribution order, blanks first), compressed with zstd.
+-- The values are replaced whole by a values upload, which raises
+-- leave_sets.values_revision.
 CREATE TABLE leave_values (
     leave_set_id  INTEGER PRIMARY KEY REFERENCES leave_sets (id) ON DELETE CASCADE,
     leaves        BYTEA NOT NULL CHECK (octet_length(leaves) > 0)
@@ -5029,9 +5044,9 @@ endpoint; this device's settings never leave it.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/lexicons` | `[{ name, letter_distribution, word_count, leave_sets, leave_count, max_num_anagrams, max_order_rank, max_leave_num_anagrams, max_leave_order_rank }]`. `leave_sets` is the lexicon's sets of leave values, newest first, each `{ name, leave_count, max_num_anagrams, max_order_rank }`; the three `leave_` figures beside it are the newest set's, and `null` for a lexicon without leave values (`leave_sets` is then empty). The four maxima are the range [ceilings](#filter-reference) the client cannot derive for itself, all taken from the [index](#derived-attributes): `max_num_anagrams` is the largest `num_anagrams` over the words, and `max_order_rank` the size of the largest length bucket, which is the highest rank Probability Order and Playability Order can reach, with the two `leave_` figures the same over the leaves, by size. The other ceilings need no endpoint: the quiz type gives 15 or 6, `GET /api/letter-distributions/:name` gives the highest tile value behind Point Value's, and `word_count` and `leave_count` are the two limit filters', which rank a whole group's survivors together. Only items loaded by every live instance, per `catalog_instance_status`, are listed, so no listed item can fail on another instance. |
+| `GET` | `/api/lexicons` | `[{ name, letter_distribution, word_count, leave_count, max_num_anagrams, max_order_rank, max_leave_num_anagrams, max_leave_order_rank }]`, where every `leave_` figure is `null` for a lexicon without leave values. The four maxima are the range [ceilings](#filter-reference) the client cannot derive for itself, all taken from the [index](#derived-attributes): `max_num_anagrams` is the largest `num_anagrams` over the words, and `max_order_rank` the size of the largest length bucket, which is the highest rank Probability Order and Playability Order can reach, with the two `leave_` figures the same over the leaves, by size. The other ceilings need no endpoint: the quiz type gives 15 or 6, `GET /api/letter-distributions/:name` gives the highest tile value behind Point Value's, and `word_count` and `leave_count` are the two limit filters', which rank a whole group's survivors together. Only items loaded by every live instance, per `catalog_instance_status`, are listed, so no listed item can fail on another instance. |
 | `GET` | `/api/letter-distributions/:name` | `{ name, tiles: [{ letter, blank_letter, count, value, is_vowel }] }` in tile order (blank first), for parsing, display and the tile palette. Read straight from `letter_distribution_tiles`, never from an in-memory index, so it needs no `catalog_instance_status` gate and a device can fetch a distribution from an instance that is still indexing the lexicons built on it |
-| `POST` | `/api/search/preview` | Body `{ lexicon, quiz_type, filters, leave_set? }`, where `leave_set` names the set of the lexicon's leave values a Leave Value search runs on (absent: its newest; a name the lexicon does not have is a `400` on the field `leave_set`; the other quiz types ignore it) → `{ count, sample[], over_cap, storage_bytes }`, where `storage_bytes` (a number) is what a cascade made from this search would hold as created, by the [storage formula](#storage-limit) with the keys' real bytes and the spec, which is exactly what creation then stores, or `400` with `{ errors: [{ path, field, message }] }`, where `path` is the row's child indexes from the top group |
+| `POST` | `/api/search/preview` | Body `{ lexicon, quiz_type, filters }` → `{ count, sample[], over_cap, storage_bytes }`, where `storage_bytes` (a number) is what a cascade made from this search would hold as created, by the [storage formula](#storage-limit) with the keys' real bytes and the spec, which is exactly what creation then stores, or `400` with `{ errors: [{ path, field, message }] }`, where `path` is the row's child indexes from the top group |
 | `GET` | `/api/searches` | `[{ id, name, quiz_type, word_list_entries, created_at, updated_at }]`: the user's saved searches **without their trees**, with `word_list_entries` the tree's total In Word List entries, so the list **Load Search…** shows stays small however many 300,000-entry lists a user keeps (as many as fit in the account's [storage](#storage-limit)) |
 | `GET` | `/api/searches/:id` | One saved search's whole tree, `{ id, name, quiz_type, filters }`, in the same shape `POST` accepts, In Word List entries included: what Load Search… fetches for the search the user picks, and rebuilds the form from. The `quiz_type` is what lets the builder flag an In Word List row on load. `404` for another user's or a deleted search |
 | `POST` | `/api/searches` | Save `{ id, name, quiz_type, filters, overwrite? }`, where `id` is a device-generated UUID minted when Save is pressed and reused for any retry of that press, exactly as for [cascade creation](#cascades-and-sync): a request whose `id` the server already holds for this user returns that saved search unchanged, so a save whose response was lost is not refused on its retry as `name_taken` or `storage_limit` by its own first attempt, and an `id` held by another user is refused with `409`. `name` is required and 1–100 Unicode scalar values, otherwise a `400` field error. `quiz_type` is what the entries were canonicalised under and is stored on the spec. **The tree is validated as it is for a preview**, for everything that does not need a lexicon — the [group](#groups) rules, each type's parameters, negation, applicability to `quiz_type`, ranges against that type's floor and its **type-fixed** ceiling (Length, Number of Vowels and Number of Unique Letters at 15 or 6, Consists of at 100), canonical form and length, and the tree's [300,000-entry In Word List total](#filter-reference) — and a failure is `400` with the same `{ errors: [{ path, field, message }] }` shape, never a stored spec. What a save cannot check is whatever depends on the lexicon, since a saved search carries none and can be loaded against any: tile membership in a distribution, and the three ceilings a target sets — Point Value's (15 × the highest tile value), the order filters' (the target's largest bucket) and Number of Anagrams' (the target's largest count). Those rows are flagged on load and refused at creation. The builder also refuses to save while any row is **flagged** (see [Filter applicability](#filter-applicability-by-quiz-type)), naming the row, because a flagged In Word List row saved under the current type would record leave-canonical entries as `anagram`, or the reverse, and nothing afterwards could tell. A name the user already has answers `409` with `{ error: "name_taken" }` unless `overwrite` is `true`, which the UI sends after confirming; the overwrite deletes the replaced saved search and its spec and stores the new one under the request's `id`, so a retried overwrite is recognised by that `id` like any other save. The search's spec counts toward the account's [storage](#storage-limit) (`saved_searches.storage_bytes`): `409` with `{ error: "storage_limit", used, limit, needed }` when it does not fit, checked inside the transaction after locking the user's row, as creation's is, so two simultaneous saves cannot both take the last space; an overwrite needs only what it adds to the search it replaces, and one that adds nothing is never refused |
@@ -5094,8 +5109,8 @@ person to write it copies names rather than choosing them.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/cascades` | Body `{ id, source_quiz_id, device_id, at, name, lexicon, quiz_type, clear_threshold, segment_size, progression, require_alphabetical, answer_mode, filters, leave_set? }`. `leave_set` is as for the preview, and the cascade row carries the name of the set it was built on as `leave_set` (`null` for the other quiz types). `name` is required, 1–200 Unicode scalar values, and one the account's cascades do not already use, the Trash included (`400` on the field `name` otherwise, checked before the search); the device builds the default summary itself (see [Creating a cascade](#creating-a-cascade)). The cascade row carries the lexicon's `definitions_revision`. `device_id` is recorded as `options_device_id` on the cascade and the Source quiz, so the creating device's option changes never compete on timestamps. `id` and `source_quiz_id` are device-generated UUIDs minted when the button is pressed and reused for any retry of that press, never regenerated on retry; a request whose `id` the server already holds for this user returns the existing cascade and Source quiz unchanged, so a lost response never makes a duplicate or counts its storage twice, and an `id` or `source_quiz_id` held by another user is refused with `409` (`invalid`), never that user's row. `at` is the device's timestamp, used for `options_changed_at` on the cascade and the Source quiz exactly as operations' `at` is, so the creating device's first option change is never `stale` against a server clock. Runs the search **before opening any transaction**, then in one short transaction locks the user's row, checks the [storage limit](#storage-limit) against what the new cascade will hold, stores the question index and shuffles the Source quiz with a server-generated seed, and returns `{ cascade, source_quiz, sync_seq }`, whose `cascade` carries `storage_bytes` as a pulled row does, and adds that to `users.storage_bytes`. A cheap check before the search refuses an account already at or over its limit without spending one (`needed` 0), and the lock therefore never covers the search's CPU or its wait for a `SEARCH_CONCURRENCY` permit, so a creation can never block the [purge task](#purge-task) on the same user's row for the length of a search. `source_quiz` carries its `shuffle_seed` rather than its positions: the device derives the Source quiz's order with the shared [shuffle](#deterministic-shuffles) over `idx` 0…count−1, and writes the cascade, the Source quiz and its question rows straight into its base stores from this response, so its first pull finds nothing to rebuild. `sync_seq` is informational; the device does **not** advance its sync cursor from this response, so its next sync pulls the rows the creation stamped. The cascade's private spec is stored with this request's `quiz_type`, which is what an In Word List row's entries were canonicalised under and what Start over copies. `422` if the search is empty or over the cap. `409` with `{ error: "storage_limit", used, limit, needed }` when the cascade does not fit (see [Storage limit](#storage-limit)). A `5xx`, such as a deadlock or timeout inside the creation transaction, is retried by the device with the same body, which the device-minted ids make safe, and so is a `429`, after `Retry-After`, since this endpoint shares `SEARCH_RATE_PER_MINUTE` with the builder's preview. The threshold, the three [quiz options](#quiz-options) and the answer mode are required, so an omitted one is a `400`: the builder sends the defaults every new cascade starts with (`CASCADE_SETTING_DEFAULTS`; see [Settings](#settings)). The other settings (`show_definitions`, `show_hooks`, `reveal_correct`, `leave_value_decimals`) are not in the request and take their column defaults; Start over copies all of them from the original. The Source quiz is created with a copy of the options. |
-| `POST` | `/api/cascades/:id/start-over` | Body `{ id, source_quiz_id, device_id, at }`, minted per press exactly as for creation and subject to the same repeat, timestamp and `options_device_id` rules. New cascade, named after the original with the next free number, with a copy of the spec and the same threshold and options, on the original's set of leave values whatever has been uploaded since; returns the same shape. Subject to the [storage limit](#storage-limit), with the original's questions and a copy of its spec as what it needs. |
+| `POST` | `/api/cascades` | Body `{ id, source_quiz_id, device_id, at, name, lexicon, quiz_type, clear_threshold, segment_size, progression, require_alphabetical, answer_mode, filters }`. `name` is required, 1–200 Unicode scalar values, and one the account's cascades do not already use, the Trash included (`400` on the field `name` otherwise, checked before the search); the device builds the default summary itself (see [Creating a cascade](#creating-a-cascade)). The cascade row carries the lexicon's `definitions_revision` and, for a Leave Value cascade, its leave values' `leave_values_revision` (`null` otherwise). `device_id` is recorded as `options_device_id` on the cascade and the Source quiz, so the creating device's option changes never compete on timestamps. `id` and `source_quiz_id` are device-generated UUIDs minted when the button is pressed and reused for any retry of that press, never regenerated on retry; a request whose `id` the server already holds for this user returns the existing cascade and Source quiz unchanged, so a lost response never makes a duplicate or counts its storage twice, and an `id` or `source_quiz_id` held by another user is refused with `409` (`invalid`), never that user's row. `at` is the device's timestamp, used for `options_changed_at` on the cascade and the Source quiz exactly as operations' `at` is, so the creating device's first option change is never `stale` against a server clock. Runs the search **before opening any transaction**, then in one short transaction locks the user's row, checks the [storage limit](#storage-limit) against what the new cascade will hold, stores the question index and shuffles the Source quiz with a server-generated seed, and returns `{ cascade, source_quiz, sync_seq }`, whose `cascade` carries `storage_bytes` as a pulled row does, and adds that to `users.storage_bytes`. A cheap check before the search refuses an account already at or over its limit without spending one (`needed` 0), and the lock therefore never covers the search's CPU or its wait for a `SEARCH_CONCURRENCY` permit, so a creation can never block the [purge task](#purge-task) on the same user's row for the length of a search. `source_quiz` carries its `shuffle_seed` rather than its positions: the device derives the Source quiz's order with the shared [shuffle](#deterministic-shuffles) over `idx` 0…count−1, and writes the cascade, the Source quiz and its question rows straight into its base stores from this response, so its first pull finds nothing to rebuild. `sync_seq` is informational; the device does **not** advance its sync cursor from this response, so its next sync pulls the rows the creation stamped. The cascade's private spec is stored with this request's `quiz_type`, which is what an In Word List row's entries were canonicalised under and what Start over copies. `422` if the search is empty or over the cap. `409` with `{ error: "storage_limit", used, limit, needed }` when the cascade does not fit (see [Storage limit](#storage-limit)). A `5xx`, such as a deadlock or timeout inside the creation transaction, is retried by the device with the same body, which the device-minted ids make safe, and so is a `429`, after `Retry-After`, since this endpoint shares `SEARCH_RATE_PER_MINUTE` with the builder's preview. The threshold, the three [quiz options](#quiz-options) and the answer mode are required, so an omitted one is a `400`: the builder sends the defaults every new cascade starts with (`CASCADE_SETTING_DEFAULTS`; see [Settings](#settings)). The other settings (`show_definitions`, `show_hooks`, `reveal_correct`, `leave_value_decimals`) are not in the request and take their column defaults; Start over copies all of them from the original. The Source quiz is created with a copy of the options. |
+| `POST` | `/api/cascades/:id/start-over` | Body `{ id, source_quiz_id, device_id, at }`, minted per press exactly as for creation and subject to the same repeat, timestamp and `options_device_id` rules. New cascade, named after the original with the next free number, with a copy of the spec and the same threshold and options; returns the same shape. Subject to the [storage limit](#storage-limit), with the original's questions and a copy of its spec as what it needs. |
 | `GET` | `/api/cascades/:id/cards?from=<idx>&limit=<n>&hooks=<0\|1>&definitions=<0\|1>&keys=<0\|1>`, or `?idx=<i,j,…>&hooks=…&definitions=…` | Answer cards `[{ idx, key, answer }]` for question indexes `from`…`from+limit−1` (`limit` ≤ 10,000), or for the comma-separated indexes in `idx` (at most 1,000, returned in idx order; never with `from`, `limit` or `keys`, else `400 invalid_idx`) — the player's read-ahead, which asks for the next cards in its quiz's own order. With `hooks=1`, an Anagram answer's words carry `probability_order` (the word's rank by probability among the lexicon's words of its length), `front_hooks`, `back_hooks` and the booleans `front_inner` and `back_inner` (the word less its first, or last, tile is a word), and a Definition card carries `word`: `{ word, probability_order, front_hooks, back_hooks, front_inner, back_inner }` beside its answer. The device splits each row between its `questions` store (the `key`) and its `cards` store (the rest), so eviction can take the answer and leave the question (see [On the device](#on-the-device)). With `keys=1` the response is `{ from, keys: [...] }` — the keys alone, in idx order, since the range makes every index implied — and **`limit` ≤ 100,000**, which at about 10 bytes a key is roughly the size of one 10,000-card page: a 300,000-question cascade's keys are three requests where its answers are thirty, a tenth of the cost in the shared rate bucket, and about a quarter of the bytes of cards without definitions (see [Downloads](#on-the-device)). It is what the download manager fetches first, so a cascade becomes playable and self-gradable before its answers arrive; `hooks` and `definitions` are then a `400`. A Leave Value `answer` is a JSON number written as the shortest text that round-trips the stored `f64`, which `JSON.parse` reads back exactly. Card pages are served `Cache-Control: private, no-store`, because the device keeps every byte it fetches in IndexedDB and a second copy in the browser's HTTP cache would sit outside every budget the plan states; only the questions endpoint, whose index lists are small and refetched by the pending path, keeps immutable caching. Responses are compressed. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/questions?from=<n>&limit=<n>` | The quiz's question indexes `[idx…]` in idx order, `limit` ≤ 50,000. A quiz's question set never changes, so it is served with the same immutable caching. Fetched when the device materialises a quiz; never part of a pull. `404` for another user's, a purged, or a Source quiz, whose indexes are implied. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/grades?from=<idx>&limit=<n>` | The quiz's graded rows for the attempt its row names, which for a cleared quiz is the attempt it finished on (its grades each dated that finish, the quiz's `last_activity_at`, since a cleared quiz keeps no grade times), as the parallel arrays a pull uses, in idx order, with the quiz row's `attempt` and `shuffle_seed` so the device can tell whether they belong to the order it holds. `from` is an **index, not an offset**, as on the card pages: the response holds the graded rows whose `question_idx` is in `from … from+limit−1`, `limit` ≤ 50,000, so the device pages the index space by `from += limit` until `from` reaches the cascade's `question_count` and a sparse page — most of a quiz's questions may be ungraded — means nothing is left behind. The questions endpoint below reads `from` the other way, as an offset into a dense list, which is why the two are written `<idx>` and `<n>`. There is no `min_updated_seq` here, which only a pull's fast path needs; the device stamps these rows with the sequence of the sync it made before the fetch. Not cacheable. Fetched when the device materialises a quiz whose rows it dropped on leaving the download window; never part of a pull. If the device's quiz row names a different attempt or seed, the device discards the response, syncs and fetches again. `404` for another user's or a purged quiz. |
@@ -5189,9 +5204,10 @@ out of `segment_size`, `progression` and `require_alphabetical`, and for
 | `POST` | `/api/admin/letter-distributions` | Multipart `name`, `file`. `201` with the distribution, or `400` with `{ errors: [{ line, message }], total_errors }`. |
 | `DELETE` | `/api/admin/letter-distributions/:id` | `409` with what still uses it |
 | `POST` | `/api/admin/lexicons` | Multipart `name`, `letter_distribution`, `file` |
-| `POST` | `/api/admin/lexicons/:id/definitions` | Multipart `file`: [replaces the lexicon's definitions](#replacing-definitions). `201` with `{ id, name, word_count, definitions_changed, definitions_revision }`; `400` with the upload error list when anything but definitions differs, or nothing does |
+| `POST` | `/api/admin/lexicons/:id/definitions` | Multipart `file`: [replaces the lexicon's definitions](#replacing-definitions-and-leave-values). `201` with `{ id, name, word_count, definitions_changed, definitions_revision }`; `400` with the upload error list when anything but definitions differs, or nothing does |
 | `DELETE` | `/api/admin/lexicons/:id` | `409` with what still uses it |
-| `POST` | `/api/admin/leave-sets` | Multipart `lexicon`, `name` (optional), `file`; `400` when the lexicon already has a set of that name |
+| `POST` | `/api/admin/leave-sets` | Multipart `lexicon`, `file` |
+| `POST` | `/api/admin/leave-sets/:id/values` | Multipart `file`: [replaces the set's values](#replacing-definitions-and-leave-values). `201` with `{ id, lexicon, leave_count, values_changed, values_revision }`; `400` with the upload error list when the leaves differ, or no value does |
 | `DELETE` | `/api/admin/leave-sets/:id` | `409` with what still uses it |
 
 `GET /health` checks the database connection and that every catalog item present
@@ -5517,7 +5533,7 @@ Useful flags:
 | Flag | Effect |
 |---|---|
 | `--scenario NAME` | Seed a study state through the real API; repeatable. `studying` (Level 1 finished with misses, Level 2 half graded), `finished` (the completion screen), `segments` (runs of five, one finished with a miss), `typed` (typed answers on), `trash`, `limits` (cascades until the account holds 90–100% of its [storage limit](#storage-limit), each the broadest search that still fits; on the fixture catalog, whose cascades are tens of KB, run it with `--env MAX_STORAGE_BYTES_PER_USER=1000000`), `big` (one cascade near `MAX_QUIZ_QUESTIONS` from the real catalog), `saved-searches`. Operations go through `POST /api/sync`, so the server's rules check them; the quiz state they need is read with SQL, as the integration tests do |
-| `--real-catalog [DIR]`, `--no-real-catalog` | Upload the licensed files `DIR/manifest.json` lists, in the fixture manifest's form. Done by default from `$ACRODONT_CATALOG_DIR`, else from `fixtures/licensed/`, which dev.py downloads when it has no `manifest.json` (if the download fails, the fixture catalog stands in); `--no-real-catalog` leaves it out, and the fixture catalog stands in. The licensed files never enter the repository (`fixtures/licensed/` is gitignored). `scripts/build-licensed-catalog.py` makes the folder from two public repositories at pinned commits: the words, definitions and playability values from the Zyzzyva database in [CrowdsourcedDefs](https://github.com/jvc56/CrowdsourcedDefs) `editions/2/CSW24.zip`, and the leave values decoded from [MAGPIE-DATA](https://github.com/jvc56/MAGPIE-DATA) `data/lexica/CSW24.klv2`; the distribution is `fixtures/magpie-data/english.csv`. It writes the upload's three-column lexicon, the leave values and the manifest. A manifest's leave values entry may carry `"set"`, the name the set is uploaded under (the script writes `MAGPIE`); without it the set takes its file's name |
+| `--real-catalog [DIR]`, `--no-real-catalog` | Upload the licensed files `DIR/manifest.json` lists, in the fixture manifest's form. Done by default from `$ACRODONT_CATALOG_DIR`, else from `fixtures/licensed/`, which dev.py downloads when it has no `manifest.json` (if the download fails, the fixture catalog stands in); `--no-real-catalog` leaves it out, and the fixture catalog stands in. The licensed files never enter the repository (`fixtures/licensed/` is gitignored). `scripts/build-licensed-catalog.py` makes the folder from two public repositories at pinned commits: the words, definitions and playability values from the Zyzzyva database in [CrowdsourcedDefs](https://github.com/jvc56/CrowdsourcedDefs) `editions/2/CSW24.zip`, and the leave values decoded from [MAGPIE-DATA](https://github.com/jvc56/MAGPIE-DATA) `data/lexica/CSW24.klv2`; the distribution is `fixtures/magpie-data/english.csv`. It writes the upload's three-column lexicon, the leave values and the manifest |
 | `--stats` | Print each catalog index's size, its build time, the catalog load time and the backend's memory: what the production task's memory is sized from |
 | `--users N` | N more confirmed users (`dev2`, `dev3`, …) for multi-account work |
 | `--login-as USER`, `--no-login` | Which account the browser opens signed in as, or none |
@@ -6438,13 +6454,17 @@ they run in parallel and leave nothing behind.
     and the column's own limit are the same number.
   - A Leave Value cascade whose leave value set belongs to another lexicon is
     rejected by the composite foreign key.
-  - Two leave value sets on one lexicon: an upload under a name the lexicon
-    already has is refused and one under a new name is stored beside it;
-    `/api/lexicons` lists them newest first; a preview and a creation run on
-    the newest unless `leave_set` names another, and a name the lexicon lacks
-    is a `400` on that field; a cascade built on the older set still serves
-    its cards, exports and Starts over from that set after the newer one is
-    uploaded; and each set is deletable once its own cascades are gone.
+  - Replacing a lexicon's definitions, and a leave value set's values: every
+    difference but the replaceable part is refused with the upload error list
+    and nothing stored; a replacement raises the revision, keeps the stored
+    order, gives every cascade on the item a new `updated_seq` and no other,
+    and is what cards, searches and the admin overview then show; while the
+    instance's index is older than the row's revision, cards that carry the
+    replaced part answer `503` and the others do not.
+  - An account's cascade names: a second cascade of a name is a `400` on
+    `name`, in the Trash or not, and not for another account; Start over
+    numbers its copy, replacing a number already there and cutting a name at
+    the limit; the unique constraint holds under a direct update.
   - A second active quiz at the same level, a second Source quiz, a Source quiz
     at any level but 1 or with status `cleared`, a non-Source quiz at Level 1,
     and a cascade with `depth` 0 are each rejected.
@@ -7171,9 +7191,12 @@ through the ordinary endpoints, so there is still no test-only path.
   redirects to `/#trash`.
 - As an admin, upload a distribution, lexicon and leave value set, see a
   deliberately broken file rejected with line numbers, build a Leave Value
-  cascade from the new set, upload a second set under its own name and build
-  from the older one through the builder's Leave values select, and see
-  deletion refused while the cascades exist.
+  cascade from the new set, replace the lexicon's definitions and the set's
+  values and see the cascade's answer change on the device with no reload,
+  and see deletion refused while the cascade exists.
+- In the builder, build the same search twice and see the second suggested a
+  numbered name, a name in use refused under the field, and Start over's copy
+  numbered.
 
 ### Scale tests
 

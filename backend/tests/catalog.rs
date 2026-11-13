@@ -313,8 +313,7 @@ async fn leave_upload_rules(pool: sqlx::PgPool) {
         ["?", "?ES"],
         "stored in canonical order, blank first"
     );
-    assert_eq!(r.json()["name"], "x", "the name defaults to the file's");
-    // A lexicon holds any number of sets, each under its own name.
+    // The lexicon must not already have leave values.
     let r = a
         .upload(
             "/api/admin/leave-sets",
@@ -324,36 +323,6 @@ async fn leave_upload_rules(pool: sqlx::PgPool) {
         )
         .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
-    assert_eq!(r.json()["errors"][0]["message"], "LX already has leave values named \"x\"");
-    for bad in ["semi;colon", "a/b", "0123456789012345678901234567890123"] {
-        let r = a
-            .upload("/api/admin/leave-sets", &[("lexicon", "LX"), ("name", bad)], "x.csv", b"A,1\n")
-            .await;
-        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
-    }
-    let r = a
-        .upload(
-            "/api/admin/leave-sets",
-            &[("lexicon", "LX"), ("name", "Gen 2")],
-            "x.csv",
-            b"A,1\nE,2\n",
-        )
-        .await;
-    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
-    assert_eq!(r.json()["name"], "Gen 2");
-    assert_eq!(count(&app, "leave_sets").await, 2);
-    app.reconcile().await;
-    // Listed newest first; the single figures are the newest set's.
-    let listed = a.get("/api/lexicons").await.json();
-    let lx = listed.as_array().unwrap().iter().find(|l| l["name"] == "LX").unwrap();
-    let names: Vec<&str> = lx["leave_sets"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["Gen 2", "x"]);
-    assert_eq!(lx["leave_sets"][0]["leave_count"], 2);
-    assert_eq!(lx["leave_sets"][1]["leave_count"], 2);
-    assert_eq!(lx["leave_count"], 2);
-    let c = a.get("/api/admin/catalog").await.json();
-    let names: Vec<&str> = c["leave_sets"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["Gen 2", "x"]);
 }
 
 #[sqlx::test]
@@ -783,10 +752,6 @@ async fn lexicons_reports_the_four_maxima(pool: sqlx::PgPool) {
         .find(|l| l["name"] == "EN-FIX-OLD")
         .unwrap();
     assert!(old["leave_count"].is_null() && old["max_leave_order_rank"].is_null());
-    assert_eq!(old["leave_sets"], json!([]));
-    assert_eq!(en["leave_sets"].as_array().unwrap().len(), 1);
-    assert_eq!(en["leave_sets"][0]["name"], "EN-FIX-leaves");
-    assert_eq!(en["leave_sets"][0]["leave_count"], en["leave_count"]);
 }
 
 #[sqlx::test]
@@ -852,6 +817,7 @@ async fn non_admins_get_not_found_on_every_admin_route(pool: sqlx::PgPool) {
         ("POST", "/api/admin/lexicons"),
         ("POST", "/api/admin/leave-sets"),
         ("POST", "/api/admin/lexicons/1/definitions"),
+        ("POST", "/api/admin/leave-sets/1/values"),
         ("DELETE", "/api/admin/letter-distributions/1"),
         ("DELETE", "/api/admin/lexicons/1"),
         ("DELETE", "/api/admin/leave-sets/1"),
@@ -1265,4 +1231,90 @@ async fn definitions_are_replaced_whole_and_nothing_else(pool: sqlx::PgPool) {
     // Admins only.
     let mut user = app.signed_in("someone").await;
     assert_eq!(user.upload(&path, &[], "new.tsv", corrected.as_bytes()).await.status, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test]
+async fn leave_values_are_replaced_whole_and_no_leaf_added_or_dropped(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("ADMIN_UPLOAD_RATE_PER_MINUTE", "100")]).await;
+    let mut a = app.seed_fixture_catalog("root").await;
+    let set: i32 = sqlx::query_scalar("SELECT s.id FROM leave_sets s JOIN lexicons l ON l.id = s.lexicon_id WHERE l.name = 'EN-FIX'")
+        .fetch_one(app.db())
+        .await
+        .unwrap();
+    let path = format!("/api/admin/leave-sets/{set}/values");
+    let file = std::fs::read_to_string(fixture_path("EN-FIX-leaves.csv")).unwrap();
+    // A Leave Value cascade of the leaves worth 30 or more, and an anagram cascade beside it.
+    let r = a
+        .post(
+            "/api/cascades",
+            json!({
+                "id": uuid::Uuid::new_v4(), "source_quiz_id": uuid::Uuid::new_v4(), "device_id": uuid::Uuid::new_v4(),
+                "at": "2026-01-01T00:00:00Z", "name": "Good leaves", "lexicon": "EN-FIX", "quiz_type": "leave_value",
+                "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false,
+                "answer_mode": "flashcard",
+                "filters": { "op": "and", "children": [{ "type": "leave_value", "negated": false, "min": 30.0, "max": null }] },
+            }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!(r.json()["cascade"]["leave_values_revision"], 1);
+    let leaves = r.json()["cascade"]["id"].as_str().unwrap().to_owned();
+    let anagram = api_cascade(&mut a, "anagram", "Twos").await;
+    let seq: i64 = sqlx::query_scalar("SELECT sync_seq FROM users WHERE username = 'root'").fetch_one(app.db()).await.unwrap();
+    let cards = |c: &Value| -> Vec<(String, f64)> {
+        c.as_array().unwrap().iter().map(|k| (k["key"].as_str().unwrap().to_owned(), k["answer"].as_f64().unwrap())).collect()
+    };
+    let before = cards(&a.get(&format!("/api/cascades/{leaves}/cards?from=0&limit=100")).await.json());
+    assert!(before.contains(&("?S".to_owned(), 32.4)), "{before:?}");
+
+    // Only values may differ.
+    for (what, changed, lines) in [
+        ("a leave the set lacks", format!("{file}ZZ,1\n"), vec![json!(file.lines().count() + 1)]),
+        ("a leave left out", file.replacen("?S,32.400\n", "", 1), vec![Value::Null]),
+        ("a file that does not parse", file.replacen("?S,32.400", "?S,lots", 1), vec![json!(3)]),
+        ("nothing changed", file.clone(), vec![Value::Null]),
+    ] {
+        let r = a.upload(&path, &[], "new.csv", changed.as_bytes()).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{what}: {:?}", r.json());
+        assert_eq!(error_lines(&r), lines, "{what}: {:?}", r.json());
+    }
+    assert_eq!(a.upload("/api/admin/leave-sets/2000000/values", &[], "new.csv", file.as_bytes()).await.status, StatusCode::NOT_FOUND);
+
+    // One value lowered below the cascade's filter, the tiles of another leave written in another order.
+    let corrected = file.replacen("?S,32.400", "S?,12.5", 1);
+    let r = a.upload(&path, &[], "new.csv", corrected.as_bytes()).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!((r.json()["values_changed"].as_i64(), r.json()["values_revision"].as_i64()), (Some(1), Some(2)));
+    assert_eq!(r.json()["leave_count"], 35);
+    app.reconcile().await;
+
+    // The cascade keeps the questions it was created with and answers with the new value;
+    // its row is at the new revision under a new sequence, and no other cascade's is.
+    let after = cards(&a.get(&format!("/api/cascades/{leaves}/cards?from=0&limit=100")).await.json());
+    assert_eq!(after.len(), before.len());
+    assert!(after.contains(&("?S".to_owned(), 12.5)), "{after:?}");
+    let rows: Vec<(String, i64)> = sqlx::query_as("SELECT name, updated_seq FROM cascades ORDER BY name").fetch_all(app.db()).await.unwrap();
+    assert_eq!(rows, [("Good leaves".to_owned(), seq + 1), ("Twos".to_owned(), seq)]);
+    let pulled: Value = sqlx::query_scalar("SELECT to_jsonb(s.values_revision) FROM leave_sets s WHERE s.id = $1").bind(set).fetch_one(app.db()).await.unwrap();
+    assert_eq!(pulled, json!(2));
+    // A search runs on the new values, and the overview shows the revision.
+    let r = a
+        .post(
+            "/api/search/preview",
+            json!({ "lexicon": "EN-FIX", "quiz_type": "leave_value",
+                    "filters": { "op": "and", "children": [{ "type": "leave_value", "negated": false, "min": 30.0, "max": null }] } }),
+        )
+        .await;
+    assert_eq!(r.json()["count"].as_i64(), Some(before.len() as i64 - 1));
+    let c = a.get("/api/admin/catalog").await.json();
+    let listed = c["leave_sets"].as_array().unwrap().iter().find(|s| s["lexicon"] == "EN-FIX").unwrap();
+    assert_eq!(listed["values_revision"], 2);
+
+    // While an instance still holds the older index, the cascade's cards wait for it; its keys do not.
+    sqlx::query("UPDATE leave_sets SET values_revision = 9 WHERE id = $1").bind(set).execute(app.db()).await.unwrap();
+    assert_eq!(a.get(&format!("/api/cascades/{leaves}/cards?from=0&limit=10")).await.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(a.get(&format!("/api/cascades/{leaves}/cards?from=0&limit=10&keys=1")).await.status, StatusCode::OK);
+    assert_eq!(a.get(&format!("/api/cascades/{anagram}/cards?from=0&limit=10")).await.status, StatusCode::OK);
+    app.reconcile().await;
+    assert_eq!(a.get(&format!("/api/cascades/{leaves}/cards?from=0&limit=10")).await.status, StatusCode::OK);
 }

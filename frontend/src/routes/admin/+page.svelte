@@ -28,6 +28,8 @@
 		has_leave_set?: boolean;
 		/** A lexicon's: 1 as uploaded, raised by each replacement of its definitions. */
 		definitions_revision?: number;
+		/** A leave value set's: 1 as uploaded, raised by each replacement of its values. */
+		values_revision?: number;
 		/** Everything the server keeps for it: its rows and their indexes, and its in-memory index. */
 		storage_bytes: number;
 		index_bytes?: number | null;
@@ -146,9 +148,16 @@
 						noun: 'leave values',
 						items: catalog.leave_sets,
 						name: (s) => s.lexicon ?? '',
-						label: (s) => `the leave values ${s.name} of ${s.lexicon}`,
-						cols: [{ head: 'Name', cell: (s) => s.name ?? '' }, { head: 'Leaves', cell: (s) => count(s.leave_count) }, uploaded, { head: 'Cascades', cell: (s) => count(s.cascade_count) }, storage],
-						blocker: (s) => (s.cascade_count ? 'In use: Leave Value cascades refer to it.' : null)
+						label: (s) => `the leave values of ${s.lexicon}`,
+						cols: [
+							{ head: 'Leaves', cell: (s) => count(s.leave_count) },
+							{ head: 'Values', cell: (s) => (s.values_revision === 1 ? 'as uploaded' : `revision ${s.values_revision}`) },
+							uploaded,
+							{ head: 'Cascades', cell: (s) => count(s.cascade_count) },
+							storage
+						],
+						blocker: (s) => (s.cascade_count ? 'In use: Leave Value cascades refer to it.' : null),
+						also: { href: '/admin/leave-sets/values', label: 'Replace values' }
 					}
 				]
 			: []

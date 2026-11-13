@@ -132,31 +132,19 @@ Nothing is deployed, so the edit is in place: `./scripts/dev.py --reset`.
 
 Nothing is deployed, so the edits are in place: `./scripts/dev.py --reset`.
 
-## 2026-11-13: a lexicon holds any number of named leave value sets
+## 2026-11-13: definitions and leave values can be replaced; unique cascade names
 
-Nothing is deployed, so this is still an edit in place, the last before the
+Nothing is deployed, so these are still edits in place, the last before the
 first deploy freezes the file.
 
-- `leave_sets.lexicon_id` is no longer UNIQUE, and `leave_sets` gains
-  `name TEXT NOT NULL CHECK (name ~ '^[A-Za-z0-9 _-]{1,32}$')` with
-  `UNIQUE (lexicon_id, name)`.
-- Why: improved leave values for a lexicon could only be shipped by deleting
-  the old set, which every Leave Value cascade on it blocks, or by uploading the
-  whole lexicon again under a new name. A new set now sits beside the old one;
-  new cascades use the newest unless they name another, and each cascade keeps
-  the set its `leave_set_id` already recorded (PLAN.md § Uploads, § Immutability
-  and deletion).
-- `cascades` is unchanged: its composite foreign key already pinned one set.
-
-## 2026-11-13: a definitions revision, and unique cascade names
-
-Still before the first deploy, and in the same pull request as the entry above.
-
 - `lexicons` gains `definitions_revision INTEGER NOT NULL DEFAULT 1 CHECK
-  (definitions_revision >= 1)`. A lexicon's definitions can now be replaced by
-  an admin upload (PLAN.md § Replacing definitions); each replacement raises
-  the revision, a cascade row carries it, and a device fetches again the
-  answers it holds from an older one. Words and playabilities stay immutable.
+  (definitions_revision >= 1)`, and `leave_sets` gains `values_revision` of the
+  same shape. An admin upload can now replace a lexicon's definitions, or a
+  leave value set's values (PLAN.md § Replacing definitions and leave values).
+  Each replacement raises the revision; a cascade row carries it, and a device
+  fetches again the answers it holds from an older one. Words, playabilities
+  and the leaves themselves stay immutable, and a lexicon still has at most
+  one leave value set.
 - `cascades` gains `UNIQUE (user_id, name)`: an account's cascades each have
   their own name, the Trash included (PLAN.md § Creating a cascade). Start
   over, which used to copy the name, numbers it instead.

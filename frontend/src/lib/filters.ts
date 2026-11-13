@@ -127,38 +127,16 @@ export const PARTS_OF_SPEECH = [
 	['verb', 'Verb']
 ] as const;
 
-/** One of a lexicon's sets of leave values. */
-export interface LeaveSetInfo {
-	name: string;
-	leave_count: number;
-	max_num_anagrams: number;
-	max_order_rank: number;
-}
-
 /** `GET /api/lexicons` (PLAN.md § API → Catalog and search). */
 export interface LexiconInfo {
 	name: string;
 	letter_distribution: string;
 	word_count: number;
-	/** Its sets of leave values, newest first: the first is what a Leave Value search uses unless it names another. */
-	leave_sets?: LeaveSetInfo[];
-	/** The newest set's figures; null without one. */
 	leave_count: number | null;
 	max_num_anagrams: number;
 	max_order_rank: number;
 	max_leave_num_anagrams: number | null;
 	max_leave_order_rank: number | null;
-}
-
-/** The lexicon as a Leave Value search on `set` sees it: that set's figures in place of the newest's. */
-export function withLeaveSet(lexicon: LexiconInfo, set: LeaveSetInfo | null): LexiconInfo {
-	if (!set) return lexicon;
-	return {
-		...lexicon,
-		leave_count: set.leave_count,
-		max_leave_num_anagrams: set.max_num_anagrams,
-		max_leave_order_rank: set.max_order_rank
-	};
 }
 
 export interface CeilingContext {

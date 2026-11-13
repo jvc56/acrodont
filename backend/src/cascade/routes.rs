@@ -20,7 +20,7 @@ use crate::auth::{CurrentUser, Session};
 use crate::catalog::tiles::Tile;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::ApiJson;
-use crate::search::routes::{path_errors, prepare, run, LeaveChoice, Prepared};
+use crate::search::routes::{path_errors, prepare, run, Prepared};
 use crate::search::store::{copy_spec, insert_spec, load_spec, SpecKind};
 use crate::search::wire::{tree_to_json, PathError, QuizType};
 use crate::storage;
@@ -61,9 +61,6 @@ pub struct CreateBody {
     require_alphabetical: bool,
     answer_mode: AnswerMode,
     filters: Value,
-    /// A Leave Value cascade: the lexicon's set of this name. Absent: its newest.
-    #[serde(default)]
-    leave_set: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -354,8 +351,7 @@ async fn create(
     if is_name_taken(&state.db, user.id, &b.name).await? {
         return Err(name_taken(&b.name));
     }
-    let choice = b.leave_set.as_deref().map_or(LeaveChoice::Newest, LeaveChoice::Named);
-    let p = prepare(&state, &b.lexicon, b.quiz_type, &b.filters, choice)?;
+    let p = prepare(&state, &b.lexicon, b.quiz_type, &b.filters)?;
     let n = NewCascade {
         id: b.id,
         source_quiz_id: b.source_quiz_id,
@@ -375,9 +371,8 @@ async fn create(
 
 /// A new cascade named after the original with the next free number
 /// ([`numbered_name`]), a private copy of the same filters, and
-/// the same threshold, quiz options, answer mode and display settings; a Leave
-/// Value cascade keeps the original's set of leave values. Subject to the
-/// storage limit.
+/// the same threshold, quiz options, answer mode and display settings. Subject
+/// to the storage limit.
 async fn start_over(
     State(state): State<AppState>,
     Session(user): Session,
@@ -393,7 +388,7 @@ async fn start_over(
         r#"SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS "progression: Progression",
                   c.require_alphabetical, c.answer_mode AS "answer_mode: AnswerMode", c.show_definitions,
                   c.show_hooks, c.reveal_correct, c.show_found_count, c.show_probability, c.definition_column,
-                  c.leave_value_decimals, c.leave_set_id, l.name AS lexicon
+                  c.leave_value_decimals, l.name AS lexicon
            FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2"#,
         original,
         user.id
@@ -404,8 +399,7 @@ async fn start_over(
     let (quiz_type, tree) = load_spec(&mut conn, row.spec_id).await?.ok_or(ApiError::NotFound)?;
     drop(conn);
     let name = numbered_name(&state.db, user.id, &row.name).await?;
-    let choice = row.leave_set_id.map_or(LeaveChoice::Newest, LeaveChoice::Id);
-    let p = prepare(&state, &row.lexicon, quiz_type, &tree_to_json(&tree), choice)?;
+    let p = prepare(&state, &row.lexicon, quiz_type, &tree_to_json(&tree))?;
     let n = NewCascade {
         id: b.id,
         source_quiz_id: b.source_quiz_id,
@@ -499,8 +493,11 @@ async fn cards(
         return Err(ApiError::bad_request("keys_only"));
     }
     let row = sqlx::query!(
-        r#"SELECT c.quiz_type AS "quiz_type: QuizType", c.lexicon_id, c.leave_set_id, l.definitions_revision
-           FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2"#,
+        r#"SELECT c.quiz_type AS "quiz_type: QuizType", c.lexicon_id, l.definitions_revision,
+                  ls.values_revision AS "leave_values_revision?"
+           FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id
+           LEFT JOIN leave_sets ls ON ls.id = c.leave_set_id
+           WHERE c.id = $1 AND c.user_id = $2"#,
         cascade_id,
         user.id
     )
@@ -534,11 +531,13 @@ async fn cards(
             return Err(ApiError::Unavailable { retry_after_secs: 5 });
         }
         let dist = &lex.distribution;
-        // The set the cascade was built on, whatever has been uploaded since.
-        let leaves = match row.leave_set_id {
-            Some(id) => Some(snap.leave_sets.get(&id).ok_or(ApiError::Unavailable { retry_after_secs: 5 })?),
-            None => None,
-        };
+        let leaves = snap.leave_set_for(lex.id);
+        // And likewise while a leave set's values are being replaced.
+        if let (QuizType::LeaveValue, Some(named)) = (row.quiz_type, row.leave_values_revision)
+            && leaves.is_none_or(|s| s.values_revision < named)
+        {
+            return Err(ApiError::Unavailable { retry_after_secs: 5 });
+        }
         let mut cards = Vec::with_capacity(rows.len());
         for (idx, question_key) in &rows {
             let answer = match row.quiz_type {

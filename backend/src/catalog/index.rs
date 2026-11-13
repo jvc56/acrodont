@@ -327,8 +327,9 @@ pub struct LeaveEntry {
 #[derive(Debug)]
 pub struct LeaveSetIndex {
     pub id: i32,
-    /// Unique within its lexicon.
-    pub name: String,
+    /// The `leave_sets.values_revision` these values were read at: 1 as
+    /// built, set by the loader.
+    pub values_revision: i32,
     pub lexicon_id: i16,
     pub distribution: Arc<Distribution>,
     /// Sorted by canonical leave.
@@ -344,7 +345,7 @@ pub struct LeaveSetIndex {
 }
 
 impl LeaveSetIndex {
-    pub fn build(id: i32, name: &str, lexicon: &LexiconIndex, mut raw: Vec<(Vec<Tile>, f64)>) -> Self {
+    pub fn build(id: i32, lexicon: &LexiconIndex, mut raw: Vec<(Vec<Tile>, f64)>) -> Self {
         let start = Instant::now();
         let d = lexicon.distribution.clone();
         for (t, _) in raw.iter_mut() {
@@ -424,7 +425,7 @@ impl LeaveSetIndex {
         );
         LeaveSetIndex {
             id,
-            name: name.to_owned(),
+            values_revision: 1,
             lexicon_id: lexicon.id,
             distribution: d,
             leaves,

@@ -204,24 +204,25 @@ CREATE TABLE lexicon_words (
 );
 ALTER TABLE lexicon_words ALTER COLUMN words SET STORAGE EXTERNAL;
 
--- A lexicon's leave value sets: any number, each named within its lexicon. A
--- new Leave Value cascade uses the newest (the highest id) unless it names
--- another; a cascade keeps the set it was built on. Leaves use the lexicon's
--- letter distribution.
+-- At most one per lexicon. Leaves use the lexicon's letter distribution.
 CREATE TABLE leave_sets (
     id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    lexicon_id   SMALLINT NOT NULL REFERENCES lexicons (id),
-    name         TEXT NOT NULL CHECK (name ~ '^[A-Za-z0-9 _-]{1,32}$'),
+    lexicon_id   SMALLINT NOT NULL UNIQUE REFERENCES lexicons (id),
     leave_count  INTEGER NOT NULL CHECK (leave_count > 0),
+    values_revision INTEGER NOT NULL DEFAULT 1 CHECK (values_revision >= 1),
+                     -- raised by each replacement of the set's values, as
+                     -- lexicons.definitions_revision is by its definitions'; the
+                     -- leaves themselves never change
     uploaded_by  UUID REFERENCES users (id) ON DELETE SET NULL,
     uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (lexicon_id, name),
     UNIQUE (id, lexicon_id)   -- target of cascades' composite foreign key
 );
 
 -- A leave set's leaves, packed as a lexicon's words are: one row per set, the
 -- text one line per leave, `leave TAB value LF`, the leave in canonical MAGPIE
 -- notation (1–6 tiles in distribution order, blanks first), compressed with zstd.
+-- The values are replaced whole by a values upload, which raises
+-- leave_sets.values_revision.
 CREATE TABLE leave_values (
     leave_set_id  INTEGER PRIMARY KEY REFERENCES leave_sets (id) ON DELETE CASCADE,
     leaves        BYTEA NOT NULL CHECK (octet_length(leaves) > 0)

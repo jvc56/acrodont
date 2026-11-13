@@ -98,6 +98,19 @@ export function holdsDefinitions(c: Pick<CascadeRow, 'quiz_type' | 'show_definit
 	return c.quiz_type === 'definition' || wantsDefinitions(c);
 }
 
+/**
+ * The revision of what an admin can replace in a cascade's cards: its leave
+ * values' for a Leave Value cascade, the lexicon's definitions' for one whose
+ * cards carry definitions, and null for a cascade whose cards hold neither.
+ * Cards fetched at an older revision are fetched again.
+ */
+export function answerRevision(
+	c: Pick<CascadeRow, 'quiz_type' | 'show_definitions' | 'definitions_revision' | 'leave_values_revision'>
+): number | null {
+	if (c.quiz_type === 'leave_value') return c.leave_values_revision ?? 1;
+	return holdsDefinitions(c) ? (c.definitions_revision ?? 1) : null;
+}
+
 /** The server's cap on cards named with `idx=`. */
 export const MAX_CARDS_BY_IDX = 1_000;
 
@@ -534,9 +547,10 @@ export class DownloadManager {
 		const hooks = wantsHooks(c);
 		const definitions = wantsDefinitions(c);
 		// Cards record which extras they hold; a setting asking for more refetches them.
-		// They record the definitions revision they were fetched at too: once the
-		// lexicon's definitions are replaced, the pages that carry them come again.
-		const revision = holdsDefinitions(c) ? (c.definitions_revision ?? 1) : null;
+		// They record the revision they were fetched at too: once the lexicon's
+		// definitions or the leave values are replaced, the pages that carry them
+		// come again.
+		const revision = answerRevision(c);
 		let froms = await this.missingRanges('cards', c, CARDS_PAGE);
 		if (hooks || definitions || revision !== null) {
 			const lacking = new Set(froms);
@@ -647,8 +661,9 @@ export class DownloadManager {
 				page.forEach((card, i) => {
 					const row: CardRow = { cascade_id: c.id, idx: card.idx, answer: card.answer, definitions, hooks, inner: hooks };
 					// The revision the cascade's row named when the page was asked for: the
-					// server answers 503 rather than serve an older revision's text for it.
-					if (c.definitions_revision !== undefined) row.rev = c.definitions_revision;
+					// server answers 503 rather than serve an older revision's answers for it.
+					const rev = answerRevision(c);
+					if (rev !== null && rev > 1) row.rev = rev;
 					if (card.word) row.word = card.word;
 					if (before[i]) answerBytes -= JSON.stringify(before[i]!.answer).length;
 					answerBytes += JSON.stringify(card.answer).length;

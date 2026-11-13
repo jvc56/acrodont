@@ -49,7 +49,6 @@ fn leaves(id: i32, file: &str, lexicon: &LexiconIndex) -> Arc<LeaveSetIndex> {
     let parsed = upload::parse_leaves(&bytes, &lexicon.distribution).unwrap();
     Arc::new(LeaveSetIndex::build(
         id,
-        "fixture",
         lexicon,
         parsed.into_iter().map(|l| (l.tiles, l.value)).collect(),
     ))

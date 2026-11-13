@@ -21,8 +21,6 @@ export interface PreviewBody {
 	lexicon: string;
 	quiz_type: string;
 	filters: unknown;
-	/** A Leave Value search: the lexicon's set of this name. Absent: its newest. */
-	leave_set?: string;
 }
 
 export interface PreviewResponse {

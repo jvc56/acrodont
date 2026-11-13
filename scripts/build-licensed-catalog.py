@@ -149,7 +149,7 @@ def main() -> int:
     manifest = [
         {"kind": "distribution", "name": DISTRIBUTION, "file": dist.name},
         {"kind": "lexicon", "name": NAME, "file": lexicon.name, "parent": DISTRIBUTION},
-        {"kind": "leaves", "name": NAME, "file": leave_file.name, "set": "MAGPIE"},
+        {"kind": "leaves", "name": NAME, "file": leave_file.name},
     ]
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 

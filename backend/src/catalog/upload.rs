@@ -265,12 +265,6 @@ pub fn parse_distribution(bytes: &[u8]) -> Result<ParsedDistribution, UploadErro
 // Lexicon
 // ---------------------------------------------------------------------------
 
-/// A leave value set's name, unique within its lexicon: the rule a letter
-/// distribution's name follows.
-pub fn is_valid_leave_set_name(name: &str) -> bool {
-    is_valid_distribution_name(name)
-}
-
 pub fn is_valid_lexicon_name(name: &str) -> bool {
     (1..=32).contains(&name.len())
         && name
@@ -290,7 +284,7 @@ pub struct ParsedWord {
 }
 
 /// A definitions upload against the lexicon's stored words (PLAN.md §
-/// Immutability and deletion → Replacing definitions): the file is a lexicon
+/// Immutability and deletion → Replacing definitions and leave values): the file is a lexicon
 /// file holding exactly the stored words with their stored playabilities, so
 /// only definitions can differ. Returns the stored words in their stored
 /// order with the file's definitions, and how many definitions changed.
@@ -432,10 +426,53 @@ pub fn parse_lexicon(bytes: &[u8], dist: &Distribution) -> Result<Vec<ParsedWord
 
 #[derive(Debug, Clone)]
 pub struct ParsedLeave {
+    /// Its line in the uploaded file, from 1.
+    pub line: u32,
     /// Canonical order: tile order, blank first.
     pub tiles: Vec<Tile>,
     pub leave: String,
     pub value: f64,
+}
+
+/// A values upload against a leave value set's stored leaves (PLAN.md §
+/// Replacing definitions and leave values): the file is a leave values file
+/// holding exactly the stored leaves, so only values can differ. Returns the
+/// stored leaves in their stored order with the file's values, and how many
+/// values changed.
+pub fn replace_leave_values(
+    stored: Vec<(String, f64)>,
+    parsed: Vec<ParsedLeave>,
+) -> Result<(Vec<(String, f64)>, usize), UploadErrors> {
+    let mut errors = UploadErrors::default();
+    let by_leave: HashMap<&str, usize> = stored.iter().enumerate().map(|(i, l)| (l.0.as_str(), i)).collect();
+    let mut new_value: Vec<Option<f64>> = vec![None; stored.len()];
+    for l in parsed {
+        match by_leave.get(l.leave.as_str()) {
+            Some(&i) => new_value[i] = Some(l.value),
+            None => errors.push(Some(l.line), format!("{:?} is not a leave of this set", l.leave)),
+        }
+    }
+    for (i, v) in new_value.iter().enumerate() {
+        if v.is_none() {
+            errors.push(None, format!("the set's leave {:?} is missing from the file", stored[i].0));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    let mut changed = 0;
+    let out = stored
+        .into_iter()
+        .zip(new_value)
+        .map(|((leave, old), new)| {
+            let new = new.expect("every stored leave has a value in the file");
+            if new.to_bits() != old.to_bits() {
+                changed += 1;
+            }
+            (leave, new)
+        })
+        .collect();
+    Ok((out, changed))
 }
 
 pub fn parse_leaves(bytes: &[u8], dist: &Distribution) -> Result<Vec<ParsedLeave>, UploadErrors> {
@@ -518,6 +555,7 @@ pub fn parse_leaves(bytes: &[u8], dist: &Distribution) -> Result<Vec<ParsedLeave
             }
             seen.insert(tiles.clone(), line);
             leaves.push(ParsedLeave {
+                line,
                 leave: dist.to_magpie(&tiles),
                 tiles,
                 value: value.unwrap_or(0.0),

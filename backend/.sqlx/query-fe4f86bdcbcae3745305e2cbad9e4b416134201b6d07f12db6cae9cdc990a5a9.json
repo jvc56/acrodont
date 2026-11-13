@@ -1,31 +1,29 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO leave_sets (lexicon_id, name, leave_count, uploaded_by) VALUES ($1, $2, $3, $4) RETURNING id",
+  "query": "UPDATE leave_sets SET values_revision = values_revision + 1\n         WHERE id = $1 AND values_revision = $2 RETURNING values_revision",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
+        "name": "values_revision",
         "type_info": "Int4",
         "origin": {
           "Table": {
             "table": "leave_sets",
-            "name": "id"
+            "name": "values_revision"
           }
         }
       }
     ],
     "parameters": {
       "Left": [
-        "Int2",
-        "Text",
         "Int4",
-        "Uuid"
+        "Int4"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "c0dd914a352477981c2a9c24b8487478ee849aba8df163d4b44946793a7ded9a"
+  "hash": "fe4f86bdcbcae3745305e2cbad9e4b416134201b6d07f12db6cae9cdc990a5a9"
 }

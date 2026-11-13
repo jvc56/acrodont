@@ -58,19 +58,10 @@ impl Snapshot {
         self.lexicons.values().find(|l| l.name == name)
     }
 
-    /// The lexicon's newest leave value set: what a new Leave Value cascade
-    /// uses unless it names another.
-    pub fn newest_leave_set(&self, lexicon_id: i16) -> Option<&Arc<LeaveSetIndex>> {
+    pub fn leave_set_for(&self, lexicon_id: i16) -> Option<&Arc<LeaveSetIndex>> {
         self.leave_sets
             .values()
-            .filter(|s| s.lexicon_id == lexicon_id)
-            .max_by_key(|s| s.id)
-    }
-
-    pub fn leave_set_named(&self, lexicon_id: i16, name: &str) -> Option<&Arc<LeaveSetIndex>> {
-        self.leave_sets
-            .values()
-            .find(|s| s.lexicon_id == lexicon_id && s.name == name)
+            .find(|s| s.lexicon_id == lexicon_id)
     }
 }
 
@@ -247,7 +238,7 @@ pub async fn reconcile(state: &AppState) -> anyhow::Result<()> {
 
     // Drop what the database no longer has, leaving its status rows at once.
     for &id in snap.leave_sets.keys() {
-        if !items.leave_sets.iter().any(|&(s, _)| s == id) {
+        if !items.leave_sets.iter().any(|&(s, _, _)| s == id) {
             state.catalog.update(|s| {
                 s.leave_sets.remove(&id);
             });
@@ -313,18 +304,23 @@ pub async fn reconcile(state: &AppState) -> anyhow::Result<()> {
         });
         write_status(state, ItemKind::Lexicon, i32::from(id)).await?;
     }
-    for &(id, lexicon_id) in &items.leave_sets {
-        if state.catalog.snapshot().leave_sets.contains_key(&id) {
+    for &(id, lexicon_id, revision) in &items.leave_sets {
+        // Built once, and again when its values have been replaced.
+        if state.catalog.snapshot().leave_sets.get(&id).is_some_and(|s| s.values_revision >= revision) {
             continue;
         }
         let Some(lexicon) = state.catalog.snapshot().lexicons.get(&lexicon_id).cloned() else {
             continue;
         };
-        let Some((name, raw)) = store::load_leaves(&state.db, id, &lexicon.distribution).await? else {
+        let Some((read_at, raw)) = store::load_leaves(&state.db, id, &lexicon.distribution).await? else {
             continue;
         };
-        let index =
-            tokio::task::spawn_blocking(move || LeaveSetIndex::build(id, &name, &lexicon, raw)).await?;
+        let index = tokio::task::spawn_blocking(move || {
+            let mut index = LeaveSetIndex::build(id, &lexicon, raw);
+            index.values_revision = read_at;
+            index
+        })
+        .await?;
         state.catalog.update(|s| {
             s.leave_sets.insert(id, Arc::new(index));
         });

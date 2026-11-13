@@ -11,7 +11,7 @@ import { openUserDb, type UserDb } from '$lib/local/db';
 import { getMeta, initMeta, recordOpen, writeMeta } from '$lib/local/meta';
 import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
-import { DownloadManager, ROW_BYTES, type DownloadApi, holdsDefinitions, wantsDefinitions, wantsHooks } from './downloads';
+import { DownloadManager, ROW_BYTES, type DownloadApi, answerRevision, holdsDefinitions, wantsDefinitions, wantsHooks } from './downloads';
 import { SyncEngine } from './engine';
 import { policy } from './policy';
 import { FakeServer } from './testing/fake-server';
@@ -534,6 +534,12 @@ describe('the download manager', () => {
 		expect(cards().length).toBe(before + 1);
 		expect(holdsDefinitions({ quiz_type: 'definition', show_definitions: false })).toBe(true);
 		expect(holdsDefinitions({ quiz_type: 'leave_value', show_definitions: true })).toBe(false);
+		// A Leave Value cascade's cards follow its leave values' revision, never the definitions'.
+		const leave = { quiz_type: 'leave_value', show_definitions: true, definitions_revision: 7 } as const;
+		expect(answerRevision(leave)).toBe(1);
+		expect(answerRevision({ ...leave, leave_values_revision: 3 })).toBe(3);
+		expect(answerRevision({ quiz_type: 'definition', show_definitions: false, definitions_revision: 2, leave_values_revision: null })).toBe(2);
+		expect(answerRevision({ quiz_type: 'anagram', show_definitions: false, definitions_revision: 2 })).toBeNull();
 	});
 
 	it('a QuotaExceededError runs the drop pass, then eviction, and retries once; a second failure says there is no room', async () => {

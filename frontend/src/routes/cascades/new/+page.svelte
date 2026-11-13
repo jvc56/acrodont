@@ -34,7 +34,6 @@
 		freeName,
 		parseTree,
 		summaryName,
-		withLeaveSet,
 		type CeilingContext,
 		type LexiconInfo,
 		type QuizType
@@ -75,16 +74,9 @@
 	let loadError = $state<string | null>(null);
 
 	let lexiconInfo = $derived(lexicons.find((l) => l.name === lexicon) ?? null);
-	/** The set of leave values picked for a Leave Value cascade; '' is the lexicon's newest. */
-	let leaveSetName = $state('');
-	let leaveSets = $derived(quizType === 'leave_value' ? (lexiconInfo?.leave_sets ?? []) : []);
-	/** The set the search runs on: the one picked, or the newest when it is not one of this lexicon's. */
-	let leaveSet = $derived(leaveSets.find((s) => s.name === leaveSetName) ?? leaveSets[0] ?? null);
 	let ctx = $derived<CeilingContext | null>(
-		lexiconInfo && dist ? { quizType, lexicon: withLeaveSet(lexiconInfo, leaveSet), maxTileValue: dist.maxValue } : null
+		lexiconInfo && dist ? { quizType, lexicon: lexiconInfo, maxTileValue: dist.maxValue } : null
 	);
-	/** Named in every Leave Value request, so the cascade is built on the set the preview counted. */
-	let leaveSetField = $derived(leaveSet ? { leave_set: leaveSet.name } : {});
 	let wire = $derived(toWire(root, quizType, dist, ctx));
 	let manual = $derived(wire.entries > PREVIEW_MANUAL_ENTRIES);
 
@@ -149,7 +141,7 @@
 
 	$effect(() => {
 		const ready = lexicon && dist && wire.errors.size === 0;
-		scheduler.update(ready ? { lexicon, quiz_type: quizType, filters: wire.tree, ...leaveSetField } : null, manual);
+		scheduler.update(ready ? { lexicon, quiz_type: quizType, filters: wire.tree } : null, manual);
 	});
 
 	async function create() {
@@ -176,8 +168,7 @@
 			progression: CASCADE_SETTING_DEFAULTS.progression,
 			require_alphabetical: CASCADE_SETTING_DEFAULTS.require_alphabetical,
 			answer_mode: CASCADE_SETTING_DEFAULTS.answer_mode,
-			filters: wire.tree,
-			...leaveSetField
+			filters: wire.tree
 		};
 		try {
 			const created = await sendWithRetry(() => api.post<Created>('/api/cascades', body), { onBusy: (b) => (busy = b) });
@@ -313,20 +304,6 @@
 						</option>
 					{/each}
 				</select>
-				<!-- Only when there is a choice: a lexicon with one set of leave values has nothing to pick. -->
-				{#if leaveSets.length > 1}
-					<Label for="leave-set" class="max-sm:pt-2">Leave values</Label>
-					<select
-						id="leave-set"
-						class="h-9 w-full rounded-md border bg-transparent px-2 text-sm sm:w-60"
-						value={leaveSet?.name ?? ''}
-						onchange={(e) => (leaveSetName = e.currentTarget.value)}
-					>
-						{#each leaveSets as s, i (s.name)}
-							<option value={s.name}>{s.name}{i === 0 ? ' (newest)' : ''}</option>
-						{/each}
-					</select>
-				{/if}
 			</div>
 
 			<div class="grid gap-2">
