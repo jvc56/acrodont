@@ -247,6 +247,9 @@ async fn email_caps(pool: sqlx::PgPool) {
         )
         .await;
     }
+    // Each mail follows its response, so the sixteen still on their way are
+    // waited for first; then a moment more, in which a twenty-first would show.
+    assert_eq!(app.mail_to("erin@example.com", 20).await.len(), 20);
     assert_eq!(app.settled_mail_to("erin@example.com").await.len(), 20);
 }
 
