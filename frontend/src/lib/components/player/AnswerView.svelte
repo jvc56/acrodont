@@ -9,7 +9,10 @@
 	// the word instead (and a narrow screen always does). The word is in the
 	// middle of the row whatever sits either side; each hook column is as wide
 	// as its widest hooks and no wider; the definition takes the room that is
-	// left, up to this device's limit, and is centred on its word's line.
+	// left, up to this device's limit. The probability order, hooks and word
+	// share one line, and that line and the definition are centred on each
+	// other however many lines the definition wraps to; a wrapped line is
+	// indented, and a short part of speech ("[n -S]") is never split.
 	// Unfound words are highlighted after a typed-mode reveal; before it, only the
 	// words typed so far show, bare: no hooks, inner hooks or definitions, which
 	// would give hints. The words and a leave value are drawn in the answer font
@@ -17,7 +20,7 @@
 	// size is scaled by the CSS variable --fit, which the player lowers to fit the
 	// answer on the screen.
 	import TileText from '$lib/components/TileText.svelte';
-	import { definitionLines } from '$lib/cascade/definition';
+	import { definitionLines, splitTag, unbroken } from '$lib/cascade/definition';
 	import { leaveValueText } from '$lib/cascade/leave';
 	import { textStyle } from '$lib/player/display.svelte';
 	import type { CascadeRow } from '$lib/local/rows';
@@ -81,8 +84,14 @@
 	);
 	let answerStyle = $derived(fitted(textStyle(font, size, spacing)));
 	let hookStyle = $derived(`font-size: calc(${hookSize}px * var(--fit, 1));`);
-	/** The definition column's limit, for the rows' stylesheet. */
-	let widthStyle = $derived(definitionWidth > 0 ? `--definition-width: ${definitionWidth}px;` : '');
+	/**
+	 * For the rows' stylesheet: the definition column's limit, and the two sizes
+	 * a word's line holds, which every cell of the line is given (see .strut).
+	 */
+	let rowVars = $derived(
+		`--answer-size: calc(${size}px * var(--fit, 1)); --hook-size: calc(${hookSize}px * var(--fit, 1));` +
+			(definitionWidth > 0 ? ` --definition-width: ${definitionWidth}px;` : '')
+	);
 
 	let all = $derived(Array.isArray(answer) ? (answer as Word[]) : []);
 	let words = $derived(typing ? all.filter((w) => typing.includes(w.word)) : all);
@@ -110,17 +119,24 @@
 
 {#snippet hookCell(mine: string | undefined, sizes: string, side: 'front' | 'back')}
 	<span class="hooks inline-grid font-normal text-muted-foreground" class:justify-items-end={side === 'front'} style={hookStyle} data-hooks={side}>
-		<!-- The zero-width space gives an empty cell a line, so it sits on the word's baseline like a full one. -->
-		<span style="grid-area: 1 / 1;">&#8203;{#if mine}<TileText text={mine} lower />{/if}</span>
+		<span style="grid-area: 1 / 1;"><span class="strut"></span>{#if mine}<TileText text={mine} lower />{/if}</span>
 		{#if sizes}<span class="sizer" style="grid-area: 1 / 1;" data-sizes={sizes} aria-hidden="true"></span>{/if}
 	</span>
+{/snippet}
+
+{#snippet lines(text: string)}
+	<!-- A line for each part of speech; a short part of speech stays whole when its line wraps. -->
+	{#each definitionLines(text) as line, i (i)}
+		{@const [meaning, tag] = splitTag(line)}
+		<span class="line" data-line>{unbroken(meaning)}{#if tag}<span class="whitespace-nowrap">{unbroken(tag)}</span>{/if}</span>
+	{/each}
 {/snippet}
 
 {#snippet row(w: Word, hooks: boolean, peers: Word[], text: string | undefined, muted: boolean, missing = false, last = false)}
 	<!-- Left of the word: the probability order, then the front hooks, right-aligned against the word. -->
 	<span class="left">
 		<span class="justify-self-end font-normal text-muted-foreground tabular-nums" style={hookStyle} data-probability>
-			{#if showProbability && w.probability_order}{w.probability_order}{/if}
+			<span class="strut"></span>{#if showProbability && w.probability_order}{w.probability_order}{/if}
 		</span>
 		{@render hookCell(hooks ? w.front_hooks : undefined, hooks ? widest(peers, 'front_hooks') : '', 'front')}
 	</span>
@@ -131,7 +147,7 @@
 		class:text-destructive={missing}
 		class:text-green-600={last}
 	>
-		<span class:invisible={!(hooks && w.front_inner)} aria-hidden={!(hooks && w.front_inner)}>·</span><TileText text={w.word} /><span
+		<span class="strut"></span><span class:invisible={!(hooks && w.front_inner)} aria-hidden={!(hooks && w.front_inner)}>·</span><TileText text={w.word} /><span
 			class:invisible={!(hooks && w.back_inner)}
 			aria-hidden={!(hooks && w.back_inner)}>·</span
 		>
@@ -142,7 +158,7 @@
 		{@render hookCell(hooks ? w.back_hooks : undefined, hooks ? widest(peers, 'back_hooks') : '', 'back')}
 		{#if text !== undefined}
 			<span class="definition font-normal" class:text-muted-foreground={muted} style={definitionStyle} data-definition>
-				{#each definitionLines(text) as line, i (i)}<span class="block">{line}</span>{/each}
+				{@render lines(text)}
 			</span>
 		{/if}
 	</span>
@@ -150,7 +166,7 @@
 
 {#if quizType === 'anagram'}
 	<!-- A list of the anagrams; each item is `display: contents`, so its cells stay in the grid's columns. -->
-	<div role="list" class="rows" style={`${answerStyle} ${widthStyle} row-gap: calc(0.5rem * var(--fit, 1));`} data-typing={typing ? '' : undefined}>
+	<div role="list" class="rows" style={`${answerStyle} ${rowVars} row-gap: calc(0.5rem * var(--fit, 1));`} data-typing={typing ? '' : undefined}>
 		{#each words as w (w.word)}
 			<div role="listitem" class="contents">
 				{@render row(w, hooks, words, definitions ? w.definition : undefined, true, !typing && found !== null && !found.includes(w.word), w.word === latest)}
@@ -163,12 +179,12 @@
 {:else if quizType === 'definition'}
 	<!-- The word with its hooks and inner hooks, and the definition: prose, in the definitions' own typeface and size. -->
 	{#if word}
-		<div class="rows" style={`${answerStyle} ${widthStyle} row-gap: 1rem;`}>
+		<div class="rows" style={`${answerStyle} ${rowVars} row-gap: 1rem;`}>
 			{@render row(word, true, [word], String(answer), false)}
 		</div>
 	{:else}
 		<p class="mx-auto max-w-2xl text-center" style={definitionStyle}>
-			{#each definitionLines(String(answer)) as line, i (i)}<span class="block">{line}</span>{/each}
+			{@render lines(String(answer))}
 		</p>
 	{/if}
 {:else}
@@ -176,23 +192,37 @@
 {/if}
 
 <style>
-	/* Left of the word | the word | right of the word: the outer two share what is left equally, so the word is in the middle. */
+	/* Left of the word | the word | right of the word: the outer two share what is left equally, so the word is in the middle.
+	   A row's cells are centred on each other: the word's line on its definition, however tall that is. */
 	.rows {
 		display: grid;
 		width: 100%;
 		grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-		align-items: baseline;
+		align-items: center;
 		column-gap: 0.75rem;
 	}
 	.left {
 		grid-column: 1;
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
-		align-items: baseline;
+		align-items: center;
 		column-gap: 0.75rem;
 	}
 	.word {
 		grid-column: 2;
+	}
+	/* Every cell of a word's line (probability, hooks, word) holds a letter's height at the word's size and
+	   at the hooks' size, unseen and without width. So the cells' lines are equally tall with their baselines
+	   at the same height, and centring the cells puts their text on one baseline, whichever size is larger. */
+	.strut::before,
+	.strut::after {
+		content: '\200b';
+	}
+	.strut::before {
+		font-size: var(--answer-size);
+	}
+	.strut::after {
+		font-size: var(--hook-size);
 	}
 	/* Under the word: the back hooks stay on the word's line, and the definition has a row of its own across every column. */
 	.right {
@@ -208,6 +238,9 @@
 		max-width: 42rem;
 		text-align: center;
 	}
+	.line {
+		display: block;
+	}
 	/* The other rows' hooks, taking width and nothing else. */
 	.sizer {
 		height: 0;
@@ -219,7 +252,8 @@
 		content: attr(data-sizes);
 	}
 	/* A column of its own, where the screen has room for one: after the back hooks, to the edge of
-	   the page or this device's limit, and centred on the word's line however many lines it takes. */
+	   the page or this device's limit. A line that wraps is indented, so each part of speech still
+	   starts at the column's edge. */
 	@media (min-width: 640px) {
 		.right.own-column {
 			grid-column: 3;
@@ -236,6 +270,10 @@
 			justify-self: start;
 			max-width: var(--definition-width, none);
 			text-align: left;
+		}
+		.right.own-column > .definition > .line {
+			padding-left: 1em;
+			text-indent: -1em;
 		}
 	}
 </style>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { definitionLines } from './definition';
+import { definitionLines, splitTag, unbroken } from './definition';
 
 describe('definitionLines', () => {
 	it('gives each part of speech a line of its own', () => {
@@ -12,5 +12,16 @@ describe('definitionLines', () => {
 		expect(definitionLines('an either / or choice [n -S]')).toEqual(['an either / or choice [n -S]']);
 		expect(definitionLines('no brackets here')).toEqual(['no brackets here']);
 		expect(definitionLines('')).toEqual([]);
+	});
+
+	it('keeps a short part of speech whole, and lets a long one wrap', () => {
+		expect(splitTag('a harbour [n -S]')).toEqual(['a harbour ', '[n -S]']);
+		expect(splitTag('to go out [v -ED, -ING, -S]')).toEqual(['to go out [v -ED, -ING, -S]', '']);
+		expect(splitTag('no brackets here')).toEqual(['no brackets here', '']);
+		expect(splitTag('[n -S]')).toEqual(['[n -S]', '']);
+	});
+
+	it('keeps an inflection with its hyphen', () => {
+		expect(unbroken('a gun-like device [v -ED, -ING]')).toBe('a gun-like device [v -\u2060ED, -\u2060ING]');
 	});
 });

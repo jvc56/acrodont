@@ -71,7 +71,7 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	// The back hooks' column is as wide as the hooks, so the definition starts just after them, centred on the word's line.
 	expect(d.x - (b.x + b.width)).toBeLessThan(20);
 	expect(b.width).toBeLessThan(w.width);
-	expect(Math.abs(d.y + d.height / 2 - (w.y + w.height / 2))).toBeLessThan(6);
+	expect(Math.abs(d.y + d.height / 2 - (w.y + w.height / 2))).toBeLessThan(3);
 	// The word stays in the middle of the quiz area, whatever sits either side of it.
 	// (Measured afresh each time: opening Settings shows the menu, which narrows the area.)
 	const offCentre = async () => {
@@ -99,10 +99,17 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
 	await press(page, 'Space');
 	const parts = page.getByRole('listitem').filter({ hasText: /EXIT/ }).locator('[data-definition]');
-	await expect(parts.locator('span')).toHaveText(['a way out [n -S]', 'to go out [v -ED, -ING, -S]'], { timeout: 30_000 });
+	await expect(parts.locator('[data-line]')).toHaveText(['a way out [n -\u2060S]', 'to go out [v -\u2060ED, -\u2060ING, -\u2060S]'], { timeout: 30_000 });
 	await expect(page.getByRole('listitem').filter({ hasText: /EXIT/ }).locator('[data-probability]')).toHaveText('');
 	const [x, lines] = [await box(page.locator('[data-answer]').filter({ hasText: /EXIT/ })), await box(parts)];
-	expect(Math.abs(lines.y + lines.height / 2 - (x.y + x.height / 2))).toBeLessThan(6);
+	expect(Math.abs(lines.y + lines.height / 2 - (x.y + x.height / 2))).toBeLessThan(3);
+	// In a window too narrow for the second line it wraps, and the word is still centred on the taller definition.
+	const wide = page.viewportSize()!;
+	await page.setViewportSize({ width: 660, height: wide.height });
+	await expect.poll(async () => (await box(parts)).height).toBeGreaterThan(lines.height + 10);
+	const [x2, wrapped] = [await box(page.locator('[data-answer]').filter({ hasText: /EXIT/ })), await box(parts)];
+	expect(Math.abs(wrapped.y + wrapped.height / 2 - (x2.y + x2.height / 2))).toBeLessThan(3);
+	await page.setViewportSize(wide);
 	// Each hook column is as wide as its own widest hooks, the same for every row, and the two differ:
 	// AT has front hooks enopqrv and back hook e, TA front hook e and back hooks noprx.
 	const at = await apiCascade(page, { name: 'At', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'A T' }] } });
