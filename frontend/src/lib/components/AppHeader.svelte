@@ -37,7 +37,7 @@
 		</nav>{/if}
 		<div class="ml-auto flex items-center gap-3 sm:gap-4">
 			<OfflineStatus />
-			<SyncStatus />
+			<SyncStatus compact />
 			<a
 				href="/account"
 				aria-current={page.url.pathname === '/account' ? 'page' : undefined}

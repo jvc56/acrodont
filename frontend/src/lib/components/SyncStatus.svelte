@@ -13,7 +13,13 @@
 	 * Quiet (the player, with its sync status or its status bar hidden): the
 	 * everyday labels are not shown, only what needs attention.
 	 */
-	let { quiet = false }: { quiet?: boolean } = $props();
+	/**
+	 * Compact (the site's header): on a phone an everyday label is its dot
+	 * alone, and a tap on the dot shows or hides the word; what needs
+	 * attention always has its words.
+	 */
+	let { quiet = false, compact = false }: { quiet?: boolean; compact?: boolean } = $props();
+	let shown = $state(false);
 	const EVERYDAY = new Set(['Synced', 'Syncing…', 'Waiting to sync']);
 
 	let text = $derived.by(() => {
@@ -42,11 +48,16 @@
      On a phone the box fits its label, so the header stays on one line. -->
 {#if !(quiet && EVERYDAY.has(text))}
 <div class="flex max-w-40 min-w-0 items-center sm:w-40 sm:shrink-0 justify-end gap-2 text-sm whitespace-nowrap" role="status" title={text}>
-	<span class="inline-block h-2 w-2 shrink-0 rounded-full" class:bg-green-600={text === 'Synced'} class:bg-muted-foreground={text !== 'Synced'}></span>
+	<span class="inline-block h-2 w-2 shrink-0 rounded-full {compact && EVERYDAY.has(text) ? 'max-sm:hidden' : ''}" class:bg-green-600={text === 'Synced'} class:bg-muted-foreground={text !== 'Synced'}></span>
 	{#if syncState.status === 'reload'}
 		<button class="truncate underline" onclick={applyUpdate}>{text}</button>
 	{:else if text === 'Log in to sync'}
 		<a class="truncate underline" href="/login">{text}</a>
+	{:else if compact && EVERYDAY.has(text)}
+		<button type="button" class="-m-2 p-2 sm:hidden" aria-label={shown ? 'Hide the sync status' : 'Show the sync status'} aria-expanded={shown} onclick={() => (shown = !shown)}>
+			<span class="block h-2 w-2 rounded-full" class:bg-green-600={text === 'Synced'} class:bg-muted-foreground={text !== 'Synced'}></span>
+		</button>
+		<span class="truncate {shown ? '' : 'max-sm:sr-only'}">{text}</span>
 	{:else}
 		<span class="truncate">{text}</span>
 	{/if}

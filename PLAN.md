@@ -1035,7 +1035,10 @@ as the term of the data model and the API.
 - **Every setting is a row with its control at the right end**: a checkbox,
   a choice or a number, in the player's Settings and in the quiz options
   alike (`SettingRow`), so the place to click is
-  always the same. Progression is a choice (Ladder or Drill), not a pair of
+  always the same. On a phone (narrower than 640 px) a number or a choice
+  goes under its name, which then has the row's whole width and is not
+  squeezed into a few words a line; a checkbox stays at the right end of its
+  name's line. Progression is a choice (Ladder or Drill), not a pair of
   radio buttons; its ⓘ explains both.
 - **Every setting explains itself**: an ⓘ beside its name (`InfoTip`) shows
   what it does — on hover with a mouse, and on a tap or click, which keeps it
@@ -2627,9 +2630,13 @@ has kept its data, so the app is installable and asks to keep that data:
   amber when the data is not kept or the browser has no service worker, pulsing
   while the worker installs. Hovering, tapping or clicking it says which, in
   words (`lib/sw/install.ts`), and offers Install where the browser can.
+  **On a phone the header is one line**: beside the offline icon the sync
+  status is its dot alone while it is Synced, Syncing… or Waiting to sync (a
+  tap on the dot shows or hides the word), and has its words whenever
+  something needs attention.
 - **Install**: Chrome's and Edge's `beforeinstallprompt` is held back from the
   browser's own mini-infobar and shown as an **Install** button in the header
-  (icon only on a phone) and in the offline status; pressing it opens the
+  (not on a phone, where the header has no room for it) and in the offline status; pressing it opens the
   browser's install dialog. It goes once used or installed (`appinstalled`), and
   is never shown inside the installed app.
 - **On an iPhone or iPad**, which never offers to install, a one-time tip under

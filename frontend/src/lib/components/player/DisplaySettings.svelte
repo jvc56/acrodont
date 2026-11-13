@@ -58,8 +58,9 @@
 
 {#snippet check(label: string, field: keyof Display, id: string, checked: boolean, info: string, set: (on: boolean) => void)}
 	<SettingRow {label} for={id} {info}>
-		<span class="flex w-36 justify-end"><input {id} type="checkbox" {checked} onchange={(e) => set(e.currentTarget.checked)} /></span>
-		<span class="w-8" aria-hidden="true"></span>
+		<!-- On a wide screen the checkbox sits in the fields' column; on a phone, at the row's right end. -->
+		<span class="flex justify-end sm:w-36"><input {id} type="checkbox" {checked} onchange={(e) => set(e.currentTarget.checked)} /></span>
+		<span class="w-8 max-sm:hidden" aria-hidden="true"></span>
 	</SettingRow>
 	{@render widen(field)}
 {/snippet}
@@ -123,9 +124,9 @@
 		{@render check('Green border on a correct answer', 'border_correct', 'display-border-correct', d.border_correct, INFO.border_correct, (on) => change({ border_correct: on }))}
 		{@render check('Red border on a missed answer', 'border_missed', 'display-border-missed', d.border_missed, INFO.border_missed, (on) => change({ border_missed: on }))}
 		{@render number('Grade border width', 'px', 'border_px', 'border_px', INFO.border_width)}
-		{@render check('Show the status bar below the quiz', 'status_bar_hidden', 'display-status-bar', !d.status_bar_hidden, INFO.status_bar, (on) => change({ status_bar_hidden: !on }))}
-		{@render check('Show the sync status below the quiz', 'sync_status_hidden', 'display-sync-status', !d.sync_status_hidden, INFO.sync_status, (on) => change({ sync_status_hidden: !on }))}
-		{@render number('Definition column width (0 for all the room)', 'px', 'definition_width_px', 'definition_width_px', INFO.definition_width)}
+		{@render check('Show the status bar', 'status_bar_hidden', 'display-status-bar', !d.status_bar_hidden, INFO.status_bar, (on) => change({ status_bar_hidden: !on }))}
+		{@render check('Show the sync status', 'sync_status_hidden', 'display-sync-status', !d.sync_status_hidden, INFO.sync_status, (on) => change({ sync_status_hidden: !on }))}
+		{@render number('Definition column width', 'px', 'definition_width_px', 'definition_width_px', INFO.definition_width)}
 		{@render number('Hook size', 'px', 'hook_size_px', 'hook_size_px', INFO.hook_size)}
 		<SettingRow label="Tap zones on a phone" info={INFO.mobile_buttons} for="display-mobile-buttons">
 			<select

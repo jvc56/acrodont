@@ -145,9 +145,46 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	await expect(synced).toHaveCount(0);
 	await page.getByRole('button', { name: 'Show status bar' }).click();
 	await expect(synced).toBeVisible();
-	await playerSetting(page, 'Show the sync status below the quiz', false);
+	await playerSetting(page, 'Show the sync status', false);
 	await expect(synced).toHaveCount(0);
 	await expect(page.getByText('1 / 1')).toBeVisible();
+});
+
+test('on a phone the header is one line, and a setting\'s name is not squeezed beside its control', async ({ page }) => {
+	await newUser(page, 'narrow');
+	const port = await apiCascade(page, { name: 'Port', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'O P R T' }] } });
+	await page.setViewportSize({ width: 360, height: 740 });
+	await page.goto('/cascades');
+	const header = page.locator('header');
+	await expect(header.getByRole('button', { name: 'Show the sync status' })).toBeVisible({ timeout: 30_000 });
+	const box = async (l: ReturnType<typeof page.locator>) => (await l.boundingBox())!;
+	// One line: the name at the left and the account at the right share it.
+	const [name, account] = [await box(header.getByRole('link', { name: 'Acrodont' })), await box(header.getByRole('link', { name: /^narrow/ }))];
+	expect(Math.abs(name.y + name.height / 2 - (account.y + account.height / 2))).toBeLessThan(4);
+	// The sync status is its dot; a tap shows the word, another hides it.
+	const word = header.getByRole('status').getByText(/^(Synced|Syncing…|Waiting to sync)$/);
+	expect((await box(word)).width).toBeLessThan(3);
+	await header.getByRole('button', { name: 'Show the sync status' }).click();
+	expect((await box(word)).width).toBeGreaterThan(30);
+	await header.getByRole('button', { name: 'Hide the sync status' }).click();
+
+	// In Settings a number goes under its name, and a checkbox stays at the end of its name's line: each name is one line.
+	await page.goto(port);
+	await openPlayerSettings(page);
+	const dialog = page.getByRole('dialog', { name: 'Settings' });
+	for (const label of ['Show the status bar', 'Definition column width', 'Grade border width']) {
+		const text = dialog.locator('label', { hasText: new RegExp(`^${label}$`) });
+		await text.scrollIntoViewIfNeeded();
+		expect((await box(text)).height, label).toBeLessThan(30);
+	}
+	const [label, field, tick] = [
+		await box(dialog.locator('label', { hasText: /^Grade border width$/ })),
+		await box(dialog.getByLabel('Grade border width', { exact: true })),
+		await box(dialog.getByLabel('Show the status bar', { exact: true }))
+	];
+	expect(field.y).toBeGreaterThanOrEqual(label.y + label.height - 1);
+	const shown = await box(dialog.locator('label', { hasText: /^Show the status bar$/ }));
+	expect(Math.abs(tick.y + tick.height / 2 - (shown.y + shown.height / 2))).toBeLessThan(6);
 });
 
 test('a cascade trashed offline is listed in the Trash with "deleted forever 30 days after this syncs"', async ({ page, context }) => {

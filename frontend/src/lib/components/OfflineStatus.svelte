@@ -20,9 +20,10 @@
 
 <div class="flex items-center gap-2">
 	{#if offline.offer}
-		<Button size="sm" variant="outline" onclick={install} aria-label="Install Acrodont" title="Install Acrodont: open it from its own icon, with or without a connection">
+		<!-- Not on a phone, where the header has no room for it: the icon's details offer Install there. -->
+		<Button class="max-sm:hidden" size="sm" variant="outline" onclick={install} aria-label="Install Acrodont" title="Install Acrodont: open it from its own icon, with or without a connection">
 			<DownloadIcon class="size-4" aria-hidden="true" />
-			<span class="max-sm:hidden">Install</span>
+			<span>Install</span>
 		</Button>
 	{/if}
 	<Popover.Root>
