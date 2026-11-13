@@ -37,15 +37,22 @@ export const session = new Session();
 
 /** The queued logout's request, with the CSRF token whenever the cookie is there. */
 export async function sendQueuedLogout(): Promise<LogoutOutcome> {
-	const headers: Record<string, string> = {};
-	const csrf = readCookie(CSRF_COOKIE);
-	if (csrf) headers[CSRF_HEADER] = csrf;
+	const send = () => {
+		const headers: Record<string, string> = {};
+		const csrf = readCookie(CSRF_COOKIE);
+		if (csrf) headers[CSRF_HEADER] = csrf;
+		return fetch('/api/auth/logout', { method: 'POST', headers, credentials: 'same-origin' });
+	};
 	try {
-		const r = await fetch('/api/auth/logout', {
-			method: 'POST',
-			headers,
-			credentials: 'same-origin'
-		});
+		let r = await send();
+		if (r.status === 403) {
+			// A session cookie whose CSRF cookie is gone (a browser that cleared
+			// part of its site data). /api/auth/me sets the token again for a
+			// session that still holds, so the logout can clear the cookie
+			// rather than leave it valid on a machine someone else may use.
+			const me = await fetch('/api/auth/me', { credentials: 'same-origin' });
+			if (me.ok && readCookie(CSRF_COOKIE)) r = await send();
+		}
 		return { status: r.status };
 	} catch {
 		return { networkError: true };

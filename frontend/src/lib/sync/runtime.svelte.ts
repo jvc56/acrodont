@@ -21,6 +21,8 @@ class SyncState {
 	progress = $state(0);
 	/** The cascade this tab's player has open (the drop pass skips it). */
 	openCascade = $state<string | null>(null);
+	/** The last download pass found no room on this device, even after dropping what it may. */
+	noRoom = $state(false);
 	/** Operations waiting in the outbox; null until counted, so "Synced" is never shown unread. */
 	pending = $state<number | null>(null);
 	/** Cascades a rebase changed: a player showing one refreshes (step 5). */
@@ -92,21 +94,32 @@ function downloadInBackground() {
 	void dm
 		.run()
 		.then(() => (again ? dm.run() : undefined))
-		.then(() => {
-			syncState.progress += 1;
-			post({ kind: 'progress' });
-		})
-		.catch(() => undefined);
+		.catch(() => undefined)
+		.then(() => passDone(dm));
+}
+
+/** A download pass ended, well or not: badges changed, here and in every other tab, and whether there was room. */
+function passDone(dm: DownloadManager) {
+	syncState.progress += 1;
+	syncState.noRoom = dm.noRoom;
+	post({ kind: 'progress', noRoom: dm.noRoom });
 }
 let channel: BroadcastChannel | null = null;
 let stop: (() => void) | null = null;
+
+function reloadDeviceSettings() {
+	void display.reload();
+	void controls.reload();
+}
 
 type Message =
 	| { kind: 'status'; status: SyncStatus }
 	| { kind: 'kick' }
 	| { kind: 'notices'; notices: Notice[] }
 	| { kind: 'changed'; ids: string[] }
-	| { kind: 'progress' };
+	/** The leader took shared device settings: an open player in any tab shows them. */
+	| { kind: 'settings' }
+	| { kind: 'progress'; noRoom?: boolean };
 
 function post(m: Message) {
 	channel?.postMessage(m);
@@ -117,6 +130,7 @@ export function startSync(userId: string): () => void {
 	stopSync();
 	currentUser = userId;
 	syncState.pending = null;
+	syncState.noRoom = false;
 	void refreshPending();
 	if (typeof BroadcastChannel !== 'undefined') {
 		channel = new BroadcastChannel(`acrodont-sync-${userId}`);
@@ -130,7 +144,11 @@ export function startSync(userId: string): () => void {
 			}
 			else if (m.kind === 'notices' && !syncState.leader) syncState.notices = [...syncState.notices, ...m.notices];
 			else if (m.kind === 'changed') syncState.changed = { ids: m.ids, tick: syncState.changed.tick + 1 };
-			else if (m.kind === 'progress') syncState.progress += 1;
+			else if (m.kind === 'settings') reloadDeviceSettings();
+			else if (m.kind === 'progress') {
+				syncState.progress += 1;
+				if (!syncState.leader && m.noRoom !== undefined) syncState.noRoom = m.noRoom;
+			}
 		};
 	}
 	const release = electLeader(userId, () => {
@@ -139,7 +157,8 @@ export function startSync(userId: string): () => void {
 		let cancelled = false;
 		syncState.leader = true;
 		void userDb(userId).then((db) => {
-			if (cancelled) return;
+			// Only for the account this tab still runs as.
+			if (cancelled || session.userId !== userId) return;
 			const e = new SyncEngine(db, {
 				// The download manager's turn after every pull; never awaited by the
 				// cycle, since its grades fetch syncs first.
@@ -149,19 +168,18 @@ export function startSync(userId: string): () => void {
 						syncState.changed = { ids, tick: syncState.changed.tick + 1 };
 						post({ kind: 'changed', ids });
 					}
-					void downloads
-						?.run()
-						.then(() => {
-							// A finished pass changes badges here and in every other tab.
-							syncState.progress += 1;
-							post({ kind: 'progress' });
-						})
-						.catch(() => undefined);
+					const dm = downloads;
+					if (dm)
+						void dm
+							.run()
+							.catch(() => undefined)
+							.then(() => passDone(dm));
 				},
-				// A shared display setting or the controls changed: an open player shows them.
+				// A shared display setting or the controls changed: an open player
+				// shows them, in this tab and in every other.
 				onDeviceSettings: () => {
-					void display.reload();
-					void controls.reload();
+					reloadDeviceSettings();
+					post({ kind: 'settings' });
 				},
 				onStatus: (s) => {
 					syncState.status = s;
@@ -209,6 +227,7 @@ export function startSync(userId: string): () => void {
 export function stopSync() {
 	stop?.();
 	stop = null;
+	currentUser = null;
 }
 
 /** After a local write: half a second later, by this tab or by the leader. */

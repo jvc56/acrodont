@@ -162,6 +162,7 @@ export class DownloadManager {
 	private running: Promise<void> | null = null;
 	/** A first open's progress, per cascade: each step reports the units it finished (ensureCascade). */
 	private readonly meters = new Map<string, (units: number) => void>();
+	/** A write failed for room even after the drop pass and eviction: the sync status says so. */
 	noRoom = false;
 
 	constructor(
@@ -272,6 +273,8 @@ export class DownloadManager {
 	}
 
 	private async pass(): Promise<void> {
+		// Said again only if this pass, too, cannot make room.
+		this.noRoom = false;
 		await this.dropPass(await policy(this.db, this.now()));
 		// Judged again after the pass, so a cascade the budget just dropped is not fetched back.
 		const pol = await policy(this.db, this.now());

@@ -117,11 +117,19 @@
 		const input = r.input;
 		const type = choices.format === 'csv' ? 'text/csv' : 'text/plain';
 		const worker = new Worker(new URL('../../../../lib/export/worker.ts', import.meta.url), { type: 'module' });
-		const blob = await new Promise<Blob>((resolve) => {
-			worker.onmessage = (ev) => resolve(ev.data as Blob);
-			worker.postMessage({ input: $state.snapshot(input), type });
-		});
-		worker.terminate();
+		let blob: Blob;
+		try {
+			blob = await new Promise<Blob>((resolve, reject) => {
+				worker.onmessage = (ev) => resolve(ev.data as Blob);
+				// A worker that fails to load or throws sends no message: without
+				// these the export waited for one for good.
+				worker.onerror = (ev) => reject(new Error(ev.message || 'the export worker failed'));
+				worker.onmessageerror = () => reject(new Error('the export worker sent something unreadable'));
+				worker.postMessage({ input: $state.snapshot(input), type });
+			});
+		} finally {
+			worker.terminate();
+		}
 		save(blob, exportFilename(cascade.name, { ...choices, level: input.choices.level }));
 		return true;
 	}
@@ -172,7 +180,7 @@
 			}
 			await server();
 		} catch {
-			message = 'The export could not be made. Check your connection.';
+			message = navigator.onLine ? 'The export could not be made. Try again.' : 'The export could not be made. Check your connection.';
 		} finally {
 			busy = false;
 		}

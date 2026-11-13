@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button';
 	import AuthCard from '$lib/components/auth/AuthCard.svelte';
 	import Field from '$lib/components/auth/Field.svelte';
@@ -13,6 +14,8 @@
 	let password = $state('');
 	let error = $state<string | null>(null);
 	let busy = $state(false);
+	// The confirmation link lands here (confirm-email/+page.svelte).
+	const confirmed = $derived(page.url.searchParams.get('confirmed') === '1');
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();
@@ -38,6 +41,7 @@
 
 <AuthCard title="Log in" description="Log in with your username.">
 	<form class="grid gap-4" onsubmit={submit}>
+		{#if confirmed && !error}<p class="text-sm" role="status">Your email address is confirmed. Log in to start.</p>{/if}
 		<FormError message={error} />
 		<Field id="username" label="Username" bind:value={username} autocomplete="username" />
 		<Field id="password" label="Password" type="password" bind:value={password} autocomplete="current-password" />

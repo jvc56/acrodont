@@ -3768,7 +3768,11 @@ of divergence (see [Monitoring](#deployment-and-operations)).
   [needs neither a session nor a CSRF token](#auth-and-account) and answers
   `2xx` as well, because there is nothing left to clear. The one `403` left is a
   session cookie with the CSRF cookie gone — a browser that cleared part of its
-  site data — and the class rule above clears the flag for it rather than
+  site data. For that the app asks `GET /api/auth/me` once, which sets the
+  token again for a session that still holds, and sends the logout once more,
+  so the cookie is cleared rather than left valid on a machine someone else
+  may use; if that too is refused, the class rule above clears the flag
+  rather than
   firing the same doomed request at every startup for the life of the
   installation. It runs only while no account is signed in
   because the endpoint clears whatever session cookie the browser holds, and the
@@ -4857,7 +4861,8 @@ The flows are the conventional ones, built directly on Axum:
   sequence, so a new account's `sync_seq` starts at 0, the column default, and
   its first pull carries nothing until it has a cascade.
 - **Confirm email** (`/confirm-email?code=…`): the page submits the code; on
-  success the user is sent to `/login`. Login is refused with `403` until the
+  success the user is sent to `/login`, which says "Your email address is
+  confirmed. Log in to start." Login is refused with `403` until the
   email is confirmed.
 - **Login**: by **username** and password, never by email, so the `403` for an
   unconfirmed account reveals nothing that the public username does not. Rate

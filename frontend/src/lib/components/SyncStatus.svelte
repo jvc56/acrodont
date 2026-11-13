@@ -26,11 +26,10 @@
 	let text = $derived.by(() => {
 		if (session.signedOutInAnotherTab) return 'Signed out in another tab';
 		if (session.needsLogin || syncState.status === 'needs_login') return 'Log in to sync';
+		if (syncState.status === 'reload') return 'Reload to keep syncing';
+		// A download that found no room even after dropping what it may (downloads.ts).
+		if (syncState.noRoom) return 'Not enough room on this device';
 		switch (syncState.status) {
-			case 'reload':
-				return 'Reload to keep syncing';
-			case 'no_room':
-				return 'Not enough room on this device';
 			case 'offline':
 				return 'Offline';
 			case 'syncing':

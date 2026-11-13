@@ -13,6 +13,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, ApiError } from '$lib/api';
+	import { isRetriable, sendWithRetry } from '$lib/builder/create';
 	import { session } from '$lib/auth/session.svelte';
 	import CascadeLadder from '$lib/components/CascadeLadder.svelte';
 	import QuizOptionsForm from '$lib/components/QuizOptionsForm.svelte';
@@ -549,10 +550,17 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		if (!ok) return;
 		const { device_id } = await getMeta(db, 'device');
 		const body = { id: crypto.randomUUID(), source_quiz_id: crypto.randomUUID(), device_id, at: new Date().toISOString() };
-		starting = { stage: 'server', progress: 0, count: null };
 		cascadeError = null;
+		if (!navigator.onLine) {
+			cascadeError = 'Duplicating a cascade needs a connection.';
+			return;
+		}
+		starting = { stage: 'server', progress: 0, count: null };
 		try {
-			const created = await api.post<Created>(`/api/cascades/${id}/duplicate`, body);
+			// Retried with the same ids on a 5xx, a 429 or a dropped connection, as
+			// Create Cascade is (builder/create.ts): the server answers a repeat
+			// with the cascade it already made.
+			const created = await sendWithRetry(() => api.post<Created>(`/api/cascades/${id}/duplicate`, body));
 			starting = { stage: 'device', progress: 0, count: Number(created.source_quiz.question_count) };
 			await storeCreated(db, created, new Date(), (f) => starting && (starting.progress = f));
 			settingsOpen = false;
@@ -561,7 +569,9 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 			if (e instanceof ApiError && e.code === 'storage_limit') {
 				const b = e.body as { used: number; limit: number; needed: number };
 				cascadeError = `Duplicating needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your storage is free. Empty the Trash or delete cascades to make room.`;
-			} else cascadeError = 'Duplicating a cascade needs a connection.';
+			} else if (isRetriable(e)) cascadeError = 'Duplicating a cascade needs a connection.';
+			// The server refused it, or this device could not store it: not the connection.
+			else cascadeError = 'The cascade could not be duplicated. Try again.';
 		} finally {
 			starting = null;
 		}
