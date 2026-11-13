@@ -558,7 +558,10 @@ export class Player {
 		}
 		const r = this.retry;
 		this.retry = null;
-		if (r) await r();
+		if (!r) return;
+		this.v.storage = false;
+		this.v.message = null;
+		await r();
 	}
 
 	// -------------------------------------------------------------------------
@@ -607,9 +610,7 @@ export class Player {
 			return;
 		}
 		if (!card.revealed) return this.reveal(card);
-		const act = async () => this.saveAndAdvance(card, q);
-		this.retry = act;
-		await act();
+		await this.saveAndAdvance(card, q);
 	}
 
 	private needsConnection(q: QuizRow) {
@@ -678,7 +679,7 @@ export class Player {
 				shuffle_seed: this.seed(),
 				new_quiz_id: this.uuid()
 			});
-			if (!r) return;
+			if (!r) return this.holdFinish(card, q);
 			await this.reload();
 			let back: { level: number; run: number; runs: number } | undefined;
 			if (q.segment_chain && this.v.quiz) {
@@ -701,10 +702,18 @@ export class Player {
 			shuffle_seed: this.seed(),
 			new_quiz_id: this.uuid()
 		});
-		if (!r) return;
+		if (!r) return this.holdFinish(card, q);
 		await this.reload();
 		this.v.banner = runBanner({ outcome: r.outcome!, run: ri.run, runs: ri.total, misses: runMisses, level: q.level });
 		this.emit();
+	}
+
+	/**
+	 * A finish the device had no room for: the card's grade is saved, so Try
+	 * again (retryStorage) makes the finish alone.
+	 */
+	private holdFinish(card: Card, q: QuizRow) {
+		if (this.v.storage) this.retry = () => this.saveAndAdvance({ ...card, saved: card.grade }, q);
 	}
 
 	toggle(): Promise<void> {

@@ -554,6 +554,32 @@ describe('the player', () => {
 		expect(await ops()).toEqual(['grade', 'move_cursor']);
 		expect(p.v.card!.pos).toBe(1);
 	});
+
+	it('a finish the device has no room for is made by Try again once space is freed', async () => {
+		await cascade(1);
+		// The device fills after the last card's grade is saved: only the finish fails.
+		let full = false;
+		const p = new Player(db, C, { ensure: async () => undefined, seed: () => '777', afterWrite: () => (full = true) });
+		await p.load();
+		const real = db.transaction.bind(db);
+		(db as unknown as { transaction: typeof real }).transaction = ((...a: Parameters<typeof real>) => {
+			if (full && a[1] === 'readwrite') throw new DOMException('full', 'QuotaExceededError');
+			return real(...a);
+		}) as typeof real;
+		await p.showNext();
+		await p.showNext();
+		expect(p.v.storage).toBe(true);
+		expect(await ops()).toEqual(['grade']);
+		// Still full: Try again leaves the player asking.
+		await p.retryStorage();
+		expect(p.v.storage).toBe(true);
+		expect(await ops()).toEqual(['grade']);
+		(db as unknown as { transaction: typeof real }).transaction = real;
+		await p.retryStorage();
+		expect(p.v.storage).toBe(false);
+		expect(await ops()).toEqual(['grade', 'finish']);
+		expect(p.v.banner).not.toBeNull();
+	});
 });
 
 describe('controls', () => {
