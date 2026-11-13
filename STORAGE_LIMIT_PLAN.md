@@ -7,6 +7,13 @@ were taken the same day (docs/plan-questions.md PQ-023). The default limit,
 PLAN.md § Storage limit is now the spec; this file records how it was
 decided.
 
+**Since then** the default was lowered to **10 MB** (`MAX_STORAGE_BYTES_PER_USER`
+is `10000000`), once each level's questions were packed into chunks and the
+same cascades came to a small fraction of the sizes below, and `MAX_ACCOUNTS`
+was raised from 50 to 750. Every "100 MB" and "50" in this file is the
+figure of the day it was written; PLAN.md § Storage limit has today's
+sizing.
+
 ### Implementation status
 
 - **The per-row sizes** are `contract-fixtures/storage.json`: `cascade_row`
