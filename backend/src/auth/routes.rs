@@ -41,6 +41,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
             "/api/account/sign-out-everywhere",
             post(sign_out_everywhere),
         )
+        .route("/api/account/password", post(change_password))
         .route("/api/account", delete(delete_account));
     // Only on a local stack: the route does not exist otherwise, so production
     // answers 404 (config.rs refuses DEV_LOGIN with SECURE_COOKIES).
@@ -682,6 +683,71 @@ async fn sign_out_everywhere(
     )
     .fetch_one(&state.db)
     .await?;
+    Ok((
+        SessionCookies::issue(&state, user.id, generation, None),
+        StatusCode::NO_CONTENT,
+    )
+        .into_response())
+}
+
+#[derive(Deserialize)]
+pub struct ChangePasswordBody {
+    current_password: String,
+    new_password: String,
+}
+
+/// A signed-in change of password: the current one proves it is the owner,
+/// the new one meets the strength rule a reset's does. Like Sign out
+/// everywhere it bumps `session_generation` and re-issues this device's
+/// cookies, so every other session is refused while this one keeps working;
+/// and it spends the account's outstanding reset links, which were asked for
+/// under the old password.
+async fn change_password(
+    State(state): State<AppState>,
+    Session(user): Session,
+    ApiJson(body): ApiJson<ChangePasswordBody>,
+) -> ApiResult<Response> {
+    // Each try costs a hash and maybe a scoring: bounded per account, as a
+    // reset link's tries are.
+    state.limits.reset.check(&format!("pw:{}", user.id))?;
+    let account = sqlx::query!(
+        r#"SELECT username::text AS "username!", email::text AS "email!", password_hash
+           FROM users WHERE id = $1"#,
+        user.id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(ApiError::Unauthorized)?;
+    if !password::verify(body.current_password, account.password_hash).await {
+        return Err(ApiError::Fields(vec![FieldError::new(
+            "current_password",
+            "That password is not right.",
+        )]));
+    }
+    let errors =
+        password::check_strength("new_password", &body.new_password, &account.username, &account.email).await?;
+    if !errors.is_empty() {
+        return Err(ApiError::Fields(errors));
+    }
+    // Hashed before the transaction, so the wait holds no lock.
+    let hash = password::hash(body.new_password).await?;
+    let mut tx = state.db.begin().await?;
+    let generation = sqlx::query_scalar!(
+        "UPDATE users SET password_hash = $2, session_generation = session_generation + 1
+         WHERE id = $1 RETURNING session_generation",
+        user.id,
+        hash,
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(ApiError::Unauthorized)?;
+    sqlx::query!(
+        "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL",
+        user.id
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
     Ok((
         SessionCookies::issue(&state, user.id, generation, None),
         StatusCode::NO_CONTENT,

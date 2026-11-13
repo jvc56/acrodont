@@ -306,7 +306,7 @@ async fn first_syncs(pool: sqlx::PgPool) {
     assert_eq!(rows(&pages, "quiz_questions")[0]["question_idx"].as_array().unwrap().len(), 200);
     let c = &rows(&pages, "cascades")[0];
     assert_eq!(c["reveal_correct"], true, "a reveal marks a card correct by default");
-    assert_eq!((&c["show_definitions"], &c["show_hooks"], &c["leave_value_decimals"]), (&json!(true), &json!(true), &json!(1)));
+    assert_eq!((&c["show_definitions"], &c["show_hooks"], &c["leave_value_decimals"]), (&json!(true), &json!(true), &json!(0)));
     assert!(pages.iter().all(|p| p["changes"].get("preferences").is_none()), "no account-level settings");
 }
 

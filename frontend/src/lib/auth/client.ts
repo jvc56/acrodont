@@ -16,6 +16,8 @@ export const authApi = {
 		api.post<unknown>('/api/auth/reset-password', { email }, { bindUser: false }),
 	confirmReset: (token: string, password: string) =>
 		api.post<unknown>('/api/auth/reset-password/confirm', { token, password }, { bindUser: false }),
+	changePassword: (current_password: string, new_password: string) =>
+		api.post<unknown>('/api/account/password', { current_password, new_password }),
 	signOutEverywhere: (password: string) =>
 		api.post<unknown>('/api/account/sign-out-everywhere', { password }),
 	deleteAccount: (password: string) => api.delete<unknown>('/api/account', { password })

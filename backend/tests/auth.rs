@@ -247,6 +247,9 @@ async fn email_caps(pool: sqlx::PgPool) {
         )
         .await;
     }
+    // Each mail follows its response, so the sixteen still on their way are
+    // waited for first; then a moment more, in which a twenty-first would show.
+    assert_eq!(app.mail_to("erin@example.com", 20).await.len(), 20);
     assert_eq!(app.settled_mail_to("erin@example.com").await.len(), 20);
 }
 
@@ -671,18 +674,50 @@ async fn sign_out_everywhere(pool: sqlx::PgPool) {
     );
 }
 
-/// There is no signed-in password change, as in birdtest: a reset is the one way.
+/// A signed-in password change: the current password proves the owner, the
+/// new one meets the strength rule, every other session is signed out and
+/// this one keeps working.
 #[sqlx::test]
-async fn there_is_no_signed_in_password_change(pool: sqlx::PgPool) {
+async fn a_signed_in_password_change(pool: sqlx::PgPool) {
+    const NEW: &str = "violet-harbor-lantern-quill";
     let app = TestApp::new(pool).await;
     let mut here = app.signed_in("ozzy").await;
+    let mut there = app.client_from("198.51.100.4");
+    there.user_id = here.user_id;
+    let r = there.post("/api/auth/login", json!({"username": "ozzy", "password": PASSWORD})).await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    // A wrong current password, then a weak new one: each a field error, and nothing changes.
     let r = here
-        .post(
-            "/api/account/password",
-            json!({"current_password": PASSWORD, "new_password": "violet-harbor-lantern-quill"}),
-        )
+        .post("/api/account/password", json!({"current_password": "wrong-password", "new_password": NEW}))
         .await;
-    assert!(matches!(r.status, StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED), "{}", r.status);
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.json()["errors"][0]["field"], "current_password", "{:?}", r.json());
+    let r = here
+        .post("/api/account/password", json!({"current_password": PASSWORD, "new_password": "password1"}))
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.json()["errors"][0]["field"], "new_password", "{:?}", r.json());
+    assert_eq!(there.get("/api/auth/me").await.status, StatusCode::OK);
+
+    let r = here
+        .post("/api/account/password", json!({"current_password": PASSWORD, "new_password": NEW}))
+        .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT, "{:?}", r.json());
+    assert!(r.set_cookie("acrodont_session").is_some());
+    assert_eq!(here.get("/api/auth/me").await.status, StatusCode::OK, "this session keeps working");
+    assert_eq!(there.get("/api/auth/me").await.status, StatusCode::UNAUTHORIZED, "every other is signed out");
+    // The old password no longer logs in; the new one does.
+    let r = there.post("/api/auth/login", json!({"username": "ozzy", "password": PASSWORD})).await;
+    assert_ne!(r.status, StatusCode::OK);
+    let r = there.post("/api/auth/login", json!({"username": "ozzy", "password": NEW})).await;
+    assert_eq!(r.status, StatusCode::OK);
+    // Signed out, there is no changing it.
+    let mut nobody = app.client_from("198.51.100.5");
+    let r = nobody
+        .post("/api/account/password", json!({"current_password": NEW, "new_password": PASSWORD}))
+        .await;
+    assert!(matches!(r.status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN), "{}", r.status);
 }
 
 #[sqlx::test]

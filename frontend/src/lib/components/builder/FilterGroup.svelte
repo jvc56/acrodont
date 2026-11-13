@@ -46,10 +46,6 @@
 		insertAfter(root, key, newRow(defaultType, quizType, ctx));
 	}
 
-	function addGroupAfter(key: number) {
-		insertAfter(root, key, newGroup(group.op === 'and' ? 'or' : 'and', [newRow(defaultType, quizType, ctx)]));
-	}
-
 	function dragStart(e: DragEvent, key: number) {
 		e.dataTransfer?.setData('application/x-acrodont-node', String(key));
 		if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
@@ -127,7 +123,6 @@
 				{lexicon}
 				error={errors.get(child.key) ?? null}
 				onaddrow={() => addRowAfter(child.key)}
-				onaddgroup={() => addGroupAfter(child.key)}
 				onremove={() => removeNode(root, child.key)}
 				ondragstart={(e) => dragStart(e, child.key)}
 			/>
@@ -159,19 +154,18 @@
 	{#if top && group.children.length === 0}
 		<p class="text-sm text-muted-foreground">No filters: every word in the lexicon, or every leave for a Leave Value quiz.</p>
 	{/if}
-	{#if group.children.length === 0 || top}
-		<div class="flex flex-wrap gap-2">
-			<Button type="button" size="sm" variant="outline" onclick={() => group.children.push(newRow(defaultType, quizType, ctx))}>
-				<ListPlusIcon class="size-4" />Add row
-			</Button>
-			<Button
-				type="button"
-				size="sm"
-				variant="outline"
-				onclick={() => group.children.push(newGroup(group.op === 'and' ? 'or' : 'and', [newRow(defaultType, quizType, ctx)]))}
-			>
-				<BracketsIcon class="size-4" />Add group
-			</Button>
-		</div>
-	{/if}
+	<!-- Every group ends with these: a row's + adds a row below it, and a group is added here. -->
+	<div class="flex flex-wrap gap-2">
+		<Button type="button" size="sm" variant="outline" onclick={() => group.children.push(newRow(defaultType, quizType, ctx))}>
+			<ListPlusIcon class="size-4" />Add row
+		</Button>
+		<Button
+			type="button"
+			size="sm"
+			variant="outline"
+			onclick={() => group.children.push(newGroup(group.op === 'and' ? 'or' : 'and', [newRow(defaultType, quizType, ctx)]))}
+		>
+			<BracketsIcon class="size-4" />Add group
+		</Button>
+	</div>
 </div>

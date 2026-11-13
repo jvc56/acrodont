@@ -68,6 +68,13 @@ test('updating the app @serial @full', async ({ context }) => {
 		await a.reload();
 		await expect(a.getByRole('button', { name: 'Reload to keep syncing' })).toBeVisible({ timeout: 60_000 });
 		expect(await build(a)).toBe(old);
+		// The reload left the waiting build's files alone: the old worker deletes older builds'
+		// caches only, or the new one would take over with nothing and show a blank page.
+		const shells = await a.evaluate(async () => {
+			const names = (await caches.keys()).filter((n) => n.startsWith('acrodont-'));
+			return Promise.all(names.map(async (n) => !!(await (await caches.open(n)).match('/index.html'))));
+		});
+		expect(shells).toEqual([true, true]);
 		// Its own reload does: the new build, and the next sync succeeds.
 		await a.getByRole('button', { name: 'Reload to keep syncing' }).click();
 		await expect.poll(() => build(a), { timeout: 60_000 }).toBe(old + 1);

@@ -467,6 +467,8 @@ describe('the download manager', () => {
 		expect(wantsHooks({ quiz_type: 'definition', show_hooks: false })).toBe(true);
 		expect(wantsHooks({ quiz_type: 'anagram', show_hooks: true })).toBe(true);
 		expect(wantsHooks({ quiz_type: 'anagram', show_hooks: false })).toBe(false);
+		// The probability order comes with the hooks.
+		expect(wantsHooks({ quiz_type: 'anagram', show_hooks: false, show_probability: true })).toBe(true);
 		expect(wantsHooks({ quiz_type: 'leave_value', show_hooks: true })).toBe(false);
 		expect(wantsDefinitions({ quiz_type: 'anagram', show_definitions: true })).toBe(true);
 		expect(wantsDefinitions({ quiz_type: 'anagram', show_definitions: false })).toBe(false);

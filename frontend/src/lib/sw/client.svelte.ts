@@ -49,7 +49,11 @@ export async function watchUpdates() {
 			return;
 		}
 		if (asked) location.reload();
-		else updates.updatedElsewhere = true;
+		else {
+			updates.updatedElsewhere = true;
+			// The new worker is told what this tab still runs, so it keeps that build's files.
+			post(sw.controller, { type: 'HELLO', version });
+		}
 	});
 	const check = (r: ServiceWorkerRegistration) => {
 		if (r.waiting) updates.ready = true;

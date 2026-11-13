@@ -625,7 +625,9 @@ cascade's Settings.
 | **When an answer is revealed, mark it** (`reveal_correct`) | Flashcard cards (a typed card is graded by what was typed) | **Correct** | Correct / Missed: the grade a card starts with when its answer is shown, before any toggle |
 | **Show definitions** (`show_definitions`) | Anagram answers | **on** | on / off |
 | **Show hooks** (`show_hooks`) | Anagram answers (with inner hooks) | **on** | on / off |
-| **Round leave values to (decimal places)** (`leave_value_decimals`) | Leave Value answers, rounded half away from zero | `1` | `0`, `1`, `2`, `3` |
+| **Show each word's probability order** (`show_probability`) | Anagram answers and a Definition card's word | off | on / off |
+| **Definitions in their own column** (`definition_column`) | Anagram answers and a Definition card's definition | **on** | on / off: beside the word, or centred beneath it |
+| **Round leave values to (decimal places)** (`leave_value_decimals`) | Leave Value answers, rounded half away from zero | `0` | `0`, `1`, `2`, `3` |
 | **Segment size** (`segment_size`) | Levels made from now on (see [Quiz options](#quiz-options)) | `0` (off) | 0 (off), or 5 – `MAX_QUIZ_QUESTIONS` |
 | **Progression** (`progression`) | Levels made from now on | **Ladder** | Ladder / Drill |
 | **Answers in alphabetical order** (`require_alphabetical`) | Levels made from now on, Anagram cascades | off | on / off |
@@ -944,13 +946,15 @@ as the term of the data model and the API.
   larger heading and an ⓘ saying what it reaches and whether it syncs
   (`SCOPE` in `settings-info.ts`) — so the two read as separate. Every
   setting is saved as soon as it is changed:
-  - **Cascade Settings** (synced; other cascades keep their own), in order: the ladder as a
+  - **Cascade Settings** (synced; other cascades keep their settings, and a
+    change can be applied to every cascade), in order: the ladder as a
     table whose columns line up — level, questions, pass, last pass's score,
     status — with each level's Export…; the clear threshold (a number, taking
     effect when the field is left, for the pass in progress too); the answer
     mode (anagram cascades); "When an answer is revealed, mark it"; Show
     definitions, Show hooks and Show how many anagrams are found in typed
-    mode (anagram cascades); Round leave values (leave
+    mode (anagram cascades); Show each word's probability order and Definitions
+    in their own column (anagram and definition cascades); Round leave values (leave
     value cascades); the [options](#quiz-options) of **Level N, the level you
     are studying** (that quiz only, from the current card; "✓ Saved for this
     level" after a change); the options **levels made from now on** start
@@ -963,7 +967,8 @@ as the term of the data model and the API.
     for levels made from now on, says "✓ Saved for this cascade" once changed
     and offers **all N cascades** (see
     [One cascade, or all of them](#one-cascade-or-all-of-them)).
-  - **Device Settings** (not synced unless asked): the display settings, then
+  - **Device Settings** (saved on this device; other devices keep their
+    settings, and a change can be applied to all of them): the display settings, then
     the [controls](#controls) under their own **Controls** subheading. Each
     display setting says "✓ Saved on this device" once changed and offers
     **all your devices**, as do the controls after a change or after **Reset
@@ -1016,11 +1021,12 @@ as the term of the data model and the API.
   field is left, out-of-range values are clamped, and values saved by builds
   that offered presets are converted. Answers match the question by default. A
   definition answer is prose, so it takes the answer typeface at a reading
-  size; hooks are three quarters of the word's size, and anagram definitions
+  size; hooks, and the probability order, have a size of their own (27 px by
+  default, three quarters of the answers' default), and anagram definitions
   have their own. These, the question's
   position, the borders, whether the status bar and the sync status are
-  shown, whether a definition has a column of its own (on) and whether each
-  word shows its probability order (off; see [Answers](#answers)), a phone's
+  shown, how wide a definition's own column may be (0 px by default: all the room there is; see
+  [Answers](#answers)), a phone's
   [tap zones](#touch-zones) and the repeat guard are per device (the `meta`
   store's `display` value), since what suits a laptop is wrong on a phone;
   they are in the player's Settings, under Device Settings, and reach other
@@ -1029,7 +1035,10 @@ as the term of the data model and the API.
 - **Every setting is a row with its control at the right end**: a checkbox,
   a choice or a number, in the player's Settings and in the quiz options
   alike (`SettingRow`), so the place to click is
-  always the same. Progression is a choice (Ladder or Drill), not a pair of
+  always the same. On a phone (narrower than 640 px) a number or a choice
+  goes under its name, which then has the row's whole width and is not
+  squeezed into a few words a line; a checkbox stays at the right end of its
+  name's line. Progression is a choice (Ladder or Drill), not a pair of
   radio buttons; its ⓘ explains both.
 - **Every setting explains itself**: an ⓘ beside its name (`InfoTip`) shows
   what it does — on hover with a mouse, and on a tap or click, which keeps it
@@ -1122,15 +1131,18 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   them. The words sit in **one straight column**: each line is a row of five
   columns — the word's probability order, right-aligned; front hooks,
   right-aligned; the word, with its inner-hook dots; back hooks, left-aligned;
-  the definition, left-aligned — with the two hook columns equally wide and
-  the outer two sharing the rest equally, so every word starts at the same
-  place and the column is centred whatever the others hold.
+  the definition, left-aligned. Each hook column is as wide as its own widest
+  hooks and no wider, the same for every row. What is left of the word and
+  what is right of it share the page's width equally, so every word starts at
+  the same place and the column is in the middle of the page whatever the
+  others hold; the answer is as wide as the quiz area.
   - **The probability order** is the word's rank by
     [probability](#probability-and-probability-order) among the lexicon's
     words of its length (1 is the likeliest). The column is empty unless the
-    device's *Show each word's probability order* is on (off by default). The
-    card carries it with the hooks (`probability_order`), so a cascade with
-    *show hooks* off has none to show.
+    cascade's *Show each word's probability order* is on (off by default). The
+    card carries it with the hooks (`probability_order`), so a cascade that
+    shows it fetches its cards with hooks even with *show hooks* off (the
+    hooks are then not drawn).
   - With *show hooks* on (the default), each word is written Zyzzyva-style with its front
     hooks to the left and back hooks to the right, e.g. `bcfm ·AA· hls`, and
     its **inner hooks** as a dot before the word (the word less its first tile
@@ -1144,11 +1156,20 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
     playing that tile" everywhere else in Acrodont and is an error in an upload
     file. So a Catalan front hook reads `NY`, never `ny`.
   - With *show definitions* on (the default), each word's definition appears
-    in the definitions' own typeface and size: in its own column after the
-    back hooks, on the word's line (the device's *Definitions in their own
-    column*, on by default), or, with that off, centred beneath the word. A
-    window narrower than 640 px has no room for the column and always puts
-    the definition beneath the word.
+    in the definitions' own typeface and size, **one line for each part of
+    speech** (a lexicon's definition separates them with ` / ` after the
+    bracketed part of speech: `a way out [n -S] / to go out [v -ED, -ING, -S]`
+    is two lines; a line too long for its column wraps). It is in its own
+    column after the back hooks (the cascade's *Definitions in their own
+    column*, on by default), or, with that off, centred beneath the word. The
+    column runs to the right edge of the page, or to the device's *Definition
+    column width* when that is not 0. The probability order and the hooks, which are
+    smaller than the word, are centred on it vertically, not sat on its
+    baseline, and the word and the definition are **centred on each
+    other**, however many lines the definition takes or wraps to: a
+    definition of three lines has its second beside the word. A short part of speech (`[n -S]`, up to 16 characters)
+    is never split across lines, nor an inflection from its hyphen (`-S`). A window narrower than 640 px has no room for the column and always
+    puts the definition beneath the word.
 - **Definition**: the word, written like an anagram's with its probability
   order, hooks and inner hooks, and the full definition text in its column
   or beneath it, as above. A Definition cascade's cards
@@ -1886,7 +1907,9 @@ The rules:
   errors are keyed by the row's **path**: its child indexes from the top group,
   such as `[1, 0]`.
 
-On the form, each row's `+` menu offers **Add row** and **Add group**, a group
+On the form, each row's `+` adds a row below it at once (another row is what
+is wanted nearly every time), every group ends with **Add row** and **Add
+group**, which add to its end, a group
 is drawn as an indented box with an AND / OR switch in its header, and rows and
 groups can be dragged between groups. A saved search stores the whole tree. The
 cascade's default name writes groups with parentheses, such as
@@ -2569,7 +2592,18 @@ other tab shows "Acrodont was updated in another tab — reload to continue" and
 keeps running. So that it can, the new worker's `activate` deletes the previous
 build's cache only once `clients.matchAll()` finds no page still on that build,
 checking again whenever an old tab reports that it is closing, so a tab left on
-the old build can still load the chunks the card it is on needs. The
+the old build can still load the chunks the card it is on needs: a request for
+a hashed file this build does not have is answered from whichever build's cache
+holds it. Each tab says which build it runs (`HELLO`), again to a worker that
+takes it over, and nothing is deleted while some open tab has not said: a
+worker stopped while idle forgets what it was told. A worker deletes **older**
+builds' caches only (a build's version is the time it was made), never a newer
+one's, which is the cache of a worker installed and waiting: deleted, that
+worker would take over with nothing, answer with the old build's shell, and
+show a blank page when the shell asked for a chunk the server no longer has. A
+worker that does find its cache gone fetches it again on `activate`, and until
+then answers from the network, falling back to another build's copy only with
+no connection. The
 app never reloads on its own initiative, so a card in progress is never
 interrupted by an update, and a user who never accepts keeps the old version
 until the `426` line. IndexedDB schema upgrades run from versioned migrations,
@@ -2607,9 +2641,14 @@ has kept its data, so the app is installable and asks to keep that data:
   amber when the data is not kept or the browser has no service worker, pulsing
   while the worker installs. Hovering, tapping or clicking it says which, in
   words (`lib/sw/install.ts`), and offers Install where the browser can.
+  **On a phone the header is one line**: beside the offline icon the sync
+  status is its dot alone while it is Synced, Syncing… or Waiting to sync (a
+  tap on the dot shows or hides the word, which floats under the dot so the
+  header keeps its one line), and has its words whenever
+  something needs attention.
 - **Install**: Chrome's and Edge's `beforeinstallprompt` is held back from the
   browser's own mini-infobar and shown as an **Install** button in the header
-  (icon only on a phone) and in the offline status; pressing it opens the
+  (not on a phone, where the header has no room for it) and in the offline status; pressing it opens the
   browser's install dialog. It goes once used or installed (`appinstalled`), and
   is never shown inside the installed app.
 - **On an iPhone or iPad**, which never offers to install, a one-time tip under
@@ -2965,7 +3004,7 @@ brings the server's.
 | `move_cursor` | quiz, attempt, attempt seed, position, at | the quiz is active, its cascade is not trashed, the attempt and its seed match, the position is not below `run_start`, is below `next_boundary(quiz)` when the quiz has one and below the question count otherwise, and the cursor is unset, or was last set by this device, or had been seen by the device (`seen_seq`), or the new `at` is later | Set the cursor, `cursor_moved_at` and the device that moved it. The outbox keeps only the latest pending cursor per quiz, re-appended with a fresh `device_seq` (see [The sync cycle](#the-sync-cycle)). A rejected cursor move (`bad_cursor`) is logged but never counted in a notice; it is not the user's work |
 | `finish` | quiz, attempt, attempt seed, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, every question is graded, and `new_quiz_id` is not already a quiz (`invalid`) | Apply [Cascade Rules](#cascade-rules) using the server's grades and the quiz's own progression; any new quiz uses the device's id; record the attempt. A reset or new quiz starts at cursor 0, stamped with the operation's `at` and device. The attempt row and any new level are added to the cascade's and the account's [storage](#storage-limit), past the limit or not: studying never fails for storage. The result carries the outcome the server reached and the new quiz's question count and `questions_hash`, so the device can see when the server's grades led somewhere else (see [Conflicts](#conflicts)) |
 | `finish_segment` | quiz, attempt, attempt seed, segment end, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, its segment size is greater than 0, the segment end is a multiple of it strictly between 0 and the question count and greater than the cursor, every question before the segment end is graded, no quiz already exists for this quiz, attempt and segment end, and `new_quiz_id` is not already a quiz (`invalid`) | Create the drill quiz one level down from the misses in positions `run_start` … segment end − 1 (nothing if there are none), and set the cursor and `run_start` to the segment end, stamping `cursor_moved_at` and `cursor_device_id` from the operation; a drill quiz's level is added to the [storage](#storage-limit) as a finish's is. See [Segments](#segments) |
-| `set_cascade_options` | cascade, the changed [settings](#settings) (any of `segment_size`, `progression`, `require_alphabetical`, `clear_threshold`, `answer_mode`, `show_definitions`, `show_hooks`, `reveal_correct`, `leave_value_decimals`), at | the cascade exists, is neither trashed nor purged, every carried value is in range (segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, alphabetical order a flag, clear threshold 1–100, answer mode `flashcard` or `typed`, `show_definitions`, `show_hooks` and `reveal_correct` flags, leave value decimals 0–3; otherwise `invalid`, so an out-of-range value is a rejection and never a constraint violation recorded as `error`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit. The three quiz options affect only later quizzes; the clear threshold applies at once, to every finish from then on; the other settings apply at once, to what the player shows |
+| `set_cascade_options` | cascade, the changed [settings](#settings) (any of `segment_size`, `progression`, `require_alphabetical`, `clear_threshold`, `answer_mode`, `show_definitions`, `show_hooks`, `reveal_correct`, `show_found_count`, `show_probability`, `definition_column`, `leave_value_decimals`), at | the cascade exists, is neither trashed nor purged, every carried value is in range (segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, alphabetical order a flag, clear threshold 1–100, answer mode `flashcard` or `typed`, `show_definitions`, `show_hooks` and `reveal_correct` flags, leave value decimals 0–3; otherwise `invalid`, so an out-of-range value is a rejection and never a constraint violation recorded as `error`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit. The three quiz options affect only later quizzes; the clear threshold applies at once, to every finish from then on; the other settings apply at once, to what the player shows |
 | `set_quiz_options` | quiz, changed option fields (the three quiz options only: a `clear_threshold`, `answer_mode`, `show_definitions`, `show_hooks`, `reveal_correct` or `leave_value_decimals` is a `400`), at | the quiz is active, its cascade is not trashed, every carried value is in range as for `set_cascade_options`, `progression` and `segment_size` are not carried for a `segment_chain` quiz and `progression` is not carried for the Source quiz, which its rules ignore (`invalid`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit |
 | `restore_quiz` | quiz, shuffle seed | the quiz is cleared and not purged | Push it back as the new deepest level with a new attempt shuffled by the seed, cursor 0 stamped from the operation; bring back its cascade if it was trashed, and only then set `cleared_at` to now on its other cleared quizzes |
 | `trash_cascade` | cascade | the cascade is not trashed (`trashed`) | Trash it |
@@ -4048,7 +4087,10 @@ CREATE TABLE cascades (
     show_hooks           BOOLEAN NOT NULL DEFAULT true,  -- Anagram: hooks on reveal
     reveal_correct       BOOLEAN NOT NULL DEFAULT true,  -- a reveal marks the card correct
                                  -- (false: missed) until toggled
-    leave_value_decimals SMALLINT NOT NULL DEFAULT 1    -- Leave Value: decimal places shown
+    show_found_count     BOOLEAN NOT NULL DEFAULT false, -- Anagram: typed mode's "3 of 9 found"
+    show_probability     BOOLEAN NOT NULL DEFAULT false, -- each word's probability order on reveal
+    definition_column    BOOLEAN NOT NULL DEFAULT true,  -- a definition beside its word (false: beneath it)
+    leave_value_decimals SMALLINT NOT NULL DEFAULT 0    -- Leave Value: decimal places shown
                              CHECK (leave_value_decimals BETWEEN 0 AND 3),
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
                              -- set_cascade_options; an older operation is rejected whole
@@ -4684,10 +4726,8 @@ The flows are the conventional ones, built directly on Axum:
   of a cookie's life is answered with a fresh cookie of the full TTL, so an
   active user is never signed out for age, and a device that stays offline
   past the TTL sees **Log in to sync** with its local data intact.
-- **Password reset** is the one way to change a password. There is no
-  signed-in password change, as in birdtest: a signed-in user who wants a new
-  password asks for a reset link like anyone else, and every new password
-  passes through the one hardened path below.
+- **Password reset** is how a password is set by someone who cannot sign in;
+  a signed-in user changes it on `/account` (below).
   - **Asking** (`/reset-password`, from "Forgot password?" on `/login`)
     answers `202 {}` whether or not the address has an account, and the lookup and the email happen after the
     response, so both branches take the same time. If the address belongs to
@@ -4723,10 +4763,17 @@ The flows are the conventional ones, built directly on Axum:
     and CSRF cookies as well, and the page forgets any session it holds and
     goes to `/login` with no message: signing in with the new password is the
     confirmation.
-- **Reset password** is on `/account` too: a card asking for the account's
-  address, which sends the same request as the log-in page's link (the
-  reply is the same whatever address is typed), and the new password is set
-  from the mail's link as above. There is still no signed-in password change.
+- **Change password** is on `/account`: the current password and the new one
+  (`POST /api/account/password`). Nothing is typed but the two passwords and
+  no mail is sent: the session says whose account it is. A wrong current
+  password is a `current_password` field error; the new one is held to the
+  strength rule against the account's username and address
+  (`new_password`). Tries are limited to `RESET_RATE_PER_HOUR` an hour per
+  account, since each costs a hash and maybe a scoring. A change stores the
+  new hash, spends every outstanding reset token (they were asked for under
+  the old password), and, like Sign out everywhere, bumps
+  `session_generation` and issues a new session to this device: every other
+  session is signed out and this one keeps working.
 - **Sign out everywhere** and **delete account** (each with password
   re-entry) are on `/account`. Sign out everywhere bumps `session_generation`,
   which signs out every other session, and issues a new session to the current
@@ -4873,6 +4920,7 @@ enough for a filter tree holding a 300,000-entry In Word List; Axum's default of
 | `POST` | `/api/auth/reset-password` | Body `{ email }` → `202 {}` whether or not the address has an account; the lookup and the reset email (with the account's username) follow the response. `429` past `RESET_RATE_PER_HOUR` per caller or per address named, alike for every address (see [Authentication](#authentication)) |
 | `POST` | `/api/auth/reset-password/confirm` | Body `{ token, password }` → `204`, clearing the caller's session and CSRF cookies. The link is checked first (`400 invalid_token`, before any scoring), then the link's own `RESET_RATE_PER_HOUR` bucket (`429`), then the strength rule against the account's username and address (`400` field error on `password`; the link still works); `503` with `Retry-After: 10` when no scoring turn comes within 10 seconds. Spends every outstanding token of the account and bumps `session_generation`. The one way to change a password |
 | `GET` | `/api/auth/me` | `{ user_id, username, is_admin, trash_retention_days, max_quiz_questions, storage_bytes, max_storage_bytes }` or `401`, where `storage_bytes` is the account's [storage](#storage-limit) and `max_storage_bytes` its effective limit (`users.storage_limit_bytes` when set, otherwise `MAX_STORAGE_BYTES_PER_USER`), both numbers. Login and dev-login answer with the same body. Exempt from the account-binding `X-Acrodont-User` check, since it only reports whose session cookie the browser holds, which the startup comparison reads. The retention period, the cap and the storage figures go into the `meta` store, so the Trash can show purge dates offline, the option forms validate segment size against the server's cap, and the Cascades page and the builder show the account's storage offline |
+| `POST` | `/api/account/password` | Body `{ current_password, new_password }` → `204`. A wrong current password or a weak new one is a `400` field error. Stores the new hash, spends the account's reset tokens, bumps `session_generation` and re-issues this device's cookies, as Sign out everywhere does |
 | `POST` | `/api/account/sign-out-everywhere` | Body `{ password }`. Bump `session_generation` and re-issue this device's session and CSRF cookies, so every other session is refused from its next request while this one keeps working |
 | `DELETE` | `/api/account` | Delete the account (requires password). On a `2xx` the device removes its own local copy of that account, as [Authentication](#authentication) describes |
 
@@ -5066,7 +5114,7 @@ SvelteKit static SPA. The routes:
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, name, preview with what the cascade will use against the account's storage), with no settings: a note says a new cascade's settings are changed in its Settings once it is created |
 | `/cascades/:id` | Player for the cascade's deepest level, whose Settings dialog holds the ladder and every [setting](#settings), the cascade's and this device's |
 | `/trash` | No page of its own: redirects to `/#trash`, so an old link lands on the Cascades page scrolled to the Trash |
-| `/account` | Log out (with **Remove this account's data from this device**), sync status, sign out everywhere, delete account. Reset password (sends the reset link). Nothing about storage: the Cascades page has the account's. No password change: a new password comes only from a [reset](#authentication). No settings: those are in a cascade's Settings (☰ → Settings in the player) |
+| `/account` | Log out (with **Remove this account's data from this device**), sync status, change password (current and new), sign out everywhere, delete account. Nothing about storage: the Cascades page has the account's. No settings: those are in a cascade's Settings (☰ → Settings in the player) |
 | `/admin` | Catalog overview with delete actions (admins only; others get a not-found page): a card per kind (letter distributions, lexicons, leave values), each with its **Upload** button, its items a table on a wide screen and a list of entries, figures under each name, on a phone, so nothing scrolls sideways |
 | `/admin/letter-distributions/new`, `/admin/lexicons/new`, `/admin/leave-sets/new` | Upload forms with validation error lists |
 
@@ -6564,10 +6612,11 @@ they run in parallel and leave nothing behind.
     error with the link still working after; the strong password accepted
     with `204` and the caller's session cookie cleared; every other
     outstanding token spent and every session answered `401`; the link
-    refused a second time; and the new password logging in. And **no
-    signed-in password change** (`there_is_no_signed_in_password_change`):
-    `POST /api/account/password` from a signed-in session is answered `404`
-    or `405`, since the route does not exist
+    refused a second time; and the new password logging in. And a
+    **signed-in password change** (`a_signed_in_password_change`): a wrong
+    current password and a weak new one each a field error with nothing
+    changed; then `204`, this session working, every other answered `401`,
+    and only the new password logging in
   - saved-search overwrite answering `409` without `overwrite` and replacing
     the old spec with it, and delete removing the spec; a save recording its
     `quiz_type` on the spec, `GET /api/searches/:id` returning it, and Start over

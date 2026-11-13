@@ -52,7 +52,7 @@ test('hooks read Zyzzyva-style in lower case, and a Catalan multi-character hook
 	await expect(page.getByRole('listitem').filter({ hasText: /ny/ })).toHaveCount(0);
 });
 
-test('a word row is probability, front hooks, word, back hooks, definition; each is this device\'s choice, as is the sync status', async ({ page }) => {
+test('a word row is probability, front hooks, word, back hooks, definition; the cascade chooses what shows', async ({ page }) => {
 	await newUser(page, 'columns');
 	const port = await apiCascade(page, { name: 'Port', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'O P R T' }] } });
 	await page.goto(port);
@@ -68,7 +68,10 @@ test('a word row is probability, front hooks, word, back hooks, definition; each
 	// By default the definition is a column of its own, after the back hooks on the word's line.
 	let [w, d, b] = [await box(word), await box(definition), await box(backHooks)];
 	expect(d.x).toBeGreaterThanOrEqual(b.x + b.width);
-	expect(d.y).toBeLessThan(w.y + w.height);
+	// The back hooks' column is as wide as the hooks, so the definition starts just after them, centred on the word's line.
+	expect(d.x - (b.x + b.width)).toBeLessThan(20);
+	expect(b.width).toBeLessThan(w.width);
+	expect(Math.abs(d.y + d.height / 2 - (w.y + w.height / 2))).toBeLessThan(3);
 	// The word stays in the middle of the quiz area, whatever sits either side of it.
 	// (Measured afresh each time: opening Settings shows the menu, which narrows the area.)
 	const offCentre = async () => {
@@ -76,7 +79,7 @@ test('a word row is probability, front hooks, word, back hooks, definition; each
 		return Math.abs(word_.x + word_.width / 2 - (area.x + area.width / 2));
 	};
 	expect(await offCentre()).toBeLessThan(3);
-	// No probability order until asked for; then it sits before the front hooks.
+	// No probability order until the cascade asks for it; then it sits before the front hooks.
 	await expect(probability).toHaveText('');
 	await playerSetting(page, 'Show each word’s probability order', true);
 	await expect(probability).toHaveText(/^\s*\d+\s*$/);
@@ -88,6 +91,46 @@ test('a word row is probability, front hooks, word, back hooks, definition; each
 	[w, d] = [await box(word), await box(definition)];
 	expect(d.y).toBeGreaterThanOrEqual(w.y + w.height - 1);
 	expect(Math.abs(d.x + d.width / 2 - (w.x + w.width / 2))).toBeLessThan(3);
+	await playerSetting(page, 'Definitions in their own column', true);
+	// Both are the cascade's settings: another cascade has its own, at their defaults.
+	// Its definition has a line for each part of speech, centred as a whole on the word's line.
+	const exit = await apiCascade(page, { name: 'Exit', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'E I T X' }] } });
+	await page.goto(exit);
+	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
+	await press(page, 'Space');
+	const parts = page.getByRole('listitem').filter({ hasText: /EXIT/ }).locator('[data-definition]');
+	await expect(parts.locator('[data-line]')).toHaveText(['a way out [n -\u2060S]', 'to go out [v -\u2060ED, -\u2060ING, -\u2060S]'], { timeout: 30_000 });
+	await expect(page.getByRole('listitem').filter({ hasText: /EXIT/ }).locator('[data-probability]')).toHaveText('');
+	const [x, lines] = [await box(page.locator('[data-answer]').filter({ hasText: /EXIT/ })), await box(parts)];
+	expect(Math.abs(lines.y + lines.height / 2 - (x.y + x.height / 2))).toBeLessThan(3);
+	// In a window too narrow for the second line it wraps, and the word is still centred on the taller definition.
+	const wide = page.viewportSize()!;
+	await page.setViewportSize({ width: 660, height: wide.height });
+	// (The narrower window lays the player out afresh: for a moment the definition is not there to measure.)
+	await expect.poll(async () => (await parts.boundingBox())?.height ?? 0).toBeGreaterThan(lines.height + 10);
+	const [x2, wrapped] = [await box(page.locator('[data-answer]').filter({ hasText: /EXIT/ })), await box(parts)];
+	expect(Math.abs(wrapped.y + wrapped.height / 2 - (x2.y + x2.height / 2))).toBeLessThan(3);
+	await page.setViewportSize(wide);
+	// Each hook column is as wide as its own widest hooks, the same for every row, and the two differ:
+	// AT has front hooks enopqrv and back hook e, TA front hook e and back hooks noprx.
+	const at = await apiCascade(page, { name: 'At', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'A T' }] } });
+	await page.goto(at);
+	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
+	await press(page, 'Space');
+	const cell = (w: RegExp, side: string) => box(page.getByRole('listitem').filter({ has: page.locator('[data-answer]').filter({ hasText: w }) }).locator(`[data-hooks="${side}"]`));
+	await expect(page.locator('[data-answer]')).toHaveCount(2, { timeout: 30_000 });
+	const [atFront, taFront, atBack, taBack] = [await cell(/^\W*AT\W*$/, 'front'), await cell(/^\W*TA\W*$/, 'front'), await cell(/^\W*AT\W*$/, 'back'), await cell(/^\W*TA\W*$/, 'back')];
+	expect(Math.abs(atFront.width - taFront.width)).toBeLessThan(1);
+	expect(Math.abs(atBack.width - taBack.width)).toBeLessThan(1);
+	expect(Math.abs(atBack.x - taBack.x)).toBeLessThan(1);
+	expect(atFront.width).toBeGreaterThan(atBack.width + 10);
+	// The hooks, smaller than the word, are centred on it, not sat on its baseline.
+	const atWord = await box(page.locator('[data-answer]').filter({ hasText: /^\W*AT\W*$/ }));
+	for (const h of [atFront, atBack]) expect(Math.abs(h.y + h.height / 2 - (atWord.y + atWord.height / 2))).toBeLessThan(1.5);
+	expect(atFront.height).toBeLessThan(atWord.height - 5);
+	// The words are still in the middle, though the hooks either side are not equally wide.
+	const [ta, area] = [await box(page.locator('[data-answer]').filter({ hasText: /^\W*TA\W*$/ })), (await page.locator('[data-fit-area]').first().boundingBox())!];
+	expect(Math.abs(ta.x + ta.width / 2 - (area.x + area.width / 2))).toBeLessThan(3);
 
 	// The two sections of Settings carry no "Synced" / "Not synced" badge.
 	await openPlayerSettings(page);
@@ -103,9 +146,51 @@ test('a word row is probability, front hooks, word, back hooks, definition; each
 	await expect(synced).toHaveCount(0);
 	await page.getByRole('button', { name: 'Show status bar' }).click();
 	await expect(synced).toBeVisible();
-	await playerSetting(page, 'Show the sync status below the quiz', false);
+	await playerSetting(page, 'Show the sync status', false);
 	await expect(synced).toHaveCount(0);
 	await expect(page.getByText('1 / 1')).toBeVisible();
+});
+
+test('on a phone the header is one line, and a setting\'s name is not squeezed beside its control', async ({ page }) => {
+	await newUser(page, 'narrow');
+	const port = await apiCascade(page, { name: 'Port', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'O P R T' }] } });
+	await page.setViewportSize({ width: 360, height: 740 });
+	await page.goto('/cascades');
+	const header = page.locator('header');
+	await expect(header.getByRole('button', { name: 'Show the sync status' })).toBeVisible({ timeout: 30_000 });
+	const box = async (l: ReturnType<typeof page.locator>) => (await l.boundingBox())!;
+	// One line: the name at the left and the account at the right share it.
+	const [name, account] = [await box(header.getByRole('link', { name: 'Acrodont' })), await box(header.getByRole('link', { name: /^narrow/ }))];
+	expect(Math.abs(name.y + name.height / 2 - (account.y + account.height / 2))).toBeLessThan(4);
+	// The sync status is its dot; a tap shows the word, another hides it.
+	const word = header.getByRole('status').getByText(/^(Synced|Syncing…|Waiting to sync)$/);
+	expect((await box(word)).width).toBeLessThan(3);
+	await header.getByRole('button', { name: 'Show the sync status' }).click();
+	expect((await box(word)).width).toBeGreaterThan(30);
+	// The word floats under the dot: the header is still one line, the account where it was.
+	const [name2, account2] = [await box(header.getByRole('link', { name: 'Acrodont' })), await box(header.getByRole('link', { name: /^narrow/ }))];
+	expect(Math.abs(name2.y + name2.height / 2 - (account2.y + account2.height / 2))).toBeLessThan(4);
+	expect(Math.abs(account2.x - account.x)).toBeLessThan(1);
+	expect((await box(word)).y).toBeGreaterThan(account2.y + account2.height / 2);
+	await header.getByRole('button', { name: 'Hide the sync status' }).click();
+
+	// In Settings a number goes under its name, and a checkbox stays at the end of its name's line: each name is one line.
+	await page.goto(port);
+	await openPlayerSettings(page);
+	const dialog = page.getByRole('dialog', { name: 'Settings' });
+	for (const label of ['Show the status bar', 'Definition column width', 'Grade border width']) {
+		const text = dialog.locator('label', { hasText: new RegExp(`^${label}$`) });
+		await text.scrollIntoViewIfNeeded();
+		expect((await box(text)).height, label).toBeLessThan(30);
+	}
+	const [label, field, tick] = [
+		await box(dialog.locator('label', { hasText: /^Grade border width$/ })),
+		await box(dialog.getByLabel('Grade border width', { exact: true })),
+		await box(dialog.getByLabel('Show the status bar', { exact: true }))
+	];
+	expect(field.y).toBeGreaterThanOrEqual(label.y + label.height - 1);
+	const shown = await box(dialog.locator('label', { hasText: /^Show the status bar$/ }));
+	expect(Math.abs(tick.y + tick.height / 2 - (shown.y + shown.height / 2))).toBeLessThan(6);
 });
 
 test('a cascade trashed offline is listed in the Trash with "deleted forever 30 days after this syncs"', async ({ page, context }) => {

@@ -409,7 +409,9 @@ CREATE TABLE cascades (
     reveal_correct       BOOLEAN NOT NULL DEFAULT true,  -- a reveal marks the card correct
                                  -- (false: missed) until toggled
     show_found_count     BOOLEAN NOT NULL DEFAULT false, -- Anagram: typed mode's "3 of 9 found"
-    leave_value_decimals SMALLINT NOT NULL DEFAULT 1    -- Leave Value: decimal places shown
+    show_probability     BOOLEAN NOT NULL DEFAULT false, -- each word's probability order on reveal
+    definition_column    BOOLEAN NOT NULL DEFAULT true,  -- a definition beside its word (false: beneath it)
+    leave_value_decimals SMALLINT NOT NULL DEFAULT 0    -- Leave Value: decimal places shown
                              CHECK (leave_value_decimals BETWEEN 0 AND 3),
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
                              -- set_cascade_options; an older operation is rejected whole

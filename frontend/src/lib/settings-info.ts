@@ -4,8 +4,9 @@
 /** Where a group of settings applies, said once above the group in a cascade's Settings. */
 export const SCOPE = {
 	cascade:
-		'Saved with this cascade and synced to your other devices. Your other cascades keep their own: after a change you can use it for every cascade too, or copy all of another cascade’s settings here.',
-	device: 'Kept on this device only and not synced, so your other devices keep their own. They apply to every cascade you study here.'
+		'Saved with this cascade and synced to your other devices. Your other cascades keep their settings. After you change a setting you can optionally apply the change for every cascade too.',
+	device:
+		'Saved on this device, for every cascade you study here. Your other devices keep their settings. After you change a setting you can optionally apply the change for all your devices too.'
 } as const;
 
 /** What each part of a cascade's Settings is for, behind an ⓘ beside its heading. */
@@ -27,6 +28,10 @@ export const INFO = {
 		'Flashcard: reveal the answer and grade yourself. Typed (anagram cascades only): type each anagram, then press Enter on an empty box when you are finished; the card is correct only if you found them all and typed nothing else.',
 	reveal_correct:
 		'The grade a card gets when you reveal its answer, before you toggle it. “Correct” suits studying words you mostly know; “Missed” makes you mark the ones you got.',
+	show_probability:
+		'Shows each word’s probability order to the left of its front hooks: its rank among the lexicon’s words of the same length, 1 being the likeliest to be drawn.',
+	definition_column:
+		'Puts each word’s definition in a column of its own to the right of its back hooks. Off, the definition is centred under the word. On a narrow screen, such as a phone held upright, it is always under the word.',
 	found_count:
 		'In typed mode, shows "3 of 9 found" in the status bar. Off by default, since knowing how many anagrams are left is a hint.',
 	clear_threshold:
@@ -50,10 +55,9 @@ export const INFO = {
 		'The bar under the quiz with the level, pass, progress, score and sync status. Hiding it leaves the quiz area the same size, and quiets the sync status too.',
 	sync_status:
 		'“Synced”, “Syncing…” and “Waiting to sync” at the bottom right of the quiz. Hidden, only what needs your attention still shows there: offline, log in, reload, or no room on this device.',
-	definition_column:
-		'Puts each word’s definition in a column of its own to the right of its back hooks. Off, the definition is centred under the word. On a narrow screen, such as a phone held upright, it is always under the word.',
-	show_probability:
-		'Shows each word’s probability order to the left of its front hooks: its rank among the lexicon’s words of the same length, 1 being the likeliest to be drawn.',
+	definition_width:
+		'The widest a definition’s own column may be, in pixels, in cascades that give definitions one; a longer definition wraps. 0, the default, lets the column use all of the page to the right of the back hooks.',
+	hook_size: 'The text size of the front and back hooks, and of the probability order, in pixels.',
 	mobile_buttons:
 		'On a phone or tablet. Columns: Previous, Toggle and Show / Next side by side, each a third of the screen, tapped anywhere in its column. Rows: the question, then Previous, Toggle and Show / Next in rows under it, Show / Next at the bottom, nearest your thumb.',
 	mobile_row_px: 'In the rows layout, how tall each of the three rows of buttons is.',

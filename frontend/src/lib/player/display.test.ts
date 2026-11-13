@@ -9,11 +9,11 @@ describe('display settings', () => {
 		expect([d.question_spacing, d.answer_spacing]).toEqual([0, 0]);
 		expect([d.question_top_px, d.border_px, d.repeat_guard_ms]).toEqual([8, 10, 0]);
 		expect(d.status_bar_hidden).toBe(false);
-		// The sync status shows, a definition has its own column, and no probability order.
-		expect([d.sync_status_hidden, d.definition_column, d.show_probability]).toEqual([false, true, false]);
+		// The sync status shows; a definition's column is as wide as the room there is; hooks are 27 px.
+		expect([d.sync_status_hidden, d.definition_width_px, d.hook_size_px]).toEqual([false, 0, 27]);
 		// A value saved before these existed takes the defaults; a chosen one is kept.
-		const kept = normalizeDisplay({ definition_column: false, show_probability: true, sync_status_hidden: true });
-		expect([kept.sync_status_hidden, kept.definition_column, kept.show_probability]).toEqual([true, false, true]);
+		const kept = normalizeDisplay({ definition_width_px: 320, hook_size_px: 18, sync_status_hidden: true });
+		expect([kept.sync_status_hidden, kept.definition_width_px, kept.hook_size_px]).toEqual([true, 320, 18]);
 		// Columns on a phone; rows, when chosen, 64 px each.
 		expect([d.mobile_buttons, d.mobile_row_px]).toEqual(['columns', 64]);
 		// A missed answer shows its red border; a correct one shows none.

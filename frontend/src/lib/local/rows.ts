@@ -29,6 +29,10 @@ export interface CascadeRow {
 	reveal_correct: boolean;
 	/** An Anagram cascade's: typed mode's "3 of 9 found" shows in the status bar (off by default: it hints). */
 	show_found_count: boolean;
+	/** Each word's probability order shows before its front hooks (off by default). */
+	show_probability: boolean;
+	/** A word's definition sits in a column of its own after the back hooks (the default), not centred under the word. */
+	definition_column: boolean;
 	/** A Leave Value cascade's: the decimal places leave values are rounded to, 0 to 3. */
 	leave_value_decimals: number;
 	/** What the cascade holds on the server, in bytes, as the server last counted it (PLAN.md § Storage limit). */
@@ -61,7 +65,9 @@ export const CASCADE_SETTING_DEFAULTS = {
 	show_hooks: true,
 	reveal_correct: true,
 	show_found_count: false,
-	leave_value_decimals: 1
+	show_probability: false,
+	definition_column: true,
+	leave_value_decimals: 0
 } as const satisfies Partial<CascadeRow>;
 
 export interface QuizRow {
