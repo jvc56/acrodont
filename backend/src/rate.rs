@@ -47,6 +47,13 @@ impl<K: Hash + Eq + Clone> Keyed<K> {
                 retry_after_secs: ceil_secs(not_until.wait_time_from(self.clock.now())),
             })
     }
+
+    /// Forgets every key whose bucket has refilled. `governor` keeps a key
+    /// until it is told to look.
+    pub fn prune(&self) {
+        self.limiter.retain_recent();
+        self.limiter.shrink_to_fit();
+    }
 }
 
 fn ceil_secs(d: Duration) -> u64 {
@@ -54,11 +61,14 @@ fn ceil_secs(d: Duration) -> u64 {
     s.max(1)
 }
 
-/// A bucket that can be inspected before it is spent, for the login-failure
-/// limits: a request is refused before any Argon2 verify when the bucket is
-/// empty, and a token is taken only when the verify fails. `governor` can only
-/// check-and-take, so it cannot express "a successful login spends nothing"
-/// (PQ-004). Same refill rule as `governor`'s quota: `n` per minute, burst `n`.
+/// A bucket whose token can be given back, for the login-failure limits: a
+/// request takes a token from each bucket before any Argon2 verify, is refused
+/// when either has none, and gives its tokens back when the verify succeeds.
+/// So a successful login spends nothing, and requests arriving together cannot
+/// all pass a bucket that holds fewer tokens than there are requests: a peek
+/// before the verify and a take after it let every one of them through.
+/// `governor` can only check-and-take, never refund (PQ-004). Same refill rule
+/// as `governor`'s quota: `n` per minute, burst `n`.
 pub struct FailureBuckets<K: Hash + Eq + Clone> {
     capacity: f64,
     per_sec: f64,
@@ -74,7 +84,7 @@ impl<K: Hash + Eq + Clone> FailureBuckets<K> {
         }
     }
 
-    fn level(&self, map: &mut HashMap<K, (f64, Instant)>, key: &K, now: Instant) -> f64 {
+    fn level(&self, map: &HashMap<K, (f64, Instant)>, key: &K, now: Instant) -> f64 {
         match map.get(key) {
             None => self.capacity,
             Some(&(tokens, at)) => {
@@ -83,29 +93,44 @@ impl<K: Hash + Eq + Clone> FailureBuckets<K> {
         }
     }
 
-    /// `Some(retry_after)` when the bucket has no whole token left.
-    pub fn empty(&self, key: &K) -> Option<u64> {
+    /// Takes a token, or answers `429` with the wait until there is one.
+    pub fn reserve(&self, key: &K) -> Result<(), ApiError> {
         let now = Instant::now();
         let mut map = self.buckets.lock().expect("bucket lock");
-        let level = self.level(&mut map, key, now);
-        if level >= 1.0 {
-            None
+        let level = self.level(&map, key, now);
+        if level < 1.0 {
+            return Err(ApiError::TooManyRequests {
+                retry_after_secs: ((1.0 - level) / self.per_sec).ceil().max(1.0) as u64,
+            });
+        }
+        map.insert(key.clone(), (level - 1.0, now));
+        Ok(())
+    }
+
+    /// Gives back a token [`reserve`](Self::reserve) took.
+    pub fn refund(&self, key: &K) {
+        let now = Instant::now();
+        let mut map = self.buckets.lock().expect("bucket lock");
+        let level = (self.level(&map, key, now) + 1.0).min(self.capacity);
+        if level >= self.capacity {
+            map.remove(key);
         } else {
-            Some(((1.0 - level) / self.per_sec).ceil().max(1.0) as u64)
+            map.insert(key.clone(), (level, now));
         }
     }
 
-    pub fn take(&self, key: &K) {
+    /// Forgets every bucket that has refilled: a full bucket carries no state.
+    pub fn prune(&self) {
         let now = Instant::now();
         let mut map = self.buckets.lock().expect("bucket lock");
-        let level = self.level(&mut map, key, now);
-        map.insert(key.clone(), ((level - 1.0).max(0.0), now));
-        // Keep the map from growing without bound: full buckets carry no state.
-        if map.len() > 100_000 {
-            let cap = self.capacity;
-            let per_sec = self.per_sec;
-            map.retain(|_, (t, at)| *t + now.duration_since(*at).as_secs_f64() * per_sec < cap);
-        }
+        let (cap, per_sec) = (self.capacity, self.per_sec);
+        map.retain(|_, (t, at)| *t + now.duration_since(*at).as_secs_f64() * per_sec < cap);
+        map.shrink_to_fit();
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.buckets.lock().expect("bucket lock").len()
     }
 }
 
@@ -114,7 +139,8 @@ pub struct Limiters {
     pub auth_ip: Keyed<IpAddr>,
     /// Password resets, `RESET_RATE_PER_HOUR` (5) an hour per key: `ip:` the
     /// caller and `em:` the address named, for asking; `tok:` the link, for
-    /// setting (PLAN.md § Authentication).
+    /// setting; `pw:` the account, for each password typed behind a session
+    /// (PLAN.md § Authentication).
     pub reset: Keyed<String>,
     pub catalog_ip: Keyed<IpAddr>,
     pub login_fail_ip: FailureBuckets<IpAddr>,
@@ -143,6 +169,22 @@ impl Limiters {
             admin_upload: Keyed::per_minute(c.admin_upload_rate_per_minute),
         }
     }
+
+    /// Drops the state of every bucket that has refilled, in every limiter.
+    /// Run on a timer (`purge::spawn`): without it each map keeps an entry
+    /// for every key it has ever seen.
+    pub fn prune(&self) {
+        self.auth_ip.prune();
+        self.reset.prune();
+        self.catalog_ip.prune();
+        self.login_fail_ip.prune();
+        self.login_fail_username.prune();
+        self.sync.prune();
+        self.download.prune();
+        self.search.prune();
+        self.export.prune();
+        self.admin_upload.prune();
+    }
 }
 
 #[cfg(test)]
@@ -150,16 +192,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn failure_bucket_peeks_without_spending() {
+    fn a_failure_bucket_refunds_what_it_reserved() {
         let b = FailureBuckets::<u8>::per_minute(2);
+        // Reserved and given back, a token is never spent.
         for _ in 0..10 {
-            assert!(b.empty(&1).is_none());
+            assert!(b.reserve(&1).is_ok());
+            b.refund(&1);
         }
-        b.take(&1);
-        assert!(b.empty(&1).is_none());
-        b.take(&1);
-        assert!(b.empty(&1).is_some());
-        assert!(b.empty(&2).is_none());
+        assert_eq!(b.len(), 0, "a full bucket carries no state");
+        // Two reservations held at once are the whole bucket.
+        assert!(b.reserve(&1).is_ok());
+        assert!(b.reserve(&1).is_ok());
+        assert!(matches!(b.reserve(&1), Err(ApiError::TooManyRequests { retry_after_secs }) if retry_after_secs >= 1));
+        assert!(b.reserve(&2).is_ok());
+        b.refund(&1);
+        assert!(b.reserve(&1).is_ok());
+    }
+
+    #[test]
+    fn pruning_forgets_refilled_buckets() {
+        let b = FailureBuckets::<u8>::per_minute(2);
+        b.reserve(&1).unwrap();
+        b.prune();
+        assert_eq!(b.len(), 1, "a spent token is remembered");
+        b.refund(&1);
+        b.reserve(&2).unwrap();
+        b.buckets.lock().unwrap().get_mut(&2).unwrap().1 -= Duration::from_secs(120);
+        b.prune();
+        assert_eq!(b.len(), 0);
+
+        let k = Keyed::<u8>::per_hour(1);
+        assert!(k.check(&1).is_ok());
+        k.prune();
+        assert!(matches!(k.check(&1), Err(ApiError::TooManyRequests { .. })), "a spent key is kept");
     }
 
     #[test]

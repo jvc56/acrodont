@@ -60,8 +60,11 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   without spending it, nor refund.
 - **Provisional choice:** every other limit uses `governor`; the two
   login-failure limits use a small in-house bucket with the same quota
-  semantics (`n` per minute, burst `n`) that can be inspected before it is
-  spent (`backend/src/rate.rs`, `FailureBuckets`).
+  semantics (`n` per minute, burst `n`) whose token can be given back
+  (`backend/src/rate.rs`, `FailureBuckets`). A login takes its tokens before
+  the verify and returns them unless the verify fails: inspecting the bucket
+  first and spending it afterwards, the first form of this, let every request
+  of a burst through, and PLAN.md now states the take-and-return form.
 
 ## PQ-005 — "/api/lexicons omits an item while a second instance is still completing its startup load" (open)
 

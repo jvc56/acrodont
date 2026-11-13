@@ -19,6 +19,9 @@ pub fn spawn(state: AppState) {
         let mut tick = tokio::time::interval(Duration::from_secs(state.config.purge_interval_seconds.max(1)));
         loop {
             tick.tick().await;
+            // This instance's own in-memory limits, whoever holds the lock.
+            state.limits.prune();
+            state.email_caps.prune();
             if let Err(e) = run_once(&state).await {
                 tracing::error!(error = %e, "purge run failed");
             }

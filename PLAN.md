@@ -4844,12 +4844,25 @@ The flows are the conventional ones, built directly on Axum:
   unconfirmed account reveals nothing that the public username does not. Rate
   limited on **failed** attempts, per IP and per username
   (`LOGIN_FAILURES_PER_IP_PER_MINUTE` and
-  `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE`, 10 each): a request is refused with
-  `429` **before** any Argon2 verify runs when either bucket is empty, so no
-  guess ever costs a hash, and a token is taken from both only when the verify
-  fails. A successful login spends nothing, because guessing is what the limits
+  `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE`, 10 each): a request takes a token
+  from both buckets **before** any Argon2 verify runs and is refused with
+  `429` when either is empty, so no guess past the limit ever costs a hash,
+  and it gives both tokens back unless the verify fails. Taking first is what
+  makes the limit hold for requests that arrive together: a bucket looked at
+  before the verify and spent after it lets a whole burst through. A
+  successful login spends nothing, because guessing is what the limits
   exist to stop, and a club or tournament room logging in together from one
-  address must not lock itself out. The per-username limit lets anyone who
+  address must not lock itself out; more than ten of its logins in the air at
+  the same instant can be told `429` for a second, since each holds a token
+  while its verify runs. A username no account could have (not 3 to 32
+  letters, digits or underscores) is answered `401` at once: it costs no
+  hash, takes no token and is never kept as a bucket's key, however long it
+  is. **Argon2 runs in turns**, at most four hashes or verifies at once on
+  the blocking pool, for every endpoint that hashes: each holds 19 MiB while
+  it runs, so a burst of sign-ins is otherwise gigabytes at once. A request
+  waits at most 10 seconds for a turn and is otherwise answered `503` with
+  `Retry-After: 10`; a login turned away so keeps its tokens.
+  The per-username limit lets anyone who
   knows a username keep its owner out for a minute at a time by failing on
   purpose; that is accepted over unlimited guessing against one account. The
   other auth endpoints that need no session — register, confirm-email,
@@ -4891,7 +4904,8 @@ The flows are the conventional ones, built directly on Axum:
     forgotten that as well. The mail goes only to the address's owner.
     Asking is limited to `RESET_RATE_PER_HOUR` (5) an hour **per caller** and
     **per address named** (lower-cased), on top of the per-IP auth bucket and
-    the email caps under Register. The first bounds bulk probing; the second
+    the email caps under Register. Something that is not an address gets the
+    same `202` and goes no further: it is never kept as a bucket's key. The first bounds bulk probing; the second
     stops one address being buried in reset mail from many sources. Past
     either, the answer is `429` with `Retry-After`, alike for every address,
     so the limit reveals nothing about which addresses have accounts.
@@ -4923,7 +4937,10 @@ The flows are the conventional ones, built directly on Axum:
   password is a `current_password` field error; the new one is held to the
   strength rule against the account's username and address
   (`new_password`). Tries are limited to `RESET_RATE_PER_HOUR` an hour per
-  account, since each costs a hash and maybe a scoring. A change stores the
+  account, since each costs a hash and maybe a scoring, and is a guess at the
+  password by whoever holds the session. The password re-entry of Sign out
+  everywhere and of Delete account draws on the same bucket, for the same
+  reason: past it, each answers `429` with `Retry-After`. A change stores the
   new hash, spends every outstanding reset token (they were asked for under
   the old password), and, like Sign out everywhere, bumps
   `session_generation` and issues a new session to this device: every other
@@ -4991,7 +5008,10 @@ Security generally:
   pages hold ten times as many rows, so ten cascades' keys fit in the bucket
   that one cascade's answers would have filled. In bytes the pass is about a
   quarter of cards without definitions, not a tenth, so it is the request
-  count and not the bandwidth that this default is sized against. The buckets are in memory, so every limit in this plan holds per
+  count and not the bandwidth that this default is sized against. The buckets are in memory, and each
+  instance forgets a bucket once it has refilled (on the purge task's timer,
+  with the email caps' addresses outside their 24 hours), so the memory they
+  take follows recent callers and not every caller there has ever been. Every limit in this plan holds per
   backend instance and the deployment's task count multiplies it: with two
   tasks the login limit is effectively twenty failures a minute per username. Until a
   shared limiter is needed, the Terraform module caps the service at two
@@ -5490,10 +5510,10 @@ startup rather than falling back to a default.
 | `EXPORT_RATE_PER_MINUTE` | `10` | Per-user; server-streamed exports, counted when the dialog asks for an export token, since that is the request whose `429` the page can see |
 | `ADMIN_UPLOAD_RATE_PER_MINUTE` | `10` | Per-user; the three admin upload endpoints, each of which can carry 100 MB and hold a connection for 120 seconds |
 | `CATALOG_RATE_PER_MINUTE` | `300` | **Per IP**, for the two endpoints that need no session: `GET /api/lexicons` and `GET /api/letter-distributions/:name`. A device needs one of each per login plus one distribution per pulled cascade on a new device, but the bucket is per **address**, and a club or tournament room behind one address is dozens of devices logging in at once; 300 covers a room of about a hundred. A larger room waits out `429`s, which every client honours, rather than failing |
-| `LOGIN_FAILURES_PER_IP_PER_MINUTE` | `10` | Failed logins per IP; a successful login spends nothing, so a room logging in together is never refused |
-| `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE` | `10` | Failed logins per username, checked before any Argon2 verify |
+| `LOGIN_FAILURES_PER_IP_PER_MINUTE` | `10` | Failed logins per IP; a successful login spends nothing, so a room logging in together is not locked out |
+| `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE` | `10` | Failed logins per username, taken before any Argon2 verify and given back unless it fails |
 | `AUTH_RATE_PER_IP_PER_MINUTE` | `30` | Per IP; register, confirm-email, reset-password and its confirm. Not `GET /api/auth/me`, which needs a session, and not logout |
-| `RESET_RATE_PER_HOUR` | `5` | Password resets an hour, each key its own bucket: asking for a link per caller (`ip:`) and per address named (`em:`, lower-cased), and setting a password per link (`tok:`), whoever sends it. On top of `AUTH_RATE_PER_IP_PER_MINUTE` and the email caps |
+| `RESET_RATE_PER_HOUR` | `5` | Password resets an hour, each key its own bucket: asking for a link per caller (`ip:`) and per address named (`em:`, lower-cased), setting a password per link (`tok:`), whoever sends it, and typing the password behind a session per account (`pw:`: Change password, Sign out everywhere, Delete account). On top of `AUTH_RATE_PER_IP_PER_MINUTE` and the email caps |
 | `CATALOG_RECONCILE_SECONDS` | `60` | Fallback reload interval if a notification is missed |
 | `TRUSTED_PROXY_HOPS` | `0` | `1` behind the ALB or compose Nginx |
 | `DEV_LOGIN` | `false` | `true` only on a local stack: adds `POST /api/dev/login {username}`, a session for a confirmed account without its password, answered as `/api/auth/login` is, for `./scripts/dev.py --login-as`. Startup **refuses** it together with `SECURE_COOKIES=true`, so a TLS deployment cannot start with it on; without it the route does not exist (404) |
@@ -6696,7 +6716,14 @@ they run in parallel and leave nothing behind.
     succeed, while the eleventh **failed** login from that address in the minute
     is refused with `429` before any Argon2 verify runs, and a login for another
     username from a second address still succeeds; the eleventh failure for one
-    username is refused from any address; and with
+    username is refused from any address; with both limits lowered to 3, of
+    eight failed logins sent **at once** from one address, and of eight sent at
+    once for one username, three are answered `401`, five `429`, and three
+    verifies run; a 100,000-character username is answered `401` without a
+    verify however often it is sent, and a reset asked for one `202` without
+    spending the caller's hourly bucket; with `RESET_RATE_PER_HOUR` lowered to
+    3, a fourth password typed into Sign out everywhere, Delete account or
+    Change password is answered `429`, another account's first is not; and with
     `AUTH_RATE_PER_IP_PER_MINUTE` lowered to 1, a second register,
     confirm-email, reset-password or reset-password/confirm from one address in
     the minute answers `429` with `Retry-After`, while `GET /api/auth/me` and

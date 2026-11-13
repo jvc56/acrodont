@@ -2,7 +2,8 @@
 //! registration and at a reset: its length, then a zxcvbn score of at least 3
 //! against the account's username and address (PLAN.md § Authentication).
 //! Scoring has turns of its own, off the executor: a crafted password costs
-//! zxcvbn close to a second.
+//! zxcvbn close to a second. Hashing and verifying have theirs, which bound
+//! the memory Argon2 holds at once.
 
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
@@ -91,19 +92,44 @@ pub fn strength_errors(field: &str, password: &str, username: &str, email: &str)
     Vec::new()
 }
 
-/// Hashes on a blocking thread, since Argon2 is deliberately slow.
-pub async fn hash(password: String) -> anyhow::Result<String> {
-    tokio::task::spawn_blocking(move || {
+/// How many Argon2 hashes or verifies may run at once, and how long a request
+/// waits for a turn before it is told to come back (`503`, Retry-After 10).
+/// Each one holds Argon2's 19 MiB for its whole run and the blocking pool
+/// allows hundreds of threads, so unbounded, a burst of sign-ins is gigabytes
+/// held at once and the task is killed for memory.
+const HASHING_CONCURRENCY: usize = 4;
+const HASHING_QUEUE_WAIT: Duration = Duration::from_secs(10);
+static HASHING_TURNS: Semaphore = Semaphore::const_new(HASHING_CONCURRENCY);
+
+async fn hashing_turn() -> Result<SemaphorePermit<'static>, ApiError> {
+    match tokio::time::timeout(HASHING_QUEUE_WAIT, HASHING_TURNS.acquire()).await {
+        Ok(Ok(turn)) => Ok(turn),
+        Ok(Err(_)) => Err(anyhow::anyhow!("the password hashing queue is closed").into()),
+        Err(_) => Err(ApiError::Unavailable { retry_after_secs: 10 }),
+    }
+}
+
+/// Hashes on a blocking thread, since Argon2 is deliberately slow, in a turn
+/// that goes with the run.
+pub async fn hash(password: String) -> Result<String, ApiError> {
+    let turn = hashing_turn().await?;
+    let hashed = tokio::task::spawn_blocking(move || {
+        let _turn = turn;
         Argon2::default()
             .hash_password(password.as_bytes())
             .map(|h| h.to_string())
             .map_err(|e| anyhow::anyhow!("argon2: {e}"))
     })
-    .await?
+    .await
+    .map_err(anyhow::Error::from)??;
+    Ok(hashed)
 }
 
-pub async fn verify(password: String, phc: String) -> bool {
-    tokio::task::spawn_blocking(move || {
+/// Whether `password` is the one `phc` was made from, in a turn as [`hash`] is.
+pub async fn verify(password: String, phc: String) -> Result<bool, ApiError> {
+    let turn = hashing_turn().await?;
+    Ok(tokio::task::spawn_blocking(move || {
+        let _turn = turn;
         PasswordHash::new(&phc)
             .map(|h| {
                 Argon2::default()
@@ -113,7 +139,7 @@ pub async fn verify(password: String, phc: String) -> bool {
             .unwrap_or(false)
     })
     .await
-    .unwrap_or(false)
+    .unwrap_or(false))
 }
 
 #[cfg(test)]
@@ -144,7 +170,31 @@ mod tests {
     #[tokio::test]
     async fn hash_verifies() {
         let h = hash("correct-tile-rack-bingo".into()).await.unwrap();
-        assert!(verify("correct-tile-rack-bingo".into(), h.clone()).await);
-        assert!(!verify("wrong".into(), h).await);
+        assert!(verify("correct-tile-rack-bingo".into(), h.clone()).await.unwrap());
+        assert!(!verify("wrong".into(), h).await.unwrap());
+    }
+
+    /// However many arrive together, at most `HASHING_CONCURRENCY` run at once.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hashing_runs_in_turns() {
+        let h = hash("correct-tile-rack-bingo".into()).await.unwrap();
+        let most = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let watcher = {
+            let most = most.clone();
+            tokio::spawn(async move {
+                loop {
+                    let running = HASHING_CONCURRENCY - HASHING_TURNS.available_permits();
+                    most.fetch_max(running, std::sync::atomic::Ordering::Relaxed);
+                    tokio::time::sleep(Duration::from_micros(200)).await;
+                }
+            })
+        };
+        let all: Vec<_> = (0..24).map(|_| tokio::spawn(verify("wrong".into(), h.clone()))).collect();
+        for one in all {
+            assert!(!one.await.unwrap().unwrap());
+        }
+        watcher.abort();
+        let most = most.load(std::sync::atomic::Ordering::Relaxed);
+        assert!((1..=HASHING_CONCURRENCY).contains(&most), "{most} at once");
     }
 }
