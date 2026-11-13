@@ -9,16 +9,19 @@ const body = (n: number): PreviewBody => ({ lexicon: 'CSW24', quiz_type: 'anagra
 
 function harness(respond: (b: PreviewBody, i: number) => Promise<{ count: number; sample: string[]; over_cap: boolean }>) {
 	const calls: PreviewBody[] = [];
+	/** When each request went out, on the test's clock. */
+	const at: number[] = [];
 	let state: PreviewState | null = null;
 	const s = new PreviewScheduler(
 		(b) => {
 			calls.push(b);
+			at.push(Date.now());
 			return respond(b, calls.length);
 		},
 		(st) => (state = st),
 		realClock
 	);
-	return { s, calls, state: () => state! };
+	return { s, calls, at, state: () => state! };
 }
 
 const ok = (b: PreviewBody) => Promise.resolve({ count: (b.filters as { n: number }).n, sample: [], over_cap: false });
@@ -84,15 +87,18 @@ describe('preview', () => {
 			h.s.update(body(i));
 			await vi.advanceTimersByTimeAsync(PREVIEW_MIN_INTERVAL_MS);
 		}
-		// 40 edits over 80 seconds; in any rolling minute at most 28 went out.
-		const times: number[] = [];
-		expect(h.calls.length).toBeLessThanOrEqual(40);
+		// 40 edits over 80 seconds; in any rolling minute at most 28 went out,
+		// and the run is long enough for the reserve to have held some back.
+		const budget = SEARCH_RATE_PER_MINUTE - 2;
+		expect(h.at.length).toBeGreaterThan(budget);
+		expect(h.at.length).toBeLessThan(40);
+		for (const t of h.at) {
+			expect(h.at.filter((u) => u > t - 60_000 && u <= t).length).toBeLessThanOrEqual(budget);
+		}
 		const h2 = harness(ok);
-		const start = Date.now();
 		for (let i = 1; i <= 29; i++) {
 			h2.s.update(body(i));
 			await vi.advanceTimersByTimeAsync(PREVIEW_MIN_INTERVAL_MS);
-			times.push(Date.now() - start);
 		}
 		expect(h2.calls.length).toBe(SEARCH_RATE_PER_MINUTE - 2);
 		expect(h2.state().busy).toBe(true);
