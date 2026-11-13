@@ -270,7 +270,8 @@ All alarms go to the `acrodont-alarms` SNS topic and on to `alarm_email`.
 | Alarm | Means | First step |
 |---|---|---|
 | `acrodont-down` | No healthy target for 10 minutes | The service's events and the newest stopped task's reason. A Spot interruption replaces the task within minutes; if Spot capacity cannot place one, `scripts/set-setting.sh use_fargate_spot=false` |
-| `acrodont-api-5xx` | The load balancer answered 5xx for 15 minutes | The log group, `level = ERROR` |
+| `acrodont-api-5xx` | The load balancer itself answered 5xx for 15 minutes: no target to send to, or a dropped connection | The service's events and the target group's health; then the Nginx lines in the log group |
+| `acrodont-app-5xx` | The application answered 5xx for 15 minutes, though `/health` may still pass | The log group, `level = ERROR` |
 | `acrodont-backend-cpu-high` | Over 85% CPU for 15 minutes | Searches or exports? Consider `task_cpu=1024` (and `search_concurrency`) |
 | `acrodont-backend-memory-high` | Over 85% memory for 10 minutes | The in-memory index sizes in `/admin` (hover each Storage) against `task_memory`; raise it |
 | `acrodont-db-cpu-high` | Database over 80% CPU for 15 minutes | Raise `db_instance_class`; the change applies at once with a short restart |

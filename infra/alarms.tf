@@ -90,6 +90,27 @@ resource "aws_cloudwatch_metric_alarm" "api_5xx" {
   ok_actions          = [aws_sns_topic.alarms.arn]
 }
 
+# The application answering 5xx for fifteen minutes. The alarm above counts
+# only what the load balancer itself answers (no target, a dropped
+# connection): a backend returning 500 on every /api call while /health still
+# passes is a target response, a different metric, and nothing else would say.
+resource "aws_cloudwatch_metric_alarm" "app_5xx" {
+  count               = local.service_alarms
+  alarm_name          = "acrodont-app-5xx"
+  alarm_description   = "acrodont's application has answered 5xx for fifteen minutes"
+  namespace           = "AWS/ApplicationELB"
+  metric_name         = "HTTPCode_Target_5XX_Count"
+  dimensions          = { TargetGroup = aws_lb_target_group.web.arn_suffix, LoadBalancer = aws_lb.main.arn_suffix }
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 3
+  threshold           = 5
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+}
+
 resource "aws_cloudwatch_metric_alarm" "backend_cpu_high" {
   count               = local.service_alarms
   alarm_name          = "acrodont-backend-cpu-high"

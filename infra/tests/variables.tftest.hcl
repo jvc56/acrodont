@@ -52,8 +52,8 @@ run "defaults_plan" {
     error_message = "the app runs on Spot by default"
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.down) == 1
-    error_message = "a running service has its down alarm"
+    condition     = length(aws_cloudwatch_metric_alarm.down) == 1 && length(aws_cloudwatch_metric_alarm.app_5xx) == 1
+    error_message = "a running service has its down alarm and its application 5xx alarm"
   }
   assert {
     condition     = aws_db_instance.main.backup_retention_period == 7 && aws_db_instance.main.allocated_storage == 20
@@ -72,7 +72,7 @@ run "on_demand_and_no_tasks" {
     error_message = "use_fargate_spot = false must use on-demand Fargate"
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.down) == 0 && length(aws_cloudwatch_metric_alarm.backend_memory_high) == 0
+    condition     = length(aws_cloudwatch_metric_alarm.down) == 0 && length(aws_cloudwatch_metric_alarm.backend_memory_high) == 0 && length(aws_cloudwatch_metric_alarm.app_5xx) == 0
     error_message = "a stack with no tasks must not page"
   }
 }
