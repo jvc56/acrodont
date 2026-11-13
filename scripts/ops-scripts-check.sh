@@ -564,6 +564,10 @@ run rotate-db-password.sh --signing-key || fail "rotate-db-password.sh --signing
 said "EVERYONE IS SIGNED OUT" || fail "--signing-key did not warn"
 { ! called "run-task" && called "update-service"; } || fail "--signing-key should restart and touch no role"
 fresh "$B"
+answers y
+if FAKE_RESTART_ROLLBACK=1 run rotate-db-password.sh; then fail "a restart that was rolled back counted as a rotation"; fi
+{ said "the restart did not take" && said "--resume"; } || fail "a rolled-back restart is not named, or does not say --resume"
+fresh "$B"
 ssm_put DATABASE_URL 'postgres://postgres:pw@h:5432/acrodont'
 answers y
 if run rotate-db-password.sh; then fail "a DATABASE_URL for another role was rotated"; fi
@@ -613,14 +617,35 @@ in_order "aws ecs run-task" \
 grep -qx "WF_U=acrodont_app" "$FAKE_DIR/psql/1.env" && grep -qx "WF_DB=acrodont_restored" "$FAKE_DIR/psql/1.env" \
   || fail "the check did not connect to the new database as acrodont_app"
 ! grep -q "^WF_P=" "$FAKE_DIR/psql/1.env" || fail "the password was left in the task's environment for psql's children"
-for want in "pg_get_userbyid(datdba)" "has_schema_privilege('public', 'CREATE')" "FROM users" "FROM _sqlx_migrations"; do
+for want in "pg_get_userbyid(datdba)" "has_schema_privilege('public', 'CREATE')" "NOT EXISTS (SELECT FROM users)" "FROM _sqlx_migrations"; do
   grep -qF "$want" "$FAKE_DIR/psql/1.stdin" || fail "the check's SQL lacks: $want"
 done
 ! grep -rqF "oldpw" "$FAKE_DIR/calls.log" "$FAKE_DIR/runtask" "$WORK/out" || fail "a password travelled in a call, an override or the output"
 : > "$FAKE_DIR/calls.log"
+# Both parameters naming the database does not say the tasks have read them:
+# a rerun writes nothing, and checks and restarts all the same.
+answers y
 run cutover-db.sh acrodont_restored || fail "a second cutover-db.sh failed"
-said "nothing to do" || fail "a finished cutover is not recognised"
-{ ! called "put-parameter" && ! called "update-service" && ! called "run-task"; } || fail "a finished cutover did something"
+! called "put-parameter" || fail "a rerun wrote parameters that already name the database"
+in_order "aws ecs run-task" "aws ecs update-service --cluster acrodont --service acrodont --force-new-deployment" "aws elbv2 wait"
+# The restart fails after both parameters are written: the rerun it asks for finishes the job.
+fresh "$B"
+answers y
+if FAKE_UPDATE_SERVICE_FAIL=1 run cutover-db.sh acrodont_restored; then fail "a cutover whose restart failed counted as done"; fi
+said "STOPPED PART-WAY" || fail "a cutover that stopped before its restart does not say so"
+[[ "$(ssm_get BACKUP_DATABASE_URL)" == "${BACKUP_URL/5432\/acrodont?/5432/acrodont_restored?}" ]] || fail "the stand-in did not stop after the parameter writes"
+: > "$FAKE_DIR/calls.log"
+answers y
+run cutover-db.sh acrodont_restored || fail "the rerun after a failed restart failed"
+called "aws ecs update-service --cluster acrodont --service acrodont --force-new-deployment" \
+  || fail "the rerun after a failed restart did not restart the service: its tasks stay on the old database"
+! said "nothing to do" || fail "a cutover that never restarted was taken as finished"
+# A restart the circuit breaker rolls back settles on another deployment: not "done".
+fresh "$B"
+answers y
+if FAKE_RESTART_ROLLBACK=1 run cutover-db.sh acrodont_restored; then fail "a restart that was rolled back counted as a cutover"; fi
+said "the restart did not take" || fail "a rolled-back restart is not named"
+! said "done:" || fail "a rolled-back restart was reported as done"
 fresh "$B"
 answers y
 if FAKE_PSQL_EXIT=3 run cutover-db.sh acrodont_restored; then fail "a database the app cannot use was cut over to"; fi
@@ -640,7 +665,7 @@ ssm_put BACKUP_DATABASE_URL "${BACKUP_URL/5432\/acrodont?/5432/acrodont_restored
 answers y
 run cutover-db.sh acrodont_restored || fail "finishing a part-way cutover failed"
 [[ "$(ssm_get DATABASE_URL)" == "${APP_URL/5432\/acrodont?/5432/acrodont_restored?}" ]] || fail "a part-way cutover was not finished"
-pass "cutover-db.sh: the new database checked as the app role first, both URLs repointed (nothing else in them), restart; refused, declined, bad names, rerun"
+pass "cutover-db.sh: the new database checked as the app role first, both URLs repointed (nothing else in them), restart; refused, declined, bad names; a rerun restarts; a failed or rolled-back restart is not done"
 
 # ---------------------------------------------------------------------------
 # check-alerts.sh, prod-shell.sh, onboard-deployer.sh

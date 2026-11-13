@@ -31,6 +31,8 @@ FAKE_TG_FAIL_ROUNDS (target-in-service waits that time out first),
 FAKE_CURL_FAIL, FAKE_SNS_PENDING, FAKE_RDS_SUB_STATUS (active),
 FAKE_RULE_BROKEN (a rule whose pattern matches every ECS event),
 FAKE_SETTLE_POLLS (describe-services calls that still show two deployments),
+FAKE_UPDATE_SERVICE_FAIL, FAKE_RESTART_ROLLBACK (a restart's deployment is
+rolled back: the service settles on another),
 FAKE_TF_VERSION (1.16.5), FAKE_BUILD_FAIL.
 """
 import datetime
@@ -188,10 +190,14 @@ def running():
 def ecs(op, pos, opt, q):
     if op == "describe-services":
         desired = int(read(path("ecs", "desired"), "1").strip())
-        deps = [{"status": "PRIMARY", "rolloutState": "COMPLETED", "taskDefinition": TD_ARN}]
+        dep = read(path("ecs", "deployment"), "ecs-svc/0").strip()
+        if os.environ.get("FAKE_RESTART_ROLLBACK") and dep != "ecs-svc/0":
+            dep += "-rollback"
+        deps = [{"id": dep, "status": "PRIMARY", "rolloutState": "COMPLETED", "taskDefinition": TD_ARN}]
         if count("settle_polls") <= int(os.environ.get("FAKE_SETTLE_POLLS", "0")):
-            deps = [{"status": "PRIMARY", "rolloutState": "IN_PROGRESS", "taskDefinition": TD_ARN},
-                    {"status": "ACTIVE", "rolloutState": "COMPLETED", "taskDefinition": TD_ARN[:-1] + "6"}]
+            deps = [{"id": dep, "status": "PRIMARY", "rolloutState": "IN_PROGRESS", "taskDefinition": TD_ARN},
+                    {"id": "ecs-svc/old", "status": "ACTIVE", "rolloutState": "COMPLETED",
+                     "taskDefinition": TD_ARN[:-1] + "6"}]
         out(json.dumps({"services": [{
             "serviceName": opt["--services"], "desiredCount": desired, "runningCount": desired,
             "deployments": deps,
@@ -205,9 +211,18 @@ def ecs(op, pos, opt, q):
                 {"name": "backend", "image": "%s/acrodont-backend:%s" % (REGISTRY, r["tag"])},
                 {"name": "nginx", "image": "%s/acrodont-frontend:%s" % (REGISTRY, r["tag"])}]}}))
     elif op == "update-service":
+        if os.environ.get("FAKE_UPDATE_SERVICE_FAIL"):
+            fail("fake aws ecs update-service: failing as asked")
         if "--desired-count" in opt:
             write(path("ecs", "desired"), opt["--desired-count"])
-        out(opt["--service"])
+        if "--force-new-deployment" in opt:
+            # A restart is a new deployment, and the service's PRIMARY from here.
+            dep = "ecs-svc/%d" % count("deployments")
+            write(path("ecs", "deployment"), dep)
+            out(json.dumps({"service": {"serviceName": opt["--service"], "deployments": [
+                {"id": dep, "status": "PRIMARY", "rolloutState": "IN_PROGRESS", "taskDefinition": TD_ARN}]}}))
+        else:
+            out(opt["--service"])
     elif op == "run-task":
         run_task(opt)
     elif op == "describe-tasks":

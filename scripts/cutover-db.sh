@@ -9,10 +9,14 @@
 # dump reading the abandoned database and reporting success.
 #
 # Before anything is written, an ops task connects to DATABASE as the app
-# role and refuses unless that role owns it and can read its users table: a
-# database made or restored by the master user is one the app can neither
-# read nor migrate. The service then restarts to read the new value, and the
-# site is checked. To go back, run it again with the old name.
+# role and refuses unless that role owns it and finds accounts in its users
+# table: a database made or restored by the master user is one the app can
+# neither read nor migrate, and an empty one is not a restore. The service
+# then restarts to read the new value; the restart must be the deployment the
+# service settles on, and the site is checked. To go back, run it again with
+# the old name. Run again with the same name after a run that stopped
+# part-way, it checks and restarts again: the parameters alone do not say
+# whether the tasks have read them.
 set -euo pipefail
 # shellcheck source=scripts/lib/ops.sh
 source "$(dirname "$0")/lib/ops.sh"
@@ -56,10 +60,11 @@ backup_url=$(get_param BACKUP_DATABASE_URL) || ops_die "could not read $OPS_SSM_
 [[ "$(url_part "$backup_url" username)" == acrodont_backup ]] || ops_die "$OPS_SSM_PREFIX/BACKUP_DATABASE_URL's user is not acrodont_backup"
 from=$(url_part "$app_url" path)
 backup_from=$(url_part "$backup_url" path)
-if [[ "$from" == "$db" && "$backup_from" == "$db" ]]; then
-  ops_say "the site and the backup already use $db: nothing to do"
-  exit 0
-fi
+# Both parameters naming DATABASE does not mean the cutover finished: a run
+# that stopped after writing them left the tasks on the old database. So
+# nothing is taken as done here; this run checks and restarts all the same.
+written=0
+[[ "$from" != "$db" || "$backup_from" != "$db" ]] || written=1
 
 # The task's own injected URL carries the password; only the name travels.
 script="set -euo pipefail
@@ -82,6 +87,12 @@ BEGIN
     RAISE EXCEPTION '% cannot create in schema public of %: it could not migrate', current_user, current_database();
   END IF;
 END \$\$;
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM users) THEN
+    RAISE EXCEPTION 'database % has no accounts: an empty database is not a restore', current_database();
+  END IF;
+END \$\$;
 SELECT 'accounts: ' || count(*) FROM users;
 SELECT 'migrations: ' || count(*) FROM _sqlx_migrations;
 SQL"
@@ -89,24 +100,27 @@ rc=0
 ops_run_ops_script "$script" || rc=$?
 ((rc == 0)) || ops_die "$db is not a database the app can use (exit $rc): nothing changed"
 
-ops_say "the site moves from $from to $db, and the nightly backup from $backup_from to $db"
-ops_say "the service restarts; work synced to $from after the restore point is not in $db"
-ops_confirm "Cut over to $db?" || ops_die "nothing changed"
+if ((written)); then
+  ops_say "both parameters already name $db. A cutover that stopped before its restart leaves tasks on the old database, so the service is restarted"
+  ops_confirm "Restart the service on $db?" || ops_die "nothing changed"
+else
+  ops_say "the site moves from $from to $db, and the nightly backup from $backup_from to $db"
+  ops_say "the service restarts; work synced to $from after the restore point is not in $db"
+  ops_confirm "Cut over to $db?" || ops_die "nothing changed"
+fi
 
-trap 'rm -rf "$OPS_TMP"; ops_say "STOPPED PART-WAY: run  scripts/cutover-db.sh $db  again to finish, or with $from to go back"' EXIT
-put_param DATABASE_URL "$(url_with_db "$app_url" "$db")"
-ops_say "$OPS_SSM_PREFIX/DATABASE_URL written"
-put_param BACKUP_DATABASE_URL "$(url_with_db "$backup_url" "$db")"
-ops_say "$OPS_SSM_PREFIX/BACKUP_DATABASE_URL written"
+trap 'rm -rf "$OPS_TMP"; ops_say "STOPPED PART-WAY: run  scripts/cutover-db.sh $db  again to finish${from:+, or with $from to go back}"' EXIT
+if ((written)); then
+  from=""
+else
+  put_param DATABASE_URL "$(url_with_db "$app_url" "$db")"
+  ops_say "$OPS_SSM_PREFIX/DATABASE_URL written"
+  put_param BACKUP_DATABASE_URL "$(url_with_db "$backup_url" "$db")"
+  ops_say "$OPS_SSM_PREFIX/BACKUP_DATABASE_URL written"
+fi
 unset app_url backup_url
 
-live=$(ops_live_release) || ops_die "cannot read what the service runs"
-aws ecs update-service --cluster "$OPS_CLUSTER" --service "$OPS_SERVICE" --force-new-deployment \
-  --query 'service.serviceName' --output text >/dev/null
-ops_say "the service is restarting to read the new value"
+ops_restart_service
+[[ "$(ops_desired_count)" == 0 ]] || ops_check_site
 trap 'rm -rf "$OPS_TMP"' EXIT
-if [[ "$(ops_desired_count)" != 0 ]]; then
-  ops_wait_release "${live%% *}" "${live#* }"
-  ops_check_site
-fi
-ops_say "done: the site and tonight's dump use $db. $from is untouched; drop it once you are sure"
+ops_say "done: the site and tonight's dump use $db.${from:+ $from is untouched; drop it once you are sure}"

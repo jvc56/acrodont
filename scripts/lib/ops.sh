@@ -417,6 +417,31 @@ ops_wait_release() {
   ops_wait_healthy
 }
 
+# Restarts the service on the task definition it has, so that its tasks read
+# their parameters again, and waits until the restart has taken. The image and
+# the size are the same before and after, so ops_wait_release could not tell a
+# restart that took from one the circuit breaker rolled back: this compares
+# deployments. The restart is the deployment update-service returns; the
+# service must settle with that one as its PRIMARY. A rollback settles on
+# another.
+ops_restart_service() {
+  local new primary
+  new=$(aws ecs update-service --cluster "$OPS_CLUSTER" --service "$OPS_SERVICE" --force-new-deployment --output json \
+    | jq -r '[.service.deployments[]? | select(.status == "PRIMARY") | .id][0] // empty') || ops_die "the restart could not be asked for"
+  [[ -n "$new" ]] || ops_die "ECS did not say which deployment the restart is: aws ecs describe-services --cluster $OPS_CLUSTER --services $OPS_SERVICE"
+  ops_say "the service is restarting to read the new value"
+  [[ "$(ops_desired_count)" != 0 ]] || return 0
+  ops_say "waiting for the deployment to settle (startup is allowed several minutes; failed starts roll it back)"
+  sleep 20
+  ops_wait_settled
+  primary=$(ops_describe_service | jq -r '[.services[0].deployments[]? | select(.status == "PRIMARY") | .id][0] // empty') || primary=""
+  if [[ "$primary" != "$new" ]]; then
+    ops_show_events
+    ops_die "the restart did not take: the service settled on deployment [${primary:-none}], not the restart's [$new]. The tasks serving now may still hold the old values, and a task that starts later reads the new ones"
+  fi
+  ops_wait_healthy
+}
+
 # The AWS waiter gives up after ten minutes, so it is asked three times.
 ops_wait_healthy() {
   local arn round
@@ -560,16 +585,22 @@ ops_describe_task() {
 # A task ECS does not describe ("MISSING") is new (eventual consistency) or
 # long forgotten (a laptop that slept): stopped once seen, or after 5 minutes.
 ops_wait_task_stopped() {
-  local arn=$1 seen=0 unseen=0 status
+  local arn=$1 seen=0 unseen=0 failed=0 status
   while :; do
     sleep 10
     status=$(ops_describe_task "$arn" 2>/dev/null | jq -r 'if (.tasks | length) == 0 then "MISSING" else .tasks[0].lastStatus end' 2>/dev/null) || status=""
     [[ "$status" == STOPPED ]] && return 0
     if [[ "$status" == MISSING ]]; then
-      unseen=$((unseen + 1))
+      unseen=$((unseen + 1)) failed=0
       { ((seen)) || ((unseen >= 30)); } && return 0
     elif [[ -n "$status" ]]; then
-      seen=1 unseen=0
+      seen=1 unseen=0 failed=0
+    else
+      # The call itself fails (an expired sign-in, no network). The task runs
+      # on whatever this does, so it is not given up on: it is said, once a
+      # minute, with what to do.
+      failed=$((failed + 1))
+      ((failed % 6 != 0)) || ops_say "cannot ask ECS about the task (for $((failed / 6)) min): it may still be running. If your sign-in has expired, run  aws sso login  in another terminal and this carries on"
     fi
   done
 }

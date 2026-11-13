@@ -404,11 +404,18 @@ The backup role can write dumps but read only the daily dump it copies to
    ```
 
    It first checks, as the app role, that the database is owned by that role
-   and holds the schema, and changes nothing otherwise. Then it points
-   **both** `DATABASE_URL` and `BACKUP_DATABASE_URL` at it (repointing the
-   app alone leaves the nightly dump reading the abandoned database and
-   reporting success), restarts the service and checks the site. Run with
-   the old name, it goes back. Tell users what was lost: work pushed after
+   and holds the schema and at least one account, and changes nothing
+   otherwise. Then it points **both** `DATABASE_URL` and
+   `BACKUP_DATABASE_URL` at it (repointing the app alone leaves the nightly
+   dump reading the abandoned database and reporting success), restarts the
+   service and checks the site. It says "done" only when the restart is the
+   deployment the service settled on: if it says "the restart did not take",
+   the tasks serving may still be on the old database, so read the service's
+   events, fix the cause and run it again. If it stops anywhere after the
+   question ("STOPPED PART-WAY"), run it again with the same name: it writes
+   nothing that is already written and restarts the service all the same,
+   since until the restart the running tasks hold the old database while the
+   nightly dump reads the new one. Run with the old name, it goes back. Tell users what was lost: work pushed after
    the restore point that lived only on the server. Anything still in a
    device's outbox is pushed again and survives. The old database stays
    until you drop it.
