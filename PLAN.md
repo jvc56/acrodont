@@ -2592,7 +2592,18 @@ other tab shows "Acrodont was updated in another tab — reload to continue" and
 keeps running. So that it can, the new worker's `activate` deletes the previous
 build's cache only once `clients.matchAll()` finds no page still on that build,
 checking again whenever an old tab reports that it is closing, so a tab left on
-the old build can still load the chunks the card it is on needs. The
+the old build can still load the chunks the card it is on needs: a request for
+a hashed file this build does not have is answered from whichever build's cache
+holds it. Each tab says which build it runs (`HELLO`), again to a worker that
+takes it over, and nothing is deleted while some open tab has not said: a
+worker stopped while idle forgets what it was told. A worker deletes **older**
+builds' caches only (a build's version is the time it was made), never a newer
+one's, which is the cache of a worker installed and waiting: deleted, that
+worker would take over with nothing, answer with the old build's shell, and
+show a blank page when the shell asked for a chunk the server no longer has. A
+worker that does find its cache gone fetches it again on `activate`, and until
+then answers from the network, falling back to another build's copy only with
+no connection. The
 app never reloads on its own initiative, so a card in progress is never
 interrupted by an update, and a user who never accepts keeps the old version
 until the `426` line. IndexedDB schema upgrades run from versioned migrations,

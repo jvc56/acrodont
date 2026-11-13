@@ -23,7 +23,7 @@ describe('the service worker', () => {
 
 	it('serves the built app from the cache and leaves anything unrecognised alone', () => {
 		expect(route(u('/_app/immutable/entry/start.js'), 'no-cors', O, pre)).toBe('precached');
-		expect(route(u('/_app/immutable/chunks/unknown.js'), 'no-cors', O, pre)).toBe('network');
+		expect(route(u('/robots.txt'), 'no-cors', O, pre)).toBe('network');
 		expect(route(new URL('https://fonts.example/x.woff2'), 'cors', O, pre)).toBe('network');
 	});
 
@@ -32,5 +32,18 @@ describe('the service worker', () => {
 		expect(deletable(names, '3', ['2'])).toEqual([cacheName('1')]);
 		expect(deletable(names, '3', [])).toEqual([cacheName('1'), cacheName('2')]);
 		expect(deletable(names, '3', ['3'])).toEqual([cacheName('1'), cacheName('2')]);
+	});
+
+	it('never deletes a newer build’s cache: a worker waiting to take over would start with nothing', () => {
+		const names = [cacheName('1'), cacheName('2'), cacheName('3')];
+		expect(deletable(names, '2', [])).toEqual([cacheName('1')]);
+		// Nor one whose age cannot be told.
+		expect(deletable([cacheName('abc'), cacheName('1')], '2', [])).toEqual([cacheName('1')]);
+	});
+
+	it('looks in the other builds’ caches for a chunk this build does not have', () => {
+		expect(route(u('/_app/immutable/chunks/old.js'), 'cors', O, pre)).toBe('other_build');
+		expect(route(u('/_app/immutable/entry/start.js'), 'cors', O, pre)).toBe('precached');
+		expect(route(u('/_app/version.json'), 'cors', O, pre)).toBe('network');
 	});
 });
