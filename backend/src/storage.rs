@@ -132,13 +132,17 @@ pub async fn usage(conn: &mut PgConnection, user: Uuid, default_limit: u64) -> R
 }
 
 /// Adds `delta` to a cascade's figure and its user's total, stamping the
-/// cascade with `seq` so the change reaches every device's pull.
+/// cascade with `seq` so the change reaches every device's pull. A figure
+/// never goes below zero: what a purge frees is counted again from the rows
+/// with today's `ROW_BYTES`, and rows stored under other constants would
+/// otherwise take the figure negative, fail its CHECK and stop the purge.
+/// The recount corrects the total either way.
 pub async fn add_to_cascade(conn: &mut PgConnection, user: Uuid, cascade: Uuid, delta: i64, seq: i64) -> Result<(), sqlx::Error> {
     if delta == 0 {
         return Ok(());
     }
     sqlx::query!(
-        "UPDATE cascades SET storage_bytes = storage_bytes + $2, updated_seq = $3 WHERE id = $1",
+        "UPDATE cascades SET storage_bytes = greatest(storage_bytes + $2, 0), updated_seq = $3 WHERE id = $1",
         cascade,
         delta,
         seq
@@ -152,7 +156,7 @@ pub async fn add_to_user(conn: &mut PgConnection, user: Uuid, delta: i64) -> Res
     if delta == 0 {
         return Ok(());
     }
-    sqlx::query!("UPDATE users SET storage_bytes = storage_bytes + $2 WHERE id = $1", user, delta)
+    sqlx::query!("UPDATE users SET storage_bytes = greatest(storage_bytes + $2, 0) WHERE id = $1", user, delta)
         .execute(conn)
         .await?;
     Ok(())

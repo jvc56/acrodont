@@ -4784,6 +4784,16 @@ it:
 - **prunes** `catalog_instance_status` rows whose heartbeat is older than
   3 minutes, left by instances that have stopped
 
+**One failure does not stop a run.** Each step runs whatever the others did,
+and a step that works account by account goes on to the next account when
+one fails; every failure is logged, with the account, and the run is then
+reported as failed. One account's bad row therefore cannot keep every other
+account's Trash from being purged, or the pruning and the recount from
+running, hour after hour. What a purge frees is counted from the rows with
+the current sizes, so a figure never goes below zero: taking more off than
+was once added would fail the column's CHECK, and the recount corrects the
+total either way.
+
 ---
 
 ## Authentication
