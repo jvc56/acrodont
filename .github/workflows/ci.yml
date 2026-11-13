@@ -274,6 +274,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: make ops-check (operator scripts against fakes, runbook blocks parse)
         run: make ops-check
+      - name: make contract-check (the generators still write the checked-in contract fixtures)
+        run: make contract-check
 
   scale:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

@@ -7520,7 +7520,7 @@ CI (`.github/workflows/ci.yml`) runs three tiers, each a superset of the last:
 
 | Tier | When | What |
 |---|---|---|
-| **Push** | Every push, every branch | Clippy, the unit tests (a backend and a frontend job), `make test-integration`, `make test-e2e-core`, `make infra-validate`, `make ops-check`. About 5 minutes |
+| **Push** | Every push, every branch | Clippy, the unit tests (a backend and a frontend job), `make test-integration`, `make test-e2e-core`, `make infra-validate`, `make ops-check`, `make contract-check` (the generators in `contract-fixtures/tools/` still write the checked-in fixtures). About 5 minutes |
 | **Main** | A push to `main`, and a manual run on any branch | The Push tier, plus `make test-e2e-main`, `make test-e2e-seeding` and `make test-ops-image` (the last also on a push that changes `scripts/` or `docker/`) |
 | **Nightly** | 04:30 UTC on `main` | The Main tier, plus `make test-scale` (which a manual run on any branch runs too). A failure opens (or comments on) one issue |
 

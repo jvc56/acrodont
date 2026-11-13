@@ -279,6 +279,18 @@ infra-validate:
 	$(TF) fmt -check $$(cd infra && git ls-files '*.tf' '*.tftest.hcl')
 	$(TF) test
 
+## The contract fixtures are what their generators write today: each generator
+## (Python's standard library only, under a second) writes its files again, and
+## a difference from the checked-in ones fails. gen_filters.py reads PLAN.md's
+## filter tables, so a table edited without regenerating fails here too.
+.PHONY: contract-check
+contract-check:
+	python3 contract-fixtures/tools/gen_cascade.py
+	python3 contract-fixtures/tools/gen_export.py
+	python3 contract-fixtures/tools/gen_filters.py
+	git diff --exit-code --stat -- contract-fixtures || { \
+	  echo "contract-fixtures differ from what contract-fixtures/tools/ generates: commit the regenerated files, or fix the generator" >&2; exit 1; }
+
 ## Operator scripts: the runbook's fenced blocks (labelled, parsing, AWS_PAGER
 ## off), scripts/*.sh against stand-ins for aws, terraform, gh and docker, and
 ## the backup's S3 paths (the dump marker) against a stand-in S3 and pg_dump.
