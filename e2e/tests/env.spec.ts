@@ -21,6 +21,8 @@ test('@env @ttl session expiry while offline', async ({ page, context }) => {
 	await ready(page);
 	await context.setOffline(true);
 	await page.goto(player);
+	// The first card first: a key pressed before the player has loaded is lost.
+	await expect(page.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
 	await press(page, 'Space');
 	await press(page, 'Space');
 	await press(page, 'Space');

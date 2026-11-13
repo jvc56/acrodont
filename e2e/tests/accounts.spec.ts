@@ -100,7 +100,8 @@ test('logging out, online and offline, and a second account on the same browser'
 	await expect(page.getByText('Synced')).toBeVisible({ timeout: 30_000 });
 	// Logging out with his data removed leaves Alice's.
 	await logOut(page, true);
-	expect(await deviceAccounts(page)).toEqual([alice.username]);
+	// (The log-in page shows as soon as the session is gone; the removal finishes a moment after.)
+	await expect.poll(() => deviceAccounts(page), { timeout: 15_000 }).toEqual([alice.username]);
 	await login(page, alice.username);
 	await expect(page.getByText('Alice cascade')).toBeVisible({ timeout: 30_000 });
 });
