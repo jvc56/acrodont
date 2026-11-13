@@ -703,7 +703,9 @@ async fn an_incremental_pull_beside_60000_chain_quizzes(pool: sqlx::PgPool) {
         (acrodont::sync::pull::ATTEMPTS_SQL.to_owned(), "quiz_attempts_user_seq", true),
     ] {
         let plan = explain(&app, &sql, |q| {
-            let q = q.bind(user).bind(cursor).bind(cursor).bind(Uuid::nil());
+            // The range a pull asks for, open above: an empty one (cursor to
+            // cursor) would read nothing whatever the index did.
+            let q = q.bind(user).bind(cursor).bind(i64::MAX).bind(Uuid::nil());
             if attempts { q.bind(0).bind(50_001_i64) } else { q.bind(50_001_i64) }
         })
         .await;

@@ -80,6 +80,17 @@ const MAX_SHARED_NAME: usize = 40;
 /// held by one account.
 const MAX_SHARED_BYTES: usize = 16 * 1024;
 
+/// Whether any text in `v` holds a NUL, which Postgres stores in neither
+/// text nor jsonb: the merge below would fail on it instead of refusing it.
+fn has_nul(v: &Value) -> bool {
+    match v {
+        Value::String(s) => s.contains('\0'),
+        Value::Array(a) => a.iter().any(has_nul),
+        Value::Object(m) => m.iter().any(|(k, e)| k.contains('\0') || has_nul(e)),
+        _ => false,
+    }
+}
+
 /// A request's shared device settings (PLAN.md § Settings → This device, or
 /// all of them): an object of setting name to `{value, at}`, the time it was
 /// shared, which is written back in one form so the merge can compare it.
@@ -105,6 +116,9 @@ fn parse_device_settings(v: Option<&Value>) -> ApiResult<Option<Value>> {
             .and_then(|s| s.parse::<DateTime<Utc>>().ok())
             .ok_or_else(|| bad("device_settings needs each setting's at"))?;
         let value = e.get("value").ok_or_else(|| bad("device_settings needs each setting's value"))?;
+        if has_nul(value) {
+            return Err(bad("device_settings holds a character that cannot be stored"));
+        }
         out.insert(
             k.clone(),
             json!({ "value": value, "at": at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true) }),

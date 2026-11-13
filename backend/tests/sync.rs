@@ -134,7 +134,20 @@ async fn request_level_400s(pool: sqlx::PgPool) {
     cases.push(("SYNC_MAX_OPS + 1", b));
     let mut b = base.clone();
     b["ops"] = json!([ops[0]]);
-    b["page_token"] = json!("x");
+    // A token the server would take on its own, so the operation is what is refused.
+    let token = acrodont::sync::pull::PageToken {
+        u: d.client.user_id.unwrap(),
+        cur: None,
+        ceil: 0,
+        qrf: vec![],
+        table: 0,
+        after: vec![],
+    }
+    .encode();
+    b["page_token"] = json!(token);
+    let mut alone = base.clone();
+    alone["page_token"] = json!(token);
+    assert_eq!(d.raw_sync(alone).await.status, StatusCode::OK, "the token without an operation");
     cases.push(("page_token with an operation", b));
     let mut b = base.clone();
     b["question_rows_for"] = json!((0..=acrodont::config::MAX_QUESTION_ROWS_FOR).map(|_| Uuid::new_v4()).collect::<Vec<_>>());
@@ -152,6 +165,12 @@ async fn request_level_400s(pool: sqlx::PgPool) {
     o["x"] = json!(1);
     b["ops"] = json!([o]);
     cases.push(("an options op with another field", b));
+    // A NUL is text Postgres cannot hold, in a shared setting's value at any depth.
+    for value in [json!("a\u{0}b"), json!({ "inner": ["\u{0}"] }), json!({ "k\u{0}": 1 })] {
+        let mut b = base.clone();
+        b["device_settings"] = json!({ "border_px": { "value": value, "at": "2026-11-11T10:00:00Z" } });
+        cases.push(("a NUL in a shared setting", b));
+    }
     for (what, body) in cases {
         let r = d.raw_sync(body).await;
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{what}");
