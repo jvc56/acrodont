@@ -376,6 +376,8 @@ def cloudwatch(op, pos, opt, q):
 
 
 def task_pattern(family):
+    """infra/backups.tf's task_failed pattern by hand, without its clusterArn.
+    infra/tests/variables.tftest.hcl pins the real one's "$or" to this text."""
     return {"source": ["aws.ecs"], "detail-type": ["ECS Task State Change"],
             "detail": {"lastStatus": ["STOPPED"], "group": ["family:" + family],
                        "$or": [{"containers": {"exitCode": [{"anything-but": 0}]}},

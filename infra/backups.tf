@@ -114,6 +114,16 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
       noncurrent_days = 366
     }
   }
+  # A backup task killed mid-upload leaves its parts, which no listing shows
+  # and no expiration above reaches: they would be billed for good.
+  rule {
+    id     = "unfinished-uploads"
+    status = "Enabled"
+    filter {}
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
   depends_on = [aws_s3_bucket_versioning.backups]
 }
 
@@ -319,12 +329,20 @@ resource "aws_cloudwatch_event_rule" "task_failed" {
       clusterArn = [aws_ecs_cluster.main.arn]
       group      = ["family:${each.value}"]
       lastStatus = ["STOPPED"]
-      "$or" = [
-        { containers = { exitCode = [{ "anything-but" = 0 }] } },
-        { stopCode = ["TaskFailedToStart"] },
-      ]
+      "$or"      = local.task_failed_any_of
     }
   })
+}
+
+# What makes a stopped task a failed one. A local so that the offline test can
+# pin it (the pattern holds the cluster's ARN, unknown at plan):
+# scripts/lib/ops_fakes.py's task_pattern is the same pattern by hand, and
+# scripts/check-alerts.sh is checked against that copy.
+locals {
+  task_failed_any_of = [
+    { containers = { exitCode = [{ "anything-but" = 0 }] } },
+    { stopCode = ["TaskFailedToStart"] },
+  ]
 }
 
 resource "aws_cloudwatch_event_target" "task_failed" {

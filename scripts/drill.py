@@ -69,6 +69,24 @@ def newest_dump(s3, bucket: str) -> str:
     raise DrillFailed(f"none of the {len(keys)} dumps in s3://{bucket}/daily/ is complete")
 
 
+def fetch_schema(s3, bucket: str, key: str, work: Path) -> Optional[Path]:
+    """The schema-only dump beside `key`, or None when the bucket holds none
+    (an older dump): the rest is still checked. Any other failure to fetch it
+    (access denied, the network) fails the drill, so that the table check is
+    never skipped in silence."""
+    schema_key = key.replace(".dump", ".schema.sql")
+    path = work / Path(schema_key).name
+    try:
+        s3.download_file(bucket, schema_key, str(path))
+    except Exception as e:
+        code = str(getattr(e, "response", {}).get("Error", {}).get("Code", ""))
+        if code not in ("404", "NoSuchKey", "NotFound"):
+            raise
+        print(f"drill: no s3://{bucket}/{schema_key}: the tables are not compared with it")
+        return None
+    return path
+
+
 def as_postgres(cmd: List[str]) -> List[str]:
     """Postgres refuses to run as root; the ops image runs as root."""
     if os.geteuid() != 0:
@@ -189,11 +207,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             key = newest_dump(s3, args.s3_bucket)
             dump = work / Path(key).name
             s3.download_file(args.s3_bucket, key, str(dump))
-            schema = work / Path(key.replace(".dump", ".schema.sql")).name
-            try:
-                s3.download_file(args.s3_bucket, key.replace(".dump", ".schema.sql"), str(schema))
-            except Exception:  # an older dump without its schema file: check the rest
-                schema = None
+            schema = fetch_schema(s3, args.s3_bucket, key, work)
             print(f"drill: s3://{args.s3_bucket}/{key} ({dump.stat().st_size} bytes)")
         if os.geteuid() == 0:
             shutil.chown(str(dump), "postgres")

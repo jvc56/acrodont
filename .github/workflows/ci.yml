@@ -208,6 +208,9 @@ jobs:
             ops:
               - 'scripts/**'
               - 'docker/**'
+              - 'backend/migrations/**'
+              - 'docker-compose.yml'
+              - 'Makefile'
               - '.github/workflows/ci.yml'
 
   # § End-to-end tests → What the tests reuse: "CI runs it once more with
@@ -232,8 +235,10 @@ jobs:
         run: make test-e2e-seeding
 
   # The ops image is otherwise first built inside the first release, and
-  # backup.py and drill.py first run in production: the image builds here, a
-  # seeded stack is dumped, and the drill restores the dump inside the image.
+  # backup.py and drill.py first run in production: the image builds here and
+  # imports boto3, backup.py dumps a seeded stack from inside it with its own
+  # pg_dump, and the drill restores that dump inside it. A migration the app
+  # role cannot restore shows here, so the migrations are among its paths.
   ops-image:
     needs: changes
     if: ${{ !cancelled() && (github.ref == 'refs/heads/main' || github.event_name != 'push' || needs.changes.outputs.ops == 'true') }}

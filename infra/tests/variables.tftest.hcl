@@ -67,6 +67,18 @@ run "defaults_plan" {
     condition     = one(aws_lb_target_group.web.health_check).interval * one(aws_lb_target_group.web.health_check).unhealthy_threshold >= 300
     error_message = "the target group's health check must ride out a five-minute database restart before the task is replaced"
   }
+  assert {
+    condition     = local.backend_health_check.interval * local.backend_health_check.retries >= 300
+    error_message = "the backend container's health check must ride out the same five minutes: ECS replaces a task whose container is unhealthy whatever the target group says"
+  }
+  assert {
+    condition     = jsonencode(local.task_failed_any_of) == "[{\"containers\":{\"exitCode\":[{\"anything-but\":0}]}},{\"stopCode\":[\"TaskFailedToStart\"]}]"
+    error_message = "the backup and drill failure rules changed: change task_pattern in scripts/lib/ops_fakes.py with them, which scripts/check-alerts.sh is checked against"
+  }
+  assert {
+    condition     = anytrue([for r in aws_s3_bucket_lifecycle_configuration.backups.rule : length(r.abort_incomplete_multipart_upload) == 1])
+    error_message = "the backups bucket must abort unfinished multipart uploads"
+  }
 }
 
 run "www_redirects_to_the_bare_domain" {

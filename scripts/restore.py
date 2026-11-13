@@ -17,9 +17,11 @@ holds a cursor at or ahead of the server's; with every cursor now below the
 floor, each device's next sync answers `resync_required` and it rebuilds from
 the server, its unsent operations pushed first in that same request.
 
-Then point a stack at it — `./scripts/dev.py --env DATABASE_URL=…` — and check
-/health (it stays not-ready until every catalog index is built from the rows)
-and a few cascades before any cutover.
+Before any cutover, check a copy on your own machine (docs/runbook.md,
+Restoring): `./scripts/dev.py --restore DUMP` restores it into the dev stack,
+scrubbed, where /health stays not-ready until every catalog index is built
+from the rows; open a few cascades. Never point a dev.py stack at the
+restored production database itself: that stack runs with dev sign-in.
 """
 
 from __future__ import annotations

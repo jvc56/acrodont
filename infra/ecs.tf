@@ -58,6 +58,18 @@ locals {
   }
 }
 
+# The backend container's own check, a local so that the offline test can
+# read it (the container definitions are not known at plan).
+locals {
+  backend_health_check = {
+    command     = ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+    interval    = 30
+    timeout     = 5
+    retries     = 10
+    startPeriod = var.health_check_start_period
+  }
+}
+
 resource "aws_ecs_task_definition" "app" {
   family                   = "acrodont"
   requires_compatibilities = ["FARGATE"]
@@ -84,13 +96,7 @@ resource "aws_ecs_task_definition" "app" {
       # a minute, its replacements exited until the database was back, and
       # the one that stayed had the whole catalog to index again. The target
       # group's check (alb.tf) allows the same five minutes.
-      healthCheck = {
-        command     = ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
-        interval    = 30
-        timeout     = 5
-        retries     = 10
-        startPeriod = var.health_check_start_period
-      }
+      healthCheck      = local.backend_health_check
       logConfiguration = local.log_config
     },
     {

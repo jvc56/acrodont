@@ -193,23 +193,33 @@ test-e2e-seeding: e2e-binary
 	python3 scripts/stack.py seed --project acrodont-ci-seed --port 5190
 
 ## The ops image and what runs on it (PLAN.md § Backups): the image builds
-## (its Postgres comes from an apt repository outside this one), backup.py
-## dumps a seeded stack, and drill.py restores that dump inside the image, as
-## root with its own Postgres, the way the monthly drill task does. Otherwise
-## the image's first build is the first release's and the drill's first run is
-## in production. CI runs it on main, nightly, and when scripts/ or docker/
-## change. The dump is left in a directory under the system's temporary one.
+## (its Postgres comes from an apt repository outside this one) and imports
+## boto3; backup.py, inside the image with the image's own pg_dump, dumps a
+## seeded stack that holds a cascade, over the stack's network; and drill.py
+## restores that dump inside the image, as root with its own Postgres, the way
+## the monthly drill task does. Otherwise the image's first build is the first
+## release's, and the backup's and the drill's first runs are in production.
+## The S3 paths do not run here: scripts/backup-check.py (make ops-check) runs
+## them against a stand-in. CI runs this on main, nightly, and when scripts/,
+## docker/, the migrations, the compose file or this file change. The dump is
+## left in a directory under the system's temporary one.
 test-ops-image: e2e-binary
 	trap 'python3 scripts/stack.py down --project acrodont-ci-ops --volumes' EXIT
 	out=$$(mktemp -d)
+	# The image's root writes the dump here, and this user lists it.
+	chmod 755 "$$out"
 	docker build --target ops -f docker/backend.Dockerfile -t acrodont-ops:ci .
+	docker run --rm --entrypoint python3 acrodont-ops:ci -c 'import boto3; print("boto3", boto3.__version__)'
 	python3 scripts/stack.py up --project acrodont-ci-ops --port 5191
 	python3 scripts/stack.py seed --project acrodont-ci-ops --port 5191
-	python3 scripts/backup.py --project acrodont-ci-ops --out "$$out"
-	chmod -R a+rX "$$out"
+	python3 -c 'import sys; sys.path.insert(0, "scripts"); import stack, scenarios; scenarios.seed(stack.ensure_user("http://localhost:5191", stack.User(), "acrodont-ci-ops"), "acrodont-ci-ops", ["studying"])'
+	docker run --rm --network acrodont-ci-ops_default -v "$$out:/dumps" --entrypoint python3 acrodont-ops:ci \
+	  /opt/acrodont/scripts/backup.py --database-url postgres://acrodont:acrodont@postgres:5432/acrodont --out /dumps
 	dump=$$(cd "$$out" && ls *.dump)
 	docker run --rm -v "$$out:/dumps:ro" --entrypoint python3 acrodont-ops:ci \
-	  /opt/acrodont/scripts/drill.py --dump "/dumps/$$dump"
+	  /opt/acrodont/scripts/drill.py --dump "/dumps/$$dump" | tee "$$out/drill.log"
+	grep -Eq '[1-9][0-9]* cascades' "$$out/drill.log" \
+	  || { echo "the drill restored no cascade: its question check ran on nothing" >&2; exit 1; }
 
 ## The 300,000-question budgets (PLAN.md § Scale tests): the server's half
 ## against a throwaway Postgres with production durability settings, in
@@ -270,8 +280,10 @@ infra-validate:
 	$(TF) test
 
 ## Operator scripts: the runbook's fenced blocks (labelled, parsing, AWS_PAGER
-## off), and scripts/*.sh against stand-ins for aws, terraform, gh and docker.
+## off), scripts/*.sh against stand-ins for aws, terraform, gh and docker, and
+## the backup's S3 paths (the dump marker) against a stand-in S3 and pg_dump.
 .PHONY: ops-check
 ops-check:
 	scripts/runbook-check.sh
 	scripts/ops-scripts-check.sh
+	python3 scripts/backup-check.py
