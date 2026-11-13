@@ -11,8 +11,8 @@
 	// as its widest hooks and no wider; the definition takes the room that is
 	// left, up to this device's limit. The probability order, hooks and word
 	// share one line, and that line and the definition are centred on each
-	// other however many lines the definition wraps to; a wrapped line is
-	// indented, and a short part of speech ("[n -S]") is never split.
+	// other however many lines the definition wraps to; a short part of
+	// speech ("[n -S]") is never split.
 	// Unfound words are highlighted after a typed-mode reveal; before it, only the
 	// words typed so far show, bare: no hooks, inner hooks or definitions, which
 	// would give hints. The words and a leave value are drawn in the answer font
@@ -252,8 +252,7 @@
 		content: attr(data-sizes);
 	}
 	/* A column of its own, where the screen has room for one: after the back hooks, to the edge of
-	   the page or this device's limit. A line that wraps is indented, so each part of speech still
-	   starts at the column's edge. */
+	   the page or this device's limit. */
 	@media (min-width: 640px) {
 		.right.own-column {
 			grid-column: 3;
@@ -270,10 +269,6 @@
 			justify-self: start;
 			max-width: var(--definition-width, none);
 			text-align: left;
-		}
-		.right.own-column > .definition > .line {
-			padding-left: 1em;
-			text-indent: -1em;
 		}
 	}
 </style>
