@@ -21,6 +21,7 @@ this page parses.
 | `scripts/confirm-user.sh [--admin] USER` | Confirms an account by hand, and can grant admin |
 | `scripts/init-db-roles.sh` | First-time database roles and SSM secrets |
 | `scripts/rotate-db-password.sh` | Rotates the app or backup password, or the signing key |
+| `scripts/cutover-db.sh DATABASE` | Points the site and the nightly backup at a restored database |
 | `scripts/check-alerts.sh` | Proves alarms reach your inbox |
 
 Terraform is the only deployer: `deploy.sh` sets `image_tag` in `prod.tfvars`
@@ -322,15 +323,44 @@ The backup role can write dumps but read only the daily dump it copies to
 
 ## Restoring
 
-1. **Restore into a new database, never over the live one.** There are two
-   routes:
-   - **From a nightly dump:** in `scripts/prod-shell.sh`, create an empty
-     database with `acrodont-master-psql -c 'CREATE DATABASE acrodont_restored'`,
-     then run `python3 /opt/acrodont/scripts/restore.py s3://BUCKET/daily/DAY.dump`
-     with `--s3-region`, `--database-url` set to the new database, and
-     `?sslmode=require`.
-   - **From point-in-time recovery:** restore the RDS instance to a new
-     identifier in the console, then run `restore.py --bump-only` against it.
+1. **Restore into a new database on the live instance, never over the live
+   one.** The new database must be **owned by `acrodont_app` and restored as
+   that role**. One the master user makes is one the app role cannot create
+   in (the restore stops at its first statement), and one the master user
+   restores is one the app can neither read nor migrate. Both routes run in
+   `scripts/prod-shell.sh`, whose `DATABASE_URL` is the app role's.
+   - **From a nightly dump** (`BUCKET` is the `backups_bucket` output, `DAY`
+     the dump's date):
+
+     ```bash
+     acrodont-master-psql -c 'CREATE DATABASE acrodont_restored OWNER acrodont_app'
+     NEW_URL=$(python3 -c 'import os, urllib.parse as u
+     print(u.urlsplit(os.environ["DATABASE_URL"])._replace(path="/acrodont_restored").geturl())')
+     python3 /opt/acrodont/scripts/restore.py s3://BUCKET/daily/DAY.dump \
+       --s3-region us-west-2 --database-url "$NEW_URL"
+     ```
+
+   - **From point-in-time recovery:** restore the RDS instance to a new,
+     temporary identifier, **in the `acrodont` DB subnet group and with the
+     `acrodont-db` security group**: without both, nothing in the VPC can
+     reach it. Then copy it into a new database on the live instance, as a
+     dump would be. The temporary instance has the roles and passwords of its
+     restore point, so `DATABASE_URL`'s work on it unless the app password was
+     rotated since. `TEMP_HOST` is its endpoint:
+
+     ```bash
+     acrodont-master-psql -c 'CREATE DATABASE acrodont_restored OWNER acrodont_app'
+     NEW_URL=$(python3 -c 'import os, urllib.parse as u
+     print(u.urlsplit(os.environ["DATABASE_URL"])._replace(path="/acrodont_restored").geturl())')
+     TEMP_URL=$(HOST=TEMP_HOST python3 -c 'import os, urllib.parse as u
+     p = u.urlsplit(os.environ["DATABASE_URL"])
+     print(p._replace(netloc=p.netloc.rsplit("@", 1)[0] + "@" + os.environ["HOST"] + ":5432").geturl())')
+     pg_dump --dbname "$TEMP_URL" --format=custom --file /tmp/pitr.dump
+     python3 /opt/acrodont/scripts/restore.py /tmp/pitr.dump --database-url "$NEW_URL"
+     ```
+
+     Delete the temporary instance once the cutover has held. Terraform never
+     knew it.
 2. **Check it before any cutover.** Restore a copy locally with
    `./scripts/dev.py --restore DUMP`. It is scrubbed (every address replaced,
    every password the dev password) and the sequences are bumped. Then open a
@@ -339,15 +369,25 @@ The backup role can write dumps but read only the daily dump it copies to
 3. **The resync step.** `restore.py` does this every time, and on its own with
    `--bump-only`. It sets every user's `sync_seq` and `sync_floor_seq` to
    `sync_seq + 2^32`. Every device's next sync then answers `resync_required`
-   and rebuilds from the server, after pushing its unsent operations in that
-   same request. It is easy to forget and impossible to skip: without it, a
+   and rebuilds from the server, pushing its unsent operations with that
+   pull. It is easy to forget and impossible to skip: without it, a
    device that synced after the restore point would silently ignore rows it
    should pull.
-4. **Cut over.** Point the `DATABASE_URL` parameter at the restored database.
-   Then run `aws ecs update-service --force-new-deployment` (as
-   `rotate-db-password.sh` does). Tell users what was lost: work pushed after
+4. **Cut over**, from your own machine:
+
+   ```bash
+   scripts/cutover-db.sh acrodont_restored
+   ```
+
+   It first checks, as the app role, that the database is owned by that role
+   and holds the schema, and changes nothing otherwise. Then it points
+   **both** `DATABASE_URL` and `BACKUP_DATABASE_URL` at it (repointing the
+   app alone leaves the nightly dump reading the abandoned database and
+   reporting success), restarts the service and checks the site. Run with
+   the old name, it goes back. Tell users what was lost: work pushed after
    the restore point that lived only on the server. Anything still in a
-   device's outbox is pushed again and survives.
+   device's outbox is pushed again and survives. The old database stays
+   until you drop it.
 
 ## The drill
 

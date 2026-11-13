@@ -574,6 +574,54 @@ run init-db-roles.sh || fail "a second init-db-roles.sh failed"
 pass "init-db-roles.sh: missing parameters created (never overwritten), roles made from the task's own URLs; safe to rerun"
 
 # ---------------------------------------------------------------------------
+# cutover-db.sh
+# ---------------------------------------------------------------------------
+fresh "$B"
+answers y
+run cutover-db.sh acrodont_restored || fail "cutover-db.sh failed"
+[[ "$(ssm_get DATABASE_URL)" == "${APP_URL/5432\/acrodont?/5432/acrodont_restored?}" ]] \
+  || fail "DATABASE_URL changed beyond its database: $(ssm_get DATABASE_URL)"
+[[ "$(ssm_get BACKUP_DATABASE_URL)" == "${BACKUP_URL/5432\/acrodont?/5432/acrodont_restored?}" ]] \
+  || fail "BACKUP_DATABASE_URL changed beyond its database: $(ssm_get BACKUP_DATABASE_URL)"
+in_order "aws ecs run-task" \
+         "aws ssm put-parameter --name /acrodont/production/DATABASE_URL --type SecureString --overwrite --value file://" \
+         "aws ssm put-parameter --name /acrodont/production/BACKUP_DATABASE_URL --type SecureString --overwrite --value file://" \
+         "aws ecs update-service --cluster acrodont --service acrodont --force-new-deployment" \
+         "aws elbv2 wait"
+[[ "$(head -1 "$FAKE_DIR/psql/1.args")" == psql ]] || fail "the database was not checked as the app role"
+grep -qx "WF_U=acrodont_app" "$FAKE_DIR/psql/1.env" && grep -qx "WF_DB=acrodont_restored" "$FAKE_DIR/psql/1.env" \
+  || fail "the check did not connect to the new database as acrodont_app"
+! grep -q "^WF_P=" "$FAKE_DIR/psql/1.env" || fail "the password was left in the task's environment for psql's children"
+for want in "pg_get_userbyid(datdba)" "has_schema_privilege('public', 'CREATE')" "FROM users" "FROM _sqlx_migrations"; do
+  grep -qF "$want" "$FAKE_DIR/psql/1.stdin" || fail "the check's SQL lacks: $want"
+done
+! grep -rqF "oldpw" "$FAKE_DIR/calls.log" "$FAKE_DIR/runtask" "$WORK/out" || fail "a password travelled in a call, an override or the output"
+: > "$FAKE_DIR/calls.log"
+run cutover-db.sh acrodont_restored || fail "a second cutover-db.sh failed"
+said "nothing to do" || fail "a finished cutover is not recognised"
+{ ! called "put-parameter" && ! called "update-service" && ! called "run-task"; } || fail "a finished cutover did something"
+fresh "$B"
+answers y
+if FAKE_PSQL_EXIT=3 run cutover-db.sh acrodont_restored; then fail "a database the app cannot use was cut over to"; fi
+said "nothing changed" || fail "the refusal does not say nothing changed"
+{ ! called "put-parameter" && ! called "update-service"; } || fail "a refused cutover wrote a parameter or restarted the service"
+fresh "$B"
+answers n
+if run cutover-db.sh acrodont_restored; then fail "a declined cutover went ahead"; fi
+! called "put-parameter" || fail "a declined cutover wrote a parameter"
+fresh "$B"
+for bad_name in "" "Acrodont" "a b" "x;DROP" "acrodont?sslmode=disable"; do
+  if run cutover-db.sh "$bad_name"; then fail "cutover-db.sh took the database name '$bad_name'"; fi
+done
+! called "aws" || fail "a refused name reached AWS"
+fresh "$B"
+ssm_put BACKUP_DATABASE_URL "${BACKUP_URL/5432\/acrodont?/5432/acrodont_restored?}"
+answers y
+run cutover-db.sh acrodont_restored || fail "finishing a part-way cutover failed"
+[[ "$(ssm_get DATABASE_URL)" == "${APP_URL/5432\/acrodont?/5432/acrodont_restored?}" ]] || fail "a part-way cutover was not finished"
+pass "cutover-db.sh: the new database checked as the app role first, both URLs repointed (nothing else in them), restart; refused, declined, bad names, rerun"
+
+# ---------------------------------------------------------------------------
 # check-alerts.sh, prod-shell.sh, onboard-deployer.sh
 # ---------------------------------------------------------------------------
 fresh "$B"

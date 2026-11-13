@@ -2317,7 +2317,7 @@ straight into Postgres; the original files are not kept.
 | `e2e/` | Playwright configuration, `globalSetup` and the [journeys](#the-journeys). |
 | `docker/` | Backend Dockerfile (a Rust build, then two targets: `backend`, the server alone, and `ops`, the tools for the backup, drill and ops tasks), the frontend's, and the Nginx configuration. Base images pinned by digest. |
 | `infra/` | Terraform. |
-| `scripts/` | `stack.py` (the one way to bring a Acrodont up: compose, health, seed, reset, down), `dev.py` (its command line), `scenarios.py` (study states through the API), `scrub.sql` (a production copy made safe locally), `backup.py`, `restore.py` and `drill.py`; the operator scripts (`deploy.sh`, `rollback.sh`, `set-setting.sh`, `prod-sql.sh`, `prod-shell.sh`, `confirm-user.sh`, `init-db-roles.sh`, `rotate-db-password.sh`, `onboard-deployer.sh`, `check-alerts.sh`) over `lib/ops.sh`, and their checks (`ops-scripts-check.sh` against stand-ins in `lib/ops_fakes.py`, `runbook-check.sh`). |
+| `scripts/` | `stack.py` (the one way to bring a Acrodont up: compose, health, seed, reset, down), `dev.py` (its command line), `scenarios.py` (study states through the API), `scrub.sql` (a production copy made safe locally), `backup.py`, `restore.py` and `drill.py`; the operator scripts (`deploy.sh`, `rollback.sh`, `set-setting.sh`, `prod-sql.sh`, `prod-shell.sh`, `confirm-user.sh`, `init-db-roles.sh`, `rotate-db-password.sh`, `cutover-db.sh`, `onboard-deployer.sh`, `check-alerts.sh`) over `lib/ops.sh`, and their checks (`ops-scripts-check.sh` against stand-ins in `lib/ops_fakes.py`, `runbook-check.sh`). |
 | `Makefile` | The [test targets](#running-the-tests), each runnable with no arguments. |
 | `docker-compose.yml` | Local stack. |
 
@@ -5873,8 +5873,12 @@ Acrodont never stores as files, only as rows, and those rows are in the dump.
 
 The runbook has the full procedure; the parts specific to Acrodont are:
 
-1. **Restore into a new instance**, never over the live one, and point a staging
+1. **Restore into a new database**, never over the live one, and point a staging
    backend at it to check `/health` and a few cascades before any cutover.
+   The new database is owned by the app role and restored as that role: the
+   app could neither read nor migrate one the master user made. The cutover
+   (`scripts/cutover-db.sh`) repoints the app's URL and the nightly dump's
+   together, so the dump never goes on reading the abandoned database.
 2. **Re-index the catalog**: `/health` stays not-ready until every lexicon and
    leave value set has been built into memory, which takes a few seconds per
    item. Nothing has to be re-uploaded.
