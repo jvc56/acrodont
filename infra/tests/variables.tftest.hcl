@@ -76,6 +76,14 @@ run "defaults_plan" {
     error_message = "the backup and drill failure rules changed: change task_pattern in scripts/lib/ops_fakes.py with them, which scripts/check-alerts.sh is checked against"
   }
   assert {
+    condition = alltrue([
+      for t in concat(values(aws_cloudwatch_event_target.task_failed), [aws_cloudwatch_event_target.deploy_failed]) : alltrue([
+        for p in regexall("<([^>]*)>", t.input_transformer[0].input_template) : contains(keys(t.input_transformer[0].input_paths), p[0])
+      ])
+    ])
+    error_message = "a mail template holds <...> that is not a key of its input_paths: EventBridge reads it as a placeholder"
+  }
+  assert {
     condition     = anytrue([for r in aws_s3_bucket_lifecycle_configuration.backups.rule : length(r.abort_incomplete_multipart_upload) == 1])
     error_message = "the backups bucket must abort unfinished multipart uploads"
   }

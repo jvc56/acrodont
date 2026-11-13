@@ -350,8 +350,11 @@ resource "aws_cloudwatch_event_target" "task_failed" {
   rule      = each.value.name
   target_id = "sns"
   arn       = aws_sns_topic.alarms.arn
+  # EventBridge reads every <name> in the template as a placeholder for a key
+  # of input_paths, so the template holds no other angle brackets: one it does
+  # not know may be refused at apply (the offline test checks this).
   input_transformer {
     input_paths    = { task = "$.detail.taskArn", reason = "$.detail.stoppedReason" }
-    input_template = "\"acrodont ${each.key} task FAILED (<task>): <reason>. Its log stream is ${each.key}/${each.key}/<task id> in ${aws_cloudwatch_log_group.app.name}.\""
+    input_template = "\"acrodont ${each.key} task FAILED (<task>): <reason>. Its log stream in ${aws_cloudwatch_log_group.app.name} is ${each.key}/${each.key}/ followed by the task id, the last part of that ARN.\""
   }
 }
