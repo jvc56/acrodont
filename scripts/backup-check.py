@@ -10,9 +10,11 @@ AWS or a database.
 from __future__ import annotations
 
 import argparse
+import atexit
 import datetime as dt
 import io
 import os
+import shutil
 import sys
 import tempfile
 import types
@@ -81,6 +83,7 @@ def main() -> int:
     import restore
 
     tmp = Path(tempfile.mkdtemp(prefix="acrodont-backup-check-"))
+    atexit.register(shutil.rmtree, tmp, True)
     fake = tmp / "pg_dump"
 
     def pg_dump(body: str, rc: int) -> None:
