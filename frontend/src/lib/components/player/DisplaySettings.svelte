@@ -125,10 +125,7 @@
 		{@render number('Grade border width', 'px', 'border_px', 'border_px', INFO.border_width)}
 		{@render check('Show the status bar below the quiz', 'status_bar_hidden', 'display-status-bar', !d.status_bar_hidden, INFO.status_bar, (on) => change({ status_bar_hidden: !on }))}
 		{@render check('Show the sync status below the quiz', 'sync_status_hidden', 'display-sync-status', !d.sync_status_hidden, INFO.sync_status, (on) => change({ sync_status_hidden: !on }))}
-		{@render check('Definitions in their own column', 'definition_column', 'display-definition-column', d.definition_column, INFO.definition_column, (on) => change({ definition_column: on }))}
-		{#if d.definition_column}
-			{@render number('Definition column width (0 for all the room)', 'px', 'definition_width_px', 'definition_width_px', INFO.definition_width)}
-		{/if}
+		{@render number('Definition column width (0 for all the room)', 'px', 'definition_width_px', 'definition_width_px', INFO.definition_width)}
 		{@render number('Hook size', 'px', 'hook_size_px', 'hook_size_px', INFO.hook_size)}
 		<SettingRow label="Tap zones on a phone" info={INFO.mobile_buttons} for="display-mobile-buttons">
 			<select

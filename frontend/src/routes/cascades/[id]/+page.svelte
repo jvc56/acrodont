@@ -602,7 +602,6 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 							size={dsp.answer_size_px}
 							spacing={dsp.answer_spacing}
 							definition={{ font: dsp.definition_font, size: dsp.definition_size_px, spacing: dsp.definition_spacing }}
-							definitionColumn={dsp.definition_column}
 							definitionWidth={dsp.definition_width_px}
 							hookSize={dsp.hook_size_px}
 							word={card.word}
@@ -1036,13 +1035,22 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 								/>
 							</SettingRow>
 							{@render widen('show_probability')}
+							<SettingRow label="Definitions in their own column" info={INFO.definition_column} for="cascade-definition-column">
+								<input
+									id="cascade-definition-column"
+									type="checkbox"
+									checked={c.definition_column !== false}
+									onchange={(e) => setCascade({ definition_column: e.currentTarget.checked })}
+								/>
+							</SettingRow>
+							{@render widen('definition_column')}
 						{/if}
 						{#if c.quiz_type === 'leave_value'}
 							<SettingRow label="Round leave values to (decimal places)" info={INFO.leave_value_decimals} for="cascade-decimals">
 								<select
 									id="cascade-decimals"
 									class="rounded border bg-background px-2 py-1"
-									value={String(c.leave_value_decimals ?? 1)}
+									value={String(c.leave_value_decimals ?? 0)}
 									onchange={(e) => setCascade({ leave_value_decimals: Number(e.currentTarget.value) })}
 								>
 									{#each [0, 1, 2, 3] as d (d)}<option value={String(d)}>{d}</option>{/each}

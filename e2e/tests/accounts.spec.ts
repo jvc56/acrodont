@@ -26,11 +26,14 @@ test('logging out, online and offline, and a second account on the same browser'
 	await expect(page.locator('li', { hasText: 'Alice cascade' }).locator('[data-quiz-type]')).toHaveText('Anagram');
 	await ready(page);
 
-	// The Account page asks for a password reset link, as the log-in page does.
+	// The Account page changes the password: the current one, then the new. A wrong
+	// current one is said under its field, and nothing is changed.
 	await page.goto('/account');
-	await page.getByLabel("This account's email").fill(alice.email);
-	await page.getByRole('button', { name: 'Send reset link' }).click();
-	await expect(page.getByText('a reset link is on its way')).toBeVisible();
+	await page.getByLabel('Current password').fill('not-the-password');
+	await page.getByLabel('New password').fill('violet-harbor-lantern-quill');
+	await page.getByRole('button', { name: 'Change password' }).click();
+	await expect(page.getByText('That password is not right.')).toBeVisible();
+	await expect(page.getByText('Your password is changed')).toHaveCount(0);
 
 	// Nothing unsent: the login page, and it stays there through an offline reload.
 	await logOut(page);

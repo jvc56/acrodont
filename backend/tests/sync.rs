@@ -291,7 +291,7 @@ async fn out_of_range_values_are_invalid_never_error(pool: sqlx::PgPool) {
     .fetch_one(app.db())
     .await
     .unwrap();
-    assert_eq!((seg, decimals, defs, hooks, reveal), (0, 1, true, true, true));
+    assert_eq!((seg, decimals, defs, hooks, reveal), (0, 0, true, true, true));
     let errors: i64 = sqlx::query_scalar("SELECT count(*) FROM sync_operations WHERE reason = 'error'").fetch_one(app.db()).await.unwrap();
     assert_eq!(errors, 0);
     // The schema refuses such a row directly.
@@ -535,7 +535,7 @@ async fn latest_wins_whole(pool: sqlx::PgPool) {
     stale["seen_seq"] = json!(0);
     assert_eq!(result(&a.sync(vec![stale]).await, 0)["reason"], "stale");
     let decimals: i16 = sqlx::query_scalar("SELECT leave_value_decimals FROM cascades").fetch_one(app.db()).await.unwrap();
-    assert_eq!(decimals, 1, "the stale change lost whole");
+    assert_eq!(decimals, 0, "the stale change lost whole");
     // Two changes from one device with a clock a day ahead, in one batch: both applied.
     let mut fast = b.sibling(&app);
     fast.skew = Duration::days(1);
@@ -757,15 +757,16 @@ async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
     let c = &rows(&pages, "cascades")[0];
     assert_eq!(
         (&c["show_definitions"], &c["show_hooks"], &c["reveal_correct"], &c["leave_value_decimals"]),
-        (&json!(true), &json!(true), &json!(true), &json!(1)),
+        (&json!(true), &json!(true), &json!(true), &json!(0)),
     );
+    assert_eq!(c["definition_column"], json!(true), "a definition starts beside its word");
     assert_eq!(c["show_found_count"], json!(false), "the found count is off until asked for");
     assert_eq!(c["show_probability"], json!(false), "and so is the probability order");
     let o = d.op(
         "set_cascade_options",
         json!({ "cascade_id": s.cascade_id, "show_definitions": false, "show_hooks": false,
                 "reveal_correct": false, "leave_value_decimals": 3, "show_found_count": true,
-                "show_probability": true }),
+                "show_probability": true, "definition_column": false }),
     );
     assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
     // One field alone leaves the others as they are.
@@ -777,7 +778,7 @@ async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
         (&c["show_definitions"], &c["show_hooks"], &c["reveal_correct"], &c["leave_value_decimals"]),
         (&json!(false), &json!(true), &json!(false), &json!(3)),
     );
-    assert_eq!((&c["show_found_count"], &c["show_probability"]), (&json!(true), &json!(true)));
+    assert_eq!((&c["show_found_count"], &c["show_probability"], &c["definition_column"]), (&json!(true), &json!(true), &json!(false)));
     // Out of range or the wrong type: invalid, and nothing changes.
     let bad: Vec<Value> = [json!({ "leave_value_decimals": 4 }), json!({ "leave_value_decimals": "1" }), json!({ "show_hooks": "true" })]
         .into_iter()
@@ -793,7 +794,7 @@ async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
     let decimals: i16 = sqlx::query_scalar("SELECT leave_value_decimals FROM cascades").fetch_one(app.db()).await.unwrap();
     assert_eq!(decimals, 3);
     // The settings are the cascade's alone: a quiz's options operation naming one is refused whole.
-    for field in ["show_definitions", "show_hooks", "reveal_correct", "show_found_count", "show_probability", "leave_value_decimals"] {
+    for field in ["show_definitions", "show_hooks", "reveal_correct", "show_found_count", "show_probability", "definition_column", "leave_value_decimals"] {
         let mut f = json!({ "quiz_id": s.source_id });
         f[field] = if field == "leave_value_decimals" { json!(2) } else { json!(false) };
         let o = d.op("set_quiz_options", f);

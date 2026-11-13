@@ -1,8 +1,7 @@
 // How the player looks and responds on this device: the question's and the
 // answers' typefaces, sizes and letter spacing, how far down the question
 // sits, the grade border's width, whether the player's status bar and sync
-// status are hidden, whether a definition has a column of its own and how wide
-// it may be, the hooks' size, a phone's tap zones (columns or rows), and the
+// status are hidden, how wide a definition's column may be, the hooks' size, a phone's tap zones (columns or rows), and the
 // repeat guard against an accidental double press.
 // Kept in the user's `meta` store, per device and user like the other `meta`
 // values: what suits a laptop is wrong on a phone. A change stays on its
@@ -61,7 +60,6 @@ export function defaultDisplay(): Display {
 		border_missed: true,
 		status_bar_hidden: false,
 		sync_status_hidden: false,
-		definition_column: true,
 		definition_width_px: LIMITS.definition_width_px.default,
 		hook_size_px: LIMITS.hook_size_px.default,
 		mobile_buttons: 'columns',
@@ -126,7 +124,6 @@ export function normalizeDisplay(stored: Stored | undefined): Display {
 		border_missed: d.border_missed === undefined ? true : !!d.border_missed,
 		status_bar_hidden: !!d.status_bar_hidden,
 		sync_status_hidden: !!d.sync_status_hidden,
-		definition_column: d.definition_column === undefined ? true : !!d.definition_column,
 		definition_width_px: clampSetting('definition_width_px', d.definition_width_px),
 		hook_size_px: clampSetting('hook_size_px', d.hook_size_px),
 		mobile_buttons: d.mobile_buttons === 'rows' ? 'rows' : 'columns',

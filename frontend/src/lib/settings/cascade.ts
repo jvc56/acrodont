@@ -18,6 +18,7 @@ export const CASCADE_SETTINGS = [
 	'reveal_correct',
 	'show_found_count',
 	'show_probability',
+	'definition_column',
 	'leave_value_decimals',
 	'segment_size',
 	'progression',

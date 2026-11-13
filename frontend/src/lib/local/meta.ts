@@ -58,8 +58,6 @@ export interface MetaValues {
 		status_bar_hidden: boolean;
 		/** The sync status at the player's bottom right is quiet: only what needs attention shows. */
 		sync_status_hidden: boolean;
-		/** A word's definition sits in a column of its own after the back hooks (the default), not centred under the word. */
-		definition_column: boolean;
 		/** The definition column's greatest width, in px; 0 lets it take all the room right of the back hooks. */
 		definition_width_px: number;
 		/** The size of the front and back hooks, and of the probability order, in px. */
@@ -101,7 +99,6 @@ export const META_DEFAULTS: { [K in MetaKey]: () => MetaValues[K] } = {
 		border_missed: true,
 		status_bar_hidden: false,
 		sync_status_hidden: false,
-		definition_column: true,
 		definition_width_px: 0,
 		hook_size_px: 27,
 		mobile_buttons: 'columns',

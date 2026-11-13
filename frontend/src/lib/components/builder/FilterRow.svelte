@@ -1,10 +1,7 @@
 <script lang="ts">
 	// One condition row (PLAN.md § Creating a cascade, step 3; § Frontend →
 	// FilterRow), driven by the lib/filters.ts table.
-	import { Button, buttonVariants } from '$lib/components/ui/button';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
-	import BracketsIcon from '@lucide/svelte/icons/brackets';
-	import ListPlusIcon from '@lucide/svelte/icons/list-plus';
+	import { Button } from '$lib/components/ui/button';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import XIcon from '@lucide/svelte/icons/x';
 	import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical';
@@ -33,7 +30,6 @@
 		lexicon,
 		error,
 		onaddrow,
-		onaddgroup,
 		onremove,
 		ondragstart
 	}: {
@@ -45,7 +41,6 @@
 		lexicon: string;
 		error: string | null;
 		onaddrow: () => void;
-		onaddgroup: () => void;
 		onremove: () => void;
 		ondragstart: (e: DragEvent) => void;
 	} = $props();
@@ -152,27 +147,10 @@
 		{/if}
 
 		<div class="ml-auto flex items-center gap-0.5">
-			<!-- A menu that floats over the page (never clipped by the card), anchored to the button's right edge. -->
-			<DropdownMenu.Root>
-				<DropdownMenu.Trigger
-					type="button"
-					class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
-					aria-label="Add below this row"
-					title="Add below this row"
-				>
-					<PlusIcon class="size-4" />
-				</DropdownMenu.Trigger>
-				<DropdownMenu.Content align="end" class="w-48">
-					<DropdownMenu.Item onSelect={onaddrow}>
-						<ListPlusIcon />
-						Add row below
-					</DropdownMenu.Item>
-					<DropdownMenu.Item onSelect={onaddgroup}>
-						<BracketsIcon />
-						Add group below
-					</DropdownMenu.Item>
-				</DropdownMenu.Content>
-			</DropdownMenu.Root>
+			<!-- Another row is what is wanted nearly every time, so + adds one at once; a group is added at the bottom of its group. -->
+			<Button type="button" size="icon-sm" variant="ghost" onclick={onaddrow} aria-label="Add row below" title="Add row below">
+				<PlusIcon class="size-4" />
+			</Button>
 			<Button type="button" size="icon-sm" variant="ghost" class="text-muted-foreground hover:text-destructive" onclick={onremove} aria-label="Remove row" title="Remove row">
 				<XIcon class="size-4" />
 			</Button>

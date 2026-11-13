@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE cascades SET segment_size = coalesce($2, segment_size), progression = coalesce($3, progression),\n                             require_alphabetical = coalesce($4, require_alphabetical), options_changed_at = $5,\n                             options_seq = $6, options_device_id = $7, updated_seq = $6,\n                             clear_threshold = coalesce($8, clear_threshold),\n                             answer_mode = coalesce($9, answer_mode),\n                             show_definitions = coalesce($10, show_definitions),\n                             show_hooks = coalesce($11, show_hooks),\n                             reveal_correct = coalesce($12, reveal_correct),\n                             leave_value_decimals = coalesce($13, leave_value_decimals),\n                             show_found_count = coalesce($14, show_found_count),\n                             show_probability = coalesce($15, show_probability),\n                             definition_column = coalesce($16, definition_column)\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        {
+          "Custom": {
+            "name": "quiz_progression",
+            "kind": {
+              "Enum": [
+                "ladder",
+                "drill"
+              ]
+            }
+          }
+        },
+        "Bool",
+        "Timestamptz",
+        "Int8",
+        "Uuid",
+        "Int2",
+        {
+          "Custom": {
+            "name": "anagram_answer_mode",
+            "kind": {
+              "Enum": [
+                "flashcard",
+                "typed"
+              ]
+            }
+          }
+        },
+        "Bool",
+        "Bool",
+        "Bool",
+        "Int2",
+        "Bool",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aa19578d65793dad49ec101b5a90d171113f74553db09c5f6c3844af640c068b"
+}

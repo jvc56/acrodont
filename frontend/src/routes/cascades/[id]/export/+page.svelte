@@ -68,7 +68,7 @@
 				scope: quiz ? 'quiz' : 'cascade',
 				quiz_id: quiz ?? undefined,
 				lines: cascade?.quiz_type === 'anagram' ? 'answers' : 'questions',
-				decimals: cascade?.leave_value_decimals ?? 1
+				decimals: cascade?.leave_value_decimals ?? 0
 			};
 			await recount();
 		})();

@@ -52,7 +52,7 @@ test('hooks read Zyzzyva-style in lower case, and a Catalan multi-character hook
 	await expect(page.getByRole('listitem').filter({ hasText: /ny/ })).toHaveCount(0);
 });
 
-test('a word row is probability, front hooks, word, back hooks, definition; the cascade and the device choose what shows', async ({ page }) => {
+test('a word row is probability, front hooks, word, back hooks, definition; the cascade chooses what shows', async ({ page }) => {
 	await newUser(page, 'columns');
 	const port = await apiCascade(page, { name: 'Port', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'O P R T' }] } });
 	await page.goto(port);
@@ -92,7 +92,7 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	expect(d.y).toBeGreaterThanOrEqual(w.y + w.height - 1);
 	expect(Math.abs(d.x + d.width / 2 - (w.x + w.width / 2))).toBeLessThan(3);
 	await playerSetting(page, 'Definitions in their own column', true);
-	// The probability order is the cascade's setting: another cascade has its own, off.
+	// Both are the cascade's settings: another cascade has its own, at their defaults.
 	// Its definition has a line for each part of speech, centred as a whole on the word's line.
 	const exit = await apiCascade(page, { name: 'Exit', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'E I T X' }] } });
 	await page.goto(exit);

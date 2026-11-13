@@ -122,3 +122,12 @@ Postgres 16 with CSW24 (the sizes are in PLAN.md § Upload limits and
   Start over like `show_found_count`.
 
 Nothing is deployed, so the edit is in place: `./scripts/dev.py --reset`.
+
+## 2026-11-12: the definition column is a cascade setting; leaves round to 0 places
+
+- `cascades.definition_column BOOLEAN NOT NULL DEFAULT true`: whether a
+  definition sits beside its word or beneath it, which was a display setting
+  on each device, is one of a cascade's settings, like `show_probability`.
+- `cascades.leave_value_decimals` defaults to `0` (was `1`).
+
+Nothing is deployed, so the edits are in place: `./scripts/dev.py --reset`.

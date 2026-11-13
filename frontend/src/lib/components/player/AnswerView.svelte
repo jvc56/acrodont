@@ -5,7 +5,7 @@
 	// each part of speech; a leave value at the user's decimals, '-' only for a
 	// negative one. A word's row is five columns: its probability order (when
 	// the cascade shows it), front hooks, the word with its inner-hook dots,
-	// back hooks, and its definition, which this device can put centred under
+	// back hooks, and its definition, which the cascade can put centred under
 	// the word instead (and a narrow screen always does). The word is in the
 	// middle of the row whatever sits either side; each hook column is as wide
 	// as its widest hooks and no wider; the definition takes the room that is
@@ -48,14 +48,13 @@
 		definition = { font: 'Inter', size: 20, spacing: 0 },
 		word = null,
 		typing = null,
-		definitionColumn = true,
 		definitionWidth = 0,
 		hookSize = 27
 	}: {
 		quizType: string;
 		answer: unknown;
 		/** The cascade's settings for what an answer shows. */
-		settings: Pick<CascadeRow, 'show_definitions' | 'show_hooks' | 'leave_value_decimals'> & Partial<Pick<CascadeRow, 'show_probability'>>;
+		settings: Pick<CascadeRow, 'show_definitions' | 'show_hooks' | 'leave_value_decimals'> & Partial<Pick<CascadeRow, 'show_probability' | 'definition_column'>>;
 		/** Words found in typed mode; the others are highlighted. */
 		found?: string[] | null;
 		/** Any font name the device has. */
@@ -70,8 +69,6 @@
 		word?: Word | null;
 		/** Typed mode before the reveal: the words found so far, shown bare. */
 		typing?: string[] | null;
-		/** This device's choice: a definition in a column of its own after the back hooks, or centred under its word. */
-		definitionColumn?: boolean;
 		/** This device's choice: the definition column's greatest width in px; 0 is all the room there is. */
 		definitionWidth?: number;
 		/** This device's choice: the size of the hooks and the probability order, in px. */
@@ -99,6 +96,8 @@
 	let definitions = $derived(!typing && settings.show_definitions !== false);
 	/** Typed mode: the word typed last, green among the others. */
 	let latest = $derived(typing?.at(-1) ?? null);
+	/** The cascade's choice: a definition in a column of its own after the back hooks, or centred under its word. */
+	let definitionColumn = $derived(settings.definition_column !== false);
 	let showProbability = $derived(!typing && settings.show_probability === true);
 	let missingDefinitions = $derived(quizType === 'anagram' && definitions && words.some((w) => w.definition === undefined));
 
@@ -152,7 +151,7 @@
 			aria-hidden={!(hooks && w.back_inner)}>·</span
 		>
 	</span>
-	<!-- Right of the word: the back hooks, then the definition in its column; or (this device's choice,
+	<!-- Right of the word: the back hooks, then the definition in its column; or (the cascade's choice,
 	     and always on a narrow screen) the definition on a row of its own, centred under the word. -->
 	<span class="right" class:own-column={definitionColumn}>
 		{@render hookCell(hooks ? w.back_hooks : undefined, hooks ? widest(peers, 'back_hooks') : '', 'back')}
@@ -188,7 +187,7 @@
 		</p>
 	{/if}
 {:else}
-	<p class="text-center font-semibold" style={answerStyle}>{leaveValueText(Number(answer), settings.leave_value_decimals ?? 1)}</p>
+	<p class="text-center font-semibold" style={answerStyle}>{leaveValueText(Number(answer), settings.leave_value_decimals ?? 0)}</p>
 {/if}
 
 <style>

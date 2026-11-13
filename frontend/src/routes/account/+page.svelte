@@ -16,11 +16,11 @@
 	import SettingRow from '$lib/components/SettingRow.svelte';
 	import { syncNow, syncState } from '$lib/sync/runtime.svelte';
 
-	// A password is only ever set by a reset (PLAN.md § Accounts): this card asks
-	// for one, the same as the log-in page's "Forgot your password?".
-	let resetEmail = $state('');
-	let resetSent = $state(false);
-	let resetError = $state<string | null>(null);
+	// A signed-in change of password (PLAN.md § Accounts): the current one, then the new.
+	let currentPw = $state('');
+	let newPw = $state('');
+	let changeErrors = $state<FieldError[]>([]);
+	let changeMessage = $state<string | null>(null);
 
 	let everywherePw = $state('');
 	let everywhereErrors = $state<FieldError[]>([]);
@@ -40,14 +40,17 @@
 		return describe(e);
 	}
 
-	async function requestReset(e: SubmitEvent) {
+	async function changePassword(e: SubmitEvent) {
 		e.preventDefault();
-		resetError = null;
+		changeErrors = [];
+		changeMessage = null;
 		try {
-			await authApi.requestReset(resetEmail);
-			resetSent = true;
+			await authApi.changePassword(currentPw, newPw);
+			currentPw = '';
+			newPw = '';
+			changeMessage = 'Your password is changed. Every other session has been signed out; this one keeps working.';
 		} catch (err) {
-			resetError = describe(err);
+			changeMessage = fieldErrorsOr(err, (f) => (changeErrors = f));
 		}
 	}
 
@@ -137,23 +140,16 @@
 
 	<Card.Root>
 		<Card.Header>
-			<Card.Title>Reset password</Card.Title>
-			<Card.Description>
-				Emails a link for setting a new password. Setting it signs this account out everywhere, this device too.
-			</Card.Description>
+			<Card.Title>Change password</Card.Title>
+			<Card.Description>Signs out every other session. This device stays signed in.</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			{#if resetSent}
-				<p class="text-sm" role="status">
-					If that is this account's address, a reset link is on its way. The link expires in 30 minutes.
-				</p>
-			{:else}
-				<form class="grid gap-4" onsubmit={requestReset}>
-					<FormError message={resetError} />
-					<Field id="reset_email" label="This account's email" type="email" bind:value={resetEmail} autocomplete="email" />
-					<Button type="submit" variant="outline">Send reset link</Button>
-				</form>
-			{/if}
+			<form class="grid gap-4" onsubmit={changePassword}>
+				{#if changeMessage}<p class="text-sm" role="status">{changeMessage}</p>{/if}
+				<Field id="current_password" label="Current password" type="password" bind:value={currentPw} errors={changeErrors} autocomplete="current-password" />
+				<Field id="new_password" label="New password" type="password" bind:value={newPw} errors={changeErrors} autocomplete="new-password" />
+				<Button type="submit" variant="outline">Change password</Button>
+			</form>
 		</Card.Content>
 	</Card.Root>
 

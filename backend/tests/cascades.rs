@@ -222,11 +222,11 @@ async fn start_over_copies_the_spec_threshold_options_and_settings(pool: sqlx::P
     let o = r.json()["cascade"].clone();
     assert_eq!(
         (&o["show_definitions"], &o["show_hooks"], &o["reveal_correct"], &o["leave_value_decimals"]),
-        (&json!(true), &json!(true), &json!(true), &json!(1)),
+        (&json!(true), &json!(true), &json!(true), &json!(0)),
     );
     sqlx::query(
         "UPDATE cascades SET show_definitions = false, show_hooks = false, reveal_correct = false,
-                             leave_value_decimals = 3, show_probability = true",
+                             leave_value_decimals = 3, show_probability = true, definition_column = false",
     )
     .execute(app.db())
     .await
@@ -240,7 +240,11 @@ async fn start_over_copies_the_spec_threshold_options_and_settings(pool: sqlx::P
         (&n["show_definitions"], &n["show_hooks"], &n["reveal_correct"], &n["leave_value_decimals"]),
         (&json!(false), &json!(false), &json!(false), &json!(3)),
     );
-    assert_eq!(n["show_probability"], json!(true), "Start over copies the probability setting too");
+    assert_eq!(
+        (&n["show_probability"], &n["definition_column"]),
+        (&json!(true), &json!(false)),
+        "Start over copies the probability and definition column settings too"
+    );
     assert_eq!(n["name"], "Blank leaves");
     assert_eq!(n["clear_threshold"], 90);
     assert_eq!(n["segment_size"], 5);
