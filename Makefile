@@ -26,7 +26,8 @@ export CARGO_BUILD_JOBS ?= 2
 .PHONY: infra-validate ops-check test test-quick test-unit test-unit-backend test-unit-frontend \
         test-integration test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-scale test-parity \
         frontend-deps e2e-deps e2e-binary e2e-pass-full e2e-pass-ttl e2e-pass-purge e2e-pass-answers \
-        e2e-pass-budget sqlx-db sqlx-prepare
+        e2e-pass-budget $(addprefix e2e-up-,full ttl purge answers budget) $(addprefix e2e-down-,full ttl purge answers budget) \
+        sqlx-db sqlx-prepare
 
 test: test-unit test-integration test-e2e
 
@@ -88,7 +89,9 @@ test-integration:
 ##
 ##   make test-e2e-core          every journey on one stack: CI's Push tier
 ##   make test-e2e-main          update.spec and the @env passes, each on its
-##                               own stack, side by side: CI's Main tier adds it
+##                               own stack: every stack up first, the @env
+##                               passes side by side, update.spec alone, then
+##                               the stacks down. CI's Main tier adds it
 ##   make test-e2e               both: the whole suite
 ##   make test-e2e SPEC=typed    one spec file (or any Playwright file filter)
 ##                               on the suite's stack; not the @env journeys
@@ -118,9 +121,25 @@ endef
 test-e2e-core: e2e-deps e2e-binary
 	$(call e2e_passes,--grep-invert '@env|@full')
 
+# Docker bringing a stack up or down changes the host's network interfaces, and
+# Chromium then drops the page loads under way in every browser on the machine
+# (net::ERR_NETWORK_CHANGED): with each pass starting and stopping its own stack
+# beside the others, a journey's first load of a page now and then came back
+# blank. So every stack comes up first, the @env journeys then run side by side
+# with nothing starting or stopping, update.spec (which restarts its stack) runs
+# alone, and the stacks go down at the end. A failure anywhere fails the target,
+# after the stacks are down.
+E2E_MAIN = full ttl purge answers budget
 test-e2e-main: e2e-deps e2e-binary
-	$(MAKE) --no-print-directory -k -j5 --output-sync=target \
-	  e2e-pass-full e2e-pass-ttl e2e-pass-purge e2e-pass-answers e2e-pass-budget
+	status=0
+	$(MAKE) --no-print-directory -k -j5 --output-sync=target $(addprefix e2e-up-,$(E2E_MAIN)) || status=$$?
+	if [ $$status = 0 ]; then
+	  E2E_STACK_READY=1 E2E_KEEP_STACK=1 $(MAKE) --no-print-directory -k -j4 --output-sync=target \
+	    e2e-pass-ttl e2e-pass-purge e2e-pass-answers e2e-pass-budget || status=$$?
+	  E2E_STACK_READY=1 E2E_KEEP_STACK=1 $(MAKE) --no-print-directory e2e-pass-full || status=$$?
+	fi
+	$(MAKE) --no-print-directory -k $(addprefix e2e-down-,$(E2E_MAIN)) || status=$$?
+	exit $$status
 
 ifdef SPEC
 test-e2e: e2e-deps e2e-binary
@@ -133,26 +152,37 @@ test-e2e: e2e-deps e2e-binary
 	$(MAKE) --no-print-directory test-e2e-main
 endif
 
-# test-e2e-main's passes, each on its own stack and port, run side by side.
-# update.spec restarts its stack, so it has one of its own.
+# test-e2e-main's passes, each on its own stack and port: its project, and the
+# environment its stack and its journeys are run with. update.spec restarts its
+# stack, so it has one of its own. The @env journeys need the stack configured
+# differently (PLAN.md § End-to-end tests: "through the same --env flag a
+# developer would use"); the storage journeys, a frontend built with lowered
+# client limits ("lowered with a test constant").
+e2e_project_full = acrodont-e2e-update
+e2e_project_ttl = acrodont-e2e-ttl
+e2e_project_purge = acrodont-e2e-purge
+e2e_project_answers = acrodont-e2e-answers
+e2e_project_budget = acrodont-e2e-budget
+e2e_env_full = E2E_PORT=5186
+e2e_env_ttl = E2E_PORT=5181 E2E_ENV='SESSION_TTL_SECONDS=20' E2E_TTL_WAIT_MS=25000
+e2e_env_purge = E2E_PORT=5182 E2E_ENV='TRASH_RETENTION_DAYS=0 PURGE_INTERVAL_SECONDS=3'
+e2e_env_answers = E2E_PORT=5184 ACRODONT_TEST_LIMITS='{"AUTO_KEEP_OFFLINE_ROWS":30,"ANSWER_STORAGE_SOFT_LIMIT_BYTES":2000}'
+e2e_env_budget = E2E_PORT=5185 ACRODONT_TEST_LIMITS='{"AUTO_KEEP_OFFLINE_ROWS":30,"ROW_STORAGE_BUDGET":5000}'
+e2e_run = cd e2e && E2E_PROJECT=$(e2e_project_$(1)) $(e2e_env_$(1)) npx playwright test
+
+# A pass by itself brings its stack up and takes it down (the suite's global
+# setup and teardown); under test-e2e-main the stack is already up and is kept.
 e2e-pass-full:
-	cd e2e && E2E_PROJECT=acrodont-e2e-update E2E_PORT=5186 \
-	  npx playwright test --project serial --no-deps --grep @full --output test-results/full
-# The journeys that need the stack configured differently (PLAN.md § End-to-end
-# tests: "through the same --env flag a developer would use").
-e2e-pass-ttl:
-	cd e2e && E2E_PROJECT=acrodont-e2e-ttl E2E_PORT=5181 E2E_ENV='SESSION_TTL_SECONDS=20' E2E_TTL_WAIT_MS=25000 \
-	  npx playwright test --project parallel --grep @ttl --output test-results/ttl
-e2e-pass-purge:
-	cd e2e && E2E_PROJECT=acrodont-e2e-purge E2E_PORT=5182 E2E_ENV='TRASH_RETENTION_DAYS=0 PURGE_INTERVAL_SECONDS=3' \
-	  npx playwright test --project parallel --grep @purge --output test-results/purge
-# The storage journeys, on a frontend built with lowered client limits ("lowered with a test constant").
-e2e-pass-answers:
-	cd e2e && E2E_PROJECT=acrodont-e2e-answers E2E_PORT=5184 ACRODONT_TEST_LIMITS='{"AUTO_KEEP_OFFLINE_ROWS":30,"ANSWER_STORAGE_SOFT_LIMIT_BYTES":2000}' \
-	  npx playwright test --project parallel --grep @answers --output test-results/answers
-e2e-pass-budget:
-	cd e2e && E2E_PROJECT=acrodont-e2e-budget E2E_PORT=5185 ACRODONT_TEST_LIMITS='{"AUTO_KEEP_OFFLINE_ROWS":30,"ROW_STORAGE_BUDGET":5000}' \
-	  npx playwright test --project parallel --grep @budget --output test-results/budget
+	$(call e2e_run,full) --project serial --no-deps --grep @full --output test-results/full
+e2e-pass-ttl e2e-pass-purge e2e-pass-answers e2e-pass-budget: e2e-pass-%:
+	$(call e2e_run,$*) --project parallel --grep @$* --output test-results/$*
+# A pass's stack alone, up and seeded and answering a browser, and left up:
+# the global setup, with a journey that does nothing.
+$(addprefix e2e-up-,$(E2E_MAIN)): e2e-up-%:
+	export E2E_KEEP_STACK=1
+	$(call e2e_run,$*) --project parallel --grep @up --output test-results/up-$*
+$(addprefix e2e-down-,$(E2E_MAIN)): e2e-down-%:
+	python3 scripts/stack.py down --project $(e2e_project_$*) --volumes
 
 ## PLAN.md § End-to-end tests → What the tests reuse: seeding once more with
 ## ADMIN_UPLOAD_RATE_PER_MINUTE=2, where it must wait out 429s and still finish.

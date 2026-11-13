@@ -166,7 +166,7 @@ jobs:
             e2e/package-lock.json
       - name: Chromium and its system libraries for Playwright
         run: cd e2e && npm ci && npx playwright install --with-deps chromium
-      - name: make test-e2e-main (update.spec and the @env passes, each on its own stack, side by side)
+      - name: make test-e2e-main (update.spec and the @env passes, each on its own stack: all up, then the journeys)
         run: make test-e2e-main
       - name: Stacks down, volumes and all
         if: always()
