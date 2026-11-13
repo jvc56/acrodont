@@ -65,6 +65,14 @@ export async function watchUpdates() {
 		});
 	};
 	if (registration) check(registration);
+	// A first visit: the worker is registered at the page's load event, after
+	// this ran, so there was no registration to read. Taken once there is one,
+	// or this tab would never look for a new version, however long it stays open.
+	else
+		void sw.ready.then((r) => {
+			registration = r;
+			check(r);
+		});
 }
 
 /** The user accepted the new version: the one reload they asked for. */
