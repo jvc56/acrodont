@@ -167,6 +167,11 @@ test('on a phone the header is one line, and a setting\'s name is not squeezed b
 	expect((await box(word)).width).toBeLessThan(3);
 	await header.getByRole('button', { name: 'Show the sync status' }).click();
 	expect((await box(word)).width).toBeGreaterThan(30);
+	// The word floats under the dot: the header is still one line, the account where it was.
+	const [name2, account2] = [await box(header.getByRole('link', { name: 'Acrodont' })), await box(header.getByRole('link', { name: /^narrow/ }))];
+	expect(Math.abs(name2.y + name2.height / 2 - (account2.y + account2.height / 2))).toBeLessThan(4);
+	expect(Math.abs(account2.x - account.x)).toBeLessThan(1);
+	expect((await box(word)).y).toBeGreaterThan(account2.y + account2.height / 2);
 	await header.getByRole('button', { name: 'Hide the sync status' }).click();
 
 	// In Settings a number goes under its name, and a checkbox stays at the end of its name's line: each name is one line.

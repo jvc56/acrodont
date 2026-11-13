@@ -2643,7 +2643,8 @@ has kept its data, so the app is installable and asks to keep that data:
   words (`lib/sw/install.ts`), and offers Install where the browser can.
   **On a phone the header is one line**: beside the offline icon the sync
   status is its dot alone while it is Synced, Syncing… or Waiting to sync (a
-  tap on the dot shows or hides the word), and has its words whenever
+  tap on the dot shows or hides the word, which floats under the dot so the
+  header keeps its one line), and has its words whenever
   something needs attention.
 - **Install**: Chrome's and Edge's `beforeinstallprompt` is held back from the
   browser's own mini-infobar and shown as an **Install** button in the header
