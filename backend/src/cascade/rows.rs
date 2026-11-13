@@ -75,6 +75,9 @@ pub struct CascadeRow {
     pub letter_distribution: String,
     /// A Leave Value cascade's set of leave values, by its name in the lexicon.
     pub leave_set: Option<String>,
+    /// The lexicon's definitions revision: a device fetches again the answers
+    /// it holds from an older one.
+    pub definitions_revision: i32,
     pub clear_threshold: i16,
     pub segment_size: i32,
     pub progression: Progression,
@@ -155,7 +158,7 @@ pub struct QuizRow {
 
 pub const CASCADE_SELECT: &str = r#"
     SELECT c.id, c.name, c.quiz_type, l.name AS lexicon, d.name AS letter_distribution,
-           ls.name AS leave_set,
+           ls.name AS leave_set, l.definitions_revision,
            c.clear_threshold, c.segment_size, c.progression, c.require_alphabetical, c.answer_mode,
            c.show_definitions, c.show_hooks, c.reveal_correct, c.show_found_count, c.show_probability, c.definition_column,
            c.leave_value_decimals,

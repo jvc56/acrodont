@@ -29,6 +29,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/api/admin/letter-distributions", post(upload_distribution))
         .route("/api/admin/lexicons", post(upload_lexicon))
         .route("/api/admin/leave-sets", post(upload_leaves))
+        .route("/api/admin/lexicons/{id}/definitions", post(replace_definitions))
         .layer(DefaultBodyLimit::max(
             state.config.admin_upload_max_bytes as usize,
         ))
@@ -238,7 +239,7 @@ async fn admin_catalog(
     .fetch_all(&state.db)
     .await?;
     let lexicons = sqlx::query!(
-        r#"SELECT l.id, l.name, d.name AS dist, l.word_count, l.uploaded_at, u.username::text AS "uploaded_by?",
+        r#"SELECT l.id, l.name, d.name AS dist, l.word_count, l.definitions_revision, l.uploaded_at, u.username::text AS "uploaded_by?",
                   EXISTS (SELECT 1 FROM leave_sets s WHERE s.lexicon_id = l.id) AS "has_leave_set!",
                   (SELECT count(*) FROM cascades c WHERE c.lexicon_id = l.id
                      OR EXISTS (SELECT 1 FROM search_conditions sc
@@ -277,6 +278,7 @@ async fn admin_catalog(
                 + idx.map_or(0, |i| i.approx_bytes as i64);
             json!({ "id": l.id, "name": l.name, "letter_distribution": l.dist, "word_count": l.word_count,
                     "uploaded_by": l.uploaded_by, "uploaded_at": l.uploaded_at,
+                    "definitions_revision": l.definitions_revision,
                     "has_leave_set": l.has_leave_set, "cascade_count": l.cascade_count,
                     "loaded_by": by, "loading": loading, "storage_bytes": storage,
                     "index_bytes": idx.map(|i| i.approx_bytes), "build_ms": idx.map(|i| i.build_ms) })
@@ -581,6 +583,74 @@ async fn upload_lexicon(
     Ok((
         StatusCode::CREATED,
         Json(json!({ "id": id, "name": name, "letter_distribution": dist_name, "word_count": word_count })),
+    )
+        .into_response())
+}
+
+/// Replaces a lexicon's definitions (PLAN.md § Immutability and deletion →
+/// Replacing definitions). The file is a lexicon file holding exactly the
+/// lexicon's words with their playabilities; only definitions may differ.
+/// Every cascade on the lexicon is then seen by its devices at the new
+/// revision, and they fetch its answers again.
+async fn replace_definitions(
+    State(state): State<AppState>,
+    Admin(user): Admin,
+    Path(id): Path<i16>,
+    mut mp: Multipart,
+) -> ApiResult<Response> {
+    state.limits.admin_upload.check(&user.id)?;
+    let form = read_form(&mut mp).await?;
+    let (_, bytes) = form.file.ok_or_else(|| form_error("choose a file"))?;
+    let Some(row) = sqlx::query!("SELECT name, letter_distribution_id FROM lexicons WHERE id = $1", id)
+        .fetch_optional(&state.db)
+        .await?
+    else {
+        return Err(ApiError::NotFound);
+    };
+    let name = row.name;
+    let dist = store::load_distribution(&state.db, row.letter_distribution_id)
+        .await?
+        .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("lexicon without distribution")))?;
+    let (from_revision, stored) = store::lexicon_words(&state.db, id).await?.ok_or(ApiError::NotFound)?;
+    // Parsed, compared and packed (compressed) off the async threads, before the transaction opens.
+    let (word_count, changed, packed) = tokio::task::spawn_blocking(move || -> anyhow::Result<Result<_, UploadErrors>> {
+        let parsed = match upload::parse_lexicon(&bytes, &dist) {
+            Ok(p) => p,
+            Err(e) => return Ok(Err(e)),
+        };
+        let stored = store::unpack_words(&stored)?;
+        let (words, changed) = match upload::replace_definitions(stored, parsed) {
+            Ok(r) => r,
+            Err(e) => return Ok(Err(e)),
+        };
+        let packed = if changed == 0 {
+            Vec::new()
+        } else {
+            store::pack_words(words.iter().map(|w| (w.0.as_str(), w.1, w.2.as_str())))?
+        };
+        Ok(Ok((words.len(), changed, packed)))
+    })
+    .await
+    .map_err(|e| ApiError::Internal(e.into()))?
+    .map_err(ApiError::Internal)?
+    .map_err(upload_errors)?;
+    if changed == 0 {
+        return Err(form_error(format!("every definition in the file is already {name}'s: nothing to replace")));
+    }
+    let mut tx = state.db.begin().await?;
+    let Some((revision, users)) = store::replace_definitions(&mut tx, id, from_revision, &packed).await? else {
+        return Err(form_error(format!("{name}'s definitions were replaced while this upload ran; upload it again")));
+    };
+    for u in &users {
+        crate::sync::notify::changed(&mut tx, *u, None).await?;
+    }
+    store::notify(&mut tx).await?;
+    tx.commit().await?;
+    trigger_reconcile(&state);
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "id": id, "name": name, "word_count": word_count,
+                     "definitions_changed": changed, "definitions_revision": revision })),
     )
         .into_response())
 }

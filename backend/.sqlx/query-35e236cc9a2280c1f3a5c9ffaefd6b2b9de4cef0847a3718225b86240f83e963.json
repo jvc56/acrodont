@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, letter_distribution_id, definitions_revision FROM lexicons ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "lexicons",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "letter_distribution_id",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "lexicons",
+            "name": "letter_distribution_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "definitions_revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "lexicons",
+            "name": "definitions_revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "35e236cc9a2280c1f3a5c9ffaefd6b2b9de4cef0847a3718225b86240f83e963"
+}

@@ -154,7 +154,7 @@ fn length(min: i64, max: i64) -> Value {
 fn cascade_body(filters: Value) -> Value {
     json!({
         "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
-        "at": "2026-01-01T00:00:00Z", "name": "Scale", "lexicon": "SCALE", "quiz_type": "anagram",
+        "at": "2026-01-01T00:00:00Z", "name": format!("Scale {}", Uuid::new_v4().simple()), "lexicon": "SCALE", "quiz_type": "anagram",
         "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false, "answer_mode": "flashcard",
         "filters": filters,
     })
@@ -481,7 +481,7 @@ async fn pad(app: &TestApp) {
             "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, spec_id, clear_threshold, options_changed_at,
                                    options_seq, options_device_id, question_count, depth, updated_seq, storage_bytes,
                                    question_keys)
-             SELECT gen_random_uuid(), user_id, 'padding', quiz_type, lexicon_id, spec_id, 80, now(), 1, gen_random_uuid(),
+             SELECT gen_random_uuid(), user_id, 'padding ' || g, quiz_type, lexicon_id, spec_id, 80, now(), 1, gen_random_uuid(),
                     1, 1, g, 0, ''
              FROM cascades, generate_series(1, $2 - 1) AS g WHERE id = $1",
         )

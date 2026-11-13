@@ -280,11 +280,64 @@ pub fn is_valid_lexicon_name(name: &str) -> bool {
 
 #[derive(Debug, Clone)]
 pub struct ParsedWord {
+    /// Its line in the uploaded file, from 1.
+    pub line: u32,
     pub tiles: Vec<Tile>,
     /// Canonical MAGPIE notation, as stored.
     pub word: String,
     pub playability: f64,
     pub definition: String,
+}
+
+/// A definitions upload against the lexicon's stored words (PLAN.md §
+/// Immutability and deletion → Replacing definitions): the file is a lexicon
+/// file holding exactly the stored words with their stored playabilities, so
+/// only definitions can differ. Returns the stored words in their stored
+/// order with the file's definitions, and how many definitions changed.
+pub fn replace_definitions(
+    stored: Vec<(String, f64, String)>,
+    parsed: Vec<ParsedWord>,
+) -> Result<(Vec<(String, f64, String)>, usize), UploadErrors> {
+    let mut errors = UploadErrors::default();
+    let by_word: HashMap<&str, usize> = stored.iter().enumerate().map(|(i, w)| (w.0.as_str(), i)).collect();
+    let mut new_definition: Vec<Option<String>> = vec![None; stored.len()];
+    let mut in_file = vec![false; stored.len()];
+    for w in parsed {
+        let Some(&i) = by_word.get(w.word.as_str()) else {
+            errors.push(Some(w.line), format!("{:?} is not a word of this lexicon", w.word));
+            continue;
+        };
+        in_file[i] = true;
+        if w.playability.to_bits() != stored[i].1.to_bits() {
+            errors.push(
+                Some(w.line),
+                format!("{:?} has playability {} here and {} in the lexicon; only definitions can change", w.word, w.playability, stored[i].1),
+            );
+            continue;
+        }
+        new_definition[i] = Some(w.definition);
+    }
+    for (i, there) in in_file.iter().enumerate() {
+        if !there {
+            errors.push(None, format!("the lexicon's word {:?} is missing from the file", stored[i].0));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    let mut changed = 0;
+    let out = stored
+        .into_iter()
+        .zip(new_definition)
+        .map(|((word, playability, old), new)| {
+            let new = new.expect("every stored word has a definition in the file");
+            if new != old {
+                changed += 1;
+            }
+            (word, playability, new)
+        })
+        .collect();
+    Ok((out, changed))
 }
 
 fn notation_message(e: &NotationError) -> String {
@@ -355,6 +408,7 @@ pub fn parse_lexicon(bytes: &[u8], dist: &Distribution) -> Result<Vec<ParsedWord
             }
             seen.insert(tiles.clone(), line);
             words.push(ParsedWord {
+                line,
                 word: dist.to_magpie(&tiles),
                 tiles,
                 playability: playability.unwrap_or(0.0),

@@ -124,6 +124,44 @@ fn check_fields(state: &AppState, name: &str, threshold: i64, segment_size: i64)
     }
 }
 
+/// An account's cascades each have their own name, the Trash included
+/// (`UNIQUE (user_id, name)`): a `400` on the field `name`.
+fn name_taken(name: &str) -> ApiError {
+    path_errors(vec![PathError::new(
+        &[],
+        "name",
+        format!("You already have a cascade named “{name}”. Each cascade needs its own name, the Trash included."),
+    )])
+}
+
+async fn is_name_taken(db: &sqlx::PgPool, user: Uuid, name: &str) -> Result<bool, sqlx::Error> {
+    Ok(sqlx::query_scalar!("SELECT 1 AS \"one!\" FROM cascades WHERE user_id = $1 AND name = $2", user, name)
+        .fetch_optional(db)
+        .await?
+        .is_some())
+}
+
+/// The name Start over gives its new cascade: the original's with the next
+/// free number after it, "Sevens" → "Sevens (2)" → "Sevens (3)". The
+/// original's own number, if it has one, is replaced; a name at the
+/// 200-character limit is cut to make room.
+async fn numbered_name(db: &sqlx::PgPool, user: Uuid, original: &str) -> Result<String, sqlx::Error> {
+    let base = match original.rsplit_once(" (") {
+        Some((b, n)) if !b.is_empty() && n.ends_with(')') && n[..n.len() - 1].parse::<u32>().is_ok_and(|n| n >= 2) => b,
+        _ => original,
+    };
+    let mut n: u32 = 2;
+    loop {
+        let suffix = format!(" ({n})");
+        let room = 200 - suffix.chars().count();
+        let candidate: String = base.chars().take(room).chain(suffix.chars()).collect();
+        if !is_name_taken(db, user, &candidate).await? {
+            return Ok(candidate);
+        }
+        n += 1;
+    }
+}
+
 async fn existing(state: &AppState, user: &CurrentUser, id: Uuid) -> ApiResult<Option<Response>> {
     let mut conn = state.db.acquire().await?;
     let owner = sqlx::query_scalar!("SELECT user_id FROM cascades WHERE id = $1", id)
@@ -210,7 +248,7 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
         None => insert_spec(&mut tx, user.id, p.quiz_type, &p.tree, SpecKind::Cascade).await?,
     };
     let leave_set_id = if p.quiz_type.is_leave() { p.leaves.as_ref().map(|s| s.id) } else { None };
-    sqlx::query!(
+    let inserted = sqlx::query!(
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, leave_set_id, spec_id, clear_threshold,
                                segment_size, progression, require_alphabetical, options_changed_at, options_seq,
                                options_device_id, question_count, depth, peak_depth, updated_seq, answer_mode,
@@ -236,7 +274,15 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
         question_keys,
     )
     .execute(&mut *tx)
-    .await?;
+    .await;
+    match inserted {
+        Ok(_) => {}
+        // Taken between the check before the search and now.
+        Err(sqlx::Error::Database(d)) if d.constraint() == Some("cascades_user_id_name_key") => {
+            return Err(name_taken(&n.name));
+        }
+        Err(e) => return Err(e.into()),
+    }
     storage::add_to_user(&mut tx, user.id, needed).await?;
     if let Some(d) = &n.display {
         sqlx::query!(
@@ -304,6 +350,10 @@ async fn create(
     if let Some(r) = existing(&state, &user, b.id).await? {
         return Ok(r);
     }
+    // Refused before the search is spent on it.
+    if is_name_taken(&state.db, user.id, &b.name).await? {
+        return Err(name_taken(&b.name));
+    }
     let choice = b.leave_set.as_deref().map_or(LeaveChoice::Newest, LeaveChoice::Named);
     let p = prepare(&state, &b.lexicon, b.quiz_type, &b.filters, choice)?;
     let n = NewCascade {
@@ -323,7 +373,8 @@ async fn create(
     store(&state, &user, n, p).await
 }
 
-/// A new cascade with the same name, a private copy of the same filters, and
+/// A new cascade named after the original with the next free number
+/// ([`numbered_name`]), a private copy of the same filters, and
 /// the same threshold, quiz options, answer mode and display settings; a Leave
 /// Value cascade keeps the original's set of leave values. Subject to the
 /// storage limit.
@@ -352,6 +403,7 @@ async fn start_over(
     .ok_or(ApiError::NotFound)?;
     let (quiz_type, tree) = load_spec(&mut conn, row.spec_id).await?.ok_or(ApiError::NotFound)?;
     drop(conn);
+    let name = numbered_name(&state.db, user.id, &row.name).await?;
     let choice = row.leave_set_id.map_or(LeaveChoice::Newest, LeaveChoice::Id);
     let p = prepare(&state, &row.lexicon, quiz_type, &tree_to_json(&tree), choice)?;
     let n = NewCascade {
@@ -359,7 +411,7 @@ async fn start_over(
         source_quiz_id: b.source_quiz_id,
         device_id: b.device_id,
         at: b.at,
-        name: row.name,
+        name,
         clear_threshold: row.clear_threshold,
         segment_size: row.segment_size,
         progression: row.progression,
@@ -447,8 +499,8 @@ async fn cards(
         return Err(ApiError::bad_request("keys_only"));
     }
     let row = sqlx::query!(
-        r#"SELECT c.quiz_type AS "quiz_type: QuizType", c.lexicon_id, c.leave_set_id
-           FROM cascades c WHERE c.id = $1 AND c.user_id = $2"#,
+        r#"SELECT c.quiz_type AS "quiz_type: QuizType", c.lexicon_id, c.leave_set_id, l.definitions_revision
+           FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2"#,
         cascade_id,
         user.id
     )
@@ -474,6 +526,13 @@ async fn cards(
     } else {
         let snap = state.catalog.snapshot();
         let lex = snap.lexicons.get(&row.lexicon_id).ok_or(ApiError::Unavailable { retry_after_secs: 5 })?;
+        // Definitions are being replaced and this instance has not built the
+        // new index yet: a device would store the old text as the new
+        // revision's, so cards that carry definitions wait for it.
+        let with_definitions = row.quiz_type == QuizType::Definition || (row.quiz_type == QuizType::Anagram && definitions);
+        if with_definitions && lex.definitions_revision < row.definitions_revision {
+            return Err(ApiError::Unavailable { retry_after_secs: 5 });
+        }
         let dist = &lex.distribution;
         // The set the cascade was built on, whatever has been uploaded since.
         let leaves = match row.leave_set_id {

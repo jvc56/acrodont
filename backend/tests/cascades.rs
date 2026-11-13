@@ -21,7 +21,7 @@ fn length(min: i64, max: i64) -> Value {
 fn body(lexicon: &str, quiz_type: &str, filters: Value) -> Value {
     json!({
         "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
-        "at": "2026-01-01T00:00:00Z", "name": "A cascade", "lexicon": lexicon, "quiz_type": quiz_type,
+        "at": "2026-01-01T00:00:00Z", "name": format!("A cascade {}", Uuid::new_v4().simple()), "lexicon": lexicon, "quiz_type": quiz_type,
         "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false, "answer_mode": "flashcard",
         "filters": filters,
     })
@@ -245,7 +245,7 @@ async fn start_over_copies_the_spec_threshold_options_and_settings(pool: sqlx::P
         (&json!(true), &json!(false)),
         "Start over copies the probability and definition column settings too"
     );
-    assert_eq!(n["name"], "Blank leaves");
+    assert_eq!(n["name"], "Blank leaves (2)", "the original's name with the next free number");
     assert_eq!(n["clear_threshold"], 90);
     assert_eq!(n["segment_size"], 5);
     assert_eq!(n["progression"], "drill");
@@ -696,4 +696,74 @@ async fn a_cascade_keeps_the_leave_values_it_was_built_on(pool: sqlx::PgPool) {
     // With the newer set gone, the older one is the default again.
     let r = c.post("/api/search/preview", preview(None)).await;
     assert_eq!(r.json()["count"], 4);
+}
+
+#[sqlx::test]
+async fn an_account_s_cascades_each_have_their_own_name(pool: sqlx::PgPool) {
+    let app = TestApp::new(pool).await;
+    let mut c = app.seed_fixture_catalog("root").await;
+    let named = |name: &str| {
+        let mut b = body("EN-FIX", "anagram", sevens());
+        b["name"] = json!(name);
+        b
+    };
+    let first = named("Sevens");
+    let r = c.post("/api/cascades", first.clone()).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let id = Uuid::parse_str(first["id"].as_str().unwrap()).unwrap();
+    // The same request again is the same cascade, not a second one of that name.
+    assert_eq!(c.post("/api/cascades", first.clone()).await.status, StatusCode::OK);
+    // A second cascade of the name is refused on the field, before any search is spent.
+    let refused = |r: &common::TestResponse| {
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.json());
+        assert_eq!(r.json()["errors"][0]["field"], "name");
+        assert_eq!(
+            r.json()["errors"][0]["message"],
+            "You already have a cascade named “Sevens”. Each cascade needs its own name, the Trash included."
+        );
+    };
+    refused(&c.post("/api/cascades", named("Sevens")).await);
+    // Names differing in case or spacing are different names.
+    assert_eq!(c.post("/api/cascades", named("sevens")).await.status, StatusCode::CREATED);
+    // In the Trash it still holds its name.
+    sqlx::query("UPDATE cascades SET trashed_at = now() WHERE id = $1").bind(id).execute(app.db()).await.unwrap();
+    refused(&c.post("/api/cascades", named("Sevens")).await);
+    // Another account's cascades are no concern.
+    let mut other = app.signed_in("other").await;
+    assert_eq!(other.post("/api/cascades", named("Sevens")).await.status, StatusCode::CREATED);
+
+    // Start over numbers the new cascade after the original, skipping numbers in use.
+    let start_over = |from: Uuid| {
+        (
+            format!("/api/cascades/{from}/start-over"),
+            json!({ "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(), "at": "2026-01-01T00:00:00Z" }),
+        )
+    };
+    let (path, b) = start_over(id);
+    let r = c.post(&path, b).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!(r.json()["cascade"]["name"], "Sevens (2)");
+    let second = Uuid::parse_str(r.json()["cascade"]["id"].as_str().unwrap()).unwrap();
+    let (path, b) = start_over(id);
+    assert_eq!(c.post(&path, b).await.json()["cascade"]["name"], "Sevens (3)");
+    // From a numbered cascade, the number is replaced, not added to.
+    let (path, b) = start_over(second);
+    assert_eq!(c.post(&path, b).await.json()["cascade"]["name"], "Sevens (4)");
+    // A name at the limit is cut to make room for its number.
+    let long = "x".repeat(200);
+    let b = named(&long);
+    let long_id = Uuid::parse_str(b["id"].as_str().unwrap()).unwrap();
+    assert_eq!(c.post("/api/cascades", b).await.status, StatusCode::CREATED);
+    let (path, b) = start_over(long_id);
+    let r = c.post(&path, b).await;
+    assert_eq!(r.json()["cascade"]["name"], format!("{} (2)", "x".repeat(196)));
+
+    // Purged, a cascade gives its name back.
+    sqlx::query("DELETE FROM cascades WHERE id = $1").bind(id).execute(app.db()).await.unwrap();
+    assert_eq!(c.post("/api/cascades", named("Sevens")).await.status, StatusCode::CREATED);
+    // And the constraint itself holds, whatever the application checks.
+    let dup = sqlx::query("UPDATE cascades SET name = 'sevens' WHERE user_id = (SELECT id FROM users WHERE username = 'root') AND name = 'Sevens'")
+        .execute(app.db())
+        .await;
+    assert!(dup.is_err_and(|e| matches!(&e, sqlx::Error::Database(d) if d.constraint() == Some("cascades_user_id_name_key"))));
 }

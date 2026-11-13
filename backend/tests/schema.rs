@@ -224,7 +224,7 @@ async fn minimal_cascade(app: &TestApp, owner: Uuid, lexicon: i16, leave_set: Op
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, leave_set_id, spec_id, clear_threshold,
                                options_changed_at, options_seq, options_device_id, question_count, depth, updated_seq,
                                storage_bytes, question_keys)
-         VALUES ($1, $2, 'c', $3::quiz_type, $4, $5, $6, 80, now(), 1, gen_random_uuid(), 10, 1, 1, 0, '')",
+         VALUES ($1, $2, 'c ' || gen_random_uuid(), $3::quiz_type, $4, $5, $6, 80, now(), 1, gen_random_uuid(), 10, 1, 1, 0, '')",
     )
     .bind(id)
     .bind(owner)

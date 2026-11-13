@@ -31,6 +31,7 @@
 	import {
 		QUIZ_TYPES,
 		QUIZ_TYPE_LABELS,
+		freeName,
 		parseTree,
 		summaryName,
 		withLeaveSet,
@@ -58,6 +59,9 @@
 	let limit = $state(DEFAULT_STORAGE_LIMIT);
 	let name = $state('');
 	let nameEdited = $state(false);
+	/** The names of the account's cascades on this device, the Trash included: a new one needs its own. */
+	let takenNames = $state<Set<string>>(new Set());
+	let nameTaken = $derived(takenNames.has(name));
 	let preview = $state<PreviewState | null>(null);
 	/** The new cascade would not fit: the server would refuse it, so the button says so first. */
 	let wontFit = $derived(used >= limit || (preview?.storageBytes != null && used + preview.storageBytes > limit));
@@ -106,6 +110,7 @@
 			const server = await getMeta(db, 'server');
 			used = server.storage_bytes ?? 0;
 			limit = server.max_storage_bytes ?? DEFAULT_STORAGE_LIMIT;
+			takenNames = new Set((await db.getAll('cascades')).map((c) => c.name));
 		}
 		try {
 			lexicons = await loadLexicons();
@@ -138,7 +143,8 @@
 	}
 
 	$effect(() => {
-		if (!nameEdited && lexicon) name = summaryName(lexicon, wire.tree);
+		// The suggested name is one the account does not have yet, numbered if it must be.
+		if (!nameEdited && lexicon) name = freeName(summaryName(lexicon, wire.tree), takenNames);
 	});
 
 	$effect(() => {
@@ -387,7 +393,12 @@
 		<Card.Content class="grid gap-4 pt-6">
 			<div class="grid gap-1">
 				<Label for="name">Cascade name</Label>
-				<Input id="name" bind:value={name} maxlength={200} oninput={() => (nameEdited = true)} />
+				<Input id="name" bind:value={name} maxlength={200} oninput={() => (nameEdited = true)} aria-invalid={nameTaken} />
+				{#if nameTaken}
+					<p class="text-sm text-destructive">
+						You already have a cascade named “{name}”. Each cascade needs its own name, the Trash included.
+					</p>
+				{/if}
 			</div>
 			<p class="text-sm text-muted-foreground" data-settings-note>
 				You can change this cascade’s settings, such as its clear threshold, answer mode and segments, in its Settings once it is
@@ -404,7 +415,7 @@
 				<Button
 					type="button"
 					onclick={create}
-					disabled={creating || wontFit || !lexicon || !dist || wire.errors.size > 0 || !name.trim()}
+					disabled={creating || wontFit || !lexicon || !dist || wire.errors.size > 0 || !name.trim() || nameTaken}
 				>
 					{busy ? 'the server is busy' : creating ? 'Creating…' : 'Create Cascade'}
 				</Button>

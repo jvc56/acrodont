@@ -139,6 +139,25 @@ test('admin uploads, a broken file, a Leave Value cascade from the new set, dele
 	await page.getByLabel('Lexicon').selectOption(lex);
 	await expect(page.getByLabel('Leave values', { exact: true })).toHaveCount(0);
 
+	// The lexicon's definitions replaced: the same words and playabilities with one definition
+	// corrected (PLAN.md § Immutability and deletion → Replacing definitions). The overview then
+	// shows the revision. Tried again while the upload limit says to wait, as above.
+	await expect(async () => {
+		await upload(
+			page,
+			'/admin/lexicons/definitions',
+			async () => {
+				await page.getByLabel('Lexicon').selectOption({ label: lex });
+			},
+			'corrected.tsv',
+			bigLexicon().replace('a made-up word [n]', 'a corrected word [n]')
+		);
+		await expect(page.getByText('Uploaded')).toBeVisible({ timeout: 60_000 });
+	}).toPass({ timeout: 240_000, intervals: [15_000] });
+	await expect(page.getByText('1 of 11,000 definitions changed. This is revision 2 of its definitions.')).toBeVisible();
+	await page.goto('/admin');
+	await expect(page.getByRole('row').filter({ hasText: lex }).first().getByText('revision 2')).toBeVisible({ timeout: 30_000 });
+
 	// Deletion refused while the cascade exists: the button is disabled and says what uses it
 	// (PLAN.md § Catalog: "the admin page disables the delete button and explains what is still using the item").
 	await page.goto('/admin');

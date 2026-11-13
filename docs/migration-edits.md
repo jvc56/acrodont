@@ -147,3 +147,16 @@ first deploy freezes the file.
   the set its `leave_set_id` already recorded (PLAN.md § Uploads, § Immutability
   and deletion).
 - `cascades` is unchanged: its composite foreign key already pinned one set.
+
+## 2026-11-13: a definitions revision, and unique cascade names
+
+Still before the first deploy, and in the same pull request as the entry above.
+
+- `lexicons` gains `definitions_revision INTEGER NOT NULL DEFAULT 1 CHECK
+  (definitions_revision >= 1)`. A lexicon's definitions can now be replaced by
+  an admin upload (PLAN.md § Replacing definitions); each replacement raises
+  the revision, a cascade row carries it, and a device fetches again the
+  answers it holds from an older one. Words and playabilities stay immutable.
+- `cascades` gains `UNIQUE (user_id, name)`: an account's cascades each have
+  their own name, the Trash included (PLAN.md § Creating a cascade). Start
+  over, which used to copy the name, numbers it instead.

@@ -539,7 +539,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		if (!db || !session.userId) return;
 		const ok = await confirmAction({
 			title: `Start “${v?.cascade?.name ?? 'this cascade'}” over?`,
-			body: `This makes a new cascade of the same words, with the same threshold and options, starting at Level 1. This cascade isn’t changed. You’ll have both, and each counts toward your storage until it is deleted from the Trash.`,
+			body: `This makes a new cascade of the same words, with the same threshold and options, starting at Level 1. It takes this cascade’s name with the next free number after it. This cascade isn’t changed. You’ll have both, and each counts toward your storage until it is deleted from the Trash.`,
 			action: 'Start over'
 		});
 		if (!ok) return;

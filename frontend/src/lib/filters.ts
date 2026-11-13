@@ -372,3 +372,22 @@ export function summaryName(lexicon: string, tree: WireGroup): string {
 	const body = tree.children.length ? describeGroup(tree, true) : '';
 	return cutName(body ? `${lexicon} · ${body}` : lexicon);
 }
+
+/** The longest a cascade's name may be, in characters. */
+export const NAME_MAX = 200;
+
+/**
+ * `name`, or with the next free number after it when the account already has
+ * a cascade of that name ("Sevens" → "Sevens (2)" → "Sevens (3)"): an
+ * account's cascades each have their own name, the Trash included. A name at
+ * the limit is cut to make room for its number.
+ */
+export function freeName(name: string, taken: ReadonlySet<string>): string {
+	if (!taken.has(name)) return name;
+	const chars = [...name];
+	for (let n = 2; ; n++) {
+		const suffix = ` (${n})`;
+		const candidate = chars.slice(0, NAME_MAX - suffix.length).join('') + suffix;
+		if (!taken.has(candidate)) return candidate;
+	}
+}

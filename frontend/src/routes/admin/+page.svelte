@@ -26,6 +26,8 @@
 		lexicon_count?: number;
 		cascade_count?: number;
 		has_leave_set?: boolean;
+		/** A lexicon's: 1 as uploaded, raised by each replacement of its definitions. */
+		definitions_revision?: number;
 		/** Everything the server keeps for it: its rows and their indexes, and its in-memory index. */
 		storage_bytes: number;
 		index_bytes?: number | null;
@@ -97,6 +99,8 @@
 		label: (i: Item) => string;
 		cols: Col[];
 		blocker: (i: Item) => string | null;
+		/** A second action beside Upload. */
+		also?: { href: string; label: string };
 	}
 
 	const uploaded: Col = { head: 'Uploaded', cell: (i) => `${when(i.uploaded_at)} by ${i.uploaded_by ?? 'a deleted user'}` };
@@ -128,11 +132,13 @@
 						cols: [
 							{ head: 'Distribution', cell: (l) => l.letter_distribution ?? '' },
 							{ head: 'Words', cell: (l) => count(l.word_count) },
+							{ head: 'Definitions', cell: (l) => (l.definitions_revision === 1 ? 'as uploaded' : `revision ${l.definitions_revision}`) },
 							uploaded,
 							{ head: 'Cascades', cell: (l) => count(l.cascade_count) },
 							storage
 						],
-						blocker: lexiconBlocker
+						blocker: lexiconBlocker,
+						also: { href: '/admin/lexicons/definitions', label: 'Replace definitions' }
 					},
 					{
 						kind: 'leave-sets',
@@ -176,7 +182,10 @@
 				<Card.Root>
 					<Card.Header>
 						<Card.Title>{sec.title}</Card.Title>
-						<Card.Action>
+						<Card.Action class="flex flex-wrap justify-end gap-2">
+							{#if sec.also && sec.items.length}
+								<Button href={sec.also.href} variant="outline" size="sm">{sec.also.label}</Button>
+							{/if}
 							<Button href={`/admin/${sec.kind}/new`} variant="outline" size="sm" aria-label={`Upload ${sec.noun}`}>Upload</Button>
 						</Card.Action>
 					</Card.Header>

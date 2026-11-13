@@ -10,6 +10,7 @@ import {
 	defaultRange,
 	describe as describeRow,
 	filterDef,
+	freeName,
 	parseCondition,
 	rangeError,
 	summaryName,
@@ -165,5 +166,16 @@ describe('ceilings', () => {
 		expect(ceilingOf(filterDef('point_value'), lv)).toBe(60);
 		expect(ceilingOf(filterDef('limit_by_probability_order'), lv)).toBe(900_000);
 		expect(rangeError(filterDef('length'), 1, 15, lv)).toContain('6');
+	});
+});
+
+describe('a new cascade’s name', () => {
+	it('is numbered when the account already has one of that name, the limit kept', () => {
+		expect(freeName('Sevens', new Set())).toBe('Sevens');
+		expect(freeName('Sevens', new Set(['sevens']))).toBe('Sevens');
+		expect(freeName('Sevens', new Set(['Sevens']))).toBe('Sevens (2)');
+		expect(freeName('Sevens', new Set(['Sevens', 'Sevens (2)', 'Sevens (3)']))).toBe('Sevens (4)');
+		const long = 'x'.repeat(200);
+		expect(freeName(long, new Set([long]))).toBe(`${'x'.repeat(196)} (2)`);
 	});
 });

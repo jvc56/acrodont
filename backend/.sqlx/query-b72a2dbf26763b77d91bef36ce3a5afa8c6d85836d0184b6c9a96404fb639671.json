@@ -1,16 +1,16 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, letter_distribution_id FROM lexicons ORDER BY id",
+  "query": "SELECT name, letter_distribution_id FROM lexicons WHERE id = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
-        "type_info": "Int2",
+        "name": "name",
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "lexicons",
-            "name": "id"
+            "name": "name"
           }
         }
       },
@@ -27,12 +27,14 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Int2"
+      ]
     },
     "nullable": [
       false,
       false
     ]
   },
-  "hash": "b70589c2583a9a0e66148928b8afe7e9ff4b45ccba77a619a839dcbed77affba"
+  "hash": "b72a2dbf26763b77d91bef36ce3a5afa8c6d85836d0184b6c9a96404fb639671"
 }

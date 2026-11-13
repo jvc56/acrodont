@@ -55,6 +55,9 @@ pub struct RawWord {
 pub struct LexiconIndex {
     pub id: i16,
     pub name: String,
+    /// The `lexicons.definitions_revision` these definitions were read at: 1
+    /// as built, set by the loader.
+    pub definitions_revision: i32,
     pub distribution: Arc<Distribution>,
     /// Sorted in alphabetical (tile) order; a word's id is its index here.
     pub words: Vec<WordEntry>,
@@ -263,6 +266,7 @@ impl LexiconIndex {
         );
         LexiconIndex {
             id,
+            definitions_revision: 1,
             name: name.to_owned(),
             distribution,
             words,
