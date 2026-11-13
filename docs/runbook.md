@@ -86,7 +86,11 @@ DNS and the GitHub repository.
    while it waits.
 
 6. **DNS**, from `terraform -chdir=infra output`:
-   - `acm_validation_records`: the CNAMEs that validate the certificate.
+   - `acm_validation_records`: the CNAMEs that validate the certificate. The
+     apply is still waiting on them, and an output may not be readable until
+     it ends: read them from the certificate itself (`aws acm
+     list-certificates`, then `aws acm describe-certificate`, under
+     `DomainValidationOptions`).
    - `ses_dns_records`: three DKIM CNAMEs, the `mail.` MX and SPF TXT for the
      MAIL FROM domain, and a `_dmarc` TXT.
    - The domain itself: an alias (or CNAME) to `alb_dns_name`.
@@ -167,14 +171,19 @@ that commit (a branch's run of the same commit is only the Push tier, which
 does not count). It refuses otherwise; `--skip-ci-check` exists for
 emergencies. In order, it:
 
-1. checks the checkout, the AWS login and account, and that ECS is running what
+1. checks the checkout (clean, with no untracked file where the images are
+   built from), the AWS login and account, and that ECS is running what
    `prod.tfvars` names. If ECS's circuit breaker rolled a release back, the
-   two disagree, and it tells you to run `scripts/rollback.sh` first;
+   two disagree, and it tells you to run `scripts/rollback.sh` first. (If the
+   service already runs the commit being deployed, an apply of it stopped
+   part-way, and this run finishes it.);
 2. refuses any change under `backend/migrations/` that is not an added file
    (see below);
 3. builds and pushes only the images ECR lacks, tagged with the commit;
 4. sets `image_tag`, then runs the **plan gate**: the plan must not delete or
-   replace the database, a bucket, the network, a KMS key or an ECR repository.
+   replace the database, a bucket, the network, a KMS key, an ECR repository,
+   the load balancer or its target group, the certificate, the cluster, the
+   service or the alarm topic.
    The override is `ACRODONT_ALLOW_DESTRUCTIVE_PLAN=yes` plus typing `destroy`;
 5. applies the saved plan;
 6. waits for the rollout. The running task must have the new image **and** the

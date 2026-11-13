@@ -100,6 +100,9 @@ PLAN_NORMAL='{"resource_changes": [
   {"address": "aws_db_instance.main", "type": "aws_db_instance", "change": {"actions": ["no-op"]}}]}'
 PLAN_DB_REPLACE='{"resource_changes": [
   {"address": "aws_db_instance.main", "type": "aws_db_instance", "change": {"actions": ["delete", "create"]}}]}'
+PLAN_LB_REPLACE='{"resource_changes": [
+  {"address": "aws_lb.main", "type": "aws_lb", "change": {"actions": ["delete", "create"]}},
+  {"address": "aws_lb_listener.https", "type": "aws_lb_listener", "change": {"actions": ["delete", "create"]}}]}'
 PLAN_SNS_ONLY='{"resource_changes": [
   {"address": "aws_sns_topic.alarms", "type": "aws_sns_topic", "change": {"actions": ["update"]}}]}'
 S3_TFVARS="$FAKE_DIR/s3/state-bucket/acrodont/prod.tfvars"
@@ -274,7 +277,13 @@ printf '%s' "$PLAN_DB_REPLACE" > "$FAKE_DIR/plan.json"
 answers nope y
 if ACRODONT_ALLOW_DESTRUCTIVE_PLAN=yes run deploy.sh; then fail "a mistyped confirmation applied a destructive plan"; fi
 ! called "$TF apply" || fail "a mistyped confirmation applied"
-pass "the plan gate refuses a database replacement (nothing applied); passes it only when allowed and typed"
+fresh "$A" "$A" "$B"
+printf '%s' "$PLAN_LB_REPLACE" > "$FAKE_DIR/plan.json"
+answers y
+if run deploy.sh; then fail "deploy.sh applied a plan that replaces the load balancer"; fi
+said "aws_lb.main: delete then create" || fail "the load balancer's replacement is not named"
+! called "$TF apply" || fail "a refused plan was applied"
+pass "the plan gate refuses a database replacement (nothing applied); passes it only when allowed and typed; a load balancer's replacement too"
 
 fresh "$A" "$A" "$B"
 printf '{"tag": "0123456789ab", "cpu": "1024", "memory": "2048"}' > "$FAKE_DIR/ecs/running.json"
@@ -286,7 +295,14 @@ answers y
 if FAKE_ROLLBACK=1 run deploy.sh; then fail "a release ECS rolled back counted as deployed"; fi
 said "ECS rolled the release back" || fail "the rollback during the deploy is not reported"
 ! called "curl" || fail "the site was checked after a rollback"
-pass "deploy.sh refuses when ECS already rolled back, and reports a rollback during the wait"
+fresh "$A" "$A" "$B"
+printf '{"tag": "%s", "cpu": "1024", "memory": "2048"}' "$B" > "$FAKE_DIR/ecs/running.json"
+answers y
+run deploy.sh || fail "deploy.sh did not finish a release whose apply had stopped part-way"
+said "stopped part-way" || fail "the part-way apply is not recognised"
+! said "rollback.sh first" || fail "a part-way apply was taken for a rollback"
+[[ "$(s3_tag)" == "$B" ]] || fail "prod.tfvars was not uploaded after finishing the release"
+pass "deploy.sh refuses when ECS already rolled back, and reports a rollback during the wait; a release applied part-way is finished"
 
 fresh "$A" "$A" "$B"
 answers y
@@ -315,7 +331,12 @@ fresh "$A" "$A" "$B"
 answers y
 FAKE_CI_SCHEDULED="completed failure" run deploy.sh || fail "a red scheduled run refused the deploy"
 said "WARNING: the latest scheduled CI run on main is failure" || fail "a red scheduled run did not warn"
-called "gh run list --workflow ci.yml --branch main --commit $(git -C "$R" rev-parse HEAD)" || fail "CI was not checked on main's run of the exact commit"
+called "gh run list --workflow ci.yml --branch main --commit $(git -C "$R" rev-parse HEAD) --event push" || fail "CI was not checked on main's push run of the exact commit"
+echo stray > "$R/backend/src/stray.rs"
+fresh "$A" "$A" "$B"
+if run deploy.sh; then fail "deploy.sh built images from a tree holding an untracked file"; fi
+said "untracked files" || fail "the untracked file is not named"
+rm "$R/backend/src/stray.rs"
 echo dirty >> "$R/README.md"
 fresh "$A" "$A" "$B"
 if run deploy.sh; then fail "deploy.sh deployed a dirty tree"; fi

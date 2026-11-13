@@ -27,8 +27,12 @@ OPS_TFVARS_KEY=acrodont/prod.tfvars
 OPS_NAME=$(basename "$0")
 OPS_APP_FAMILY=acrodont
 OPS_SSM_PREFIX=/acrodont/production
-# Resource types whose loss is data loss or an outage.
-OPS_DANGEROUS_TYPES='^(aws_db_instance|aws_db_subnet_group|aws_s3_bucket.*|aws_vpc|aws_subnet|aws_kms_key|aws_ecr_repository)$'
+# Resource types whose loss is data loss or an outage: the data and what
+# holds it, and what cannot be replaced without work outside Terraform (a
+# new load balancer needs the hand-made DNS alias repointed, a new
+# certificate its validation records, a new topic its subscription confirmed)
+# or without the site going down (the cluster, the service, the target group).
+OPS_DANGEROUS_TYPES='^(aws_db_instance|aws_db_subnet_group|aws_s3_bucket.*|aws_vpc|aws_subnet|aws_kms_key|aws_ecr_repository|aws_lb|aws_lb_target_group|aws_acm_certificate|aws_ecs_cluster|aws_ecs_service|aws_sns_topic)$'
 # Paths whose change means the app images must be rebuilt.
 OPS_IMAGE_PATHS='^(backend/|frontend/|docker/|contract-fixtures/|scripts/(backup|restore|ops_master_psql|drill)\.py$)'
 # CLI v2 pages long output through less, which swallows the rest of a script.
