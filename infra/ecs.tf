@@ -129,6 +129,10 @@ resource "aws_ecs_service" "app" {
   }
   # Exec goes to ops tasks only (infra/ops.tf), never into the task serving users.
   enable_execute_command = false
+  # Without this the provider replaces the service when its capacity provider
+  # changes: use_fargate_spot = false, the runbook's answer to a Spot outage,
+  # would destroy the service and make it again.
+  force_new_deployment = true
 
   capacity_provider_strategy {
     capacity_provider = var.use_fargate_spot ? "FARGATE_SPOT" : "FARGATE"

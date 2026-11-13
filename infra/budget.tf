@@ -51,8 +51,17 @@ resource "aws_ce_anomaly_monitor" "acrodont" {
   name              = "acrodont"
   monitor_type      = var.cost_scope == "tag" ? "CUSTOM" : "DIMENSIONAL"
   monitor_dimension = var.cost_scope == "tag" ? null : "SERVICE"
+  # Every key the API answers with, in the form of the provider's own
+  # example. The provider compares this JSON with what it reads back, and a
+  # change replaces the monitor: with the null keys left out, every plan
+  # could show one, and "no changes" would never be reached.
   monitor_specification = var.cost_scope == "tag" ? jsonencode({
-    Tags = { Key = "Project", Values = ["acrodont"], MatchOptions = ["EQUALS"] }
+    And            = null
+    CostCategories = null
+    Dimensions     = null
+    Not            = null
+    Or             = null
+    Tags           = { Key = "Project", MatchOptions = null, Values = ["acrodont"] }
   }) : null
 }
 
