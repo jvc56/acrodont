@@ -7135,6 +7135,14 @@ through the ordinary endpoints, so there is still no test-only path.
   see only that tab reload, the second keep its revealed card, show that the app
   was updated in another tab, finish that card from the old build's cache, and
   report the update rather than block the new build's IndexedDB upgrade.
+- **The account forms** (`forms.spec.ts`): registering from the log-in
+  page's link, logging in before the address is confirmed, following the
+  mail's confirmation link (and a second use of it), a wrong password,
+  Forgot password and its mail's link with a weak password and then a strong
+  one (and a second use of the link), the old password refused and the new
+  one accepted, and Sign out everywhere with a wrong and the right password.
+  The links come from the stack's mail outbox. The other journeys register
+  and confirm through the API.
 - **Changing the password** from `/account` (`accounts.spec.ts`): a wrong
   current password is said under its field and nothing is changed. The same
   spec sees a Cascades row's quiz type after its name.
