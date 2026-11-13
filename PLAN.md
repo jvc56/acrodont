@@ -705,7 +705,9 @@ with every shared value once it has synced. A device's own later change stays
 on that device until it, or another, shares again. Sharing works offline: the
 value waits as pending until a sync carries it. The functions are in
 `lib/settings/device.ts`; the server holds at most 64 shared settings per
-account and reads no meaning into a value.
+account, 16 KB of them in all (a share that would pass either changes
+nothing: every sync response carries them, and they are outside the
+[storage limit](#storage-limit)), and reads no meaning into a value.
 
 Question order is **not** a setting: questions are always shuffled.
 

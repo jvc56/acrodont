@@ -76,7 +76,8 @@ struct Request {
 /// At most this many shared device settings per account, each name this long.
 const MAX_SHARED_SETTINGS: usize = 64;
 const MAX_SHARED_NAME: usize = 40;
-/// At most this many bytes of shared device settings in one request.
+/// At most this many bytes of shared device settings in one request, and
+/// held by one account.
 const MAX_SHARED_BYTES: usize = 16 * 1024;
 
 /// A request's shared device settings (PLAN.md § Settings → This device, or
@@ -114,24 +115,31 @@ fn parse_device_settings(v: Option<&Value>) -> ApiResult<Option<Value>> {
 
 /// Merges shared device settings into the account's: per setting, the later
 /// `at` wins, so two devices sharing the same setting agree on the last one.
-/// A merge past MAX_SHARED_SETTINGS settings changes nothing.
+/// A merge past MAX_SHARED_SETTINGS settings, or that would leave the account
+/// holding more than MAX_SHARED_BYTES of them, changes nothing: every sync
+/// response carries them all, and they are outside the storage limit.
 async fn share_device_settings(state: &AppState, user: Uuid, device: Uuid, shared: &Value) -> ApiResult<()> {
     let mut tx = state.db.begin().await?;
     let merged = sqlx::query(
-        "UPDATE users SET device_settings = (
-             SELECT coalesce(jsonb_object_agg(k, CASE
-                        WHEN n.v IS NULL THEN o.v
-                        WHEN o.v IS NULL THEN n.v
-                        WHEN (n.v->>'at')::timestamptz >= (o.v->>'at')::timestamptz THEN n.v
-                        ELSE o.v END), '{}'::jsonb)
-             FROM jsonb_each(users.device_settings) AS o(k, v)
-             FULL JOIN jsonb_each($2::text::jsonb) AS n(k, v) USING (k))
+        "WITH kept AS (SELECT device_settings FROM users WHERE id = $1 FOR UPDATE),
+              merged AS (
+                  SELECT coalesce(jsonb_object_agg(k, CASE
+                             WHEN n.v IS NULL THEN o.v
+                             WHEN o.v IS NULL THEN n.v
+                             WHEN (n.v->>'at')::timestamptz >= (o.v->>'at')::timestamptz THEN n.v
+                             ELSE o.v END), '{}'::jsonb) AS settings
+                  FROM jsonb_each((SELECT device_settings FROM kept)) AS o(k, v)
+                  FULL JOIN jsonb_each($2::text::jsonb) AS n(k, v) USING (k))
+         UPDATE users SET device_settings = merged.settings
+         FROM merged
          WHERE id = $1
-           AND (SELECT count(*) FROM jsonb_object_keys(users.device_settings || $2::text::jsonb)) <= $3",
+           AND (SELECT count(*) FROM jsonb_object_keys(merged.settings)) <= $3
+           AND octet_length(merged.settings::text) <= $4",
     )
     .bind(user)
     .bind(shared.to_string())
     .bind(MAX_SHARED_SETTINGS as i64)
+    .bind(MAX_SHARED_BYTES as i32)
     .execute(&mut *tx)
     .await?;
     // The other devices take the shared values at once (sync::notify).

@@ -845,6 +845,16 @@ async fn shared_device_settings_merge_and_come_back(pool: sqlx::PgPool) {
         assert_eq!(d.raw_sync(body(&d, bad.clone())).await.status, StatusCode::BAD_REQUEST, "{bad}");
     }
     assert_eq!(d.sync(vec![]).await.json()["device_settings"]["answer_size_px"]["value"], json!(30));
+    // A share that would take the account's settings past 16 KB changes
+    // nothing: each request may carry that much, and every response carries
+    // them all.
+    let big = |name: &str| json!({ name: { "value": "x".repeat(7_000), "at": "2026-11-11T12:00:00.000Z" } });
+    for name in ["note_a", "note_b", "note_c"] {
+        assert_eq!(d.raw_sync(body(&d, big(name))).await.status, StatusCode::OK);
+    }
+    let shared = d.sync(vec![]).await.json()["device_settings"].clone();
+    assert!(shared.get("note_b").is_some() && shared.get("note_c").is_none(), "the third did not fit");
+    assert_eq!(shared["answer_size_px"]["value"], json!(30));
     // Another account sees none of it.
     let mut bob = device(&app, "bob").await;
     assert_eq!(bob.sync(vec![]).await.json()["device_settings"], json!({}));
