@@ -39,6 +39,9 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
 - **Since PQ-022:** there is no change-password endpoint, so its body
   `{ current_password, new_password }` and its `204` no longer apply; the
   length bounds stand, for registration and a reset alike.
+- **Since then:** Change password is back (see the note under PQ-022):
+  `POST /api/account/password` takes `{ current_password, new_password }`
+  and answers `204`, so this item's body and answer apply again.
 
 ## PQ-003 — Which responses slide the session TTL (open)
 

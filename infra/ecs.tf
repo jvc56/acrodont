@@ -124,7 +124,8 @@ resource "aws_ecs_service" "app" {
   health_check_grace_period_seconds = 300
   # Rolls: the new task serves before the old one drains. Acrodont runs safely
   # as two instances for that minute (advisory-locked purge, NOTIFY catalog
-  # reload, no SSE), unlike birdtest's stop-first single task.
+  # reload, and its one SSE stream, /api/sync/events, is fed through NOTIFY
+  # and closed on shutdown), unlike birdtest's stop-first single task.
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
   # A release whose task cannot start rolls back instead of retrying forever;
