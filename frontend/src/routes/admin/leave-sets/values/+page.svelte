@@ -26,7 +26,7 @@
 				exactly the leaves the lexicon’s set holds, in any order; only values may differ. Every Leave Value
 				cascade on the lexicon then shows the new values, on each device once it has synced. A
 				cascade keeps the questions it was created with, even where a Leave Value filter would now
-				match differently; Start over picks the questions again.
+				match differently; Duplicate cascade, in its Settings, picks the questions again.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>

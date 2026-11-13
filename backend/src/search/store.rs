@@ -285,7 +285,7 @@ pub async fn word_list_entries(conn: &mut PgConnection, spec_id: Uuid) -> Result
     .await
 }
 
-/// Copies a cascade's spec for Start over, `quiz_type` included.
+/// Copies a cascade's spec for Duplicate, `quiz_type` included.
 pub async fn copy_spec(conn: &mut PgConnection, user_id: Uuid, spec_id: Uuid) -> Result<Uuid, sqlx::Error> {
     let new_id = sqlx::query_scalar!(
         "INSERT INTO search_specs (user_id, quiz_type) SELECT $1, quiz_type FROM search_specs WHERE id = $2

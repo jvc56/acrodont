@@ -1,4 +1,4 @@
-//! `POST /api/cascades`, `POST /api/cascades/:id/start-over` and
+//! `POST /api/cascades`, `POST /api/cascades/:id/duplicate` and
 //! `GET /api/cascades/:id/cards` (PLAN.md § API → Cascades and sync).
 
 use std::collections::HashMap;
@@ -36,7 +36,7 @@ pub const MAX_FUTURE: Duration = Duration::minutes(5);
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/cascades", post(create))
-        .route("/api/cascades/{id}/start-over", post(start_over))
+        .route("/api/cascades/{id}/duplicate", post(duplicate))
         .route("/api/cascades/{id}/cards", get(cards))
 }
 
@@ -65,7 +65,7 @@ pub struct CreateBody {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StartOverBody {
+pub struct DuplicateBody {
     id: Uuid,
     source_quiz_id: Uuid,
     device_id: Uuid,
@@ -83,9 +83,9 @@ struct NewCascade {
     progression: Progression,
     require_alphabetical: bool,
     answer_mode: AnswerMode,
-    /// Start over copies the original's; a new cascade takes the column defaults.
+    /// Duplicate copies the original's; a new cascade takes the column defaults.
     display: Option<Display>,
-    /// Start over copies the original's spec; creation stores the request's tree.
+    /// Duplicate copies the original's spec; creation stores the request's tree.
     copy_of_spec: Option<Uuid>,
 }
 
@@ -138,7 +138,7 @@ async fn is_name_taken(db: &sqlx::PgPool, user: Uuid, name: &str) -> Result<bool
         .is_some())
 }
 
-/// The name Start over gives its new cascade: the original's with the next
+/// The name Duplicate gives its new cascade: the original's with the next
 /// free number after it, "Sevens" → "Sevens (2)" → "Sevens (3)". The
 /// original's own number, if it has one, is replaced; a name at the
 /// 200-character limit is cut to make room.
@@ -211,7 +211,7 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     let dist = &p.lexicon.distribution;
     let key_text: Vec<String> = keys.iter().map(|k| dist.to_magpie(k)).collect();
     let key_bytes: i64 = key_text.iter().map(|k| k.len() as i64).sum();
-    // Start over's copy holds the same entries as the tree it was loaded into.
+    // Duplicate's copy holds the same entries as the tree it was loaded into.
     let needed = storage::new_cascade_bytes(keys.len() as i64, key_bytes, storage::spec_bytes(&p.tree));
     let count_q = keys.len() as i32;
     // One key per line, each ending with its line break.
@@ -373,11 +373,11 @@ async fn create(
 /// ([`numbered_name`]), a private copy of the same filters, and
 /// the same threshold, quiz options, answer mode and display settings. Subject
 /// to the storage limit.
-async fn start_over(
+async fn duplicate(
     State(state): State<AppState>,
     Session(user): Session,
     Path(original): Path<Uuid>,
-    ApiJson(b): ApiJson<StartOverBody>,
+    ApiJson(b): ApiJson<DuplicateBody>,
 ) -> ApiResult<Response> {
     state.limits.search.check(&user.id)?;
     if let Some(r) = existing(&state, &user, b.id).await? {

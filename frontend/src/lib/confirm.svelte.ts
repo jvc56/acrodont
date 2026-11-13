@@ -1,6 +1,6 @@
 // One confirmation at a time (PLAN.md § Frontend → ConfirmDialog): an action
 // that loses something or is hard to undo — moving a cascade to the Trash,
-// deleting forever, starting over, removing data — asks first. The dialog
+// deleting forever, duplicating, removing data — asks first. The dialog
 // itself is mounted once, in the root layout.
 
 export interface ConfirmRequest {

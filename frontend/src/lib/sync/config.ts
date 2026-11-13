@@ -25,7 +25,7 @@ export const PREVIEW_MIN_INTERVAL_MS = 2_000;
  * measured against (PQ-010: the client is not told the configured value).
  */
 export const SEARCH_RATE_PER_MINUTE = 30;
-/** Slots the preview leaves for Create Cascade, Start over and Save Search…. */
+/** Slots the preview leaves for Create Cascade, Duplicate and Save Search…. */
 export const PREVIEW_RESERVE = 2;
 /** Above this many In Word List entries the preview runs only on its button. */
 export const PREVIEW_MANUAL_ENTRIES = 10_000;

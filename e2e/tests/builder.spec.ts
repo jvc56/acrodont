@@ -51,7 +51,7 @@ test('the builder previews and creates a cascade', async ({ page }) => {
 
 	// An account's cascades each have their own name (PLAN.md § Creating a cascade): the same
 	// search again is suggested the name with the next free number, a name already in use is
-	// refused under the field with Create Cascade disabled, and Start over numbers its copy.
+	// refused under the field with Create Cascade disabled, and Duplicate cascade numbers its copy.
 	await page.goto('/cascades/new');
 	await page.getByLabel('Lexicon').selectOption('EN-FIX');
 	await page.getByLabel('Minimum').first().fill('7');
@@ -67,8 +67,8 @@ test('the builder previews and creates a cascade', async ({ page }) => {
 	await expect(page).toHaveURL(/\/cascades\/[0-9a-f-]{36}$/);
 	await expect(page.getByText(/^1 \/ 18$/)).toBeVisible({ timeout: 30_000 });
 	await openPlayerSettings(page);
-	await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Start over' }).click();
-	await page.getByRole('alertdialog').getByRole('button', { name: 'Start over' }).click();
+	await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Duplicate cascade' }).click();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Duplicate', exact: true }).click();
 	await expect(page).not.toHaveURL(new RegExp(page.url().split('/').pop()!), { timeout: 30_000 });
 	await page.goto('/');
 	await expect(page.getByRole('link', { name: 'Sevens again (2)', exact: true })).toBeVisible({ timeout: 30_000 });

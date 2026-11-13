@@ -1,4 +1,4 @@
-//! PLAN.md § API → Cascades and sync (`POST /api/cascades`, start-over, card
+//! PLAN.md § API → Cascades and sync (`POST /api/cascades`, duplicate, card
 //! pages) and § Integration tests (creation for all three types, options,
 //! idempotent ids, search before the transaction, word-list totals, card
 //! pages with `keys=1`, account binding). The storage limit and its races are
@@ -164,7 +164,7 @@ async fn fill_to_the_limit(app: &TestApp, user: &str) {
         .unwrap();
 }
 
-/// "A repeated `POST /api/cascades` or start-over with the same `id` returns
+/// "A repeated `POST /api/cascades` or duplicate with the same `id` returns
 /// the existing cascade and takes no second share of storage; an `id` held by
 /// another user is refused."
 #[sqlx::test]
@@ -187,14 +187,14 @@ async fn creation_is_idempotent_by_device_minted_ids(pool: sqlx::PgPool) {
     let mut b2 = body("EN-FIX", "anagram", sevens());
     b2["source_quiz_id"] = b["source_quiz_id"].clone();
     assert_eq!(bob.post("/api/cascades", b2).await.status, StatusCode::CONFLICT);
-    // Start over, repeated with the same id, with room for it.
+    // Duplicate, repeated with the same id, with room for it.
     sqlx::query("UPDATE users SET storage_limit_bytes = NULL").execute(app.db()).await.unwrap();
     let mut c2 = Client::new(&app, "203.0.113.1");
     c2.cookies = c.cookies.clone();
     c2.user_id = c.user_id;
     let so = json!({ "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
                      "at": "2026-01-01T00:00:00Z" });
-    let path = format!("/api/cascades/{}/start-over", b["id"].as_str().unwrap());
+    let path = format!("/api/cascades/{}/duplicate", b["id"].as_str().unwrap());
     let r1 = c2.post(&path, so.clone()).await;
     assert_eq!(r1.status, StatusCode::CREATED, "{:?}", r1.json());
     let used: i64 = sqlx::query_scalar("SELECT storage_bytes FROM users WHERE username = 'root'").fetch_one(app.db()).await.unwrap();
@@ -206,7 +206,7 @@ async fn creation_is_idempotent_by_device_minted_ids(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test]
-async fn start_over_copies_the_spec_threshold_options_and_settings(pool: sqlx::PgPool) {
+async fn duplicate_copies_the_spec_threshold_options_and_settings(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
     let mut c = app.seed_fixture_catalog("root").await;
     let mut b = body("EN-FIX", "leave_value", json!({ "op": "and", "children": [
@@ -233,7 +233,7 @@ async fn start_over_copies_the_spec_threshold_options_and_settings(pool: sqlx::P
     .unwrap();
     let so = json!({ "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
                      "at": "2026-01-01T00:00:00Z" });
-    let r = c.post(&format!("/api/cascades/{}/start-over", b["id"].as_str().unwrap()), so).await;
+    let r = c.post(&format!("/api/cascades/{}/duplicate", b["id"].as_str().unwrap()), so).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
     let n = r.json()["cascade"].clone();
     assert_eq!(
@@ -243,7 +243,7 @@ async fn start_over_copies_the_spec_threshold_options_and_settings(pool: sqlx::P
     assert_eq!(
         (&n["show_probability"], &n["definition_column"]),
         (&json!(true), &json!(false)),
-        "Start over copies the probability and definition column settings too"
+        "Duplicate copies the probability and definition column settings too"
     );
     assert_eq!(n["name"], "Blank leaves (2)", "the original's name with the next free number");
     assert_eq!(n["clear_threshold"], 90);
@@ -262,11 +262,11 @@ async fn start_over_copies_the_spec_threshold_options_and_settings(pool: sqlx::P
     assert!(specs.iter().all(|s| s.1 == "leave_value"));
     // And the same storage: the same rows.
     assert_eq!(n["storage_bytes"], o["storage_bytes"]);
-    // At the limit, Start over is refused.
+    // At the limit, Duplicate is refused.
     fill_to_the_limit(&app, "root").await;
     let so = json!({ "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
                      "at": "2026-01-01T00:00:00Z" });
-    let r = c.post(&format!("/api/cascades/{}/start-over", b["id"].as_str().unwrap()), so).await;
+    let r = c.post(&format!("/api/cascades/{}/duplicate", b["id"].as_str().unwrap()), so).await;
     assert_eq!(r.status, StatusCode::CONFLICT);
     assert_eq!(r.json()["error"], "storage_limit");
 }
@@ -624,29 +624,29 @@ async fn an_account_s_cascades_each_have_their_own_name(pool: sqlx::PgPool) {
     let mut other = app.signed_in("other").await;
     assert_eq!(other.post("/api/cascades", named("Sevens")).await.status, StatusCode::CREATED);
 
-    // Start over numbers the new cascade after the original, skipping numbers in use.
-    let start_over = |from: Uuid| {
+    // Duplicate numbers the new cascade after the original, skipping numbers in use.
+    let duplicate = |from: Uuid| {
         (
-            format!("/api/cascades/{from}/start-over"),
+            format!("/api/cascades/{from}/duplicate"),
             json!({ "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(), "at": "2026-01-01T00:00:00Z" }),
         )
     };
-    let (path, b) = start_over(id);
+    let (path, b) = duplicate(id);
     let r = c.post(&path, b).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
     assert_eq!(r.json()["cascade"]["name"], "Sevens (2)");
     let second = Uuid::parse_str(r.json()["cascade"]["id"].as_str().unwrap()).unwrap();
-    let (path, b) = start_over(id);
+    let (path, b) = duplicate(id);
     assert_eq!(c.post(&path, b).await.json()["cascade"]["name"], "Sevens (3)");
     // From a numbered cascade, the number is replaced, not added to.
-    let (path, b) = start_over(second);
+    let (path, b) = duplicate(second);
     assert_eq!(c.post(&path, b).await.json()["cascade"]["name"], "Sevens (4)");
     // A name at the limit is cut to make room for its number.
     let long = "x".repeat(200);
     let b = named(&long);
     let long_id = Uuid::parse_str(b["id"].as_str().unwrap()).unwrap();
     assert_eq!(c.post("/api/cascades", b).await.status, StatusCode::CREATED);
-    let (path, b) = start_over(long_id);
+    let (path, b) = duplicate(long_id);
     let r = c.post(&path, b).await;
     assert_eq!(r.json()["cascade"]["name"], format!("{} (2)", "x".repeat(196)));
 

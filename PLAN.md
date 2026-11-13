@@ -165,8 +165,7 @@ When the user finishes an attempt of the Source quiz:
   so a Drill cascade is the Source quiz plus a drill chain at Level 2.
 - A cascade can be completed more than once; each finish with no misses
   records a new `completed_at`. The Cascades page marks complete cascades, and
-  the completion screen offers **Keep studying**, **Start over** and **Move to
-  Trash**.
+  the completion screen offers **Start over** and **Move to Trash**.
 - **What the completion screen counts.** *Levels* is the deepest level the
   cascade reached since the previous completion (`cascades.peak_depth`, reset
   to 1 at each completion), and *attempts* is the number of attempts finished
@@ -391,8 +390,11 @@ Moving on from the last question of a run that is not the last run:
   each dated the finish that cleared it.
 - **A complete cascade** (Source quiz finished with no misses) stays active.
   The user sees a completion screen showing how many levels and attempts it
-  took, with **Keep studying**, **Start over** and **Move to Trash**. A
-  cascade reaches the Trash only when the user moves it there.
+  took, with **Start over** and **Move to Trash**. **Start over** closes the
+  screen and the user studies the same cascade again from Level 1, whose
+  Source quiz the finish has already reset and reshuffled: nothing is created
+  and no storage is used. A cascade reaches the Trash only when the user
+  moves it there.
 - **Trashing a cascade manually** (e.g. "I'm done with this word list") moves the
   whole cascade to the Trash with its levels as they are.
 - **Restoring a finished quiz** pushes it back onto its cascade as the **new
@@ -420,20 +422,24 @@ Moving on from the last question of a run that is not the last run:
   being purged at once for time that passed while the cascade was trashed.
   Purging a cascade purges every quiz in it. Users can also purge from the
   Trash immediately with **Delete forever**.
-- **Start over** on a complete cascade (or any cascade, from the player's
-  **Settings**) creates a new cascade named after it, a private copy of the
-  same filters, and the same threshold and [quiz options](#quiz-options). An
-  account's cascades each have their own name (see
+- **Duplicate cascade**, in any cascade's **Settings**, creates a new cascade
+  from the same filters: a private copy of them, the same threshold and
+  [quiz options](#quiz-options) and every other setting, starting at Level 1
+  with nothing graded. The search is run again, so the new cascade holds what
+  matches now. It is how a ladder is abandoned for a clean start without
+  losing it, and how a cascade's questions are chosen again after the
+  catalog's definitions or leave values were replaced. It is not on the
+  completion screen, where **Start over** means another pass of the same
+  cascade. An account's cascades each have their own name (see
   [Creating a cascade](#creating-a-cascade)), so the new one takes the
   original's name with the next free number after it: "Sevens" gives
-  "Sevens (2)", then "Sevens (3)"; starting "Sevens (2)" over replaces its
+  "Sevens (2)", then "Sevens (3)"; duplicating "Sevens (2)" replaces its
   number rather than adding one, and a name at the 200-character limit is cut
-  to make room. It asks first, saying: "This makes a new cascade of the same
-  words, with the same threshold and options, starting at Level 1. It takes
+  to make room. It asks first, saying: "This makes a new cascade from the same
+  filters, with the same threshold and options, starting at Level 1. It takes
   this cascade's name with the next free number after it. This cascade isn't
-  changed.
-  You'll have both, and each counts toward your storage until it is deleted
-  from the Trash." (see [Storage limit](#storage-limit)).
+  changed. You'll have both, and each counts toward your storage until it is
+  deleted from the Trash." (see [Storage limit](#storage-limit)).
 - **Exporting** works on anything in the Trash that has not been purged, so a
   cleared quiz can still be downloaded as a word list (see
   [Exporting words](#exporting-words)).
@@ -458,7 +464,7 @@ formula below:
 
 Studied hard is levels made from misses adding up to a second Source quiz
 each (half missed on every pass), with their quiz and attempt rows. 10 MB is
-1.66 times that, leaving room for a Start over of both large cascades at
+1.66 times that, leaving room for a Duplicate of both large cascades at
 once. (The first sizing, PQ-023, was 100 MB for three cascades that came to
 72.20 MB studied hard when every question of every level was a row of its
 own; packed, those three are 4.09 MB.) An
@@ -524,7 +530,7 @@ In Word List entry costs its bytes plus one, so a 300,000-entry list of 8-letter
 and the account's total, `users.storage_bytes`, each changed in the
 transaction that changes the rows:
 
-- creation and Start over set a cascade's figure and add it to the total
+- creation and Duplicate set a cascade's figure and add it to the total
 - `finish` adds its attempt row and any new level; `finish_segment` adds any
   new level
 - `purge_quiz` subtracts the quiz's level and its attempt rows, and bumps the
@@ -549,7 +555,7 @@ last space:
 | Action | Needs | Refusal |
 |---|---|---|
 | Create a cascade | The formula with one level of the search's questions, their keys' real bytes and the spec | `409 { error: "storage_limit", used, limit, needed }` |
-| Start over | The same, for the original's questions and a copy of its spec | Same |
+| Duplicate | The same, for the original's questions and a copy of its spec | Same |
 | Save a search | Its spec; an overwrite needs only the difference | Same |
 
 A change that adds nothing is never refused. **The search runs before the
@@ -565,7 +571,7 @@ makes a new level, and its rows are added even when they take the account over
 its limit. Refusing a finish would be the one place studying fails for a reason
 the user cannot act on, and offline the finish has already been played. Past
 the limit the account keeps studying, syncing, restoring and exporting; only
-creating a cascade, Start over and saving a search are refused.
+creating a cascade, Duplicate and saving a search are refused.
 
 - **Restores.** Restoring a quiz or a cascade adds no rows, so it is always
   allowed.
@@ -579,7 +585,7 @@ creating a cascade, Start over and saving a search are refused.
 - **Almost full and over.** From 90% the Cascades page says "Almost full:
   empty the Trash or delete cascades to make room". Over the limit it says
   "Over your storage by 12 MB: you can keep studying, but can't create cascades
-  until you make room", New cascade is disabled, and Start over is disabled
+  until you make room", New cascade is disabled, and Duplicate is disabled
   once storage is full.
 
 ---
@@ -643,7 +649,7 @@ cascade's Settings.
 Each is changed with `set_cascade_options`, under the cascade options'
 latest-wins rule (see [Conflicts](#conflicts)). The level being studied also has
 its own copy of the three quiz options, changed with `set_quiz_options` (see
-[Quiz options](#quiz-options)); that belongs to the one quiz. Start over gives
+[Quiz options](#quiz-options)); that belongs to the one quiz. Duplicate gives
 the new cascade every one of the original's settings.
 
 #### One cascade, or all of them
@@ -772,7 +778,7 @@ because searching runs on the server.
    is why the preview also **keeps a reserve**: it stops firing once it has spent
    all but two of `SEARCH_RATE_PER_MINUTE` in the rolling minute, showing the
    last count with "the server is busy" as a `429` would, because preview,
-   Create Cascade, Start over and Save Search… all draw on that one bucket and a
+   Create Cascade, Duplicate and Save Search… all draw on that one bucket and a
    preview sized to the whole of it would refuse the very action the page leads
    to. The reserve counts **this tab's own** requests, since the bucket is the
    user's and nothing tells one tab what another spent, so two builders open at
@@ -796,7 +802,7 @@ because searching runs on the server.
    a `429` the same way**, after `Retry-After`, with the button reading "the
    server is busy" until it goes through: the device-minted ids make the repeat
    safe, and without it a minute of previewing could refuse the create that
-   follows it. **Start over** and **Save Search…** do the same.
+   follows it. **Duplicate** and **Save Search…** do the same.
 8. **Create Cascade**: runs the search, shuffles the questions into the Source
    quiz, saves the cascade, starts downloading it for offline use, and goes
    straight to the first card. Under the preview count the builder shows what
@@ -849,7 +855,7 @@ device is online), never an empty list. With no cascades the list says "No
 cascades yet. Make one." (or, with no lexicon on the server, says so), and
 the Trash follows as usual. Selecting a cascade opens the player at its deepest
 level, whose **Settings** dialog holds the rest: the ladder with **Export…** per
-level, the cascade's [settings](#settings), **Start over** and
+level, the cascade's [settings](#settings), **Duplicate** and
 **Move to Trash**. The header shows the account's
 [storage](#storage-limit) against its limit, `4.3 MB of 10 MB used`, with a
 meter (`data-storage` is `ok`, `almost` from 90%, or `over`). From 90% it adds
@@ -976,10 +982,10 @@ as the term of the data model and the API.
     are studying** (that quiz only, from the current card; "✓ Saved for this
     level" after a change); the options **levels made from now on** start
     with (the cascade's); **Copy another cascade's settings** (a choice of the
-    user's other cascades and **Copy settings**); then Start over and Move to
-    Trash. Start over is disabled when the account's
-    [storage](#storage-limit) is full (`Start over: your storage is full`); a
-    `409 storage_limit` says what starting over needs and how much is free. The two sets of level options are subgroups of the section, each
+    user's other cascades and **Copy settings**); then Duplicate and Move to
+    Trash. Duplicate is disabled when the account's
+    [storage](#storage-limit) is full (`Duplicate: your storage is full`); a
+    `409 storage_limit` says what duplicating needs and how much is free. The two sets of level options are subgroups of the section, each
     under its own heading. Each of the cascade's settings, and the options
     for levels made from now on, says "✓ Saved for this cascade" once changed
     and offers **all N cascades** (see
@@ -1070,7 +1076,7 @@ as the term of the data model and the API.
   hold (`SECTION`), each behind an ⓘ ("About these settings") beside the
   heading. The texts live in one module (`lib/settings-info`).
 - **Sensitive actions ask first** (`ConfirmDialog`, one per app, in the root
-  layout): Move to Trash, Delete forever, Start over, removing an account's
+  layout): Move to Trash, Delete forever, Duplicate, removing an account's
   data from the device, deleting the account, resetting the controls,
   replacing a saved search and the admin's deletes. The dialog says what is
   about to happen and whether it can be undone; its confirming button names
@@ -1210,7 +1216,7 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
 - **The answer mode is the cascade's own** (`cascades.answer_mode`), like its
   clear threshold: one of the cascade's [settings](#settings), Flashcard when
   the cascade is created, changed in its Settings with `set_cascade_options`
-  (for it alone, or for every anagram cascade), copied by Start over, and
+  (for it alone, or for every anagram cascade), copied by Duplicate, and
   never a quiz's.
 - **The tiles typed mode needs** are the cascade's letter distribution. A
   cascade played card by card (a new one, or one not downloaded here) may not
@@ -1450,8 +1456,8 @@ happened:
 - `Level 1: 87%. Reshuffled, and its 5 missed questions are now Level 2.` (the
   Source quiz, whatever the progression)
 - `Level 1: 100%. Cascade complete after 4 levels and 9 attempts.` This one
-  leads to the completion screen, which offers **Keep studying**, **Start
-  over** and **Move to Trash**.
+  leads to the completion screen, which offers **Start over** and **Move to
+  Trash**.
 
 Moving on from the last card of a **run** that is not the last run does not
 finish anything; it drills that run's misses (see [Segments](#segments)) and
@@ -1811,7 +1817,7 @@ lexicon's own file with new definitions:
   and cards without definitions, are served as usual.
 - **A cascade keeps its questions.** They are stored as keys, so a cascade
   created with a Definition or Part of Speech filter holds the questions that
-  matched when it was created. Start over runs the search again and takes
+  matched when it was created. Duplicate runs the search again and takes
   what matches now.
 
 **Leave values.** An admin uploads, at `/admin/leave-sets/values`, the
@@ -2651,7 +2657,7 @@ question set is written for it; the [scale tests](#scale-tests) run there:
 | Logging in, registering, password reset | Opening the app, including after a reload or browser restart |
 | — | Logging out: the signed-in pointer is cleared at once and the server call is retried later |
 | Creating a cascade (search runs on the server) | Studying any downloaded cascade in both answer modes |
-| Start over (creates a new cascade) | Finishing quizzes: clearing, going down, going back up |
+| Duplicate (creates a new cascade) | Finishing quizzes: clearing, going down, going back up |
 | Saved searches, admin, account changes | Trash: restoring quizzes and cascades (a restored quiz whose rows were dropped is playable once they are fetched), Delete forever |
 | Downloading a cascade's answer cards | Changing a cascade's settings (quiz options included), the display settings and controls |
 | Exporting answers or definitions the device has not downloaded | Exporting anything the device already has |
@@ -2802,7 +2808,7 @@ brings the server's.
 **Downloads.**
 - A cascade starts downloading the moment it is created. That covers the user
   who creates one just before boarding.
-- **Creating shows what it is doing.** The builder (and Start over) shows a
+- **Creating shows what it is doing.** The builder (and Duplicate) shows a
   screen over the page — finding the questions, then saving them on this device
   with a progress bar — until the player opens. The Source quiz's rows are
   written in chunks in position order, so the row at the last position, which
@@ -3532,7 +3538,7 @@ within a second or two of the change:
 
 - Every change that advances an account's `sync_seq` — a push that applied an
   operation, shared [device settings](#this-device-or-all-of-them), creating
-  or starting over a cascade, a [purge](#purge-task) — sends a Postgres
+  or duplicating a cascade, a [purge](#purge-task) — sends a Postgres
   `NOTIFY` on `acrodont_changes`, naming the account and the device that made
   it, **in the change's own transaction**, so it goes out only once the change
   is committed, and to every instance. A sync that applies nothing sends none.
@@ -4015,7 +4021,7 @@ CREATE TABLE search_specs (
                             -- canonicalised under: a leave is sorted into tile order and
                             -- a word is not, so loading the spec under a type on the
                             -- other side of Leave Value flags that row rather than
-                            -- silently reading leaves as words. Start over copies it
+                            -- silently reading leaves as words. Duplicate copies it
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX search_specs_user_id ON search_specs (user_id);
@@ -4179,7 +4185,7 @@ CREATE TABLE cascades (
     leave_set_id      INTEGER,                    -- Leave Value cascades only
     spec_id           UUID NOT NULL REFERENCES search_specs (id),
                           -- a private copy, never a saved search's or another
-                          -- cascade's spec; Start over copies it again
+                          -- cascade's spec; Duplicate copies it again
     clear_threshold   SMALLINT NOT NULL CHECK (clear_threshold BETWEEN 1 AND 100),
 
     -- Quiz options: what every quiz created for this cascade starts with.
@@ -4618,7 +4624,7 @@ Notes on the schema:
 - **Purging a cascade** deletes its question index, quizzes, questions and
   attempts by cascade. In the same transaction, the application deletes the
   cascade's spec, which nothing else ever references because saved searches and
-  Start over each take their own copy, writes tombstones for the cascade and
+  Duplicate each take their own copy, writes tombstones for the cascade and
   each quiz, bumps the user's sync sequence, and takes the cascade's
   `storage_bytes` off `users.storage_bytes`.
 - **The 300,000 ceiling** lives in `cascades.question_count`,
@@ -4974,7 +4980,7 @@ Security generally:
   sized so that a first sync with several kept cascades fills over several
   minutes, so a `429` is the ordinary signal to wait, and a client that read it
   as a failed page would freeze a download or spin against the limit. **Create
-  Cascade, Start over and Save Search… honour it too**, retrying after
+  Cascade, Duplicate and Save Search… honour it too**, retrying after
   `Retry-After` with the same body exactly as they retry a `5xx`, which their
   device-minted ids make safe; they share the search bucket with the builder's
   preview, and the preview holds two slots back for them (see
@@ -5109,8 +5115,8 @@ person to write it copies names rather than choosing them.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/cascades` | Body `{ id, source_quiz_id, device_id, at, name, lexicon, quiz_type, clear_threshold, segment_size, progression, require_alphabetical, answer_mode, filters }`. `name` is required, 1–200 Unicode scalar values, and one the account's cascades do not already use, the Trash included (`400` on the field `name` otherwise, checked before the search); the device builds the default summary itself (see [Creating a cascade](#creating-a-cascade)). The cascade row carries the lexicon's `definitions_revision` and, for a Leave Value cascade, its leave values' `leave_values_revision` (`null` otherwise). `device_id` is recorded as `options_device_id` on the cascade and the Source quiz, so the creating device's option changes never compete on timestamps. `id` and `source_quiz_id` are device-generated UUIDs minted when the button is pressed and reused for any retry of that press, never regenerated on retry; a request whose `id` the server already holds for this user returns the existing cascade and Source quiz unchanged, so a lost response never makes a duplicate or counts its storage twice, and an `id` or `source_quiz_id` held by another user is refused with `409` (`invalid`), never that user's row. `at` is the device's timestamp, used for `options_changed_at` on the cascade and the Source quiz exactly as operations' `at` is, so the creating device's first option change is never `stale` against a server clock. Runs the search **before opening any transaction**, then in one short transaction locks the user's row, checks the [storage limit](#storage-limit) against what the new cascade will hold, stores the question index and shuffles the Source quiz with a server-generated seed, and returns `{ cascade, source_quiz, sync_seq }`, whose `cascade` carries `storage_bytes` as a pulled row does, and adds that to `users.storage_bytes`. A cheap check before the search refuses an account already at or over its limit without spending one (`needed` 0), and the lock therefore never covers the search's CPU or its wait for a `SEARCH_CONCURRENCY` permit, so a creation can never block the [purge task](#purge-task) on the same user's row for the length of a search. `source_quiz` carries its `shuffle_seed` rather than its positions: the device derives the Source quiz's order with the shared [shuffle](#deterministic-shuffles) over `idx` 0…count−1, and writes the cascade, the Source quiz and its question rows straight into its base stores from this response, so its first pull finds nothing to rebuild. `sync_seq` is informational; the device does **not** advance its sync cursor from this response, so its next sync pulls the rows the creation stamped. The cascade's private spec is stored with this request's `quiz_type`, which is what an In Word List row's entries were canonicalised under and what Start over copies. `422` if the search is empty or over the cap. `409` with `{ error: "storage_limit", used, limit, needed }` when the cascade does not fit (see [Storage limit](#storage-limit)). A `5xx`, such as a deadlock or timeout inside the creation transaction, is retried by the device with the same body, which the device-minted ids make safe, and so is a `429`, after `Retry-After`, since this endpoint shares `SEARCH_RATE_PER_MINUTE` with the builder's preview. The threshold, the three [quiz options](#quiz-options) and the answer mode are required, so an omitted one is a `400`: the builder sends the defaults every new cascade starts with (`CASCADE_SETTING_DEFAULTS`; see [Settings](#settings)). The other settings (`show_definitions`, `show_hooks`, `reveal_correct`, `leave_value_decimals`) are not in the request and take their column defaults; Start over copies all of them from the original. The Source quiz is created with a copy of the options. |
-| `POST` | `/api/cascades/:id/start-over` | Body `{ id, source_quiz_id, device_id, at }`, minted per press exactly as for creation and subject to the same repeat, timestamp and `options_device_id` rules. New cascade, named after the original with the next free number, with a copy of the spec and the same threshold and options; returns the same shape. Subject to the [storage limit](#storage-limit), with the original's questions and a copy of its spec as what it needs. |
+| `POST` | `/api/cascades` | Body `{ id, source_quiz_id, device_id, at, name, lexicon, quiz_type, clear_threshold, segment_size, progression, require_alphabetical, answer_mode, filters }`. `name` is required, 1–200 Unicode scalar values, and one the account's cascades do not already use, the Trash included (`400` on the field `name` otherwise, checked before the search); the device builds the default summary itself (see [Creating a cascade](#creating-a-cascade)). The cascade row carries the lexicon's `definitions_revision` and, for a Leave Value cascade, its leave values' `leave_values_revision` (`null` otherwise). `device_id` is recorded as `options_device_id` on the cascade and the Source quiz, so the creating device's option changes never compete on timestamps. `id` and `source_quiz_id` are device-generated UUIDs minted when the button is pressed and reused for any retry of that press, never regenerated on retry; a request whose `id` the server already holds for this user returns the existing cascade and Source quiz unchanged, so a lost response never makes a duplicate or counts its storage twice, and an `id` or `source_quiz_id` held by another user is refused with `409` (`invalid`), never that user's row. `at` is the device's timestamp, used for `options_changed_at` on the cascade and the Source quiz exactly as operations' `at` is, so the creating device's first option change is never `stale` against a server clock. Runs the search **before opening any transaction**, then in one short transaction locks the user's row, checks the [storage limit](#storage-limit) against what the new cascade will hold, stores the question index and shuffles the Source quiz with a server-generated seed, and returns `{ cascade, source_quiz, sync_seq }`, whose `cascade` carries `storage_bytes` as a pulled row does, and adds that to `users.storage_bytes`. A cheap check before the search refuses an account already at or over its limit without spending one (`needed` 0), and the lock therefore never covers the search's CPU or its wait for a `SEARCH_CONCURRENCY` permit, so a creation can never block the [purge task](#purge-task) on the same user's row for the length of a search. `source_quiz` carries its `shuffle_seed` rather than its positions: the device derives the Source quiz's order with the shared [shuffle](#deterministic-shuffles) over `idx` 0…count−1, and writes the cascade, the Source quiz and its question rows straight into its base stores from this response, so its first pull finds nothing to rebuild. `sync_seq` is informational; the device does **not** advance its sync cursor from this response, so its next sync pulls the rows the creation stamped. The cascade's private spec is stored with this request's `quiz_type`, which is what an In Word List row's entries were canonicalised under and what Duplicate copies. `422` if the search is empty or over the cap. `409` with `{ error: "storage_limit", used, limit, needed }` when the cascade does not fit (see [Storage limit](#storage-limit)). A `5xx`, such as a deadlock or timeout inside the creation transaction, is retried by the device with the same body, which the device-minted ids make safe, and so is a `429`, after `Retry-After`, since this endpoint shares `SEARCH_RATE_PER_MINUTE` with the builder's preview. The threshold, the three [quiz options](#quiz-options) and the answer mode are required, so an omitted one is a `400`: the builder sends the defaults every new cascade starts with (`CASCADE_SETTING_DEFAULTS`; see [Settings](#settings)). The other settings (`show_definitions`, `show_hooks`, `reveal_correct`, `leave_value_decimals`) are not in the request and take their column defaults; Duplicate copies all of them from the original. The Source quiz is created with a copy of the options. |
+| `POST` | `/api/cascades/:id/duplicate` | Body `{ id, source_quiz_id, device_id, at }`, minted per press exactly as for creation and subject to the same repeat, timestamp and `options_device_id` rules. New cascade, named after the original with the next free number, with a copy of the spec and the same threshold and options; returns the same shape. Subject to the [storage limit](#storage-limit), with the original's questions and a copy of its spec as what it needs. |
 | `GET` | `/api/cascades/:id/cards?from=<idx>&limit=<n>&hooks=<0\|1>&definitions=<0\|1>&keys=<0\|1>`, or `?idx=<i,j,…>&hooks=…&definitions=…` | Answer cards `[{ idx, key, answer }]` for question indexes `from`…`from+limit−1` (`limit` ≤ 10,000), or for the comma-separated indexes in `idx` (at most 1,000, returned in idx order; never with `from`, `limit` or `keys`, else `400 invalid_idx`) — the player's read-ahead, which asks for the next cards in its quiz's own order. With `hooks=1`, an Anagram answer's words carry `probability_order` (the word's rank by probability among the lexicon's words of its length), `front_hooks`, `back_hooks` and the booleans `front_inner` and `back_inner` (the word less its first, or last, tile is a word), and a Definition card carries `word`: `{ word, probability_order, front_hooks, back_hooks, front_inner, back_inner }` beside its answer. The device splits each row between its `questions` store (the `key`) and its `cards` store (the rest), so eviction can take the answer and leave the question (see [On the device](#on-the-device)). With `keys=1` the response is `{ from, keys: [...] }` — the keys alone, in idx order, since the range makes every index implied — and **`limit` ≤ 100,000**, which at about 10 bytes a key is roughly the size of one 10,000-card page: a 300,000-question cascade's keys are three requests where its answers are thirty, a tenth of the cost in the shared rate bucket, and about a quarter of the bytes of cards without definitions (see [Downloads](#on-the-device)). It is what the download manager fetches first, so a cascade becomes playable and self-gradable before its answers arrive; `hooks` and `definitions` are then a `400`. A Leave Value `answer` is a JSON number written as the shortest text that round-trips the stored `f64`, which `JSON.parse` reads back exactly. Card pages are served `Cache-Control: private, no-store`, because the device keeps every byte it fetches in IndexedDB and a second copy in the browser's HTTP cache would sit outside every budget the plan states; only the questions endpoint, whose index lists are small and refetched by the pending path, keeps immutable caching. Responses are compressed. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/questions?from=<n>&limit=<n>` | The quiz's question indexes `[idx…]` in idx order, `limit` ≤ 50,000. A quiz's question set never changes, so it is served with the same immutable caching. Fetched when the device materialises a quiz; never part of a pull. `404` for another user's, a purged, or a Source quiz, whose indexes are implied. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/grades?from=<idx>&limit=<n>` | The quiz's graded rows for the attempt its row names, which for a cleared quiz is the attempt it finished on (its grades each dated that finish, the quiz's `last_activity_at`, since a cleared quiz keeps no grade times), as the parallel arrays a pull uses, in idx order, with the quiz row's `attempt` and `shuffle_seed` so the device can tell whether they belong to the order it holds. `from` is an **index, not an offset**, as on the card pages: the response holds the graded rows whose `question_idx` is in `from … from+limit−1`, `limit` ≤ 50,000, so the device pages the index space by `from += limit` until `from` reaches the cascade's `question_count` and a sparse page — most of a quiz's questions may be ungraded — means nothing is left behind. The questions endpoint below reads `from` the other way, as an offset into a dense list, which is why the two are written `<idx>` and `<n>`. There is no `min_updated_seq` here, which only a pull's fast path needs; the device stamps these rows with the sequence of the sync it made before the fetch. Not cacheable. Fetched when the device materialises a quiz whose rows it dropped on leaving the download window; never part of a pull. If the device's quiz row names a different attempt or seed, the device discards the response, syncs and fetches again. `404` for another user's or a purged quiz. |
@@ -5431,7 +5437,7 @@ startup rather than falling back to a default.
 | `MAIL_FROM` | `no-reply@acrodont.local` | |
 | `PUBLIC_URL` | `http://localhost:5173` | Base URL for email links |
 | `MAX_QUIZ_QUESTIONS` | `300000` | May be lowered; a value above 300,000 fails startup. Lowering it bounds **new** values only: cascades and quizzes already holding a larger segment size keep working and are never rewritten, and the forms clamp what they prefill (see [Quiz options](#quiz-options)) |
-| `MAX_STORAGE_BYTES_PER_USER` | `10000000` (10 MB) | The [storage limit](#storage-limit): what an account's cascades (the Trash included) and saved searches may hold on the server, in bytes, by the storage formula. Checked inside the creation, Start over and save transactions; reported by `/api/auth/me` as `max_storage_bytes`. Must be at least 1. An account's `users.storage_limit_bytes`, set only through SQL, replaces it for that account. There is no limit on how many cascades or saved searches an account has |
+| `MAX_STORAGE_BYTES_PER_USER` | `10000000` (10 MB) | The [storage limit](#storage-limit): what an account's cascades (the Trash included) and saved searches may hold on the server, in bytes, by the storage formula. Checked inside the creation, Duplicate and save transactions; reported by `/api/auth/me` as `max_storage_bytes`. Must be at least 1. An account's `users.storage_limit_bytes`, set only through SQL, replaces it for that account. There is no limit on how many cascades or saved searches an account has |
 | `SEARCH_TIMEOUT_MS` | `2000` | Production sets 4,000: on half a vCPU a search runs at half a core's speed |
 | `SEARCH_CONCURRENCY` | `2` | Searches running at once per instance, sized to the task's vCPUs. A request waiting longer than `SEARCH_TIMEOUT_MS` for a permit gets `503` with `Retry-After`, never `422` |
 | `EXPORT_CONCURRENCY` | `2` | Server-streamed exports at once per instance (production sets 1). A permit is held for the whole stream and taken before the token is spent; a request waits up to 50 seconds for one, then gets `503` with `Retry-After`. It is what bounds peak memory (the catalog plus this many exports) whatever the number of users |
@@ -6462,7 +6468,7 @@ they run in parallel and leave nothing behind.
     instance's index is older than the row's revision, cards that carry the
     replaced part answer `503` and the others do not.
   - An account's cascade names: a second cascade of a name is a `400` on
-    `name`, in the Trash or not, and not for another account; Start over
+    `name`, in the Trash or not, and not for another account; Duplicate
     numbers its copy, replacing a number already there and cutting a name at
     the limit; the unique constraint holds under a direct update.
   - A second active quiz at the same level, a second Source quiz, a Source quiz
@@ -6591,7 +6597,7 @@ they run in parallel and leave nothing behind.
     on a trashed cascade, a `restore_cascade` or `purge_cascade` on an active
     cascade and a `purge_quiz` on a purged quiz are rejected as `trashed`,
     `not_trashed`, `not_trashed` and `not_found`.
-  - A repeated `POST /api/cascades` or start-over with the same `id` returns
+  - A repeated `POST /api/cascades` or duplicate with the same `id` returns
     the existing cascade and takes no second slot; an `id` held by another
     user is refused; and an options change seconds after creation from a
     device whose clock is behind the server is applied, not `stale`.
@@ -6745,7 +6751,7 @@ they run in parallel and leave nothing behind.
     and only the new password logging in
   - saved-search overwrite answering `409` without `overwrite` and replacing
     the old spec with it, and delete removing the spec; a save recording its
-    `quiz_type` on the spec, `GET /api/searches/:id` returning it, and Start over
+    `quiz_type` on the spec, `GET /api/searches/:id` returning it, and Duplicate
     copying it onto the new cascade's spec; a **round trip** of a tree holding
     nested AND and OR groups, every parameter shape and a 10,000-entry In Word
     List, saved and then read back from `GET /api/searches/:id` equal to what was
@@ -6802,7 +6808,7 @@ they run in parallel and leave nothing behind.
     with the row flagged and refused at creation, while an In Lexicon row in a
     live or trashed cascade's spec still refuses the deletion
   - cascade creation for all three types, a new cascade taking the default
-    settings, Start over (including at the storage limit, refused with
+    settings, Duplicate (including at the storage limit, refused with
     `storage_limit`, the original being purged afterwards, the copy holding
     the same storage, and the copy keeping the original's threshold, options,
     answer mode and other settings), card pages, a missing
@@ -6814,7 +6820,7 @@ they run in parallel and leave nothing behind.
   - the [storage limit](#storage-limit) (`backend/tests/storage.rs`): the
     preview's `storage_bytes` is exactly what creation stores, on the cascade
     row, on the user's total and as the formula counts the rows; creation and
-    Start over past the limit refused with `409` and
+    Duplicate past the limit refused with `409` and
     `{ error: "storage_limit", used, limit, needed }`, writing nothing, and an
     account already at its limit refused before any search with `needed` 0;
     two simultaneous creations racing for the last space, one winning; a
@@ -7195,7 +7201,7 @@ through the ordinary endpoints, so there is still no test-only path.
   values and see the cascade's answer change on the device with no reload,
   and see deletion refused while the cascade exists.
 - In the builder, build the same search twice and see the second suggested a
-  numbered name, a name in use refused under the field, and Start over's copy
+  numbered name, a name in use refused under the field, and Duplicate's copy
   numbered.
 
 ### Scale tests

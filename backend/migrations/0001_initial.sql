@@ -240,7 +240,7 @@ CREATE TABLE search_specs (
                             -- canonicalised under: a leave is sorted into tile order and
                             -- a word is not, so loading the spec under a type on the
                             -- other side of Leave Value flags that row rather than
-                            -- silently reading leaves as words. Start over copies it
+                            -- silently reading leaves as words. Duplicate copies it
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX search_specs_user_id ON search_specs (user_id);
@@ -404,7 +404,7 @@ CREATE TABLE cascades (
     leave_set_id      INTEGER,                    -- Leave Value cascades only
     spec_id           UUID NOT NULL REFERENCES search_specs (id),
                           -- a private copy, never a saved search's or another
-                          -- cascade's spec; Start over copies it again
+                          -- cascade's spec; Duplicate copies it again
     clear_threshold   SMALLINT NOT NULL CHECK (clear_threshold BETWEEN 1 AND 100),
 
     -- Quiz options: what every quiz created for this cascade starts with.

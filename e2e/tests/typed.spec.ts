@@ -23,7 +23,7 @@ async function next(page: Page, completes: boolean) {
 	const input = page.getByLabel('Type an answer');
 	if (await input.count()) await input.blur();
 	await press(page, 'Space');
-	const keep = page.getByRole('button', { name: 'Keep studying' });
+	const keep = page.getByRole('button', { name: 'Start over' });
 	if (completes) {
 		await keep.click({ timeout: 15_000 });
 		await expect(keep).toHaveCount(0);

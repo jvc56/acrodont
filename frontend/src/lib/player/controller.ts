@@ -528,7 +528,7 @@ export class Player {
 		}
 	}
 
-	/** "Keep studying": the completion screen closes and stays closed. */
+	/** The completion screen's Start over: it closes and stays closed, and the cascade is studied again. */
 	dismissCompletion() {
 		this.v.completion = null;
 		this.emit();

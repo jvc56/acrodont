@@ -418,7 +418,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		copied = null;
 		copyFrom = '';
 		if (db) {
-			// Start over makes a new cascade, which needs room; the server checks the exact figure.
+			// Duplicate makes a new cascade, which needs room; the server checks the exact figure.
 			const server = await getMeta(db, 'server');
 			atLimit = (server.storage_bytes ?? 0) >= (server.max_storage_bytes ?? DEFAULT_STORAGE_LIMIT);
 			sources = c ? await copySources(db, c) : [];
@@ -535,12 +535,13 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 
 	let starting = $state<{ stage: 'server' | 'device'; progress: number; count: number | null } | null>(null);
 
-	async function startOver() {
+	/** Settings → Duplicate cascade: a new cascade from the same filters and settings, at Level 1. */
+	async function duplicate() {
 		if (!db || !session.userId) return;
 		const ok = await confirmAction({
-			title: `Start “${v?.cascade?.name ?? 'this cascade'}” over?`,
-			body: `This makes a new cascade of the same words, with the same threshold and options, starting at Level 1. It takes this cascade’s name with the next free number after it. This cascade isn’t changed. You’ll have both, and each counts toward your storage until it is deleted from the Trash.`,
-			action: 'Start over'
+			title: `Duplicate “${v?.cascade?.name ?? 'this cascade'}”?`,
+			body: `This makes a new cascade from the same filters, with the same threshold and options, starting at Level 1. It takes this cascade’s name with the next free number after it. This cascade isn’t changed. You’ll have both, and each counts toward your storage until it is deleted from the Trash.`,
+			action: 'Duplicate'
 		});
 		if (!ok) return;
 		const { device_id } = await getMeta(db, 'device');
@@ -548,7 +549,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		starting = { stage: 'server', progress: 0, count: null };
 		cascadeError = null;
 		try {
-			const created = await api.post<Created>(`/api/cascades/${id}/start-over`, body);
+			const created = await api.post<Created>(`/api/cascades/${id}/duplicate`, body);
 			starting = { stage: 'device', progress: 0, count: Number(created.source_quiz.question_count) };
 			await storeCreated(db, created, new Date(), (f) => starting && (starting.progress = f));
 			settingsOpen = false;
@@ -556,14 +557,15 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		} catch (e) {
 			if (e instanceof ApiError && e.code === 'storage_limit') {
 				const b = e.body as { used: number; limit: number; needed: number };
-				cascadeError = `Starting over needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your storage is free. Empty the Trash or delete cascades to make room.`;
-			} else cascadeError = 'Start over needs a connection.';
+				cascadeError = `Duplicating needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your storage is free. Empty the Trash or delete cascades to make room.`;
+			} else cascadeError = 'Duplicating a cascade needs a connection.';
 		} finally {
 			starting = null;
 		}
 	}
 
-	function keepStudying() {
+	/** The completion screen's Start over: another pass of this cascade, whose Source quiz the finish has reset. */
+	function startOver() {
 		player?.dismissCompletion();
 	}
 </script>
@@ -1121,8 +1123,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 							<Button
 								variant="outline"
 								disabled={atLimit}
-								title={atLimit ? 'Start over: your storage is full' : 'A new cascade of the same questions, from Level 1'}
-								onclick={startOver}>Start over</Button
+								title={atLimit ? 'Duplicate cascade: your storage is full' : 'A new cascade from the same filters and settings, at Level 1'}
+								onclick={duplicate}>Duplicate cascade</Button
 							>
 							<Button variant="outline" class="hover:text-destructive" onclick={moveToTrash}>Move to Trash</Button>
 						</div>
@@ -1145,8 +1147,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 			<h2 class="text-xl font-semibold">Cascade complete</h2>
 			<p>After {v.completion.levels} levels and {v.completion.attempts} {v.completion.attempts === 1 ? 'pass' : 'passes'}.</p>
 			<div class="flex flex-col gap-2">
-				<Button onclick={keepStudying}>Keep studying</Button>
-				<Button variant="outline" onclick={startOver}>Start over</Button>
+				<Button onclick={startOver}>Start over</Button>
 				<Button variant="outline" onclick={moveToTrash}>Move to Trash</Button>
 			</div>
 		</div>
@@ -1154,5 +1155,5 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 {/if}
 
 {#if starting}
-	<CreatingCascade title="Starting over" stage={starting.stage} progress={starting.progress} count={starting.count} />
+	<CreatingCascade title="Duplicating" stage={starting.stage} progress={starting.progress} count={starting.count} />
 {/if}
