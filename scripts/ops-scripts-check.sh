@@ -676,8 +676,17 @@ said "the plan shows changes" || fail "the changes are not reported"
 fresh "$B"
 if FAKE_TF_VERSION=1.10.5 run onboard-deployer.sh; then fail "onboarding passed with terraform 1.10"; fi
 said "too old" || fail "an old terraform is not reported"
+fresh "$B"
+FAKE_NO_OUTPUTS=1 FAKE_PLAN_RC=2 run onboard-deployer.sh || fail "onboard-deployer.sh failed on a stack never applied"
+said "the first setup" || fail "a stack never applied is not recognised"
+in_order "$TF init" "aws s3 cp s3://state-bucket/acrodont/prod.tfvars" "$TF plan -input=false -detailed-exitcode -lock=false -var-file=prod.tfvars"
+! called "apply" || fail "the first setup applied something"
+fresh "$B"
+if FAKE_NO_OUTPUTS=1 FAKE_PLAN_RC=0 run onboard-deployer.sh; then fail "an empty state with nothing to add passed"; fi
+fresh "$B"
+if FAKE_NO_OUTPUTS=1 FAKE_PLAN_RC=1 run onboard-deployer.sh; then fail "a failed first plan passed"; fi
 write_env
-pass "onboard-deployer.sh: settings written from answers, init against the shared state, a plan that must show no changes"
+pass "onboard-deployer.sh: settings written from answers, init against the shared state, a plan that must show no changes; before the first apply, one that must show the stack to add"
 
 # ---------------------------------------------------------------------------
 # runbook-check.sh

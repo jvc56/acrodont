@@ -15,6 +15,8 @@
 #   6. ends with a plan that must show NO changes. If it shows some, stop and
 #      compare with whoever deployed last: one of you has an out-of-date main
 #      or prod.tfvars.
+# On the very first setup the state holds no stack yet. The closing plan must
+# then show the whole stack to add, and the script says the first apply is next.
 set -euo pipefail
 # shellcheck source=scripts/lib/ops.sh
 source "$(dirname "$0")/lib/ops.sh"
@@ -77,6 +79,21 @@ terraform -chdir="$OPS_INFRA" init -input=false \
   -backend-config="region=$STATE_REGION" \
   -backend-config="use_lockfile=true" \
   || ops_die "terraform init failed (above)"
+
+# Before the first apply the state has no outputs: nothing to compare with,
+# and the plan is the whole stack.
+if [[ -z "$(ops_out -raw region 2>/dev/null || true)" ]]; then
+  ops_say "the state holds no stack yet: taking this as the first setup"
+  ops_tfvars_fetch
+  rc=0
+  terraform -chdir="$OPS_INFRA" plan -input=false -detailed-exitcode -lock=false -var-file=prod.tfvars || rc=$?
+  case $rc in
+    2) ops_say "the plan adds the whole stack, as it must before the first apply: this machine is ready for it (docs/runbook.md, One-time setup)" ;;
+    0) ops_die "the state holds no stack, yet the plan shows nothing to add: wrong state bucket or key?" ;;
+    *) ops_die "terraform plan failed (above)" ;;
+  esac
+  exit 0
+fi
 
 # 5. The variables, and 6. the plan that must show nothing.
 ops_stack

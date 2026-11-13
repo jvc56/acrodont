@@ -77,8 +77,9 @@ DNS and the GitHub repository.
 
 4. **Onboard.** Run `scripts/onboard-deployer.sh`. It writes `~/.acrodont-env`,
    initialises Terraform against the state bucket and fetches `prod.tfvars`.
-   On the very first setup its closing plan reports changes, because nothing
-   exists yet. That is expected; carry on.
+   On the very first setup the state holds no stack, and the script says so:
+   its closing plan must then show the whole stack to add. On any later
+   machine the plan must show no changes.
 
 5. **The first apply.** Run `terraform -chdir=infra apply -var-file=prod.tfvars`.
    It waits on certificate validation, so create the DNS records in step 6
