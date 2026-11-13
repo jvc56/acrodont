@@ -991,7 +991,7 @@ as the term of the data model and the API.
     with (the cascade's); **Copy another cascade's settings** (a choice of the
     user's other cascades and **Copy settings**); then Duplicate and Move to
     Trash. Duplicate is disabled when the account's
-    [storage](#storage-limit) is full (`Duplicate: your storage is full`); a
+    [storage](#storage-limit) is full (`Duplicate cascade: your storage is full`); a
     `409 storage_limit` says what duplicating needs and how much is free. The two sets of level options are subgroups of the section, each
     under its own heading. Each of the cascade's settings, and the options
     for levels made from now on, says "✓ Saved for this cascade" once changed
