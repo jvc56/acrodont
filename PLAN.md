@@ -600,7 +600,7 @@ creating a cascade, Duplicate and saving a search are refused.
 ### Accounts
 
 Every page except the login, registration, email confirmation and password
-reset pages (and `/`, which only redirects) requires a logged-in user. An account is a username, an
+reset pages requires a logged-in user (`/` is the [Cascades page](#cascades-page); signed out, it goes to the log-in page). An account is a username, an
 email address and a password. Some accounts are **admins**, who can also upload
 and delete catalog data (see [Admin](#admin)). See
 [Authentication](#authentication).
@@ -907,7 +907,7 @@ Delete forever asks for confirmation first.
 says what it frees ("Delete forever (4.2 MB)"), and its confirmation ends
 "This frees 4.2 MB of your storage." A trashed cascade's figure is the
 server's for the whole cascade; a cleared quiz's is its level's share, counted
-on the device from the same per-row costs (its attempt rows, 176 bytes each,
+on the device from the same per-row costs (its attempt rows, 210 bytes each,
 are left out of the label but freed with it).
 **Entries are grouped and not all rendered.** A cascade's group shows its name,
 how many entries it holds, its size and the earliest date among them that one is deleted
@@ -1767,8 +1767,10 @@ line per leave, in any order, and at least one leave.
 
 The file does not have to list every possible leave; a leave missing from it
 simply cannot be quizzed. The chosen lexicon must not already have leave
-values. To replace them, delete the existing set (allowed only while no cascade
-uses it) and upload again.
+values. To change the values of the leaves it already has, use
+[Replace values](#replacing-definitions-and-leave-values); to change which
+leaves it holds, delete the existing set (allowed only while no cascade uses
+it) and upload again.
 
 ```
 ?,28.292000
@@ -3952,6 +3954,10 @@ CREATE TABLE users (
     storage_limit_bytes BIGINT CHECK (storage_limit_bytes >= 0),
                             -- set only via SQL: replaces MAX_STORAGE_BYTES_PER_USER
                             -- for this account
+    device_settings     JSONB NOT NULL DEFAULT '{}'::jsonb
+                            CHECK (jsonb_typeof(device_settings) = 'object'),
+                            -- device settings shared with all of the account's
+                            -- devices: setting name -> {value, at} (Settings)
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (sync_floor_seq <= sync_seq)
 );
@@ -5124,14 +5130,17 @@ enough for a filter tree holding a 300,000-entry In Word List; Axum's default of
 | `POST` | `/api/auth/login` | Start a session. `429` once the caller's address or the username has no failure token left; `503` with `Retry-After: 10` when no Argon2 turn comes within 10 seconds (see [Authentication](#authentication)) |
 | `POST` | `/api/auth/logout` | Clear the session cookie **and the CSRF cookie**, so no token outlives the session it was issued with; login re-sets both. The token is stateless, so a copy of it stays valid until its TTL; a user who suspects a copy uses **Sign out everywhere**. This is the one endpoint that needs **neither a session nor a CSRF token** *when no session cookie arrives with it*: there is then nothing to clear and nothing to forge, and it answers `2xx`, so a device offline past both cookies' TTL is not left retrying forever. With a session cookie it is CSRF-checked like any other write, which is the ordinary state of the [queued logout](#authentication-while-offline). It is **exempt from the account-binding `X-Acrodont-User` check**: the queued logout is sent while no account is signed in, so it could never satisfy it, and a `401` would clear its flag with the cookie still alive. The queued logout runs when no account is **signed in**, not when no cookie is held, and the `httpOnly` session cookie it exists to clear is still in the browser, so the app sends the double-submit token with it. Either way the answer is a `2xx`, never a `401`-or-`403` guess |
 | `POST` | `/api/auth/reset-password` | Body `{ email }` → `202 {}` whether or not the address has an account; the lookup and the reset email (with the account's username) follow the response. `429` past `RESET_RATE_PER_HOUR` per caller or per address named, alike for every address (see [Authentication](#authentication)) |
-| `POST` | `/api/auth/reset-password/confirm` | Body `{ token, password }` → `204`, clearing the caller's session and CSRF cookies. The link is checked first (`400 invalid_token`, before any scoring), then the link's own `RESET_RATE_PER_HOUR` bucket (`429`), then the strength rule against the account's username and address (`400` field error on `password`; the link still works); `503` with `Retry-After: 10` when no scoring turn comes within 10 seconds. Spends every outstanding token of the account and bumps `session_generation`. The one way to change a password |
+| `POST` | `/api/auth/reset-password/confirm` | Body `{ token, password }` → `204`, clearing the caller's session and CSRF cookies. The link is checked first (`400 invalid_token`, before any scoring), then the link's own `RESET_RATE_PER_HOUR` bucket (`429`), then the strength rule against the account's username and address (`400` field error on `password`; the link still works); `503` with `Retry-After: 10` when no scoring turn comes within 10 seconds. Spends every outstanding token of the account and bumps `session_generation`. The way to change a password without a session; signed in, it is `POST /api/account/password` |
 | `GET` | `/api/auth/me` | `{ user_id, username, is_admin, trash_retention_days, max_quiz_questions, storage_bytes, max_storage_bytes }` or `401`, where `storage_bytes` is the account's [storage](#storage-limit) and `max_storage_bytes` its effective limit (`users.storage_limit_bytes` when set, otherwise `MAX_STORAGE_BYTES_PER_USER`), both numbers. Login and dev-login answer with the same body. Exempt from the account-binding `X-Acrodont-User` check, since it only reports whose session cookie the browser holds, which the startup comparison reads. The retention period, the cap and the storage figures go into the `meta` store, so the Trash can show purge dates offline, the option forms validate segment size against the server's cap, and the Cascades page and the builder show the account's storage offline |
 | `POST` | `/api/account/password` | Body `{ current_password, new_password }` → `204`. A wrong current password or a weak new one is a `400` field error. Stores the new hash, spends the account's reset tokens, bumps `session_generation` and re-issues this device's cookies, as Sign out everywhere does |
 | `POST` | `/api/account/sign-out-everywhere` | Body `{ password }`. Bump `session_generation` and re-issue this device's session and CSRF cookies, so every other session is refused from its next request while this one keeps working. `429` past `RESET_RATE_PER_HOUR` passwords typed for the account, with Change password and Delete account |
 | `DELETE` | `/api/account` | Delete the account (requires password; `429` past the same per-account bucket). On a `2xx` the device removes its own local copy of that account, as [Authentication](#authentication) describes |
 
 A cascade's settings are read and written through sync, not a separate
-endpoint; this device's settings never leave it.
+endpoint. This device's settings stay on it, except those the user shares
+with **all your devices**: they travel in the sync request's and response's
+`device_settings` and are kept in `users.device_settings` (see
+[Settings](#settings)).
 
 ### Catalog and search
 
@@ -5286,8 +5295,9 @@ A segment descent and an options change on the wire:
 `set_cascade_options` and `set_quiz_options` carry only the fields that changed,
 out of `segment_size`, `progression` and `require_alphabetical`, and for
 `set_cascade_options` also `clear_threshold`, `answer_mode`,
-`show_definitions`, `show_hooks`, `reveal_correct` and
-`leave_value_decimals`; any other field is a `400`.
+`show_definitions`, `show_hooks`, `reveal_correct`, `show_found_count`,
+`show_probability`, `definition_column` and `leave_value_decimals`; any other
+field is a `400`.
 
 ### Admin
 
@@ -5691,8 +5701,8 @@ manual walk through a `dev.py` instance that precedes a launch.
 
 ## Deployment and Operations
 
-Sized for the [scale assumptions](#overview): one user at first, at most 100
-accounts. The stack costs about $53 a month (docs/runbook.md, "What it
+Sized for the [scale assumptions](#overview): one user at first, at most 750
+accounts (`MAX_ACCOUNTS`). The stack costs about $53 a month (docs/runbook.md, "What it
 costs"). Birdtest, a sibling app on the same stack that has been live since
 October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
 
@@ -7122,9 +7132,9 @@ through the ordinary endpoints, so there is still no test-only path.
   see only that tab reload, the second keep its revealed card, show that the app
   was updated in another tab, finish that card from the old build's cache, and
   report the update rather than block the new build's IndexedDB upgrade.
-- **Asking for a reset link** from `/account` (`accounts.spec.ts`): the
-  card says a link is on its way. The same spec sees a Cascades row's quiz
-  type after its name.
+- **Changing the password** from `/account` (`accounts.spec.ts`): a wrong
+  current password is said under its field and nothing is changed. The same
+  spec sees a Cascades row's quiz type after its name.
 - **Deleting the account** from `/account`, with a second account's data also on
   the browser, lands on the log-in page, leaves no per-user database or
   `accounts` row for the deleted account — so the browser's accounts list holds only the second — and a reload offers the login page rather than the deleted
@@ -7501,7 +7511,7 @@ CI (`.github/workflows/ci.yml`) runs three tiers, each a superset of the last:
 |---|---|---|
 | **Push** | Every push, every branch | Clippy, the unit tests (a backend and a frontend job), `make test-integration`, `make test-e2e-core`, `make infra-validate`, `make ops-check`. About 5 minutes |
 | **Main** | A push to `main`, and a manual run on any branch | The Push tier, plus `make test-e2e-main`, `make test-e2e-seeding` and `make test-ops-image` (the last also on a push that changes `scripts/` or `docker/`) |
-| **Nightly** | 04:30 UTC on `main` | The Main tier, plus `make test-scale`. A failure opens (or comments on) one issue |
+| **Nightly** | 04:30 UTC on `main` | The Main tier, plus `make test-scale` (which a manual run on any branch runs too). A failure opens (or comments on) one issue |
 
 The seeding check also runs on a push that changes `scripts/`. A branch can be
 green and still fail on `main`; deploys come from `main`, and
