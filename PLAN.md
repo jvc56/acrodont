@@ -2464,8 +2464,11 @@ How a search runs:
 Pattern matching:
 
 - **Anagram and Subanagram** compare tile count vectors. `.` and bracket sets
-  are matched by a small bipartite assignment: sets are few and short, so a
-  greedy most-constrained-first assignment with backtracking is enough.
+  are matched by a bipartite matching between the word's distinct remaining
+  tiles and the pattern's distinct sets, each with its count, grown along
+  augmenting paths. A candidate costs at most its length times the number of
+  (tile, set) pairs, whatever the pattern holds: a pattern of one set sixty
+  times over is answered as fast as one of three.
 - **Pattern Match** compiles to an anchored matcher over tile indexes (`.` → any
   one tile, `*` → any run, `[..]` → a tile set, `?` → the blank tile). Compiled patterns are cached
   per request.
