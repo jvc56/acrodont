@@ -114,9 +114,9 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await expect(device.getByRole('button', { name: 'Reset controls to defaults' })).toBeVisible();
 	const levels = dialog.getByRole('region', { name: 'Cascade Settings' });
 	// Each section says where it applies, behind the ⓘ beside its heading.
-	await expect(levels.getByText(/Your other cascades keep their own/)).toHaveCount(0);
-	await expect(levels.locator('[data-info*="Your other cascades keep their own"]')).toBeVisible();
-	await expect(device.locator('[data-info*="and not synced"]')).toBeVisible();
+	await expect(levels.getByText(/Your other cascades keep their settings/)).toHaveCount(0);
+	await expect(levels.locator('[data-info*="Your other cascades keep their settings. After you change a setting you can optionally apply the change for every cascade too."]')).toBeVisible();
+	await expect(device.locator('[data-info*="Your other devices keep their settings. After you change a setting you can optionally apply the change for all your devices too."]')).toBeVisible();
 	await expect(levels.getByRole('table', { name: 'Ladder' })).toBeVisible();
 	await expect(levels.getByRole('columnheader')).toHaveText(['Level', 'Questions', 'Pass', 'Last pass', 'Status', 'Actions']);
 	// The clear threshold changes there, for the pass in progress too; out of range is put back.

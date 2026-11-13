@@ -96,6 +96,7 @@ struct Display {
     show_hooks: bool,
     reveal_correct: bool,
     show_found_count: bool,
+    show_probability: bool,
     leave_value_decimals: i16,
 }
 
@@ -236,7 +237,7 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     if let Some(d) = &n.display {
         sqlx::query!(
             "UPDATE cascades SET show_definitions = $2, show_hooks = $3, reveal_correct = $4, leave_value_decimals = $5,
-                                 show_found_count = $6
+                                 show_found_count = $6, show_probability = $7
              WHERE id = $1",
             n.id,
             d.show_definitions,
@@ -244,6 +245,7 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
             d.reveal_correct,
             d.leave_value_decimals,
             d.show_found_count,
+            d.show_probability,
         )
         .execute(&mut *tx)
         .await?;
@@ -332,7 +334,8 @@ async fn start_over(
     let row = sqlx::query!(
         r#"SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS "progression: Progression",
                   c.require_alphabetical, c.answer_mode AS "answer_mode: AnswerMode", c.show_definitions,
-                  c.show_hooks, c.reveal_correct, c.show_found_count, c.leave_value_decimals, l.name AS lexicon
+                  c.show_hooks, c.reveal_correct, c.show_found_count, c.show_probability,
+                  c.leave_value_decimals, l.name AS lexicon
            FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2"#,
         original,
         user.id
@@ -359,6 +362,7 @@ async fn start_over(
             show_hooks: row.show_hooks,
             reveal_correct: row.reveal_correct,
             show_found_count: row.show_found_count,
+            show_probability: row.show_probability,
             leave_value_decimals: row.leave_value_decimals,
         }),
         copy_of_spec: Some(row.spec_id),

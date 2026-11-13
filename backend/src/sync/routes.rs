@@ -28,13 +28,14 @@ use crate::extract::ApiJson;
 pub const MAX_INDEX_PAGE: i64 = 50_000;
 
 /// The `set_cascade_options` fields a `set_quiz_options` never carries.
-const CASCADE_ONLY_FIELDS: [&str; 7] = [
+const CASCADE_ONLY_FIELDS: [&str; 8] = [
     "clear_threshold",
     "answer_mode",
     "show_definitions",
     "show_hooks",
     "reveal_correct",
     "show_found_count",
+    "show_probability",
     "leave_value_decimals",
 ];
 

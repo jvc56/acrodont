@@ -17,6 +17,7 @@ export const CASCADE_SETTINGS = [
 	'show_hooks',
 	'reveal_correct',
 	'show_found_count',
+	'show_probability',
 	'leave_value_decimals',
 	'segment_size',
 	'progression',

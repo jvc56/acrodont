@@ -1,10 +1,12 @@
 // How the player looks and responds on this device: the question's and the
 // answers' typefaces, sizes and letter spacing, how far down the question
 // sits, the grade border's width, whether the player's status bar and sync
-// status are hidden, whether a definition has a column of its own and a word
-// shows its probability order, a phone's tap zones (columns or rows), and the repeat guard against an accidental double press.
+// status are hidden, whether a definition has a column of its own and how wide
+// it may be, the hooks' size, a phone's tap zones (columns or rows), and the
+// repeat guard against an accidental double press.
 // Kept in the user's `meta` store, per device and user like the other `meta`
-// values, and never synced: what suits a laptop is wrong on a phone.
+// values: what suits a laptop is wrong on a phone. A change stays on its
+// device unless the user then shares it with all of them (lib/settings/device).
 //
 // Every value is a number the user types (pixels, em, milliseconds), but for
 // the typeface, which is one of a few that every device has (Inter is bundled).
@@ -27,6 +29,10 @@ export const DEFAULT_FONT = 'Inter';
 export const LIMITS = {
 	size_px: { min: 8, max: 200, step: 1, default: 36 },
 	definition_size_px: { min: 8, max: 200, step: 1, default: 20 },
+	// Three quarters of the answers' default size.
+	hook_size_px: { min: 6, max: 200, step: 1, default: 27 },
+	// 0: no limit, the column takes all the room there is.
+	definition_width_px: { min: 0, max: 4000, step: 1, default: 0 },
 	spacing_em: { min: -0.2, max: 2, step: 0.01, default: 0 },
 	question_top_px: { min: 0, max: 800, step: 1, default: 8 },
 	border_px: { min: 0, max: 40, step: 1, default: 10 },
@@ -56,7 +62,8 @@ export function defaultDisplay(): Display {
 		status_bar_hidden: false,
 		sync_status_hidden: false,
 		definition_column: true,
-		show_probability: false,
+		definition_width_px: LIMITS.definition_width_px.default,
+		hook_size_px: LIMITS.hook_size_px.default,
 		mobile_buttons: 'columns',
 		mobile_row_px: LIMITS.mobile_row_px.default,
 		version: DISPLAY_VERSION
@@ -120,7 +127,8 @@ export function normalizeDisplay(stored: Stored | undefined): Display {
 		status_bar_hidden: !!d.status_bar_hidden,
 		sync_status_hidden: !!d.sync_status_hidden,
 		definition_column: d.definition_column === undefined ? true : !!d.definition_column,
-		show_probability: !!d.show_probability,
+		definition_width_px: clampSetting('definition_width_px', d.definition_width_px),
+		hook_size_px: clampSetting('hook_size_px', d.hook_size_px),
 		mobile_buttons: d.mobile_buttons === 'rows' ? 'rows' : 'columns',
 		mobile_row_px: clampSetting('mobile_row_px', d.mobile_row_px),
 		version: DISPLAY_VERSION

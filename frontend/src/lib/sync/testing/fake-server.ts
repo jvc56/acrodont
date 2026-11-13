@@ -58,7 +58,7 @@ interface CascadeEntry {
 	options_device: string;
 	answer_mode: 'flashcard' | 'typed';
 	/** The per-cascade settings the cascade rules never read. */
-	settings: { show_definitions: boolean; show_hooks: boolean; reveal_correct: boolean; show_found_count: boolean; leave_value_decimals: number };
+	settings: { show_definitions: boolean; show_hooks: boolean; reveal_correct: boolean; show_found_count: boolean; show_probability: boolean; leave_value_decimals: number };
 	quizzes: Map<string, QuizMeta>;
 }
 
@@ -112,7 +112,7 @@ export class FakeServer {
 			options_seq: seq,
 			options_device: 'server',
 			answer_mode: 'flashcard',
-			settings: { show_definitions: true, show_hooks: true, reveal_correct: true, show_found_count: false, leave_value_decimals: 1 },
+			settings: { show_definitions: true, show_hooks: true, reveal_correct: true, show_found_count: false, show_probability: false, leave_value_decimals: 1 },
 			quizzes: new Map()
 		};
 		this.cascades.set(c.id, e);

@@ -52,7 +52,7 @@ test('hooks read Zyzzyva-style in lower case, and a Catalan multi-character hook
 	await expect(page.getByRole('listitem').filter({ hasText: /ny/ })).toHaveCount(0);
 });
 
-test('a word row is probability, front hooks, word, back hooks, definition; each is this device\'s choice, as is the sync status', async ({ page }) => {
+test('a word row is probability, front hooks, word, back hooks, definition; the cascade and the device choose what shows', async ({ page }) => {
 	await newUser(page, 'columns');
 	const port = await apiCascade(page, { name: 'Port', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'O P R T' }] } });
 	await page.goto(port);
@@ -68,7 +68,10 @@ test('a word row is probability, front hooks, word, back hooks, definition; each
 	// By default the definition is a column of its own, after the back hooks on the word's line.
 	let [w, d, b] = [await box(word), await box(definition), await box(backHooks)];
 	expect(d.x).toBeGreaterThanOrEqual(b.x + b.width);
-	expect(d.y).toBeLessThan(w.y + w.height);
+	// The back hooks' column is as wide as the hooks, so the definition starts just after them, centred on the word's line.
+	expect(d.x - (b.x + b.width)).toBeLessThan(20);
+	expect(b.width).toBeLessThan(w.width);
+	expect(Math.abs(d.y + d.height / 2 - (w.y + w.height / 2))).toBeLessThan(6);
 	// The word stays in the middle of the quiz area, whatever sits either side of it.
 	// (Measured afresh each time: opening Settings shows the menu, which narrows the area.)
 	const offCentre = async () => {
@@ -76,7 +79,7 @@ test('a word row is probability, front hooks, word, back hooks, definition; each
 		return Math.abs(word_.x + word_.width / 2 - (area.x + area.width / 2));
 	};
 	expect(await offCentre()).toBeLessThan(3);
-	// No probability order until asked for; then it sits before the front hooks.
+	// No probability order until the cascade asks for it; then it sits before the front hooks.
 	await expect(probability).toHaveText('');
 	await playerSetting(page, 'Show each word’s probability order', true);
 	await expect(probability).toHaveText(/^\s*\d+\s*$/);
@@ -88,6 +91,34 @@ test('a word row is probability, front hooks, word, back hooks, definition; each
 	[w, d] = [await box(word), await box(definition)];
 	expect(d.y).toBeGreaterThanOrEqual(w.y + w.height - 1);
 	expect(Math.abs(d.x + d.width / 2 - (w.x + w.width / 2))).toBeLessThan(3);
+	await playerSetting(page, 'Definitions in their own column', true);
+	// The probability order is the cascade's setting: another cascade has its own, off.
+	// Its definition has a line for each part of speech, centred as a whole on the word's line.
+	const exit = await apiCascade(page, { name: 'Exit', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'E I T X' }] } });
+	await page.goto(exit);
+	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
+	await press(page, 'Space');
+	const parts = page.getByRole('listitem').filter({ hasText: /EXIT/ }).locator('[data-definition]');
+	await expect(parts.locator('span')).toHaveText(['a way out [n -S]', 'to go out [v -ED, -ING, -S]'], { timeout: 30_000 });
+	await expect(page.getByRole('listitem').filter({ hasText: /EXIT/ }).locator('[data-probability]')).toHaveText('');
+	const [x, lines] = [await box(page.locator('[data-answer]').filter({ hasText: /EXIT/ })), await box(parts)];
+	expect(Math.abs(lines.y + lines.height / 2 - (x.y + x.height / 2))).toBeLessThan(6);
+	// Each hook column is as wide as its own widest hooks, the same for every row, and the two differ:
+	// AT has front hooks enopqrv and back hook e, TA front hook e and back hooks noprx.
+	const at = await apiCascade(page, { name: 'At', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'A T' }] } });
+	await page.goto(at);
+	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
+	await press(page, 'Space');
+	const cell = (w: RegExp, side: string) => box(page.getByRole('listitem').filter({ has: page.locator('[data-answer]').filter({ hasText: w }) }).locator(`[data-hooks="${side}"]`));
+	await expect(page.locator('[data-answer]')).toHaveCount(2, { timeout: 30_000 });
+	const [atFront, taFront, atBack, taBack] = [await cell(/^\W*AT\W*$/, 'front'), await cell(/^\W*TA\W*$/, 'front'), await cell(/^\W*AT\W*$/, 'back'), await cell(/^\W*TA\W*$/, 'back')];
+	expect(Math.abs(atFront.width - taFront.width)).toBeLessThan(1);
+	expect(Math.abs(atBack.width - taBack.width)).toBeLessThan(1);
+	expect(Math.abs(atBack.x - taBack.x)).toBeLessThan(1);
+	expect(atFront.width).toBeGreaterThan(atBack.width + 10);
+	// The words are still in the middle, though the hooks either side are not equally wide.
+	const [ta, area] = [await box(page.locator('[data-answer]').filter({ hasText: /^\W*TA\W*$/ })), (await page.locator('[data-fit-area]').first().boundingBox())!];
+	expect(Math.abs(ta.x + ta.width / 2 - (area.x + area.width / 2))).toBeLessThan(3);
 
 	// The two sections of Settings carry no "Synced" / "Not synced" badge.
 	await openPlayerSettings(page);

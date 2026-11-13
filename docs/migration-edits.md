@@ -113,3 +113,12 @@ Postgres 16 with CSW24 (the sizes are in PLAN.md § Upload limits and
   while nothing is graded; `grades`, `graded_at`, `graded_seq` and `graded_by`
   are gone. A grade's time is kept to the second. `quiz_card_rows` decodes a
   chunk for the `quiz_questions` view, whose columns are unchanged.
+
+## 2026-11-12: the probability order is a cascade setting
+
+- `cascades.show_probability BOOLEAN NOT NULL DEFAULT false`: whether a word
+  shows its probability order, which was a display setting on each device, is
+  one of a cascade's settings, set by `set_cascade_options` and copied by
+  Start over like `show_found_count`.
+
+Nothing is deployed, so the edit is in place: `./scripts/dev.py --reset`.

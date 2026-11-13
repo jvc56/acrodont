@@ -76,11 +76,12 @@ export type WireCard = { idx: number; key: string; answer: unknown; word?: WordH
 
 /**
  * Whether a cascade's cards are fetched with hooks: an Anagram cascade's when
- * its setting asks, and always a Definition cascade's, whose answer shows its
- * word with hooks above the definition.
+ * its setting asks or when it shows probability orders, which come with the
+ * hooks, and always a Definition cascade's, whose answer shows its word with
+ * hooks above the definition.
  */
-export function wantsHooks(c: Pick<CascadeRow, 'quiz_type' | 'show_hooks'>): boolean {
-	return c.quiz_type === 'definition' || (c.quiz_type === 'anagram' && c.show_hooks !== false);
+export function wantsHooks(c: Pick<CascadeRow, 'quiz_type' | 'show_hooks'> & Partial<Pick<CascadeRow, 'show_probability'>>): boolean {
+	return c.quiz_type === 'definition' || (c.quiz_type === 'anagram' && (c.show_hooks !== false || c.show_probability === true));
 }
 
 /** Whether a cascade's cards are fetched with definitions: an Anagram cascade's when its setting asks. */

@@ -390,8 +390,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	async function setCascade(fields: CascadeSettings, key: string = Object.keys(fields)[0]) {
 		const c = v?.cascade;
 		if (!c || !Object.keys(fields).length) return;
-		// Definitions or hooks change what an answer holds: the cards in memory go first.
-		if (fields.show_definitions !== undefined || fields.show_hooks !== undefined) player?.settingsChanged();
+		// Definitions, hooks or probability orders change what an answer holds: the cards in memory go first.
+		if (fields.show_definitions !== undefined || fields.show_hooks !== undefined || fields.show_probability !== undefined) player?.settingsChanged();
 		await write({ type: 'set_cascade_options', cascade_id: c.id, ...fields } as NewOp);
 		// Switching mode mid-card resets its typed entries.
 		if (fields.answer_mode !== undefined) await player?.modeChanged();
@@ -603,7 +603,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 							spacing={dsp.answer_spacing}
 							definition={{ font: dsp.definition_font, size: dsp.definition_size_px, spacing: dsp.definition_spacing }}
 							definitionColumn={dsp.definition_column}
-							probability={dsp.show_probability}
+							definitionWidth={dsp.definition_width_px}
+							hookSize={dsp.hook_size_px}
 							word={card.word}
 						/>
 					{/if}
@@ -828,7 +829,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 				{#if !menuOpen}{@render showMenu('absolute top-3 left-3')}{/if}
 				<div class="relative flex min-h-0 flex-1 flex-col items-center">
 					<div bind:this={fitArea} data-fit-area class="flex flex-1 flex-col items-center self-stretch overflow-y-auto px-8 pb-8" style={`padding-top: ${dsp.question_top_px}px;`}>
-						<div class="w-full max-w-4xl">
+						<!-- The whole width of the page: a definition's column runs to its right edge. -->
+						<div class="w-full">
 							{#if v?.status === 'ready'}{@render question()}{:else}<div class="text-center">{@render status()}</div>{/if}
 						</div>
 					</div>
@@ -1023,6 +1025,17 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 								/>
 							</SettingRow>
 							{@render widen('show_found_count')}
+						{/if}
+						{#if c.quiz_type !== 'leave_value'}
+							<SettingRow label="Show each word’s probability order" info={INFO.show_probability} for="cascade-probability">
+								<input
+									id="cascade-probability"
+									type="checkbox"
+									checked={c.show_probability === true}
+									onchange={(e) => setCascade({ show_probability: e.currentTarget.checked })}
+								/>
+							</SettingRow>
+							{@render widen('show_probability')}
 						{/if}
 						{#if c.quiz_type === 'leave_value'}
 							<SettingRow label="Round leave values to (decimal places)" info={INFO.leave_value_decimals} for="cascade-decimals">

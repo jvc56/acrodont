@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS \"progression: Progression\",\n                  c.require_alphabetical, c.answer_mode AS \"answer_mode: AnswerMode\", c.show_definitions,\n                  c.show_hooks, c.reveal_correct, c.show_found_count, c.leave_value_decimals, l.name AS lexicon\n           FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2",
+  "query": "SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS \"progression: Progression\",\n                  c.require_alphabetical, c.answer_mode AS \"answer_mode: AnswerMode\", c.show_definitions,\n                  c.show_hooks, c.reveal_correct, c.show_found_count, c.show_probability,\n                  c.leave_value_decimals, l.name AS lexicon\n           FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2",
   "describe": {
     "columns": [
       {
@@ -146,6 +146,17 @@
       },
       {
         "ordinal": 11,
+        "name": "show_probability",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "cascades",
+            "name": "show_probability"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
         "name": "leave_value_decimals",
         "type_info": "Int2",
         "origin": {
@@ -156,7 +167,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "lexicon",
         "type_info": "Text",
         "origin": {
@@ -186,8 +197,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "b5436dda280a84d16e3fc2e7357f83a7660a1205df810f3a9464ff5d5e867430"
+  "hash": "e027b847e86cefd9888bad3822c2681c244d50ab4fe08d2b7601495a390f0298"
 }

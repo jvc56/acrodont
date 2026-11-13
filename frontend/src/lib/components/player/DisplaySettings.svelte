@@ -1,7 +1,7 @@
 <script lang="ts">
 	// The settings kept on this device: the question's and the answers'
-	// typeface, size and letter spacing, the player's layout and grade border,
-	// and the repeat guard. The typeface is a choice of the few every device
+	// typeface, size and letter spacing, the hooks' size, the player's layout
+	// and grade border, and the repeat guard. The typeface is a choice of the few every device
 	// has; the rest are numbers in px, em or ms, committed when the field loses
 	// focus or on Enter, so a half-typed number is never applied; each control sits at the
 	// right of its row like every other setting. Each change is saved for this
@@ -126,7 +126,10 @@
 		{@render check('Show the status bar below the quiz', 'status_bar_hidden', 'display-status-bar', !d.status_bar_hidden, INFO.status_bar, (on) => change({ status_bar_hidden: !on }))}
 		{@render check('Show the sync status below the quiz', 'sync_status_hidden', 'display-sync-status', !d.sync_status_hidden, INFO.sync_status, (on) => change({ sync_status_hidden: !on }))}
 		{@render check('Definitions in their own column', 'definition_column', 'display-definition-column', d.definition_column, INFO.definition_column, (on) => change({ definition_column: on }))}
-		{@render check('Show each word’s probability order', 'show_probability', 'display-show-probability', d.show_probability, INFO.show_probability, (on) => change({ show_probability: on }))}
+		{#if d.definition_column}
+			{@render number('Definition column width (0 for all the room)', 'px', 'definition_width_px', 'definition_width_px', INFO.definition_width)}
+		{/if}
+		{@render number('Hook size', 'px', 'hook_size_px', 'hook_size_px', INFO.hook_size)}
 		<SettingRow label="Tap zones on a phone" info={INFO.mobile_buttons} for="display-mobile-buttons">
 			<select
 				id="display-mobile-buttons"

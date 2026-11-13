@@ -770,6 +770,7 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
     let show_hooks = flag("show_hooks")?;
     let reveal_correct = flag("reveal_correct")?;
     let show_found_count = flag("show_found_count")?;
+    let show_probability = flag("show_probability")?;
     let leave_value_decimals = match op.body.get("leave_value_decimals") {
         None => None,
         Some(v) => Some(v.as_i64().filter(|n| (0..=3).contains(n)).ok_or(Reason::Invalid)? as i16),
@@ -788,7 +789,8 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
                              show_hooks = coalesce($11, show_hooks),
                              reveal_correct = coalesce($12, reveal_correct),
                              leave_value_decimals = coalesce($13, leave_value_decimals),
-                             show_found_count = coalesce($14, show_found_count)
+                             show_found_count = coalesce($14, show_found_count),
+                             show_probability = coalesce($15, show_probability)
          WHERE id = $1",
         id,
         f.segment_size.map(|s| s as i32),
@@ -804,6 +806,7 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         reveal_correct,
         leave_value_decimals,
         show_found_count,
+        show_probability,
     )
     .execute(conn)
     .await?;

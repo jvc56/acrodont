@@ -625,6 +625,7 @@ cascade's Settings.
 | **When an answer is revealed, mark it** (`reveal_correct`) | Flashcard cards (a typed card is graded by what was typed) | **Correct** | Correct / Missed: the grade a card starts with when its answer is shown, before any toggle |
 | **Show definitions** (`show_definitions`) | Anagram answers | **on** | on / off |
 | **Show hooks** (`show_hooks`) | Anagram answers (with inner hooks) | **on** | on / off |
+| **Show each word's probability order** (`show_probability`) | Anagram answers and a Definition card's word | off | on / off |
 | **Round leave values to (decimal places)** (`leave_value_decimals`) | Leave Value answers, rounded half away from zero | `1` | `0`, `1`, `2`, `3` |
 | **Segment size** (`segment_size`) | Levels made from now on (see [Quiz options](#quiz-options)) | `0` (off) | 0 (off), or 5 – `MAX_QUIZ_QUESTIONS` |
 | **Progression** (`progression`) | Levels made from now on | **Ladder** | Ladder / Drill |
@@ -944,13 +945,15 @@ as the term of the data model and the API.
   larger heading and an ⓘ saying what it reaches and whether it syncs
   (`SCOPE` in `settings-info.ts`) — so the two read as separate. Every
   setting is saved as soon as it is changed:
-  - **Cascade Settings** (synced; other cascades keep their own), in order: the ladder as a
+  - **Cascade Settings** (synced; other cascades keep their settings, and a
+    change can be applied to every cascade), in order: the ladder as a
     table whose columns line up — level, questions, pass, last pass's score,
     status — with each level's Export…; the clear threshold (a number, taking
     effect when the field is left, for the pass in progress too); the answer
     mode (anagram cascades); "When an answer is revealed, mark it"; Show
     definitions, Show hooks and Show how many anagrams are found in typed
-    mode (anagram cascades); Round leave values (leave
+    mode (anagram cascades); Show each word's probability order (anagram
+    and definition cascades); Round leave values (leave
     value cascades); the [options](#quiz-options) of **Level N, the level you
     are studying** (that quiz only, from the current card; "✓ Saved for this
     level" after a change); the options **levels made from now on** start
@@ -963,7 +966,8 @@ as the term of the data model and the API.
     for levels made from now on, says "✓ Saved for this cascade" once changed
     and offers **all N cascades** (see
     [One cascade, or all of them](#one-cascade-or-all-of-them)).
-  - **Device Settings** (not synced unless asked): the display settings, then
+  - **Device Settings** (saved on this device; other devices keep their
+    settings, and a change can be applied to all of them): the display settings, then
     the [controls](#controls) under their own **Controls** subheading. Each
     display setting says "✓ Saved on this device" once changed and offers
     **all your devices**, as do the controls after a change or after **Reset
@@ -1016,11 +1020,13 @@ as the term of the data model and the API.
   field is left, out-of-range values are clamped, and values saved by builds
   that offered presets are converted. Answers match the question by default. A
   definition answer is prose, so it takes the answer typeface at a reading
-  size; hooks are three quarters of the word's size, and anagram definitions
+  size; hooks, and the probability order, have a size of their own (27 px by
+  default, three quarters of the answers' default), and anagram definitions
   have their own. These, the question's
   position, the borders, whether the status bar and the sync status are
-  shown, whether a definition has a column of its own (on) and whether each
-  word shows its probability order (off; see [Answers](#answers)), a phone's
+  shown, whether a definition has a column of its own (on) and how wide that
+  column may be (0 px by default: all the room there is; see
+  [Answers](#answers)), a phone's
   [tap zones](#touch-zones) and the repeat guard are per device (the `meta`
   store's `display` value), since what suits a laptop is wrong on a phone;
   they are in the player's Settings, under Device Settings, and reach other
@@ -1122,15 +1128,18 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   them. The words sit in **one straight column**: each line is a row of five
   columns — the word's probability order, right-aligned; front hooks,
   right-aligned; the word, with its inner-hook dots; back hooks, left-aligned;
-  the definition, left-aligned — with the two hook columns equally wide and
-  the outer two sharing the rest equally, so every word starts at the same
-  place and the column is centred whatever the others hold.
+  the definition, left-aligned. Each hook column is as wide as its own widest
+  hooks and no wider, the same for every row. What is left of the word and
+  what is right of it share the page's width equally, so every word starts at
+  the same place and the column is in the middle of the page whatever the
+  others hold; the answer is as wide as the quiz area.
   - **The probability order** is the word's rank by
     [probability](#probability-and-probability-order) among the lexicon's
     words of its length (1 is the likeliest). The column is empty unless the
-    device's *Show each word's probability order* is on (off by default). The
-    card carries it with the hooks (`probability_order`), so a cascade with
-    *show hooks* off has none to show.
+    cascade's *Show each word's probability order* is on (off by default). The
+    card carries it with the hooks (`probability_order`), so a cascade that
+    shows it fetches its cards with hooks even with *show hooks* off (the
+    hooks are then not drawn).
   - With *show hooks* on (the default), each word is written Zyzzyva-style with its front
     hooks to the left and back hooks to the right, e.g. `bcfm ·AA· hls`, and
     its **inner hooks** as a dot before the word (the word less its first tile
@@ -1144,11 +1153,17 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
     playing that tile" everywhere else in Acrodont and is an error in an upload
     file. So a Catalan front hook reads `NY`, never `ny`.
   - With *show definitions* on (the default), each word's definition appears
-    in the definitions' own typeface and size: in its own column after the
-    back hooks, on the word's line (the device's *Definitions in their own
-    column*, on by default), or, with that off, centred beneath the word. A
-    window narrower than 640 px has no room for the column and always puts
-    the definition beneath the word.
+    in the definitions' own typeface and size, **one line for each part of
+    speech** (a lexicon's definition separates them with ` / ` after the
+    bracketed part of speech: `a way out [n -S] / to go out [v -ED, -ING, -S]`
+    is two lines; a line too long for its column wraps). It is in its own
+    column after the back hooks (the device's *Definitions in their own
+    column*, on by default), or, with that off, centred beneath the word. The
+    column runs to the right edge of the page, or to the device's *Definition
+    column width* when that is not 0, and the definition is **centred on its
+    word's line**: a definition of three lines has its second beside the
+    word. A window narrower than 640 px has no room for the column and always
+    puts the definition beneath the word.
 - **Definition**: the word, written like an anagram's with its probability
   order, hooks and inner hooks, and the full definition text in its column
   or beneath it, as above. A Definition cascade's cards
@@ -2965,7 +2980,7 @@ brings the server's.
 | `move_cursor` | quiz, attempt, attempt seed, position, at | the quiz is active, its cascade is not trashed, the attempt and its seed match, the position is not below `run_start`, is below `next_boundary(quiz)` when the quiz has one and below the question count otherwise, and the cursor is unset, or was last set by this device, or had been seen by the device (`seen_seq`), or the new `at` is later | Set the cursor, `cursor_moved_at` and the device that moved it. The outbox keeps only the latest pending cursor per quiz, re-appended with a fresh `device_seq` (see [The sync cycle](#the-sync-cycle)). A rejected cursor move (`bad_cursor`) is logged but never counted in a notice; it is not the user's work |
 | `finish` | quiz, attempt, attempt seed, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, every question is graded, and `new_quiz_id` is not already a quiz (`invalid`) | Apply [Cascade Rules](#cascade-rules) using the server's grades and the quiz's own progression; any new quiz uses the device's id; record the attempt. A reset or new quiz starts at cursor 0, stamped with the operation's `at` and device. The attempt row and any new level are added to the cascade's and the account's [storage](#storage-limit), past the limit or not: studying never fails for storage. The result carries the outcome the server reached and the new quiz's question count and `questions_hash`, so the device can see when the server's grades led somewhere else (see [Conflicts](#conflicts)) |
 | `finish_segment` | quiz, attempt, attempt seed, segment end, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, its segment size is greater than 0, the segment end is a multiple of it strictly between 0 and the question count and greater than the cursor, every question before the segment end is graded, no quiz already exists for this quiz, attempt and segment end, and `new_quiz_id` is not already a quiz (`invalid`) | Create the drill quiz one level down from the misses in positions `run_start` … segment end − 1 (nothing if there are none), and set the cursor and `run_start` to the segment end, stamping `cursor_moved_at` and `cursor_device_id` from the operation; a drill quiz's level is added to the [storage](#storage-limit) as a finish's is. See [Segments](#segments) |
-| `set_cascade_options` | cascade, the changed [settings](#settings) (any of `segment_size`, `progression`, `require_alphabetical`, `clear_threshold`, `answer_mode`, `show_definitions`, `show_hooks`, `reveal_correct`, `leave_value_decimals`), at | the cascade exists, is neither trashed nor purged, every carried value is in range (segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, alphabetical order a flag, clear threshold 1–100, answer mode `flashcard` or `typed`, `show_definitions`, `show_hooks` and `reveal_correct` flags, leave value decimals 0–3; otherwise `invalid`, so an out-of-range value is a rejection and never a constraint violation recorded as `error`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit. The three quiz options affect only later quizzes; the clear threshold applies at once, to every finish from then on; the other settings apply at once, to what the player shows |
+| `set_cascade_options` | cascade, the changed [settings](#settings) (any of `segment_size`, `progression`, `require_alphabetical`, `clear_threshold`, `answer_mode`, `show_definitions`, `show_hooks`, `reveal_correct`, `show_found_count`, `show_probability`, `leave_value_decimals`), at | the cascade exists, is neither trashed nor purged, every carried value is in range (segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, alphabetical order a flag, clear threshold 1–100, answer mode `flashcard` or `typed`, `show_definitions`, `show_hooks` and `reveal_correct` flags, leave value decimals 0–3; otherwise `invalid`, so an out-of-range value is a rejection and never a constraint violation recorded as `error`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit. The three quiz options affect only later quizzes; the clear threshold applies at once, to every finish from then on; the other settings apply at once, to what the player shows |
 | `set_quiz_options` | quiz, changed option fields (the three quiz options only: a `clear_threshold`, `answer_mode`, `show_definitions`, `show_hooks`, `reveal_correct` or `leave_value_decimals` is a `400`), at | the quiz is active, its cascade is not trashed, every carried value is in range as for `set_cascade_options`, `progression` and `segment_size` are not carried for a `segment_chain` quiz and `progression` is not carried for the Source quiz, which its rules ignore (`invalid`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit |
 | `restore_quiz` | quiz, shuffle seed | the quiz is cleared and not purged | Push it back as the new deepest level with a new attempt shuffled by the seed, cursor 0 stamped from the operation; bring back its cascade if it was trashed, and only then set `cleared_at` to now on its other cleared quizzes |
 | `trash_cascade` | cascade | the cascade is not trashed (`trashed`) | Trash it |
@@ -4048,6 +4063,8 @@ CREATE TABLE cascades (
     show_hooks           BOOLEAN NOT NULL DEFAULT true,  -- Anagram: hooks on reveal
     reveal_correct       BOOLEAN NOT NULL DEFAULT true,  -- a reveal marks the card correct
                                  -- (false: missed) until toggled
+    show_found_count     BOOLEAN NOT NULL DEFAULT false, -- Anagram: typed mode's "3 of 9 found"
+    show_probability     BOOLEAN NOT NULL DEFAULT false, -- each word's probability order on reveal
     leave_value_decimals SMALLINT NOT NULL DEFAULT 1    -- Leave Value: decimal places shown
                              CHECK (leave_value_decimals BETWEEN 0 AND 3),
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
