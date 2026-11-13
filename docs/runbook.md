@@ -398,11 +398,12 @@ The backup role can write dumps but read only the daily dump it copies to
 ## The drill
 
 **Monthly, automatically.** On the 1st at 05:00 UTC, the `acrodont-drill` task
-(`scripts/drill.py`) restores the newest nightly dump into a Postgres started
-inside its own task, never on production. It then checks:
+(`scripts/drill.py`) restores the newest finished nightly dump into a Postgres
+started inside its own task, never on production, as the app role into a
+database that role owns, the way step 1 of Restoring does. It then checks:
 - every table the schema-only dump names is present;
 - migrations are recorded;
-- every cascade has its questions;
+- there are users, and every cascade has its questions;
 - the sequence bump forces a resync.
 
 It reports `DrillSucceeded` and `DrillSeconds`. A failure mails

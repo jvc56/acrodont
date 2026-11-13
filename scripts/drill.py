@@ -7,7 +7,8 @@ production instance (birdtest's drill once filled production's storage and
 pushed its autoscaling up for good), then checks what a restore must deliver:
 
   1. the dump (the newest whose run finished: it has its .ok marker and the
-     size the marker names) restores with pg_restore --exit-on-error;
+     size the marker names) restores with pg_restore --exit-on-error, as the
+     app role into a database that role owns, the way a real restore is made;
   2. the schema is complete: every table the schema-only dump names exists,
      and _sqlx_migrations holds at least one applied migration;
   3. the data is there: users exist, and every cascade's questions are present;
@@ -44,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import restore  # noqa: E402  (BUMP_SQL, BUMP: the same step a real restore runs)
 
 PORT = 55433
+APP_ROLE = "acrodont_app"
 
 
 class DrillFailed(Exception):
@@ -95,7 +97,11 @@ def start_postgres(work: Path) -> Path:
                      "-o", f"-p {PORT} -c listen_addresses=127.0.0.1 -k {work}", "start"]),
         stdout=subprocess.DEVNULL)
     os.environ["PGUSER"] = "postgres"
-    run(as_postgres(["createdb", "-h", "127.0.0.1", "-p", str(PORT), "acrodont"]))
+    # As a real restore is made (docs/runbook.md, Restoring): into a database
+    # owned by the app role, by that role, which is no superuser. A restore
+    # only a superuser could make would pass here and fail in production.
+    run(as_postgres(["createuser", "-h", "127.0.0.1", "-p", str(PORT), APP_ROLE]))
+    run(as_postgres(["createdb", "-h", "127.0.0.1", "-p", str(PORT), "-O", APP_ROLE, "acrodont"]))
     return data
 
 
@@ -121,6 +127,8 @@ def check(dump: Path, schema: Optional[Path]) -> List[str]:
     if migrations < 1:
         raise DrillFailed("no applied migration recorded")
     users = int(psql("SELECT count(*) FROM users"))
+    if users < 1:
+        raise DrillFailed("no users after the restore")
     cascades = int(psql("SELECT count(*) FROM cascades"))
     empty = int(psql("SELECT count(*) FROM cascades c WHERE c.question_keys = '' OR NOT EXISTS "
                      "(SELECT 1 FROM quizzes z JOIN quiz_cards k ON k.quiz_id = z.id WHERE z.cascade_id = c.id)"))
@@ -190,7 +198,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if os.geteuid() == 0:
             shutil.chown(str(dump), "postgres")
         data = start_postgres(work)
-        run(as_postgres(["pg_restore", "-h", "127.0.0.1", "-p", str(PORT), "-d", "acrodont",
+        run(as_postgres(["pg_restore", "-h", "127.0.0.1", "-p", str(PORT), "-U", APP_ROLE, "-d", "acrodont",
                          "--no-owner", "--no-privileges", "--exit-on-error", str(dump)]))
         for line in check(dump, schema):
             print(f"drill: {line}")

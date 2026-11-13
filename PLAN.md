@@ -5918,12 +5918,14 @@ The runbook has the full procedure; the parts specific to Acrodont are:
 ### The drill
 
 **Monthly, automatically.** The `acrodont-drill` task (`scripts/drill.py`)
-restores the newest nightly dump into a Postgres started inside its own task,
+restores the newest finished nightly dump into a Postgres started inside its own task,
 never on the production instance. Birdtest's drill once ran against production
-and could fill its storage. It then checks:
+and could fill its storage. It restores as the app role into a database that
+role owns, as a real restore is made, so a restore only a superuser could
+make fails here first. It then checks:
 - every table the schema-only dump names is present;
 - migrations are recorded;
-- every cascade has its questions;
+- there are users, and every cascade has its questions;
 - the sequence bump leaves every user's floor at `sync_seq`, above 2^32.
 
 It reports `DrillSucceeded` and `DrillSeconds`; a failure mails at once.
@@ -7448,6 +7450,7 @@ where PQ-019 runs a case at a tenth.
 | `make test-e2e-main` | The update journey and the `@env` passes, each on a stack of its own: every stack up first, the `@env` passes side by side, the update journey alone, then the stacks down |
 | `make test-e2e` | `test-e2e-core`, then `test-e2e-main`: the whole end-to-end suite |
 | `make test-e2e-seeding` | Seeding under a two-a-minute upload limit |
+| `make test-ops-image` | The ops image builds, `backup.py` dumps a seeded stack, and `drill.py` restores the dump inside the image |
 | `make test-scale` | The 300,000-question budgets |
 | `make test-parity` | Zyzzyva comparison; skipped with a notice unless the licensed files are present |
 | `make test` | Unit, integration and end-to-end |
@@ -7469,7 +7472,7 @@ CI (`.github/workflows/ci.yml`) runs three tiers, each a superset of the last:
 | Tier | When | What |
 |---|---|---|
 | **Push** | Every push, every branch | Clippy, the unit tests (a backend and a frontend job), `make test-integration`, `make test-e2e-core`, `make infra-validate`, `make ops-check`. About 5 minutes |
-| **Main** | A push to `main`, and a manual run on any branch | The Push tier, plus `make test-e2e-main` and `make test-e2e-seeding` |
+| **Main** | A push to `main`, and a manual run on any branch | The Push tier, plus `make test-e2e-main`, `make test-e2e-seeding` and `make test-ops-image` (the last also on a push that changes `scripts/` or `docker/`) |
 | **Nightly** | 04:30 UTC on `main` | The Main tier, plus `make test-scale`. A failure opens (or comments on) one issue |
 
 The seeding check also runs on a push that changes `scripts/`. A branch can be

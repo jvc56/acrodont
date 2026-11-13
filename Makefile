@@ -24,7 +24,7 @@ export SQLX_OFFLINE := true
 export CARGO_BUILD_JOBS ?= 2
 
 .PHONY: infra-validate ops-check test test-quick test-unit test-unit-backend test-unit-frontend \
-        test-integration test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-scale test-parity \
+        test-integration test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-ops-image test-scale test-parity \
         frontend-deps e2e-deps e2e-binary e2e-pass-full e2e-pass-ttl e2e-pass-purge e2e-pass-answers \
         e2e-pass-budget $(addprefix e2e-up-,full ttl purge answers budget) $(addprefix e2e-down-,full ttl purge answers budget) \
         sqlx-db sqlx-prepare
@@ -98,7 +98,7 @@ test-integration:
 ##   make test-e2e-seeding       seeding under a two-a-minute upload limit
 E2E_WORKERS ?= 4
 export E2E_WORKERS
-test-e2e test-e2e-core test-e2e-main test-e2e-seeding e2e-binary: export ACRODONT_BACKEND_TARGET ?= backend-prebuilt
+test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-ops-image e2e-binary: export ACRODONT_BACKEND_TARGET ?= backend-prebuilt
 
 e2e-deps: frontend-deps
 	cd e2e && { [ -d node_modules ] || npm ci; } && npx playwright install chromium >/dev/null
@@ -191,6 +191,25 @@ test-e2e-seeding: e2e-binary
 	trap 'python3 scripts/stack.py down --project acrodont-ci-seed --volumes' EXIT
 	python3 scripts/stack.py up --project acrodont-ci-seed --port 5190 --env ADMIN_UPLOAD_RATE_PER_MINUTE=2
 	python3 scripts/stack.py seed --project acrodont-ci-seed --port 5190
+
+## The ops image and what runs on it (PLAN.md § Backups): the image builds
+## (its Postgres comes from an apt repository outside this one), backup.py
+## dumps a seeded stack, and drill.py restores that dump inside the image, as
+## root with its own Postgres, the way the monthly drill task does. Otherwise
+## the image's first build is the first release's and the drill's first run is
+## in production. CI runs it on main, nightly, and when scripts/ or docker/
+## change. The dump is left in a directory under the system's temporary one.
+test-ops-image: e2e-binary
+	trap 'python3 scripts/stack.py down --project acrodont-ci-ops --volumes' EXIT
+	out=$$(mktemp -d)
+	docker build --target ops -f docker/backend.Dockerfile -t acrodont-ops:ci .
+	python3 scripts/stack.py up --project acrodont-ci-ops --port 5191
+	python3 scripts/stack.py seed --project acrodont-ci-ops --port 5191
+	python3 scripts/backup.py --project acrodont-ci-ops --out "$$out"
+	chmod -R a+rX "$$out"
+	dump=$$(cd "$$out" && ls *.dump)
+	docker run --rm -v "$$out:/dumps:ro" --entrypoint python3 acrodont-ops:ci \
+	  /opt/acrodont/scripts/drill.py --dump "/dumps/$$dump"
 
 ## The 300,000-question budgets (PLAN.md § Scale tests): the server's half
 ## against a throwaway Postgres with production durability settings, in
