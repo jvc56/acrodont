@@ -6,7 +6,8 @@ newest nightly dump into a Postgres it starts inside its own task, never on the
 production instance (birdtest's drill once filled production's storage and
 pushed its autoscaling up for good), then checks what a restore must deliver:
 
-  1. the dump restores with pg_restore --exit-on-error;
+  1. the dump (the newest whose run finished: it has its .ok marker and the
+     size the marker names) restores with pg_restore --exit-on-error;
   2. the schema is complete: every table the schema-only dump names exists,
      and _sqlx_migrations holds at least one applied migration;
   3. the data is there: users exist, and every cascade's questions are present;
@@ -50,12 +51,20 @@ class DrillFailed(Exception):
 
 
 def newest_dump(s3, bucket: str) -> str:
+    """The newest daily dump a successful run finished (restore.check_complete):
+    a failed run's truncated object under a later day's key is passed over."""
     keys: List[str] = []
     for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix="daily/"):
         keys += [o["Key"] for o in page.get("Contents", []) if o["Key"].endswith(".dump")]
     if not keys:
         raise DrillFailed(f"no daily dump in s3://{bucket}/daily/")
-    return max(keys)
+    for key in sorted(keys, reverse=True):
+        try:
+            restore.check_complete(s3, bucket, key)
+            return key
+        except restore.Incomplete as e:
+            print(f"drill: passing over a dump: {e}")
+    raise DrillFailed(f"none of the {len(keys)} dumps in s3://{bucket}/daily/ is complete")
 
 
 def as_postgres(cmd: List[str]) -> List[str]:

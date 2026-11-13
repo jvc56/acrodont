@@ -5858,7 +5858,13 @@ backend's build plus Postgres 16 and python3), with a read-only database role.
 Its task role can write dumps but read only the daily dump it copies to
 `monthly/`; the drill's can only read. It writes to a key named for the day,
 so a corrupted dump cannot overwrite a good one, and the bucket's versioning and
-object lock mean neither can a mistake or a compromised task role.
+object lock mean neither can a mistake or a compromised task role. The dump
+streams to the bucket, so a `pg_dump` that dies part-way still leaves an
+object under the day's key; a run whose dumps both succeeded writes a marker
+beside it last (`daily/YYYY-MM-DD.ok`, holding the dump's size), and the
+drill and `restore.py` take no dump without its marker or of another size.
+The size comparison below is likewise made against the last dump that has
+one.
 
 Uploaded catalog files are **not** backed up. They are licensed data that
 Acrodont never stores as files, only as rows, and those rows are in the dump.
@@ -5866,8 +5872,8 @@ Acrodont never stores as files, only as rows, and those rows are in the dump.
 ### Alarms
 
 - No successful dump in **36 hours**.
-- A dump more than 30% smaller than the previous one, which catches a truncated
-  or partial run.
+- A dump more than 30% smaller than the previous finished one, which catches
+  a run that succeeded with much of the data missing.
 - A backup or drill task that exits non-zero or never starts (no image to
   pull, no secret to read), within minutes (an EventBridge rule on the task's
   exit code and its stop code: a task that never started has no exit code).

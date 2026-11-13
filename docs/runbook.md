@@ -277,7 +277,7 @@ All alarms go to the `acrodont-alarms` SNS topic and on to `alarm_email`.
 | `acrodont-db-cpu-high` | Database over 80% CPU for 15 minutes | Raise `db_instance_class`; the change applies at once with a short restart, during which the API answers errors and the task stays up (its health checks allow five minutes) |
 | `acrodont-db-events` (RDS events) | Low storage, failure, or allocation near the autoscaling ceiling | Raise `db_allocated_storage` |
 | `acrodont-no-dump-36h` | No successful dump in 36 hours | The last `backup` log stream; the `acrodont-backup-failed` mail says why |
-| `acrodont-dump-shrank` | A dump at least 30% smaller than the one before | Check the database size first. A truncated run leaves a small object |
+| `acrodont-dump-shrank` | A finished dump at least 30% smaller than the last finished one | Check the database size first |
 | `acrodont-backup-failed`, `acrodont-drill-failed` | The task exited non-zero, or never started (no image, no secret) | Its log stream, named in the mail; for one that never started, the reason in the mail |
 | `acrodont-deploy-failed` | ECS rolled a release back | `scripts/rollback.sh` (above) |
 | `acrodont-sync-error-rejection` | A sync operation rejected as `error`: a database error the rules did not expect | Find `sync operation failed with a database error` in the logs |
@@ -320,6 +320,10 @@ The domain's registration is extra. `monthly_budget_usd` defaults to 70.
 The dump runs at 03:15 UTC as the `acrodont-backup` task: `scripts/backup.py`
 on the ops image, with the read-only `acrodont_backup` role. It reports
 `Acrodont/Backups` metrics `DumpSucceeded`, `DumpBytes` and `DumpSizeRatio`.
+A run that succeeds writes `daily/YYYY-MM-DD.ok` last, holding the dump's
+size. A run that fails part-way still leaves a (truncated) `.dump` under the
+day's key, locked like any other, but no `.ok`: `restore.py` and the drill
+refuse a dump without its marker, or whose size is not the one it names.
 The backup role can write dumps but read only the daily dump it copies to
 `monthly/`. The drill role can only read. No role may bypass the object lock.
 

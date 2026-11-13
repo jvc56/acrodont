@@ -53,14 +53,44 @@ def psql(args: argparse.Namespace, sql: str) -> str:
     return out.stdout.strip()
 
 
-def fetch(source: str, region: Optional[str], into: Path) -> Path:
+class Incomplete(Exception):
+    pass
+
+
+def check_complete(s3, bucket: str, key: str) -> int:
+    """The size of a bucket dump that a successful backup.py run finished.
+
+    backup.py's upload completes whatever pg_dump did, so a run that failed
+    part-way leaves a truncated object under the day's key. A run that
+    succeeded then writes `X.ok` beside `X.dump`, holding the dump's size.
+    """
+    marker = key[: -len(".dump")] + ".ok" if key.endswith(".dump") else key + ".ok"
+    try:
+        expected = int(s3.get_object(Bucket=bucket, Key=marker)["Body"].read().decode().strip())
+    except s3.exceptions.NoSuchKey:
+        raise Incomplete(f"s3://{bucket}/{key} has no {Path(marker).name} beside it: "
+                         "the run that wrote it failed, and it may be truncated") from None
+    size = s3.head_object(Bucket=bucket, Key=key)["ContentLength"]
+    if size != expected:
+        raise Incomplete(f"s3://{bucket}/{key} is {size} bytes, and the run that finished wrote {expected}: "
+                         "a later run failed part-way over it")
+    return size
+
+
+def fetch(source: str, region: Optional[str], into: Path, unmarked: bool = False) -> Path:
     if not source.startswith("s3://"):
         return Path(source)
     import boto3
 
     bucket, _, key = source[len("s3://"):].partition("/")
     path = into / Path(key).name
-    boto3.client("s3", region_name=region).download_file(bucket, key, str(path))
+    s3 = boto3.client("s3", region_name=region)
+    if not unmarked:
+        try:
+            check_complete(s3, bucket, key)
+        except Incomplete as e:
+            sys.exit(f"restore: {e}. Take another day's dump (or pass --unmarked for one you have checked yourself)")
+    s3.download_file(bucket, key, str(path))
     return path
 
 
@@ -97,6 +127,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     tgt.add_argument("--database-url", help="the new database to restore into")
     tgt.add_argument("--project", help="a local compose stack to restore into")
     p.add_argument("--replace", action="store_true", help="with --project: drop the stack's schema first")
+    p.add_argument("--unmarked", action="store_true",
+                   help="take a bucket dump with no .ok marker beside it (one you have checked yourself)")
     p.add_argument("--bump-only", action="store_true",
                    help="only the resync step, e.g. after an RDS point-in-time restore")
     args = p.parse_args(argv)
@@ -106,7 +138,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not args.dump:
         p.error("name a dump, or pass --bump-only")
     with tempfile.TemporaryDirectory() as tmp:
-        restore(args, fetch(args.dump, args.s3_region, Path(tmp)))
+        restore(args, fetch(args.dump, args.s3_region, Path(tmp), args.unmarked))
     bump(args)
     if args.project:
         subprocess.run(compose(args.project, "restart", "backend"), check=True)
