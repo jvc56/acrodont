@@ -6771,9 +6771,14 @@ time: the admin journey (it changes the catalog, as the seeded `dev` admin),
 the export journey (it stops the backend) and the update journey (it rebuilds
 the frontend and restarts the stack). A journey that needs the server or the
 frontend built differently is tagged `@env` plus its pass (`@ttl`, `@purge`,
-`@answers`, `@budget`) and runs on a stack of its own; `make test-e2e-main`
-brings those stacks up side by side, with the update journey (`@full`) on one
-more. The backend image of every suite stack is the release binary built on
+`@answers`, `@budget`) and runs on a stack of its own, with the update journey (`@full`) on one
+more. `make test-e2e-main` brings every one of those stacks up before any
+journey starts, runs the `@env` passes side by side, then the update journey
+alone (it restarts its stack), and takes the stacks down at the end: Docker
+starting or stopping a stack changes the host's network interfaces, and
+Chromium then drops the page loads under way in every browser on the machine
+(`net::ERR_NETWORK_CHANGED`), so a stack must not start or stop beside a
+running journey. The backend image of every suite stack is the release binary built on
 the host and copied into a thin image (`backend-prebuilt` in
 `docker/backend.Dockerfile`), not compiled again inside Docker.
 
@@ -7207,7 +7212,7 @@ where PQ-019 runs a case at a tenth.
 | `make test-integration` | Every integration test binary's tests in one pool (`cargo nextest run`, 16 at a time) against a throwaway Postgres it starts itself |
 | `make test-e2e-core` | Every end-to-end journey on one stack, four side by side, then the `@serial` ones; not the update journey or the `@env` passes |
 | `make test-e2e SPEC=<file>` | One spec file (any Playwright file filter) on the suite's stack |
-| `make test-e2e-main` | The update journey and the `@env` passes, each on a stack of its own, side by side |
+| `make test-e2e-main` | The update journey and the `@env` passes, each on a stack of its own: every stack up first, the `@env` passes side by side, the update journey alone, then the stacks down |
 | `make test-e2e` | `test-e2e-core`, then `test-e2e-main`: the whole end-to-end suite |
 | `make test-e2e-seeding` | Seeding under a two-a-minute upload limit |
 | `make test-scale` | The 300,000-question budgets |
