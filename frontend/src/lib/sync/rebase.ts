@@ -178,8 +178,6 @@ export interface RebaseCtx {
 	device_id: string;
 	max_quiz_questions: number;
 	now: () => Date;
-	/** False for a response that carried no pull (`resync_required`, `426`): the cursor stays. */
-	advance?: boolean;
 }
 
 /**
@@ -219,13 +217,11 @@ export async function rebase(db: UserDb, st: PullState, acked: Acked[], ctx: Reb
 	}
 
 	const tx = db.transaction(['meta'], 'readwrite');
-	if (ctx.advance !== false) {
-		await writeMeta(tx as unknown as RwTx, 'sync', {
-			cursor: st.seq,
-			last_sync_at: ctx.now().toISOString(),
-			upgrade_required: false
-		});
-	}
+	await writeMeta(tx as unknown as RwTx, 'sync', {
+		cursor: st.seq,
+		last_sync_at: ctx.now().toISOString(),
+		upgrade_required: false
+	});
 	await tx.done;
 	return out;
 }

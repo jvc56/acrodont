@@ -3349,8 +3349,15 @@ which alarms. Then:
    30 days), the server replies `resync_required`; a cursor at or above the
    floor has missed no pruned tombstone, even when older tombstones remain
    above the floor. That response carries the `results` of the push that
-   arrived with it and no `changes`, so the device drops the acknowledged
-   operations as usual and then makes a **full pull**: a sync request with
+   arrived with it and no `changes`. The device does nothing with those
+   results: it keeps the batch in its outbox and makes a **full pull** that
+   sends the same batch again, which the server answers from its records
+   (step 2), so the operations are acknowledged in the response that carries
+   their rows. Acknowledging them from the `resync_required` response, with
+   nothing pulled, would clear the device's own rows for a level one of them
+   created before the server's rows had arrived, and the operations queued on
+   that level would then be refused in the replay and lost. A full pull is a
+   sync request with
    `cursor: null`, pushed exactly like any other sync (it may carry
    operations, and usually does on a first sync, since a device can create a
    cascade and study it before it has ever synced), which the server answers
@@ -5770,8 +5777,12 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
     version — the build number described under [the endpoint](#cascades-and-sync) —
     and a request below `MIN_APP_VERSION` gets `426` with a
     reload prompt, after its operations have been accepted. The `426` body
-    carries the same `results` array as a `200`, and the device drops the
-    acknowledged operations from its outbox, then shows
+    carries the same `results` array and the same pull as a `200`, and the
+    device takes both exactly as it takes a `200`'s (further pages are asked
+    for by token, which are never refused for the version), so what it just
+    pushed stays on the device as the server has it; acknowledging the
+    operations without their pull would clear the device's rows for them with
+    nothing in their place. It then shows
     [`SyncStatus`](#frontend)'s **reload to keep syncing** until a sync
     succeeds. It keeps the rest of the outbox and goes on letting the user
     study, because the `426` applied the operations it carried and more are
@@ -6444,12 +6455,14 @@ window, and eviction taking its cards all the same; cards fetched
 without definitions, the cascade's setting turned on offline, the player showing
 words only, and the cards refetched with definitions on reconnect, read from
 the cascade as the device sees it, before the change is sent; a first sync
-sending `cursor: null`; a `resync_required` response dropping the acknowledged
-operations, replacing the base from a `cursor: null` pull and replaying the rest
-of the outbox with nothing lost, refetching no index list and recomputing no
+sending `cursor: null`; a `resync_required` response answered by a
+`cursor: null` pull that sends the same batch again, replacing the base and replaying the rest
+of the outbox with nothing lost, a batch holding a finish with answers queued
+on the level it made included, refetching no index list and recomputing no
 positions for a quiz whose seed is unchanged, and deleting a quiz the full pull
 did not carry; an interrupted pull converging on the next
-sync; a `426` acknowledging its operations, showing **reload to keep syncing**
+sync; a `426` acknowledging its operations and applying their pull (the level
+an acknowledged finish made stays, with the answers queued on it), showing **reload to keep syncing**
 rather than a waiting count, keeping the rest of the outbox and the grades that
 follow it, and still showing that state after a reload the service worker
 answered from its cache, until a sync succeeds; a `503` resending the same batch

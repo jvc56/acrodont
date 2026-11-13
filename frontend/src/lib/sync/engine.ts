@@ -184,28 +184,33 @@ export class SyncEngine {
 				await this.db.put('meta', { ...s, storage_bytes: body.storage.used, max_storage_bytes: body.storage.limit }, 'server');
 			}
 			if (body.device_settings && (await takeShared(this.db, body.device_settings, sent))) this.hooks.onDeviceSettings?.();
-			const acked = ackedOf(batch, body);
-			const rctx = { device_id, max_quiz_questions: server.max_quiz_questions, now: this.now };
-			if (reply.status === 426) {
-				// Its operations were applied: acknowledge them, keep the rest, and say
-				// "reload to keep syncing" until a sync succeeds.
-				const o = await rebase(this.db, newPull(Number(body.sync_seq), false, qrf), acked, { ...rctx, advance: false });
-				await this.db.put('meta', { ...(await getMeta(this.db, 'sync')), upgrade_required: true }, 'sync');
-				this.emit(o);
-				this.setStatus('reload');
-				return;
-			}
 			if (body.resync_required) {
-				// The acknowledged operations are dropped as usual, then a full pull.
-				const o = await rebase(this.db, newPull(Number(body.sync_seq), false, qrf), acked, { ...rctx, advance: false });
-				this.emit(o);
+				// A full pull, with the same batch: the server answers each operation
+				// from its record. Its results go to the rebase with the rows they
+				// produced. Dropped here, with nothing pulled, the device's own rows
+				// for a level a finish made would be cleared before the server's
+				// arrived, and the operations queued on it refused and lost.
 				cursor = null;
 				continue;
 			}
+			const acked = ackedOf(batch, body);
+			const rctx = { device_id, max_quiz_questions: server.max_quiz_questions, now: this.now };
+			// A 426 applied its operations and carries their pull like a 200: both
+			// are taken, so what was just pushed stays on the device as the server
+			// has it.
 			const st = newPull(Number(body.sync_seq), cursor === null, qrf);
 			const pulled = await this.pullPages(st, body, device_id, cursor);
 			if (!pulled) return;
 			const o = await rebase(this.db, st, acked, rctx);
+			if (reply.status === 426) {
+				// The rest of the outbox waits, and "reload to keep syncing" shows
+				// until a sync succeeds.
+				await this.db.put('meta', { ...(await getMeta(this.db, 'sync')), upgrade_required: true }, 'sync');
+				this.emit(o);
+				await this.hooks.onSynced?.(o);
+				this.setStatus('reload');
+				return;
+			}
 			this.emit(o);
 			await this.hooks.onSynced?.(o);
 			cursor = st.seq;

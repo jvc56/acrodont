@@ -443,7 +443,7 @@ describe('the sync engine', () => {
 		expect(await a.db.count('outbox')).toBe(0);
 	});
 
-	it('a 426 acknowledges its operations and says reload to keep syncing until a sync succeeds', async () => {
+	it('a 426 acknowledges its operations, takes their pull and says reload to keep syncing until a sync succeeds', async () => {
 		const { server, a } = await setup();
 		await a.play(Q1, 'CC');
 		a.tamper = (req, send) => {
@@ -454,6 +454,10 @@ describe('the sync engine', () => {
 		expect(a.engine.status).toBe('reload');
 		expect(await a.db.count('outbox')).toBe(0);
 		expect((await getMeta(a.db, 'sync')).upgrade_required).toBe(true);
+		// The grades it pushed are in the base as the server has them, not only
+		// in an overlay the acknowledgement cleared.
+		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
+		expect((await a.quiz(Q1))!.correct_count).toBe(2);
 		a.tamper = null;
 		void server;
 		await a.play(Q1, 'C', 2);
@@ -461,7 +465,36 @@ describe('the sync engine', () => {
 		expect((await getMeta(a.db, 'sync')).upgrade_required).toBe(false);
 	});
 
-	it('resync_required drops the acknowledged operations, replaces the base from a full pull and keeps the rest', async () => {
+	it('a 426 that acknowledges a finish keeps the level it made and the operations queued on it', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'CCMMM');
+		const { newId } = await a.finish(Q1, '7');
+		await a.play(newId, 'C');
+		// One more answer on the new level while the batch is in flight.
+		let late = false;
+		a.tamper = async (req, send) => {
+			const r = send(req);
+			if (!req.ops?.length) return r;
+			if (!late) {
+				late = true;
+				await a.play(newId, 'C', 1);
+			}
+			return { ...r, status: 426 };
+		};
+		await a.sync();
+		expect(a.engine.status).toBe('reload');
+		expect(texts(a)).toEqual([]);
+		expect((await a.outbox()).map((e) => e.op.type)).toEqual(['grade']);
+		expect((await a.rows(newId)).map((r) => r.grade).sort()).toEqual(['correct', 'correct', null]);
+		expect((await a.db.get('quizzes', newId))!.pending).toBeUndefined();
+		a.tamper = null;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect((await a.db.get('quizzes', newId))!.correct_count).toBe(2);
+	});
+
+	it('resync_required sends the batch again with a full pull, replaces the base and loses nothing', async () => {
 		const { server, a } = await setup();
 		const b = await second(server);
 		await b.play(Q1, 'CCCCC');
@@ -475,9 +508,35 @@ describe('the sync engine', () => {
 		await a.sync();
 		const nulls = a.requests.filter((r) => r.cursor === null);
 		expect(nulls.length).toBe(2); // the first sync and the resync
+		expect(nulls[1].ops!.length).toBe(1); // the batch, answered from the server's record
 		expect(await a.db.count('outbox')).toBe(0);
 		expect((await a.rows(Q1)).map((r) => r.position)).not.toEqual(before); // B's finish reset it
 		expect(await a.db.get('cascades', 'c2000000-0000-4000-8000-000000000000')).toBeDefined();
+	});
+
+	it('resync_required on a batch holding a finish keeps the level it made and the operations queued on it', async () => {
+		const { server, a } = await setup();
+		await a.play(Q1, 'CCMMM');
+		const { newId } = await a.finish(Q1, '7');
+		await a.play(newId, 'C');
+		server.floor = server.seq + 1;
+		// One more answer on the new level while the refused batch is in flight.
+		let late = false;
+		a.tamper = async (req, send) => {
+			const r = send(req);
+			if (!late && req.ops?.length) {
+				late = true;
+				await a.play(newId, 'C', 1);
+			}
+			return r;
+		};
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect((await a.db.get('quizzes', newId))!.correct_count).toBe(2);
+		expect((await a.rows(newId)).filter((r) => r.grade === 'correct').length).toBe(2);
+		// No index list was needed: the device's own rows for the level were promoted.
+		expect((await a.db.get('quizzes', newId))!.pending).toBeUndefined();
 	});
 
 	it('a full pull deletes a quiz it did not carry and spares a cascade created while it was in flight', async () => {
