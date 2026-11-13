@@ -458,7 +458,11 @@ async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, Api
     // Operations → Monitoring; infra/alarms.tf).
     for (op, r) in req.ops.iter().zip(&results) {
         if r.status == "rejected" {
-            tracing::info!(op_type = %op.op_type, reason = r.reason.as_deref().unwrap_or(""), "sync operation rejected");
+            // The type is a metric dimension (infra/alarms.tf), so only the
+            // server's own names are logged: a client's invented types would
+            // each mint a custom metric.
+            let op_type = if OP_TYPES.contains(&op.op_type.as_str()) { op.op_type.as_str() } else { "unknown" };
+            tracing::info!(op_type, reason = r.reason.as_deref().unwrap_or(""), "sync operation rejected");
         }
     }
     tx.commit().await.map_err(transient)?;

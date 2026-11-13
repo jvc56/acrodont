@@ -4978,7 +4978,9 @@ The flows are the conventional ones, built directly on Axum:
   account, since each costs a hash and maybe a scoring, and is a guess at the
   password by whoever holds the session. The password re-entry of Sign out
   everywhere and of Delete account draws on the same bucket, for the same
-  reason: past it, each answers `429` with `Retry-After`. A change stores the
+  reason: past it, each answers `429` with `Retry-After`. A try is counted
+  once its Argon2 turn is held, as a link's is once its scoring turn is, so a
+  request turned away busy (`503`) spends none. A change stores the
   new hash, spends every outstanding reset token (they were asked for under
   the old password), and, like Sign out everywhere, bumps
   `session_generation` and issues a new session to this device: every other

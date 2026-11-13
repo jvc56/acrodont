@@ -101,7 +101,10 @@ const HASHING_CONCURRENCY: usize = 4;
 const HASHING_QUEUE_WAIT: Duration = Duration::from_secs(10);
 static HASHING_TURNS: Semaphore = Semaphore::const_new(HASHING_CONCURRENCY);
 
-async fn hashing_turn() -> Result<SemaphorePermit<'static>, ApiError> {
+/// A turn to hash or verify, waited for at most `HASHING_QUEUE_WAIT`. Taken
+/// by the caller when something must not be spent on a request that is then
+/// turned away busy (a try from a rate limit's bucket).
+pub async fn hashing_turn() -> Result<SemaphorePermit<'static>, ApiError> {
     match tokio::time::timeout(HASHING_QUEUE_WAIT, HASHING_TURNS.acquire()).await {
         Ok(Ok(turn)) => Ok(turn),
         Ok(Err(_)) => Err(anyhow::anyhow!("the password hashing queue is closed").into()),
@@ -127,8 +130,12 @@ pub async fn hash(password: String) -> Result<String, ApiError> {
 
 /// Whether `password` is the one `phc` was made from, in a turn as [`hash`] is.
 pub async fn verify(password: String, phc: String) -> Result<bool, ApiError> {
-    let turn = hashing_turn().await?;
-    Ok(tokio::task::spawn_blocking(move || {
+    Ok(verify_in_turn(hashing_turn().await?, password, phc).await)
+}
+
+/// [`verify`] in a turn the caller already holds.
+pub async fn verify_in_turn(turn: SemaphorePermit<'static>, password: String, phc: String) -> bool {
+    tokio::task::spawn_blocking(move || {
         let _turn = turn;
         PasswordHash::new(&phc)
             .map(|h| {
@@ -139,7 +146,7 @@ pub async fn verify(password: String, phc: String) -> Result<bool, ApiError> {
             .unwrap_or(false)
     })
     .await
-    .unwrap_or(false))
+    .unwrap_or(false)
 }
 
 #[cfg(test)]

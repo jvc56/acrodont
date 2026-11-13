@@ -688,12 +688,15 @@ async fn reset_password_confirm(
 /// Change password's bucket: a session cookie alone must not be a way to
 /// guess the account's password at full speed.
 async fn check_password(state: &AppState, user: &CurrentUser, password: String) -> ApiResult<()> {
+    // The try is counted once a hashing turn is held: a request turned away
+    // busy (503) was never judged, and spends none of the account's tries.
+    let turn = password::hashing_turn().await?;
     state.limits.reset.check(&format!("pw:{}", user.id))?;
     let hash = sqlx::query_scalar!("SELECT password_hash FROM users WHERE id = $1", user.id)
         .fetch_optional(&state.db)
         .await?
         .ok_or(ApiError::Unauthorized)?;
-    if password::verify(password, hash).await? {
+    if password::verify_in_turn(turn, password, hash).await {
         Ok(())
     } else {
         Err(ApiError::Fields(vec![FieldError::new(
@@ -748,7 +751,10 @@ async fn change_password(
     ApiJson(body): ApiJson<ChangePasswordBody>,
 ) -> ApiResult<Response> {
     // Each try costs a hash and maybe a scoring, and is a guess at the
-    // password: bounded per account, as a reset link's tries are.
+    // password: bounded per account, as a reset link's tries are. Counted
+    // once a hashing turn is held, so a request turned away busy (503)
+    // spends none.
+    let turn = password::hashing_turn().await?;
     state.limits.reset.check(&format!("pw:{}", user.id))?;
     let account = sqlx::query!(
         r#"SELECT username::text AS "username!", email::text AS "email!", password_hash
@@ -758,7 +764,7 @@ async fn change_password(
     .fetch_optional(&state.db)
     .await?
     .ok_or(ApiError::Unauthorized)?;
-    if !password::verify(body.current_password, account.password_hash).await? {
+    if !password::verify_in_turn(turn, body.current_password, account.password_hash).await {
         return Err(ApiError::Fields(vec![FieldError::new(
             "current_password",
             "That password is not right.",

@@ -106,6 +106,8 @@ fn check_fields(state: &AppState, name: &str, threshold: i64, segment_size: i64)
     let n = name.chars().count();
     if n == 0 || n > 200 {
         errors.push(PathError::new(&[], "name", "The name must be 1–200 characters."));
+    } else if name.contains('\0') {
+        errors.push(PathError::new(&[], "name", crate::search::validate::NOT_STORABLE));
     }
     if !(1..=100).contains(&threshold) {
         errors.push(PathError::new(&[], "clear_threshold", "The clear threshold is 1–100."));
