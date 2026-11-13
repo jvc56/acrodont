@@ -176,7 +176,13 @@ export class SyncEngine {
 				this.setStatus('offline');
 				return;
 			}
-			const body = reply.body as SyncResponse;
+			// Something between the device and the server that answers 200 with a
+			// page of its own (a hotel's sign-in, a proxy's error) is no connection.
+			if (!isSyncBody(reply.body)) {
+				this.setStatus('offline');
+				return;
+			}
+			const body = reply.body;
 			// The account's storage, for the Cascades page and the limit checks, offline too.
 			if (body.storage) {
 				const s = await getMeta(this.db, 'server');
@@ -235,18 +241,27 @@ export class SyncEngine {
 				page_token: page.next_page_token,
 				question_rows_for: []
 			});
-			if (!reply || reply.status !== 200) {
+			// A page that is not one ends the pull unapplied: taken for the last
+			// page, it would advance the cursor past rows that never arrived.
+			if (!reply || reply.status !== 200 || !isSyncBody(reply.body)) {
 				if (reply?.status === 401) this.setStatus('needs_login');
 				else if (reply) this.setStatus('offline');
 				return false;
 			}
-			page = reply.body as SyncResponse;
+			page = reply.body;
 		}
 	}
 
 	private emit(o: RebaseOutcome) {
 		if (o.notices.length) this.hooks.onNotices?.(o.notices);
 	}
+}
+
+/** Whether a 2xx body is the sync endpoint's: every one carries the sequence it took. */
+function isSyncBody(body: unknown): body is SyncResponse {
+	if (typeof body !== 'object' || body === null) return false;
+	const seq = (body as { sync_seq?: unknown }).sync_seq;
+	return (typeof seq === 'string' || typeof seq === 'number') && seq !== '' && Number.isFinite(Number(seq));
 }
 
 /** The batch's entries paired with their results, in request order. */

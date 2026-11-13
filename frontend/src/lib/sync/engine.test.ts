@@ -539,6 +539,29 @@ describe('the sync engine', () => {
 		expect((await a.db.get('quizzes', newId))!.pending).toBeUndefined();
 	});
 
+	it('a 200 that is not the sync endpoint’s is no connection: nothing is applied and the cursor stays', async () => {
+		const { server, a } = await setup();
+		await a.play(Q1, 'C');
+		const cursor = (await getMeta(a.db, 'sync')).cursor;
+		// A sign-in page answered in the server's place.
+		a.tamper = () => ({ status: 200, body: '<html>Sign in to this network</html>', retryAfter: null });
+		await a.sync();
+		expect(a.engine.status).toBe('offline');
+		expect((await getMeta(a.db, 'sync')).cursor).toBe(cursor);
+		expect(await a.db.count('outbox')).toBe(1);
+		// The same in place of a later page: the pull is not applied short.
+		server.pageRows = 1;
+		await a.db.put('meta', { cursor: null, last_sync_at: null }, 'sync');
+		a.tamper = (req, send) => (req.page_token ? { status: 200, body: '<html></html>', retryAfter: null } : send(req));
+		await a.sync();
+		expect(a.engine.status).toBe('offline');
+		expect((await getMeta(a.db, 'sync')).cursor).toBeNull();
+		a.tamper = null;
+		await a.sync();
+		expect(a.engine.status).toBe('idle');
+		expect(await a.db.count('outbox')).toBe(0);
+	});
+
 	it('a full pull deletes a quiz it did not carry and spares a cascade created while it was in flight', async () => {
 		const { server, a } = await setup();
 		// A stale base row the server no longer has.
