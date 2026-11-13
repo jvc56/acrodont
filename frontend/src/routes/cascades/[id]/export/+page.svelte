@@ -74,12 +74,19 @@
 		})();
 	});
 
+	/** How many recounts have started: a plain counter, not state. */
+	let recounts = 0;
+
 	/** The questions the selection holds, from the `questions` store; the entries too when the cards are here. */
 	async function recount() {
 		if (!db || !cascade) return;
+		// Only the latest count is shown: an earlier selection's, finishing late, is dropped.
+		const turn = ++recounts;
 		const q = await localInput(db, cascade, { ...choices, format: 'txt', lines: 'questions' });
+		if (turn !== recounts) return;
 		count = 'input' in q ? selection(q.input).length : null;
 		const a = await localInput(db, cascade, { ...choices, format: 'txt', lines: 'answers' });
+		if (turn !== recounts) return;
 		entries = 'input' in a && cascade.quiz_type === 'anagram' ? selection(a.input).reduce((n, e) => n + (e.q.words?.length ?? 0), 0) : null;
 	}
 

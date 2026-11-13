@@ -624,7 +624,7 @@ async fn grades(
     .fetch_optional(&state.db)
     .await?
     .ok_or(ApiError::NotFound)?;
-    let end = (from + limit).min(i64::from(i32::MAX));
+    let end = from.saturating_add(limit).min(i64::from(i32::MAX));
     let start = from.min(i64::from(i32::MAX)) as i32;
     let mut conn = state.db.acquire().await?;
     let chunks = crate::cards::load_range(&mut conn, quiz, start, end as i32).await?;
