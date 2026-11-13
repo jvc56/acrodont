@@ -106,7 +106,8 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	// In a window too narrow for the second line it wraps, and the word is still centred on the taller definition.
 	const wide = page.viewportSize()!;
 	await page.setViewportSize({ width: 660, height: wide.height });
-	await expect.poll(async () => (await box(parts)).height).toBeGreaterThan(lines.height + 10);
+	// (The narrower window lays the player out afresh: for a moment the definition is not there to measure.)
+	await expect.poll(async () => (await parts.boundingBox())?.height ?? 0).toBeGreaterThan(lines.height + 10);
 	const [x2, wrapped] = [await box(page.locator('[data-answer]').filter({ hasText: /EXIT/ })), await box(parts)];
 	expect(Math.abs(wrapped.y + wrapped.height / 2 - (x2.y + x2.height / 2))).toBeLessThan(3);
 	await page.setViewportSize(wide);
