@@ -239,11 +239,17 @@ async function dropAcked(tx: RwTx, acked: Acked[]) {
 	const outbox = tx.objectStore('outbox');
 	// A batch is the outbox's first entries, and device_seq only grows, so
 	// when the range from its first to its last holds exactly the acknowledged
-	// entries it goes in one request rather than one per entry.
-	const seqs = acked.map((a) => a.entry.device_seq);
+	// entries it goes in one request rather than one per entry. Exactly, by
+	// key and not by count: these are one cascade's, and another cascade's
+	// acknowledged entry can lie between them while one of these has since
+	// been replaced (a newer move_cursor takes a new device_seq). The counts
+	// then agree, and the range would take the other cascade's entry before
+	// the transaction that applies its rows.
+	const seqs = new Set(acked.map((a) => a.entry.device_seq));
 	const range = IDBKeyRange.bound(Math.min(...seqs), Math.max(...seqs));
-	if ((await outbox.count(range)) === seqs.length) await outbox.delete(range);
-	else await Promise.all(seqs.map((k) => outbox.delete(k)));
+	const held = await outbox.getAllKeys(range);
+	if (held.length === seqs.size && held.every((k) => seqs.has(k as number))) await outbox.delete(range);
+	else await Promise.all([...seqs].map((k) => outbox.delete(k)));
 }
 
 /**
@@ -281,7 +287,17 @@ async function rebaseCascade(db: UserDb, st: PullState, C: string, work: Cascade
 		// A transaction aborted for want of room says so itself; the request in
 		// flight at that moment reports only the abort. Nothing of it was kept:
 		// this cascade's acknowledged operations are still in the outbox.
-		throw tx.error ?? e;
+		const cause = tx.error ?? e;
+		// An error that is not IndexedDB's leaves the transaction open, and it
+		// would commit what it had done so far: the acknowledged operations gone
+		// from the outbox with their rows half applied and the replay cut short.
+		// Aborted, as `applyLocally` aborts, the cascade is as it was.
+		try {
+			tx.abort();
+		} catch {
+			// Already aborted.
+		}
+		throw cause;
 	}
 }
 

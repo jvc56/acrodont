@@ -174,7 +174,7 @@ describe('the sync engine', () => {
 		expect((await getMeta(a.db, 'sync')).cursor).toBeGreaterThan(0);
 	});
 
-	it('a pull that only echoes the device’s own operations takes the fast path and empties the overlay', async () => {
+	it('a pull that only echoes the device’s own operations empties the overlay, and its grades are then read from the base', async () => {
 		const { a } = await setup();
 		await a.play(Q1, 'CCM');
 		expect(await a.db.count('overlay_quiz_questions')).toBe(3);
@@ -470,11 +470,21 @@ describe('the sync engine', () => {
 		// in an overlay the acknowledgement cleared.
 		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
 		expect((await a.quiz(Q1))!.correct_count).toBe(2);
+		// After a reload (a new engine on the same database) it still says so
+		// from its first moment, never "Syncing…", while the server answers 426.
+		const said: SyncStatus[] = [];
+		const reloaded = new SyncEngine(
+			a.db,
+			{ onStatus: (st) => said.push(st) },
+			{ transport: async (req) => ({ ...server.sync(JSON.parse(JSON.stringify(req))), status: 426 }), wait: async () => undefined }
+		);
+		await reloaded.sync();
+		expect(said).toEqual(['reload', 'reload']);
 		a.tamper = null;
-		void server;
 		await a.play(Q1, 'C', 2);
 		await a.sync();
 		expect((await getMeta(a.db, 'sync')).upgrade_required).toBe(false);
+		expect(a.engine.status).toBe('idle');
 	});
 
 	it('a 426 that acknowledges a finish keeps the level it made and the operations queued on it', async () => {
@@ -531,11 +541,15 @@ describe('the sync engine', () => {
 		await a.play(Q1, 'CCMMM');
 		const { newId } = await a.finish(Q1, '7');
 		await a.play(newId, 'C');
+		const built = (await a.rows(newId)).map((r) => [r.question_idx, r.position]).sort();
 		server.floor = server.seq + 1;
 		// One more answer on the new level while the refused batch is in flight.
+		// Each request carries the batch's seven operations and no more, so that
+		// answer is still in the outbox, behind the batch, when the full pull is
+		// applied: the rest of the outbox, replayed.
 		let late = false;
 		a.tamper = async (req, send) => {
-			const r = send(req);
+			const r = send({ ...req, ops: req.ops?.slice(0, 7) });
 			if (!late && req.ops?.length) {
 				late = true;
 				await a.play(newId, 'C', 1);
@@ -544,11 +558,23 @@ describe('the sync engine', () => {
 		};
 		await a.sync();
 		expect(texts(a)).toEqual([]);
+		expect((await a.outbox()).map((e) => e.op.type)).toEqual(['grade']);
+		// The device's own rows for the level were promoted by the full pull's
+		// response: all three, where the device had placed them, with the one
+		// grade the server holds. No index list was needed.
+		const base = await a.db.getAllFromIndex('quiz_questions', 'quiz_id', newId);
+		expect(base.map((r) => [r.question_idx, r.position]).sort()).toEqual(built);
+		expect(base.filter((r) => r.grade === 'correct')).toHaveLength(1);
+		expect((await a.db.get('quizzes', newId))!.pending).toBeUndefined();
+		expect((await a.db.get('quizzes', newId))!.correct_count).toBe(1);
+		// The answer still waiting was replayed onto them.
+		expect((await a.quiz(newId))!.correct_count).toBe(2);
+		a.tamper = null;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
 		expect(await a.db.count('outbox')).toBe(0);
 		expect((await a.db.get('quizzes', newId))!.correct_count).toBe(2);
 		expect((await a.rows(newId)).filter((r) => r.grade === 'correct').length).toBe(2);
-		// No index list was needed: the device's own rows for the level were promoted.
-		expect((await a.db.get('quizzes', newId))!.pending).toBeUndefined();
 	});
 
 	it('resync_required in answer to a full pull is not asked a third time', async () => {
@@ -556,6 +582,9 @@ describe('the sync engine', () => {
 		await a.play(Q1, 'C');
 		const before = a.requests.length;
 		a.tamper = (req, send) => {
+			// An engine that went on asking would never return: past a fourth
+			// request the connection drops, so that it fails the count below.
+			if (a.requests.length - before > 4) throw new TypeError('asked without end');
 			const r = send(req);
 			return { ...r, body: { sync_seq: (r.body as SyncResponse).sync_seq, results: [], resync_required: true } };
 		};
@@ -908,6 +937,27 @@ describe('the rebase, continued', () => {
 		expect(await a.db.count('outbox')).toBe(1);
 	});
 
+	it('a full pull that carries a cascade with pending operations deletes no quiz of it that the pull did not carry', async () => {
+		const { a } = await setup();
+		// A base quiz the server does not have, older than the pull, in a cascade the pull does carry.
+		const stale = 'dead0000-0000-4000-8000-000000000000';
+		await a.db.put('quizzes', { ...((await a.db.get('quizzes', Q1)) as QuizRow), id: stale });
+		await a.play(Q1, 'C');
+		a.tamper = (req, send) => send({ ...req, ops: [] });
+		await a.db.put('meta', { cursor: null, last_sync_at: null }, 'sync');
+		await a.sync();
+		expect(a.requests.at(-1)!.cursor).toBeNull();
+		expect(await a.db.count('outbox')).toBe(1);
+		expect(await a.db.get('quizzes', stale)).toBeDefined();
+		// Once nothing is pending, the next full pull removes it.
+		a.tamper = null;
+		await a.sync();
+		expect(await a.db.count('outbox')).toBe(0);
+		await a.db.put('meta', { ...(await getMeta(a.db, 'sync')), cursor: null }, 'sync');
+		await a.sync();
+		expect(await a.db.get('quizzes', stale)).toBeUndefined();
+	});
+
 	it('a finish rejected not_active, and grades rejected stale_attempt with no finish behind them, say it was finished elsewhere', async () => {
 		const { server, a } = await setup();
 		await a.play(Q1, 'CCMMM');
@@ -1132,6 +1182,61 @@ function failing(which: (n: number) => boolean, error: () => unknown) {
 }
 const noRoom = () => new DOMException('The quota has been exceeded.', 'QuotaExceededError');
 
+type AnyFn = (...args: unknown[]) => unknown;
+const bound = (target: object, prop: string | symbol) => {
+	const v = Reflect.get(target, prop);
+	return typeof v === 'function' ? (v as AnyFn).bind(target) : v;
+};
+
+/**
+ * A database on which a write fails part way through a transaction that has
+ * already written: the n-th transaction of a kind — `rebase`, the one per
+ * cascade, or `page`, the one that writes a pull's page — fails at its first
+ * `put` to `store`.
+ *
+ * `quota` fails it as a browser out of room does: the transaction is aborted,
+ * for real, so everything it wrote is rolled back; its `error` names the
+ * quota; and the write's own promise reports only the abort. `bug` throws an
+ * error that is not IndexedDB's and leaves the transaction open.
+ */
+function failingWrite(kind: 'rebase' | 'page', store: string, how: 'quota' | 'bug', which: (n: number) => boolean) {
+	let n = 0;
+	return (db: UserDb): UserDb =>
+		new Proxy(db, {
+			get(target, prop) {
+				if (prop !== 'transaction') return bound(target, prop);
+				return (stores: string | string[], mode?: IDBTransactionMode) => {
+					const tx = (target.transaction as AnyFn)(stores, mode) as object & { abort(): void; objectStore(name: string): object };
+					const has = (name: string) => Array.isArray(stores) && stores.includes(name);
+					const mine = kind === 'rebase' ? has('outbox') && has('staging_cascades') : !has('outbox') && has('quizzes') && has('staging_quizzes');
+					if (!mine || !which(++n)) return tx;
+					let failed = false;
+					return new Proxy(tx, {
+						get(t, p) {
+							if (p === 'error' && failed) return noRoom();
+							if (p !== 'objectStore') return bound(t, p);
+							return (name: string) => {
+								const st = t.objectStore(name);
+								if (name !== store) return st;
+								return new Proxy(st, {
+									get(inner, sp) {
+										if (sp !== 'put') return bound(inner, sp);
+										return () => {
+											if (how === 'bug') throw new Error('a bug in the rebase');
+											failed = true;
+											t.abort();
+											return Promise.reject(new DOMException('The transaction was aborted.', 'AbortError'));
+										};
+									}
+								});
+							};
+						}
+					});
+				};
+			}
+		});
+}
+
 /** Two cascades, and a device that has opened and pulled both. */
 async function two(through?: (db: UserDb) => UserDb, hooks?: EngineHooks) {
 	const server = new FakeServer();
@@ -1181,8 +1286,11 @@ describe('a pull that cannot be applied', () => {
 	it('a quota error in a cascade’s transaction makes room and pulls once more, with the outbox untouched', async () => {
 		let made = 0;
 		const full: string[] = [];
+		// The batch's cascade is the third rebase transaction. It fails at its
+		// first base quiz row, after it has taken the acknowledged operations out
+		// of the outbox: the abort is what puts them back.
 		const { a } = await two(
-			failing((n) => n === 3, noRoom),
+			failingWrite('rebase', 'quizzes', 'quota', (n) => n === 3),
 			{ makeRoom: () => void made++, onNoRoom: () => full.push('no room') }
 		);
 		await a.sync();
@@ -1207,7 +1315,7 @@ describe('a pull that cannot be applied', () => {
 		const full: string[] = [];
 		let stuck = true;
 		const { a } = await two(
-			failing((n) => n > 2 && stuck, noRoom),
+			failingWrite('rebase', 'quizzes', 'quota', (n) => n > 2 && stuck),
 			{ makeRoom: () => void made++, onNoRoom: () => full.push('no room') }
 		);
 		await a.sync();
@@ -1230,6 +1338,90 @@ describe('a pull that cannot be applied', () => {
 		expect(await a.db.count('outbox')).toBe(0);
 		expect(await a.db.count('staging_quizzes')).toBe(0);
 		expect((await a.db.get('quizzes', l2.newId))!.correct_count).toBe(2);
+	});
+});
+
+describe('a pull that cannot be applied, continued', () => {
+	it('a quota error while a page of the pull is written makes room and pulls once more, with the outbox untouched', async () => {
+		let made = 0;
+		const full: string[] = [];
+		// The first sync writes one page; the batch's pull is the second.
+		const { a } = await two(
+			failingWrite('page', 'staging_quizzes', 'quota', (n) => n === 2),
+			{ makeRoom: () => void made++, onNoRoom: () => full.push('no room') }
+		);
+		await a.sync();
+		const cursor = (await getMeta(a.db, 'sync')).cursor;
+		await a.play(Q1, 'CC');
+		await a.sync();
+		expect(made).toBe(1);
+		expect(full).toEqual([]);
+		expect(a.engine.status).toBe('idle');
+		expect(await a.db.count('outbox')).toBe(0);
+		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
+		const sent = a.requests.filter((r) => r.ops?.length);
+		expect(sent.map((r) => r.ops!.length)).toEqual([2, 2]);
+		expect(sent.map((r) => r.cursor)).toEqual([cursor, cursor]);
+	});
+
+	it('an error that is not IndexedDB’s, part way through a cascade, rolls that cascade back: its acknowledged operations stay queued', async () => {
+		let broken = true;
+		const { a } = await two(failingWrite('rebase', 'quizzes', 'bug', (n) => n > 2 && broken));
+		await a.sync();
+		const cursor = (await getMeta(a.db, 'sync')).cursor;
+		await a.play(Q1, 'CCMMM');
+		const l2 = await a.finish(Q1, '7');
+		await a.play(l2.newId, 'C');
+		await expect(a.sync()).rejects.toThrow('a bug in the rebase');
+		expect((await getMeta(a.db, 'sync')).cursor).toBe(cursor);
+		// Nothing of the cascade's transaction was kept: not the outbox without
+		// its seven operations, not a base without the level they made.
+		expect(await a.db.count('outbox')).toBe(7);
+		expect(await a.db.get('quizzes', l2.newId)).toBeUndefined();
+		expect((await a.quiz(l2.newId))!.correct_count).toBe(1);
+		broken = false;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect((await a.db.get('quizzes', l2.newId))!.correct_count).toBe(1);
+	});
+
+	it('an acknowledged operation of another cascade, lying between this cascade’s, stays queued until its own cascade’s transaction', async () => {
+		// The batch's cascades are transactions 3 and 4: the tab goes before the second.
+		const { a } = await two(failing((n) => n === 4, () => new Error('the tab is gone')));
+		await a.sync();
+		const q = (await a.quiz(Q1))!;
+		const move = (position: number) =>
+			a.apply({ type: 'move_cursor', quiz_id: Q1, attempt: q.attempt, attempt_seed: q.shuffle_seed, position });
+		await a.play(Q1, 'C');
+		await move(1);
+		await a.play(Q2, 'C');
+		await a.play(Q1, 'C', 1);
+		// While the batch is out the cursor moves again: the queued move is
+		// replaced by one with a new device_seq, so the first cascade's three
+		// acknowledged entries span a range that holds three entries, one of
+		// them the second cascade's.
+		let moved = false;
+		a.tamper = async (req, send) => {
+			const r = send(req);
+			if (!moved && req.ops?.length) {
+				moved = true;
+				await move(2);
+			}
+			return r;
+		};
+		await expect(a.sync()).rejects.toThrow('the tab is gone');
+		const left = await a.outbox();
+		expect(left.map((e) => [e.cascade_id, e.op.type])).toEqual([
+			[C2, 'grade'],
+			[C1, 'move_cursor']
+		]);
+		a.tamper = null;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect((await a.db.get('quizzes', Q2))!.correct_count).toBe(1);
+		expect((await a.db.get('quizzes', Q1))!.cursor).toBe(2);
 	});
 });
 

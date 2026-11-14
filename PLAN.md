@@ -3141,7 +3141,13 @@ brings the server's.
     acknowledged operations dropped with it, and no other), so nothing the user
     did is lost and studying continues on what is already local. For a pull the
     retry is the same request made again, which the server answers from its
-    records.
+    records. A cascade the drop took is marked as the budget's drops are, and
+    **the rest of the download pass that was under way leaves it alone**, as
+    every later pass does: fetched back by that pass's next step, it would
+    take the room just made. And **any** error that ends a per-cascade
+    transaction part way, not only IndexedDB's own, aborts it, so a cascade is
+    never left with its acknowledged operations gone from the outbox and their
+    rows half applied.
   - **An `applyLocally`**: the aborted unit **is** what the user just did. The
     grade, cursor move or finish reached neither the overlay nor the outbox, so
     the player cannot pretend it was saved and cannot advance past the card. It
@@ -6425,7 +6431,7 @@ download window fetching its index lists and materialising on first open, and,
 when it leaves the window with nothing pending, dropping every question row,
 position and card while keeping its cascade, quiz and attempt rows, then on
 reopen fetching index lists and graded rows and materialising with every
-grade intact; a cascade created while a full pull is in flight surviving the last page; a level promoted from an acknowledged `finish` by a full pull's own response keeping its rows and the answers queued on it; **a tab closed between two cascades' transactions** leaving the cursor unadvanced, the first cascade's acknowledged operation gone with its rows and the second's acknowledged `finish` still in the outbox, so the next sync sends it again and the answers queued on the level it made, beyond that sync's batch, are kept; **a level's own `finish` queued behind the batch that made the level** being applied with everything studied after it, whether it clears the level or descends from it, the base holding the server's level with no answer yet after the first acknowledgement; answers queued behind the finish that reset their quiz being counted once it is acknowledged; an answer regraded behind that batch being promoted as the server has it; **a level made and cleared inside one acknowledged batch** keeping its rows in the base, in the finished attempt's order and graded, so that a restore of it queued behind the batch keeps the answers given after it; a pull for an out-of-window cascade
+grade intact; a cascade created while a full pull is in flight surviving the last page; a level promoted from an acknowledged `finish` by a full pull's own response keeping its rows — every one, where the device had placed it, with the grade the server holds — and the answers queued on it; **a tab closed between two cascades' transactions** leaving the cursor unadvanced, the first cascade's acknowledged operation gone with its rows and the second's acknowledged `finish` still in the outbox, so the next sync sends it again and the answers queued on the level it made, beyond that sync's batch, are kept; **a level's own `finish` queued behind the batch that made the level** being applied with everything studied after it, whether it clears the level or descends from it, the base holding the server's level with no answer yet after the first acknowledgement; answers queued behind the finish that reset their quiz being counted once it is acknowledged; an answer regraded behind that batch being promoted as the server has it; **a level made and cleared inside one acknowledged batch** keeping its rows in the base, in the finished attempt's order and graded, so that a restore of it queued behind the batch keeps the answers given after it; a pull for an out-of-window cascade
 writing no question rows and leaving its quizzes pending; a grades fetch whose
 attempt differs from the base row being discarded and the device syncing
 again; a grades fetch cut off after its first page being made again, because the rows it wrote fall short of the quiz row's
@@ -6465,7 +6471,7 @@ pull's download manager — no index list, no grades, no keys, no cards, absent 
 instead of dropping and refetching the same cascade forever, then opening it
 clearing the mark and fetching it back whole, a marked cascade over
 `AUTO_KEEP_OFFLINE_ROWS` counting as neither wanted nor kept until it is
-opened, and the same mark left by a forced drop (in the scale tier); a `QuotaExceededError` thrown by a pull's per-cascade transaction leaving the cursor unadvanced and the outbox intact, asking once for room to be made and making the pull again with the same batch, which then loses nothing, and on a second failure reporting no room, with the status no longer "Syncing…", the staging rows left for the next pull and studying continuing until a later sync applies everything; the same error thrown by an **`applyLocally`**
+opened, and the same mark left by a forced drop (in the scale tier); a write that runs out of room **part way through** a pull's per-cascade transaction, after that transaction has taken the acknowledged operations out of the outbox — the transaction really aborted, its own error naming the quota while the failed write reports only the abort — leaving the cursor unadvanced and the outbox intact, asking once for room to be made and making the pull again with the same batch, which then loses nothing, and on a second failure reporting no room, with the status no longer "Syncing…", the staging rows left for the next pull and studying continuing until a later sync applies everything; the same failure while **a page of the pull is written** making room and pulling once more from the same cursor; an error that is **not IndexedDB's**, thrown part way through a cascade's transaction, rolling the whole of it back, its acknowledged operations still queued and nothing of the level they made in the base; an acknowledged operation of **another cascade lying between this cascade's** in the outbox, one of this cascade's having since been replaced, staying queued until its own cascade's transaction; the same error thrown by an **`applyLocally`**
 instead, where the grade reached neither the overlay nor the outbox: the player
 stays on that card with the storage message in place of the grade, Show / Next
 advances nothing, and the grade is written once a cascade is removed and the
@@ -6479,7 +6485,7 @@ and the same for a `finish` the server answered `completed` where the device had
 a `finish` acknowledged on its second send, after a lost response, promoting
 its rows with no notice; the fast path taking a batch of applied grades
 without touching the other pending grades' overlay rows or reading the cascade's other pending operations; every base row carrying the sequence of the response that
-wrote it, so a full pull deletes the rows an earlier pull wrote and spares those a creation or a promotion wrote while it was in flight;
+wrote it, so a full pull deletes the rows an earlier pull wrote and spares those a creation wrote while it was in flight;
 a `restore_quiz` rejected with reason `error` dropping its overlay quiz row and
 showing the could-not-be-restored notice; a batch whose only acknowledged
 operation is an applied `purge_cascade` taking the fast path with its tombstone
@@ -6496,7 +6502,7 @@ pulled by a new device arriving as one row with no question rows, restorable
 offline and pending until online, and a Trash export of it fetching its
 rows; a `finish` clearing a quiz leaving that quiz's rows and positions in
 the base, so a Trash export of it works offline; a pull that reports a quiz cleared never flagging it pending; a full pull deleting no base row of a cascade with
-pending operations although it is absent from `question_rows_for`; a `stale`
+pending operations: not the cascade, when the server no longer has it, and not a quiz of it that the pull did not carry, which goes at the first full pull after the outbox is empty; a `stale`
 grade beside an applied `finish` with a matching outcome showing the grade's
 own sentence; a new order-filter row opening at rank 1; the drop pass in a
 browser without Web Locks skipping the running tab's open cascade; the drop
@@ -6513,14 +6519,12 @@ without definitions, the cascade's setting turned on offline, and the cards refe
 the cascade as the device sees it, before the change is sent; a first sync
 sending `cursor: null`; a `resync_required` response answered by a
 `cursor: null` pull that sends the same batch again, replacing the base and replaying the rest
-of the outbox with nothing lost, a batch holding a finish with answers queued
-on the level it made included, and deleting a quiz the full pull
-did not carry; an interrupted pull converging on the next
+of the outbox with nothing lost — an answer given on the level a finish of the batch made, still queued behind the resent batch, replayed onto the promoted rows — and deleting a quiz the full pull
+did not carry; a `resync_required` answered to a full pull being asked no third time (an engine that went on asking fails the request count, not the test's timeout); an interrupted pull converging on the next
 sync; a `426` acknowledging its operations and applying their pull (the level
 an acknowledged finish made stays, with the answers queued on it), showing **reload to keep syncing**
 rather than a waiting count, keeping the rest of the outbox and the grades that
-follow it, and still showing that state after a reload the service worker
-answered from its cache, until a sync succeeds; a `503` and a `429` each resending the same batch with the outbox intact (the wait itself is a stand-in the tests do not time); **a batch read before another account logged in in the same tab** being sent under the account the engine was started for, refused `401` by a stand-in server that checks the binding, and left in the outbox with "Log in to sync"; an engine stopped by that change of account sending nothing, using no answer that arrives after it was stopped and reporting no status; a change stream the browser gave up being opened again after a wait that doubles, one the browser is reopening itself being left to it, and one refused while the account needs to log in staying closed. The **download manager** has its own: a `429` on a cards page being waited out and that page fetched again, with no page lost or fetched twice; and a page the player needs on the current card taking priority, so the download manager starts nothing while one is outstanding.
+follow it, and still showing that state from a new engine's first status on the same database, as after a reload, while the server answers `426`, until a sync succeeds; a `503` and a `429` each resending the same batch with the outbox intact (the wait itself is a stand-in the tests do not time); **a batch read before another account logged in in the same tab** being sent under the account the engine was started for, refused `401` by a stand-in server that checks the binding, and left in the outbox with "Log in to sync"; an engine stopped by that change of account sending nothing, using no answer that arrives after it was stopped and reporting no status; a change stream the browser gave up being opened again after a wait that doubles, one the browser is reopening itself being left to it, and one refused while the account needs to log in staying closed. The **download manager** has its own: a `429` on a cards page being waited out and that page fetched again, with no page lost or fetched twice; a write with no room dropping the least recently opened cascade, marking it, **not fetching it back in the rest of the same pass**, and retrying once, a second failure saying there is no room; and a page the player needs on the current card taking priority, so the download manager starts nothing while one is outstanding.
 
 **Not asserted by any test today.** Each of these is behaviour this plan
 states and the code is written to; none has a test whose body would fail if it
@@ -6543,9 +6547,8 @@ keys and cards is not asserted either: the device in that test holds none); the
 keys coming back on the open after a drop; a cascade studied for 15 days
 staying in the window, one studied elsewhere leaving it, and an export counting
 as an open; a `purge_quiz` or `set_quiz_options` not refreshing the last-open
-time; the quota path's retry refetching nothing, and **the drop pass running
-before the answer eviction** when a pull finds no room (the engine test sees
-only that room was asked for once); a completion computed while another
+time; **the drop pass running
+before the answer eviction** on the quota path, and the eviction there at all (the download manager's test sees the drop and the retry; the engine's sees only that room was asked for once); a completion computed while another
 device's finishes were unpulled showing this device's own counts, the
 came-out-differently path opening **no completion screen**, and a `finish` the
 server answered `reshuffled`; a `finish` rejected `not_deepest` with every
@@ -6558,7 +6561,7 @@ skip of a cascade with pending operations (the window's pass is tested); the
 second and third cascades' order under eviction; `429`s on keys, index-list and
 grades pages, the progress indicator across one, and ten 300,000-question
 cascades draining through a bucket that answers `429` from the 120th request of
-a minute; a multi-page full pull promoting a level; and the Account page's
+a minute; a multi-page full pull promoting a level, and rows a promotion wrote while a full pull was in flight being spared by it; a full pull sparing the graded rows of a cascade with pending operations that is absent from `question_rows_for`; a `426` state surviving a reload that the service worker answered from its cache (the engine's first status is tested, the worker is not); and the Account page's
 confirmation before a logout that removes data with changes still unsent (the
 count and the question are the page's own, and no journey logs out that way).
 `Retry-After`'s length is never timed.
