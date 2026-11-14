@@ -8,7 +8,7 @@ import { display } from '$lib/player/display.svelte';
 import { recordTotals } from '$lib/local/accounts';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';
-import { userDb } from '$lib/local/open';
+import { onUpdatedElsewhere, userDb } from '$lib/local/open';
 import { DownloadManager, httpApiFor, openPlayers } from './downloads';
 import { electLeader, listenForChanges, startTriggers, SyncEngine, transportFor, type EngineHooks, type SyncStatus } from './engine';
 import type { Notice } from './notices';
@@ -106,6 +106,15 @@ function passDone(dm: DownloadManager) {
 }
 let channel: BroadcastChannel | null = null;
 let stop: (() => void) | null = null;
+/** The account whose notices `syncState.notices` holds. */
+let noticesOf: string | null = null;
+
+// A newer build in another tab took the database (its `versionchange` closed
+// this tab's connection): this tab can no longer sync, so it stops and gives
+// the account's sync lock up, or the tab on the new build could never lead and
+// nothing would be sent while this one stayed open. What this tab had queued
+// is in the database, which the new build now holds and sends from.
+onUpdatedElsewhere(() => stopSync());
 
 function reloadDeviceSettings() {
 	void display.reload();
@@ -129,9 +138,11 @@ function post(m: Message) {
 export function startSync(userId: string): () => void {
 	stopSync();
 	currentUser = userId;
+	keepNoticesFor(userId);
 	syncState.pending = null;
 	syncState.noRoom = false;
-	void refreshPending();
+	// A database that cannot be opened is counted when it can be.
+	void refreshPending().catch(() => undefined);
 	if (typeof BroadcastChannel !== 'undefined') {
 		channel = new BroadcastChannel(`acrodont-sync-${userId}`);
 		channel.onmessage = (ev) => {
@@ -156,6 +167,8 @@ export function startSync(userId: string): () => void {
 		let stopListening: (() => void) | null = null;
 		let cancelled = false;
 		syncState.leader = true;
+		// A database that cannot be opened leaves nothing to lead with; one a
+		// newer build has already upgraded stops this sync (open.ts).
 		void userDb(userId).then((db) => {
 			// Only for the account this tab still runs as.
 			if (cancelled || session.userId !== userId) return;
@@ -219,7 +232,7 @@ export function startSync(userId: string): () => void {
 			void getMeta(db, 'device').then(({ device_id }) => {
 				if (!cancelled) stopListening = listenForChanges(e, userId, device_id);
 			});
-		});
+		}, () => undefined);
 		return () => {
 			cancelled = true;
 			stopListening?.();
@@ -229,18 +242,30 @@ export function startSync(userId: string): () => void {
 			syncState.leader = false;
 		};
 	});
-	stop = () => {
+	const mine = () => {
 		release();
 		channel?.close();
 		channel = null;
 	};
-	return stop;
+	stop = mine;
+	return () => {
+		// Only the sync this call started: a later one is not this caller's to stop.
+		if (stop === mine) stopSync();
+	};
 }
 
+/**
+ * Stops syncing in this tab: the lock is given up, and nothing here names the
+ * account any more, so a count or a sync asked for later (a Log out that
+ * outlived its wait) does not open the account's database again.
+ */
 export function stopSync() {
 	stop?.();
 	stop = null;
 	currentUser = null;
+	// The stopped engine says nothing more: its last word, "Syncing…" if a
+	// request was out, is not left standing.
+	syncState.status = 'idle';
 }
 
 /** After a local write: half a second later, by this tab or by the leader. */
@@ -261,9 +286,23 @@ export async function syncNow() {
 
 /** Operations waiting in the outbox: whether any are (the sync status), and how many (the logout warning). */
 export async function refreshPending() {
-	if (!currentUser) return;
-	const db = await userDb(currentUser);
-	syncState.pending = await db.count('outbox');
+	const user = currentUser;
+	if (!user) return;
+	const db = await userDb(user);
+	const pending = await db.count('outbox');
+	// Counted for the account this tab was syncing when it asked.
+	if (currentUser === user) syncState.pending = pending;
+}
+
+/**
+ * The account this tab runs as, or none: a notice is the account's it was
+ * raised for, so those of another are taken off the screen, rather than stay
+ * on the log-in page and into the session of whoever uses the tab next. A tab
+ * that only stopped syncing for its account keeps that account's notices.
+ */
+export function keepNoticesFor(userId: string | null) {
+	if (noticesOf !== userId) syncState.notices = [];
+	noticesOf = userId;
 }
 
 export function dismissNotice(n: Notice) {

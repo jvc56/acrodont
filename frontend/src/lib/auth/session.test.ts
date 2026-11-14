@@ -7,7 +7,7 @@ import { openDB } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAccount, recordLogin, signedIn, userDbName } from '$lib/local/accounts';
 import { userDb } from '$lib/local/open';
-import { logout, LOGOUT_TIMEOUT_MS, sendQueuedLogout, session } from './session.svelte';
+import { initSession, logout, LOGOUT_TIMEOUT_MS, sendQueuedLogout, session } from './session.svelte';
 
 const A = '11111111-1111-4111-8111-111111111111';
 
@@ -60,6 +60,37 @@ describe('logging out', () => {
 		answer(new Response(null, { status: 204 }));
 		await done;
 		expect(await getAccount(A)).toBeUndefined();
+	});
+
+	it('a session check answered after the logout does not bring the account back', async () => {
+		let answerMe!: (r: Response) => void;
+		const asked: string[] = [];
+		vi.stubGlobal('fetch', (url: string) => {
+			asked.push(url);
+			if (url === '/api/auth/me') return new Promise<Response>((r) => (answerMe = r));
+			return Promise.resolve(new Response(null, { status: 204 }));
+		});
+		vi.stubGlobal('navigator', { onLine: true });
+		vi.stubGlobal('addEventListener', () => undefined);
+		await recordLogin(A, 'alice');
+		vi.stubGlobal('BroadcastChannel', undefined);
+
+		// The tab starts signed in and asks the server who it is.
+		const started = initSession();
+		await vi.waitFor(() => expect(asked).toEqual(['/api/auth/me']));
+		expect(session.userId).toBe(A);
+		// Log out, removing the account's data, before that is answered.
+		await logout({ removeData: true });
+
+		const me = { user_id: A, username: 'alice', is_admin: true, trash_retention_days: 30, max_quiz_questions: 100, storage_bytes: 1, max_storage_bytes: 2 };
+		answerMe(new Response(JSON.stringify(me), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+		await started;
+		await new Promise<void>((r) => setTimeout(r, 0));
+		// Nothing of the account is put back: not who the tab is, not its database.
+		expect(session.me).toBeNull();
+		expect(session.isAdmin).toBe(false);
+		expect(session.username).toBe('');
+		expect(await userDbExists(A)).toBe(false);
 	});
 
 	it('gives the logout request up after a while, as no connection', async () => {

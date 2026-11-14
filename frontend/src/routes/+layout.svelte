@@ -5,7 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { initSession, session } from '$lib/auth/session.svelte';
-	import { startSync } from '$lib/sync/runtime.svelte';
+	import { keepNoticesFor, startSync } from '$lib/sync/runtime.svelte';
 	import { applyUpdate, updates, watchUpdates } from '$lib/sw/client.svelte';
 	import { askToKeepData, watchOffline } from '$lib/sw/offline.svelte';
 	import InstallTip from '$lib/components/InstallTip.svelte';
@@ -46,11 +46,18 @@
 		if (session.userId) void askToKeepData();
 	});
 
-	// Sync runs while an account is signed in and this tab still belongs to it.
+	// Sync runs while an account is signed in, this tab still belongs to it, and
+	// no newer build has taken its database: a tab that cannot sync must not
+	// hold the lock the tab that can is waiting for.
 	$effect(() => {
 		const id = session.userId;
-		if (!id || session.signedOutInAnotherTab) return;
+		if (!id || session.signedOutInAnotherTab || session.updatedInAnotherTab) return;
 		return startSync(id);
+	});
+
+	// An account's sync notices leave the screen when it logs out of this tab.
+	$effect(() => {
+		keepNoticesFor(session.userId);
 	});
 
 	$effect(() => {

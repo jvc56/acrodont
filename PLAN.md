@@ -2767,7 +2767,13 @@ until the `426` line. IndexedDB schema upgrades run from versioned migrations,
 and every tab listens for `versionchange` on its connections: the tab still
 running the old build closes them and shows "Acrodont was updated in another tab
 — reload to continue", so the new build's upgrade is never **blocked** by an
-old tab holding the previous version open.
+old tab holding the previous version open. That tab can no longer sync, so it
+**stops syncing and gives up the account's sync lock** at the same moment (as
+does an old-build tab that finds the database already upgraded when it opens
+it): held by a tab with a closed database, the lock would keep the tab on the
+new build from ever leading, and nothing would be sent until the old tab was
+reloaded or closed. What the old tab had queued is in the database the new
+build now holds, and goes out with the new build's next sync.
 
 **Installing the app.** The worker lets a closed tab come back with no
 connection, but only for someone who can find the site again and whose browser
@@ -3810,7 +3816,14 @@ of divergence (see [Monitoring](#deployment-and-operations)).
   because wiping on `401` would also destroy the unsynced work of a user who
   pressed Sign out everywhere while their phone was offline.
 - **A different user.** If a different user logs in on the device, the previous
-  user's local data stays, untouched, until that user logs in again.
+  user's local data stays, untouched, until that user logs in again. What was
+  on screen for the previous user does not: a sync notice not yet dismissed
+  ("3 answers from this device weren't kept") leaves the screen when its
+  account logs out of the tab or another takes the tab, so it is not shown on
+  the log-in page or to the next user; and a session check or a sync that was
+  under way at the logout and ends after it puts nothing of that account back,
+  not its name in the tab and not, after the removal below, an empty database
+  named for it.
 - **A deleted account** is the one case where a `401` is not the whole story.
   The device that ran `DELETE /api/account` removes its own copy at once (see
   [Authentication](#authentication)), because keeping data for an account that
@@ -5435,7 +5448,9 @@ Modules:
   same sequence; the base is written only by the sync
   engine. One tab at a time runs the sync engine and the download manager,
   elected with the Web Locks API (`navigator.locks.request` on a per-user
-  lock held for the tab's life); the other tabs read the shared stores and
+  lock held for as long as the tab runs as that account and can sync: it is
+  given up at a logout, when the account is signed out in another tab, and
+  when a newer build in another tab takes the database); the other tabs read the shared stores and
   show the leader's status. Where Web Locks is missing, every tab syncs and
   idempotency keeps that correct, at the cost of duplicate rebase work.
 - **`lib/sync/`**: the sync engine (triggers, push, paged pull, rebase, backoff,
@@ -6413,8 +6428,21 @@ is signed in; and a second account's login clearing every pending flag, so the
 queued logout never reaches the server after the cookie it was for was
 replaced; a logout that removes the account's data deleting its database
 while the logout request is still unanswered, the emptied row kept for that
-request and deleted when it is answered; and the request being given up as no
-connection after its timeout. A fixture unscoped
+request and deleted when it is answered; the request being given up as no
+connection after its timeout; and a session check (`/api/auth/me`) answered
+after such a logout setting nothing of the account in the tab and not making
+its database again. The sync runtime's tests (`runtime.test.ts`, with a
+stand-in for Web Locks) cover: a leading tab whose database a newer version
+is opened over stopping, giving the lock to the tab waiting for it, not left
+saying "Syncing…" for the request it had out, its queued operation still in
+the upgraded database, and sending nothing and opening nothing afterwards; a
+tab that finds the database already at a newer version saying it was updated
+in another tab and not keeping the lock; an account's notices staying while
+the tab only stops and restarts syncing for it, and going when it logs out or
+another account starts syncing in the tab; and a sync or a count asked for
+after a logout that removed the account's data not making its database
+again. (The layout's two lines that call these, at a change of account and
+at the "updated in another tab" state, are not exercised by a test.) A fixture unscoped
 database at each earlier version opens at the current one with its rows and
 pointer intact.
 The rebase tests cover: a rejected `finish` removing the quiz it created in

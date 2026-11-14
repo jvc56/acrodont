@@ -1,7 +1,8 @@
 // The signed-in account's database connection, one per tab (PLAN.md § On the
 // device → IndexedDB stores: no per-user database but the signed-in one is
 // ever opened). A `versionchange` from a newer build in another tab closes it
-// and raises the "updated in another tab" notice.
+// and raises the "updated in another tab" notice; so does finding the database
+// already upgraded.
 import { openUserDb, type UserDb } from './db';
 import { initMeta } from './meta';
 
@@ -26,8 +27,11 @@ export function userDb(userId: string, username = ''): Promise<UserDb> {
 		return db;
 	});
 	current = { userId, db };
-	db.catch(() => {
+	db.catch((e) => {
 		if (current?.db === db) current = null;
+		// The database is already at a version this build does not know: a newer
+		// build upgraded it while this tab held no connection to be closed.
+		if ((e as { name?: string } | null)?.name === 'VersionError') for (const fn of listeners) fn();
 	});
 	return db;
 }

@@ -99,7 +99,10 @@ onUpdatedElsewhere(() => {
 
 let channel: BroadcastChannel | null = null;
 let onlineHooked = false;
-/** Bumped by every login: a session check begun before one must not judge the new session. */
+/**
+ * Bumped by every login and logout: a session check begun before one must not
+ * judge the new session, nor bring back the account that has just logged out.
+ */
 let logins = 0;
 
 export async function initSession() {
@@ -180,6 +183,7 @@ export async function adoptSession(me: Me): Promise<Me> {
  */
 export async function logout(opts: { removeData?: boolean } = {}) {
 	const id = session.userId;
+	logins++;
 	if (id) await recordLogout(id);
 	closeUserDb();
 	session.userId = null;
@@ -193,6 +197,7 @@ export async function logout(opts: { removeData?: boolean } = {}) {
 
 /** After DELETE /api/account succeeded: the session is already void. */
 export function forgetSession() {
+	logins++;
 	closeUserDb();
 	session.userId = null;
 	session.me = null;
