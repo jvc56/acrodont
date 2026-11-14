@@ -1796,8 +1796,12 @@ compressing it: a lexicon's words and a leave set's leaves are each stored as
 one text compressed with zstd at level 19 (see [Schema](#schema)), about ten
 seconds for CSW24's 280,887 words and twenty-five for its 914,624 leaves,
 which then take 3.8 MB and 3.9 MB where a row for each took 40 MB and 91 MB. Admin upload endpoints
-accept request bodies up to 100 MB and have a 120-second timeout, and the ALB
-idle timeout is raised to match.
+accept request bodies up to 100 MB and have a 115-second timeout, and the ALB
+idle timeout is raised to 120 seconds, as is Nginx's wait for the app's
+answer: five seconds more than the app allows itself, so an upload that takes
+the whole time gets the app's own answer (a `408` when it ran out of time)
+rather than a `504` from a load balancer that gave up in the same moment the
+upload committed.
 
 ### Immutability and deletion
 
@@ -5130,7 +5134,7 @@ Security generally:
   cascade creation, saving a search and loading one — `GET /api/searches/:id`
   reads up to 300,000 word-list rows and returns megabytes, so it is as
   expensive as the preview beside it — `EXPORT_RATE_PER_MINUTE`,
-  `ADMIN_UPLOAD_RATE_PER_MINUTE` — a 100 MB body with a 120-second synchronous
+  `ADMIN_UPLOAD_RATE_PER_MINUTE` — a 100 MB body with a 115-second synchronous
   validation behind it is the most expensive call in the plan, admins are few,
   and ten a minute is far more than any real cataloguing session needs — and
   `SYNC_RATE_PER_MINUTE`. The download default of 120 is what this plan's
@@ -5652,7 +5656,7 @@ startup rather than falling back to a default.
 | `DOWNLOAD_RATE_PER_MINUTE` | `120` | Per-user; the one shared bucket over the card, question-list and grades pages. Sized for one 300,000-question cascade's reopen per minute |
 | `SEARCH_RATE_PER_MINUTE` | `30` | Per-user; search, preview, cascade creation, saving a search and loading one (`GET /api/searches/:id`) |
 | `EXPORT_RATE_PER_MINUTE` | `10` | Per-user; server-streamed exports, counted when the dialog asks for an export token, since that is the request whose `429` the page can see |
-| `ADMIN_UPLOAD_RATE_PER_MINUTE` | `10` | Per-user; the three admin upload endpoints, each of which can carry 100 MB and hold a connection for 120 seconds |
+| `ADMIN_UPLOAD_RATE_PER_MINUTE` | `10` | Per-user; the three admin upload endpoints, each of which can carry 100 MB and hold a connection for 115 seconds |
 | `CATALOG_RATE_PER_MINUTE` | `300` | **Per IP**, for the two endpoints that need no session: `GET /api/lexicons` and `GET /api/letter-distributions/:name`. A device needs one of each per login plus one distribution per pulled cascade on a new device, but the bucket is per **address**, and a club or tournament room behind one address is dozens of devices logging in at once; 300 covers a room of about a hundred. A larger room waits out `429`s, which every client honours, rather than failing |
 | `LOGIN_FAILURES_PER_IP_PER_MINUTE` | `10` | Failed logins per IP; a successful login spends nothing, so a room logging in together is not locked out |
 | `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE` | `10` | Failed logins per username, taken before any Argon2 verify and given back unless it fails |
@@ -6623,7 +6627,11 @@ they run in parallel and leave nothing behind.
   [File formats](#file-formats). Each asserts the line numbers in the error list
   and that nothing was written. A file with many errors reports the first 1,000
   and the total. Every letter distribution file in MAGPIE-DATA, fetched at a
-  pinned commit, uploads unchanged and produces the expected tiles.
+  pinned commit, uploads unchanged and produces the expected tiles. A form
+  field holding a NUL (the lexicon's distribution, the leave set's lexicon, a
+  distribution's name) is a `400` with nothing written, and a NUL in the name
+  of `GET /api/letter-distributions/:name` a `404`, where Postgres's refusal
+  of the byte was a `500`.
 - **Schema tests**:
   - Every one of the 23 condition types round-trips through
     `search_conditions` and back into an equal `ConditionKind`, In Lexicon in

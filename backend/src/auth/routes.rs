@@ -728,8 +728,10 @@ async fn sign_out_everywhere(
          RETURNING session_generation",
         user.id
     )
-    .fetch_one(&state.db)
-    .await?;
+    .fetch_optional(&state.db)
+    .await?
+    // The account was deleted since the password was checked: its session is void.
+    .ok_or(ApiError::Unauthorized)?;
     Ok((
         SessionCookies::issue(&state, user.id, generation, None),
         StatusCode::NO_CONTENT,

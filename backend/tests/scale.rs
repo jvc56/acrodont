@@ -38,8 +38,8 @@ const FINISH_BUDGET: Duration = Duration::from_secs(20);
 const EXPORTS_BUDGET: Duration = Duration::from_secs(120);
 /// The ECS task's memory (`infra/variables.tf` `task_memory`, 2048 MiB).
 const TASK_MEMORY_BYTES: u64 = 2048 * 1024 * 1024;
-/// The ALB's idle timeout for admin uploads (`infra/alb.tf`).
-const UPLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+/// The app's own timeout for admin uploads, inside the ALB's idle timeout (`infra/alb.tf`).
+const UPLOAD_TIMEOUT: Duration = acrodont::catalog::routes::UPLOAD_TIMEOUT;
 const LEAVE_ROWS: usize = 1_000_000;
 /// One purge transaction taking a 300,000-question cascade with three levels.
 const PURGE_CASCADE_BUDGET: Duration = Duration::from_secs(30);

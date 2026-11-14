@@ -325,6 +325,47 @@ async fn leave_upload_rules(pool: sqlx::PgPool) {
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
 }
 
+/// Postgres refuses a NUL in a text parameter; a name holding one is said to
+/// be wrong (or not found), never answered `500`.
+#[sqlx::test]
+async fn a_nul_in_a_form_field_or_a_name_is_not_a_server_error(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("ADMIN_UPLOAD_RATE_PER_MINUTE", "1000")]).await;
+    let mut a = admin(&app).await;
+    let r = a
+        .upload(
+            "/api/admin/lexicons",
+            &[("name", "LX"), ("letter_distribution", "e\0n")],
+            "x.tsv",
+            b"BAT\t1\tx\n",
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.json());
+    assert_eq!(error_lines(&r), vec![Value::Null]);
+    let r = a
+        .upload(
+            "/api/admin/leave-sets",
+            &[("lexicon", "L\0X")],
+            "x.csv",
+            b"AB,1\n",
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.json());
+    assert_eq!(error_lines(&r), vec![Value::Null]);
+    let r = a
+        .upload(
+            "/api/admin/letter-distributions",
+            &[("name", "e\0n")],
+            "en.csv",
+            ENGLISH.as_bytes(),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.json());
+    assert_eq!(count(&app, "letter_distributions").await, 0);
+    // The one catalog route that takes a name in its path, with no session.
+    let r = app.client().get("/api/letter-distributions/e%00n").await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
 #[sqlx::test]
 async fn many_errors_report_the_first_thousand_and_the_total(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
