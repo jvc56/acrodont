@@ -3773,7 +3773,15 @@ of divergence (see [Monitoring](#deployment-and-operations)).
   So every authenticated request the app sends carries the user id the tab runs
   as, in an `X-Acrodont-User` header read from `meta`, and the server refuses a
   request whose header differs from the session's user with `401` **before
-  anything is applied or read** (see [Security](#authentication)). The ordinary
+  anything is applied or read** (see [Security](#authentication)). The same
+  holds **inside one tab**, when another account logs in while a sync is under
+  way: the sync engine and its download manager send the id of the account
+  whose database they were started on, not whichever account the tab runs as
+  at the moment a request leaves, so a batch read a moment before the login is
+  refused `401` like any other and stays in its outbox; and an engine stopped
+  by the change of account sends nothing more, uses no answer that arrives
+  afterwards, and reports no status, so the `401` is not shown to the account
+  that has just logged in. The ordinary
   `401` rule then does the right thing: the tab keeps its data and its outbox and
   shows **Log in to sync**. At startup, once online, the app compares
   `GET /api/auth/me`'s `user_id` with the pointer and treats a difference the same
@@ -6495,7 +6503,7 @@ sync; a `426` acknowledging its operations and applying their pull (the level
 an acknowledged finish made stays, with the answers queued on it), showing **reload to keep syncing**
 rather than a waiting count, keeping the rest of the outbox and the grades that
 follow it, and still showing that state after a reload the service worker
-answered from its cache, until a sync succeeds; a `503` and a `429` each resending the same batch with the outbox intact (the wait itself is a stand-in the tests do not time); a change stream the browser gave up being opened again after a wait that doubles, one the browser is reopening itself being left to it, and one refused while the account needs to log in staying closed. The **download manager** has its own: a `429` on a cards page being waited out and that page fetched again, with no page lost or fetched twice; and a page the player needs on the current card taking priority, so the download manager starts nothing while one is outstanding.
+answered from its cache, until a sync succeeds; a `503` and a `429` each resending the same batch with the outbox intact (the wait itself is a stand-in the tests do not time); **a batch read before another account logged in in the same tab** being sent under the account the engine was started for, refused `401` by a stand-in server that checks the binding, and left in the outbox with "Log in to sync"; an engine stopped by that change of account sending nothing, using no answer that arrives after it was stopped and reporting no status; a change stream the browser gave up being opened again after a wait that doubles, one the browser is reopening itself being left to it, and one refused while the account needs to log in staying closed. The **download manager** has its own: a `429` on a cards page being waited out and that page fetched again, with no page lost or fetched twice; and a page the player needs on the current card taking priority, so the download manager starts nothing while one is outstanding.
 
 **Not asserted by any test today.** Each of these is behaviour this plan
 states and the code is written to; none has a test whose body would fail if it

@@ -9,8 +9,8 @@ import { recordTotals } from '$lib/local/accounts';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';
 import { userDb } from '$lib/local/open';
-import { DownloadManager, openPlayers } from './downloads';
-import { electLeader, listenForChanges, startTriggers, SyncEngine, type SyncStatus } from './engine';
+import { DownloadManager, httpApiFor, openPlayers } from './downloads';
+import { electLeader, listenForChanges, startTriggers, SyncEngine, transportFor, type EngineHooks, type SyncStatus } from './engine';
 import type { Notice } from './notices';
 
 class SyncState {
@@ -159,7 +159,7 @@ export function startSync(userId: string): () => void {
 		void userDb(userId).then((db) => {
 			// Only for the account this tab still runs as.
 			if (cancelled || session.userId !== userId) return;
-			const e = new SyncEngine(db, {
+			const hooks: EngineHooks = {
 				// The download manager's turn after every pull; never awaited by the
 				// cycle, since its grades fetch syncs first.
 				onSynced: (o) => {
@@ -200,9 +200,13 @@ export function startSync(userId: string): () => void {
 					syncState.notices = [...syncState.notices, ...n];
 					post({ kind: 'notices', notices: n });
 				}
-			});
+			};
+			// Every request names the account this engine was started for, not
+			// whichever the tab runs as at the moment the request leaves.
+			const e = new SyncEngine(db, hooks, { transport: transportFor(userId) });
 			engine = e;
 			downloads = new DownloadManager(db, {
+				api: httpApiFor(userId),
 				sync: () => e.sync(),
 				openElsewhere: openPlayers,
 				openHere: () => syncState.openCascade,

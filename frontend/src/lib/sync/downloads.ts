@@ -120,16 +120,26 @@ const q = (params: Record<string, string | number | boolean>) =>
 		.map(([k, v]) => `${k}=${v === true ? 1 : v}`)
 		.join('&');
 
-export const httpApi: DownloadApi = {
-	questions: (c, qz, from, limit) => api.get(`/api/cascades/${c}/quizzes/${qz}/questions?${q({ from, limit })}`),
-	grades: (c, qz, from, limit) => api.get(`/api/cascades/${c}/quizzes/${qz}/grades?${q({ from, limit })}`),
-	keys: (c, from, limit) => api.get(`/api/cascades/${c}/cards?${q({ from, limit, keys: true })}`),
-	cards: (c, from, limit, hooks, definitions) =>
-		api.get(`/api/cascades/${c}/cards?${q({ from, limit, hooks, definitions })}`),
-	cardsByIdx: (c, idx, hooks, definitions) =>
-		api.get(`/api/cascades/${c}/cards?${q({ idx: idx.join(','), hooks, definitions })}`),
-	distribution: (name) => api.get(`/api/letter-distributions/${encodeURIComponent(name)}`, { bindUser: false })
+/**
+ * The download endpoints over fetch. `userId` is the account whose database
+ * the manager holds, named on every request whatever account the tab has since
+ * come to run as (see `transportFor` in engine.ts); without it the requests
+ * name the tab's account.
+ */
+export const httpApiFor = (userId?: string): DownloadApi => {
+	const as = { user: userId };
+	return {
+		questions: (c, qz, from, limit) => api.get(`/api/cascades/${c}/quizzes/${qz}/questions?${q({ from, limit })}`, as),
+		grades: (c, qz, from, limit) => api.get(`/api/cascades/${c}/quizzes/${qz}/grades?${q({ from, limit })}`, as),
+		keys: (c, from, limit) => api.get(`/api/cascades/${c}/cards?${q({ from, limit, keys: true })}`, as),
+		cards: (c, from, limit, hooks, definitions) => api.get(`/api/cascades/${c}/cards?${q({ from, limit, hooks, definitions })}`, as),
+		cardsByIdx: (c, idx, hooks, definitions) =>
+			api.get(`/api/cascades/${c}/cards?${q({ idx: idx.join(','), hooks, definitions })}`, as),
+		distribution: (name) => api.get(`/api/letter-distributions/${encodeURIComponent(name)}`, { bindUser: false })
+	};
 };
+
+export const httpApi: DownloadApi = httpApiFor();
 
 export interface DownloadOptions {
 	api?: DownloadApi;

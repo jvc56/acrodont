@@ -12,7 +12,8 @@ import type { QuizRow } from '$lib/local/rows';
 import { storeCreated, type Created } from '$lib/local/created';
 import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
-import { electLeader, listenForChanges, STREAM_REOPEN_MS, SyncEngine, type EngineHooks, type SyncStatus } from './engine';
+import { bindUser, USER_HEADER } from '$lib/api';
+import { electLeader, listenForChanges, STREAM_REOPEN_MS, SyncEngine, transportFor, type EngineHooks, type SyncStatus } from './engine';
 import type { Notice } from './notices';
 import type { Reply, SyncRequest, SyncResponse } from './protocol';
 import { FakeServer, type NewCascade } from './testing/fake-server';
@@ -1321,6 +1322,96 @@ describe('authentication while offline', () => {
 		a.tamper = null;
 		await a.sync();
 		expect(await a.db.count('outbox')).toBe(0);
+	});
+
+	// A same-tab change of account while a sync is under way. The engine goes
+	// over the real client (`transportFor`) to a stand-in `fetch` that checks
+	// the account binding as the server does: a header that is not the session
+	// cookie's user is a 401 with nothing applied.
+	const OTHER = '22222222-2222-4222-8222-222222222222';
+	const switching = async (onSwitch: (engine: SyncEngine) => void) => {
+		const { server, a } = await setup();
+		await a.play(Q1, 'CC');
+		let cookie = USER;
+		const sent: { user: string | null; ops: number }[] = [];
+		const applied: number[] = [];
+		vi.stubGlobal('fetch', async (_url: string, init: { headers: Record<string, string>; body: string }) => {
+			const user = init.headers[USER_HEADER] ?? null;
+			const req = JSON.parse(init.body) as SyncRequest;
+			sent.push({ user, ops: req.ops?.length ?? 0 });
+			if (user !== cookie) return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
+			applied.push(req.ops?.length ?? 0);
+			const r = server.sync(req);
+			return new Response(JSON.stringify(r.body), { status: r.status });
+		});
+		bindUser(USER);
+		const statuses: SyncStatus[] = [];
+		let switched = false;
+		const engine: SyncEngine = new SyncEngine(
+			a.db,
+			{ onStatus: (s) => statuses.push(s) },
+			{
+				transport: transportFor(USER),
+				wait: async () => undefined,
+				// The engine asks the time between reading its batch and sending it:
+				// the other account logs in at that moment.
+				now: () => {
+					if (!switched) {
+						switched = true;
+						cookie = OTHER;
+						bindUser(OTHER);
+						onSwitch(engine);
+					}
+					return new Date();
+				}
+			}
+		);
+		await engine.sync();
+		return { a, engine, sent, applied, statuses };
+	};
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		bindUser(null);
+	});
+
+	it('a batch read before another account logged in here is sent under its own account, refused 401, and stays in the outbox', async () => {
+		const { a, engine, sent, applied, statuses } = await switching(() => undefined);
+		// The request named the account the engine was started for, not the tab's new one.
+		expect(sent).toEqual([{ user: USER, ops: 2 }]);
+		expect(applied).toEqual([]);
+		expect(engine.status).toBe('needs_login');
+		expect(statuses).toEqual(['syncing', 'needs_login']);
+		expect(await a.db.count('outbox')).toBe(2);
+		expect((await a.quiz(Q1))!.correct_count).toBe(2);
+	});
+
+	it('an engine stopped by the change of account sends nothing and tells the tab nothing more', async () => {
+		const { a, engine, sent, statuses } = await switching((e) => e.stop());
+		expect(sent).toEqual([]);
+		expect(statuses).toEqual(['syncing']);
+		expect(await a.db.count('outbox')).toBe(2);
+		// Stopped for good: a later trigger does not send either.
+		await engine.sync();
+		expect(sent).toEqual([]);
+	});
+
+	it('an answer that arrives after the engine was stopped is not used, and a 401 among them is not reported', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'CC');
+		const cursor = (await getMeta(a.db, 'sync')).cursor;
+		const said = a.statuses.length;
+		a.tamper = (req, send) => {
+			const r = send(req);
+			a.engine.stop();
+			return r;
+		};
+		await a.sync();
+		expect(a.statuses.slice(said)).toEqual(['syncing']);
+		expect(texts(a)).toEqual([]);
+		// Applied on the server, still queued here: acknowledged from its records at the account's next sync.
+		expect(await a.db.count('outbox')).toBe(2);
+		expect((await getMeta(a.db, 'sync')).cursor).toBe(cursor);
 	});
 });
 

@@ -44,16 +44,25 @@ export interface EngineHooks {
 /** IndexedDB's refusal for want of room, as a failed write or an aborted transaction reports it. */
 const isQuota = (e: unknown) => e instanceof DOMException && e.name === 'QuotaExceededError';
 
-/** POST /api/sync over fetch, with the session cookie, CSRF token and user binding. */
-export const fetchTransport: Transport = async (req: SyncRequest): Promise<Reply> => {
-	try {
-		const body = await request<unknown>('POST', '/api/sync', { body: req });
-		return { status: 200, body, retryAfter: null };
-	} catch (e) {
-		if (e instanceof ApiError) return { status: e.status, body: e.body, retryAfter: e.retryAfterSeconds };
-		throw e;
-	}
-};
+/**
+ * POST /api/sync over fetch, with the session cookie, the CSRF token and the
+ * user binding. `userId` is the account whose database the engine holds: the
+ * request names it whatever account the tab has since come to run as, so a
+ * batch read before another account logged in here is refused `401` by the
+ * server, never recorded under that other account (PLAN.md § Authentication
+ * while offline). Without it the request names the tab's account.
+ */
+export const transportFor =
+	(userId?: string): Transport =>
+	async (req: SyncRequest): Promise<Reply> => {
+		try {
+			const body = await request<unknown>('POST', '/api/sync', { body: req, user: userId });
+			return { status: 200, body, retryAfter: null };
+		} catch (e) {
+			if (e instanceof ApiError) return { status: e.status, body: e.body, retryAfter: e.retryAfterSeconds };
+			throw e;
+		}
+	};
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -82,13 +91,19 @@ export class SyncEngine {
 		private readonly hooks: EngineHooks = {},
 		opts: EngineOptions = {}
 	) {
-		this.transport = opts.transport ?? fetchTransport;
+		this.transport = opts.transport ?? transportFor();
 		this.now = opts.now ?? (() => new Date());
 		this.appVersion = opts.appVersion ?? (typeof __APP_BUILD__ === 'number' ? __APP_BUILD__ : 0);
 		this.wait = opts.wait ?? ((s) => sleep(s * 1000));
 	}
 
+	/**
+	 * A stopped engine says nothing more: the tab may already run as another
+	 * account, and a `401` answered to this one's last request is not that
+	 * account's to be told about.
+	 */
 	private setStatus(s: SyncStatus) {
+		if (this.stopped) return;
 		this.status = s;
 		this.hooks.onStatus?.(s);
 	}
@@ -140,6 +155,9 @@ export class SyncEngine {
 
 	private async send(req: SyncRequest): Promise<Reply | null> {
 		for (;;) {
+			// Stopped since the request was put together (the reads before it take
+			// time): the account was signed out of this tab, and nothing is sent.
+			if (this.stopped) return null;
 			let reply: Reply;
 			try {
 				reply = await this.transport(req);
@@ -147,6 +165,10 @@ export class SyncEngine {
 				this.setStatus('offline');
 				return null;
 			}
+			// Stopped while it was out: the answer is not used. What the server
+			// applied stays in the outbox and is acknowledged from its records at
+			// this account's next sync.
+			if (this.stopped) return null;
 			// 429 and 503: the same request again after Retry-After, nothing dropped.
 			if (reply.status === 429 || reply.status === 503) {
 				await this.wait(reply.retryAfter ?? 5);
@@ -258,12 +280,12 @@ export class SyncEngine {
 				// until a sync succeeds.
 				await this.db.put('meta', { ...(await getMeta(this.db, 'sync')), upgrade_required: true }, 'sync');
 				this.emit(o);
-				await this.hooks.onSynced?.(o);
+				if (!this.stopped) await this.hooks.onSynced?.(o);
 				this.setStatus('reload');
 				return;
 			}
 			this.emit(o);
-			await this.hooks.onSynced?.(o);
+			if (!this.stopped) await this.hooks.onSynced?.(o);
 			cursor = st.seq;
 			// While the outbox still holds more than was just sent, go again at once.
 			// Anything left, asked as a first key: a count would walk the whole outbox every batch.
@@ -299,7 +321,7 @@ export class SyncEngine {
 	}
 
 	private emit(o: RebaseOutcome) {
-		if (o.notices.length) this.hooks.onNotices?.(o.notices);
+		if (o.notices.length && !this.stopped) this.hooks.onNotices?.(o.notices);
 	}
 }
 
