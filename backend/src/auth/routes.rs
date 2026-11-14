@@ -91,9 +91,13 @@ fn is_valid_username(u: &str) -> bool {
     (3..=32).contains(&u.len()) && u.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
+/// No whitespace and no control character: an address holds neither, and a
+/// NUL among them is one Postgres takes in no text parameter, so the lookup
+/// that follows would fail (a `500` at register, and a `mail_failed` alarm
+/// from a reset request that any visitor can send) instead of being refused.
 fn is_valid_email(e: &str) -> bool {
     let n = e.chars().count();
-    if !(3..=254).contains(&n) || e.chars().any(char::is_whitespace) {
+    if !(3..=254).contains(&n) || e.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return false;
     }
     match e.rsplit_once('@') {

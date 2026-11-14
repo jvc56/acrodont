@@ -86,6 +86,24 @@ async fn register_reports_every_field_error_at_once(pool: sqlx::PgPool) {
     assert!(app.settled_mail_to("nope").await.is_empty());
 }
 
+/// A NUL, or any other control character, in an address is a field error at
+/// register, never a `500` from the database, and a reset request naming one
+/// is answered like any other.
+#[sqlx::test]
+async fn an_address_holding_a_control_character_is_refused(pool: sqlx::PgPool) {
+    let app = TestApp::new(pool).await;
+    let mut c = app.client();
+    for email in ["a\u{0}@example.com", "a@exam\u{0}ple.com", "a\u{7}b@example.com", "a\u{9b}@example.com"] {
+        let r = c.post("/api/auth/register", reg("nul_user", email)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{email:?}");
+        assert_eq!(r.json()["errors"][0]["field"], "email", "{email:?}");
+        let r = c.post("/api/auth/reset-password", json!({ "email": email })).await;
+        assert_eq!(r.status, StatusCode::ACCEPTED, "{email:?}");
+    }
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM users").fetch_one(app.db()).await.unwrap();
+    assert_eq!(n, 0);
+}
+
 #[sqlx::test]
 async fn taken_username_is_a_field_error_and_sends_no_email(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
