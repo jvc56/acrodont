@@ -1129,7 +1129,10 @@ as the term of the data model and the API.
   changes cannot sync now (offline, or the session needs a login). Online,
   every change syncs within a second and the sync status in the header shows
   it; a line that came and went with each setting changed would only shift
-  the page.
+  the page. Removing the account's data is the exception: Log out with that
+  box ticked counts the unsent changes after its own sync and asks before it
+  discards any, whatever the status (see
+  [Authentication while offline](#authentication-while-offline)).
 - **Inside the quiz area**, text selection is off and the browser's context menu
   is suppressed. Middle-click autoscroll and (on Linux) middle-click paste are
   prevented, so all three mouse buttons are free for quiz actions.
@@ -3862,7 +3865,18 @@ of divergence (see [Monitoring](#deployment-and-operations)).
   says how many and that they will sync the next time that user logs in on this
   device. The dialog also offers **Remove this account's data from this
   device**, which deletes the per-user database and, when the outbox is not
-  empty, says how many changes that discards. It then empties that account's
+  empty, says how many changes that discards. **That is asked whenever
+  anything is unsent, whatever the sync status reads**: after the sync the
+  logout tries first, the outbox is counted again, and if it is not empty —
+  a long outbox still draining, a server that asked the device to wait, a
+  sync another tab leads — a confirmation names the count and says that
+  removing discards those changes for good, and that logging out without
+  removing keeps them for the next login here; declined, nothing is logged
+  out or removed. **The removal does not wait for the network**: it is done
+  as soon as the pointer is cleared, before the logout request is sent, so a
+  connection that accepts that request and never answers cannot leave the
+  account's database on a shared machine, and the request itself is given up
+  after 15 seconds and left queued. It then empties that account's
   `accounts` row — its totals and its last-signed-in time — and deletes the row
   itself **unless the row still holds an unacknowledged logout**, in which case
   a row carrying that account's id, its username and the flag alone survives
@@ -6391,7 +6405,10 @@ app wants it to or not, and carrying none once both cookies have expired; the
 retry being sent at a startup with no pointer and **not** sent while an account
 is signed in; and a second account's login clearing every pending flag, so the
 queued logout never reaches the server after the cookie it was for was
-replaced. A fixture unscoped
+replaced; a logout that removes the account's data deleting its database
+while the logout request is still unanswered, the emptied row kept for that
+request and deleted when it is answered; and the request being given up as no
+connection after its timeout. A fixture unscoped
 database at each earlier version opens at the current one with its rows and
 pointer intact.
 The rebase tests cover: a rejected `finish` removing the quiz it created in
@@ -6541,8 +6558,10 @@ skip of a cascade with pending operations (the window's pass is tested); the
 second and third cascades' order under eviction; `429`s on keys, index-list and
 grades pages, the progress indicator across one, and ten 300,000-question
 cascades draining through a bucket that answers `429` from the 120th request of
-a minute; and a multi-page full pull promoting a level. `Retry-After`'s length
-is never timed.
+a minute; a multi-page full pull promoting a level; and the Account page's
+confirmation before a logout that removes data with changes still unsent (the
+count and the question are the page's own, and no journey logs out that way).
+`Retry-After`'s length is never timed.
 
 The **export formatters** are held to one set of fixtures on both sides.
 `contract-fixtures/export/` covers all three quiz types, the four selections,

@@ -14,7 +14,7 @@
 	import { removeAccountData } from '$lib/local/accounts';
 	import { closeUserDb } from '$lib/local/open';
 	import SettingRow from '$lib/components/SettingRow.svelte';
-	import { syncNow, syncState } from '$lib/sync/runtime.svelte';
+	import { refreshPending, syncNow, syncState } from '$lib/sync/runtime.svelte';
 
 	// A signed-in change of password (PLAN.md § Accounts): the current one, then the new.
 	let currentPw = $state('');
@@ -95,14 +95,27 @@
 	}
 
 	async function doLogout() {
-		const id = session.userId;
 		// The app tries to sync first, then always completes locally.
 		if (navigator.onLine) await Promise.race([syncNow(), new Promise((r) => setTimeout(r, 5000))]).catch(() => undefined);
-		await logout();
-		if (removeData && id) {
-			closeUserDb();
-			await removeAccountData(id);
+		if (removeData) {
+			// Whatever that sync did not send is about to be deleted with the rest:
+			// a long outbox still draining, a server asking the device to wait, a
+			// sync led by another tab. Counted now, and asked about, whatever the
+			// status line above was showing.
+			await refreshPending().catch(() => undefined);
+			const left = syncState.pending ?? 0;
+			if (left > 0) {
+				const ok = await confirmAction({
+					title: 'Discard changes that haven’t synced?',
+					body: `${left === 1 ? '1 change hasn’t' : `${left} changes haven’t`} synced yet. Removing this account’s data from this device discards ${left === 1 ? 'it' : 'them'} for good. Log out without removing the data and ${left === 1 ? 'it' : 'they'} will sync the next time you log in here.`,
+					action: 'Remove and log out',
+					destructive: true
+				});
+				if (!ok) return;
+			}
 		}
+		// The removal is part of the logout, ahead of its request: it needs no connection.
+		await logout({ removeData });
 		await goto('/login', { replaceState: true });
 	}
 
