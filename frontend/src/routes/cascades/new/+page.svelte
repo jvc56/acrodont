@@ -182,7 +182,11 @@
 				const b = e.body as { used: number; limit: number; needed: number };
 				used = b.used;
 				limit = b.limit;
-				createError = `This cascade needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your ${formatBytes(b.limit)} is free. Empty the Trash or delete cascades to make room.`;
+				// Refused before the search ran (the account is already full), the server knows no size to name.
+				createError =
+					b.needed > 0
+						? `This cascade needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your ${formatBytes(b.limit)} is free. Empty the Trash or delete cascades to make room.`
+						: `Your storage is full: ${formatBytes(b.used)} of ${formatBytes(b.limit)} is used. Empty the Trash or delete cascades to make room.`;
 			} else if (e instanceof ApiError && e.code === 'empty') createError = 'The search matched nothing.';
 			else if (e instanceof ApiError && e.code === 'over_cap')
 				createError = `The search matched ${(e.body as { count: number }).count.toLocaleString()} questions, more than ${cap.toLocaleString()}. Narrow it.`;

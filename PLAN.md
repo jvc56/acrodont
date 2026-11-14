@@ -156,8 +156,9 @@ When the user finishes an attempt of the Source quiz:
 | **Nothing correct** | The Source quiz is **reset**. Nothing is created. | The reset Source quiz |
 
 - The threshold still decides whether the attempt was a pass, and that is
-  derivable from the attempt's counts and the cascade's threshold, which never
-  changes, so no column records it; it does not decide where the user goes:
+  derivable from the attempt's counts and the cascade's threshold, so no
+  column records it (the threshold [can be changed](#quiz-options), and an
+  earlier attempt's pass is then read against the new one); it does not decide where the user goes:
   the Source quiz's misses always go down, because there is nothing for them
   to replace.
 - Progression does not apply to the Source quiz, for the same reason. The
@@ -916,7 +917,7 @@ are left out of the label but freed with it).
 **Entries are grouped and not all rendered.** A cascade's group shows its name,
 how many entries it holds, its size and the earliest date among them that one is deleted
 forever ("deleted forever on …"), collapsed;
-expanding it renders a virtualized list in pages of 100 behind a **Show more**
+expanding it renders its entries a page of 100 at a time behind a **Show more**
 control. A group holding one entry is rendered expanded, since collapsing a
 single row hides nothing. One segmented attempt can leave tens of thousands of cleared quizzes
 (see [Quiz options](#quiz-options)), and a flat list of them would lock the tab.
@@ -1343,9 +1344,10 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   never taken back on a later change to the same card.
 - **Protecting against accidental give-ups.** Before the answer is shown, a
   stroke bound to **Show / Next** inside the quiz area focuses the input instead
-  of acting. Strokes bound to Toggle grade and Previous, such as the default
-  right and middle clicks, still act, so a card can be marked "I don't know
-  this one" or left with the keyboard covered.
+  of acting. A stroke bound to Previous, such as the default middle click,
+  still acts, so a card can be left with the keyboard covered. One bound to
+  Toggle grade does nothing, as on any card before its answer is shown: there
+  is no grade to flip yet (see [The three actions](#the-three-actions)).
 - Switching modes in the middle of a card resets that card's typed entries.
 
 #### Controls
@@ -1358,7 +1360,7 @@ The default desktop bindings are:
 | **Toggle grade** | Right click | `X`, `M` |
 | **Previous** | Middle click | Backspace, `J` |
 
-An action can hold any number of bindings, but always at least one. A device
+An action can hold any number of bindings, up to 64 on a device in all, but always at least one. A device
 whose bindings were saved before `,`, `M`, `J` and Enter were added gets them
 with **Reset controls to defaults**.
 
@@ -1473,7 +1475,8 @@ Details:
   shrinks to the space above the on-screen keyboard (`interactive-widget=resizes-content`),
   so the bar sits just above the keyboard. The keyboard covers the zones, so while
   it is open the bar also holds a row of three buttons: Previous, Show / Next,
-  Toggle.
+  Toggle. The bar is there only until the answer is shown, so its Toggle, like
+  every Toggle before the reveal, does nothing.
 - **Customization.** Columns or rows is the one choice; only mouse and
   keyboard controls can be rebound.
 
@@ -1633,7 +1636,7 @@ changed offline. When that is needed and there is no connection, the dialog says
 so and offers to export the questions alone, which never needs anything but
 local data. A `404` from the token request means the quiz or cascade was purged on
 another device or by the retention period while the dialog was open; the dialog
-says it has been deleted and refreshes the page behind it, rather than offering
+says it has been deleted and, two seconds later, goes to the Cascades page, rather than offering
 the offline fallback, which would fail for the same reason.
 
 ---
@@ -1888,8 +1891,10 @@ names changed:
   definitions: the Leave Value filter is the usual way to build a Leave Value
   cascade, so after a replacement a cascade of "leaves worth 5 or more" may
   hold a leave now worth less and lack one now worth more. Its answers are
-  the new values; its questions are the ones chosen at creation, until Start
-  over chooses again. The values upload page says so.
+  the new values; its questions are the ones chosen at creation: **Duplicate
+  cascade** runs the search again and so chooses them again, in a new cascade
+  (Start over is another pass of the same questions). The values upload page
+  says so.
 - **A lexicon still has at most one set.** A different list of leaves is a
   different catalog item: the old set is deleted once no cascade uses it, or
   the lexicon is uploaded again under a new name.
@@ -2517,7 +2522,7 @@ word-list search over a whole lexicon does, but a full English leave value set
 (around a million leaves) does not. What fits under the cap is still bounded
 by the account's [storage](#storage-limit): the preview reports what the
 cascade would hold (`storage_bytes`), and a 300,000-question cascade is about
-6 MB as created. Preview returns the count and the first
+5 MB as created. Preview returns the count and the first
 20 questions.
 
 ---
@@ -7207,7 +7212,7 @@ through the ordinary endpoints, so there is still no test-only path.
   shows in the answer, and grades missed, a found word shows in green as the
   last entry and is the one green word among the found words in the answer
   space (the latest of them all once every anagram is found), finding every anagram reveals nothing until Enter on an empty input,
-  which then grades correct, a repeated entry is ignored, a right click before the reveal still toggles the grade while a
+  which then grades correct, a repeated entry is ignored, a right click before the reveal does nothing while a
   left click only focuses the input, the next card's input has the focus with
   no click, and switching modes mid-card clears the entries. Two answers typed on one line (`RETAINS NASTIER`) stay in the input
   with "not an anagram of the question" and the card, with every anagram then found,

@@ -13,7 +13,7 @@ import { applyLocally } from '$lib/local/apply';
 import * as view from '$lib/local/view';
 import { questionsHash } from '$lib/cascade/order';
 import { AHEAD, AHEAD_LOW, Player } from './controller';
-import { bind, inputOwns, actionFor, Debounce, DEFAULT_BINDINGS, normalizeBindings } from './bindings';
+import { bind, inputOwns, actionFor, Debounce, DEFAULT_BINDINGS, MAX_BINDINGS, normalizeBindings } from './bindings';
 import { finishBanner } from './banner';
 import { emptyTyped, isAnagramOf, submitTyped, typedGrade } from './typed';
 import { Distribution } from '$lib/tiles';
@@ -300,7 +300,7 @@ describe('the player', () => {
 		await p.toggle();
 		await p.showNext();
 		expect((await ops()).at(-1)).toBe('finish');
-		expect(p.v.banner).toBe('Level 1: 50%. Reshuffled, and its 1 missed questions are now Level 2.');
+		expect(p.v.banner).toBe('Level 1: 50%. Reshuffled, and its 1 missed question is now Level 2.');
 		expect(p.v.quiz!.level).toBe(2);
 	});
 
@@ -632,6 +632,15 @@ describe('controls', () => {
 		expect(moved.bindings.filter((b) => b.code === 'KeyX').map((b) => b.action)).toEqual(['previous']);
 		const esc = bind(DEFAULT_BINDINGS, 'previous', { ...x, code: 'Escape' });
 		expect(esc.refused).toBe(true);
+		// A device holds MAX_BINDINGS at most: shared, the list must fit the 16 KB an account's shared settings may take.
+		let many = DEFAULT_BINDINGS;
+		for (let i = 0; many.length < MAX_BINDINGS; i++) many = bind(many, 'show_next', { ...x, code: `F${i}`, alt: true }).bindings;
+		expect(many).toHaveLength(MAX_BINDINGS);
+		expect(JSON.stringify(many).length).toBeLessThan(16_000);
+		expect(bind(many, 'show_next', { ...x, code: 'KeyQ' }).refused).toBe(true);
+		// Moving a stroke it already holds adds nothing, so it still may.
+		expect(bind(many, 'previous', x).refused).toBe(false);
+		expect(normalizeBindings([...many, { action: 'previous', kind: 'key', code: 'KeyQ' }])).toHaveLength(MAX_BINDINGS);
 	});
 
 	it('the same action twice within the repeat guard counts once', () => {
@@ -665,6 +674,15 @@ describe('banners', () => {
 		expect(finishBanner({ ...base, correct: 100, misses: 0, outcome: 'cleared' })).toBe('Level 2 cleared with 100%. Back to Level 1.');
 		expect(finishBanner({ ...base, level: 1, correct: 100, misses: 0, outcome: 'completed', completion: { levels: 4, attempts: 9 } })).toBe(
 			'Level 1: 100%. Cascade complete after 4 levels and 9 passes.'
+		);
+		// One of anything is singular.
+		expect(finishBanner({ ...base, level: 1, correct: 5, count: 5, misses: 0, outcome: 'completed', completion: { levels: 1, attempts: 1 } })).toBe(
+			'Level 1: 100%. Cascade complete after 1 level and 1 pass.'
+		);
+		expect(finishBanner({ ...base, correct: 99, misses: 1, outcome: 'cleared' })).toBe('Level 2 cleared with 99%. Its 1 missed question is now Level 2.');
+		expect(finishBanner({ ...base, correct: 50, misses: 1, outcome: 'replaced' })).toBe('Level 2: 50%. Replaced with its 1 missed question.');
+		expect(finishBanner({ ...base, correct: 50, misses: 1, outcome: 'descended' })).toBe(
+			'Level 2: 50%, and 80% is needed to clear. Level 2 is reshuffled and waiting. Down to Level 3 with 1 missed question.'
 		);
 	});
 });

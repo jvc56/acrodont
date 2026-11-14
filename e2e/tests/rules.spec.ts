@@ -11,7 +11,7 @@ test('every cascade rule, from a new account', async ({ page }) => {
 	// Level 1 (18 questions) below the threshold: down to Level 2 with the 10 misses.
 	expect(await playLevel(page, (i) => i < 10)).toBe('Level 1: 44%. Reshuffled, and its 10 missed questions are now Level 2.');
 	// Level 2 cleared with a miss: replaced at Level 2.
-	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2 cleared with 90%. Its 1 missed questions are now Level 2.');
+	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2 cleared with 90%. Its 1 missed question is now Level 2.');
 	// Cleared with no misses: back up to Level 1's reshuffled quiz.
 	expect(await playLevel(page, () => false)).toBe('Level 2 cleared with 100%. Back to Level 1.');
 	// Level 1 with no misses: the completion screen.

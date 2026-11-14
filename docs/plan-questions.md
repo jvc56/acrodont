@@ -169,6 +169,11 @@ provisional choice made. Code affected is marked `// PQ-nnn`.
   sequences on the wire; `cursor`, `seen_seq` and `device_seq` are accepted
   as a JSON integer or as decimal digits (`backend/src/sync/routes.rs`,
   `// PQ-012`). The device sends numbers (sequences stay far below 2^53).
+- **Since then:** only `cursor` (and `app_version`) is accepted either way.
+  An operation's `seen_seq` and `device_seq` are read as JSON integers alone:
+  in text, `device_seq` is the request's `400`, and `seen_seq` rejects that
+  one operation as `invalid`.
+  The device has always sent numbers.
 
 ## PQ-013 — Check order for `finish` and `finish_segment` (open)
 

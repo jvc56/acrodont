@@ -102,7 +102,7 @@ test('segments and progression', async ({ page }) => {
 	await d.getByLabel('When a quiz is finished below the clear threshold').selectOption('drill');
 	await expect(d.locator('[data-level-saved]')).toBeVisible();
 	await close(page);
-	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2: 50%. Replaced with its 1 missed questions.');
+	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2: 50%. Replaced with its 1 missed question.');
 	await expect(page.getByText('Level 2 of 2')).toBeVisible();
 
 	// The cascade on Drill: the quiz in progress keeps its own; the next new one takes it.

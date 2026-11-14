@@ -75,6 +75,8 @@
 	let typedWrong = $state(false);
 	/** The last entry the card took (an anagram of the question), shown under the input: green if right, red if wrong. */
 	let lastEntry = $state<{ text: string; correct: boolean } | null>(null);
+	/** Typed mode: the answer found most recently on this card, as the answer list spells it. */
+	let lastFound = $state<string | null>(null);
 	/** The scrolling quiz area, and the answer inside it that shrinks to fit it. */
 	let fitArea = $state<HTMLElement | null>(null);
 	let answerBox = $state<HTMLElement | null>(null);
@@ -114,7 +116,12 @@
 	/** A percentage to two decimal places, rounded. */
 	const pct = (p: number) => `${p.toFixed(2)}%`;
 	/** Whether the share correct so far would clear the level: green on track, red not; nothing before a grade. */
-	let onTrack = $derived(correctPct === null || !v?.cascade ? null : correctPct >= v.cascade.clear_threshold);
+	let onTrack = $derived(
+		correctPct === null || !v?.cascade || !levelQuiz
+			? null
+			: // Compared exactly, as a finish compares it: 57 of 100 at a threshold of 57 is on track.
+				levelQuiz.correct_count * 100 >= v.cascade.clear_threshold * (levelQuiz.correct_count + levelQuiz.missed_count)
+	);
 	/** The grade the quiz area's border shows once the answer is shown; none before. */
 	let gradeState = $derived(v?.status === 'ready' && v.card?.revealed ? v.card.grade : null);
 	// Each grade's border is a setting: by default a missed answer shows red and a correct one nothing.
@@ -374,16 +381,22 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		void typingCard;
 		typedWrong = false;
 		lastEntry = null;
+		lastFound = null;
 	});
 
 	async function onTypedKey(e: KeyboardEvent) {
 		if (e.key !== 'Enter' || !player) return;
 		e.preventDefault();
+		// A key held down is one press: the repeat would arrive with the input
+		// just cleared, and an empty entry gives the card up.
+		if (e.repeat) return;
 		const text = typedText;
 		const r = await player.enter(text);
 		// A word that is not an anagram of the question stays in the input to fix; everything else clears it.
 		if (r && r.kind !== 'not_anagram') typedText = '';
 		typedWrong = r?.kind === 'wrong';
+		// The word found by this entry is the green one among the found words.
+		if (r?.kind === 'found' || r?.kind === 'out_of_order') lastFound = r.word;
 		// An anagram of the question is taken, right or wrong, and shown under the input.
 		if (r?.kind === 'found' || r?.kind === 'already' || r?.kind === 'wrong') {
 			lastEntry = { text: text.trim().toUpperCase(), correct: r.kind !== 'wrong' };
@@ -580,7 +593,16 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		} catch (e) {
 			if (e instanceof ApiError && e.code === 'storage_limit') {
 				const b = e.body as { used: number; limit: number; needed: number };
-				cascadeError = `Duplicating needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your storage is free. Empty the Trash or delete cascades to make room.`;
+				// Refused before the search ran (the account is already full), the server knows no size to name.
+				cascadeError =
+					b.needed > 0
+						? `Duplicating needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your storage is free. Empty the Trash or delete cascades to make room.`
+						: `Your storage is full: ${formatBytes(b.used)} of ${formatBytes(b.limit)} is used. Empty the Trash or delete cascades to make room.`;
+			} else if (e instanceof ApiError && e.code === 'empty') {
+				// The search is run again, on today's catalog: trying again finds the same.
+				cascadeError = 'This cascade’s search matches nothing now, so there is nothing to duplicate.';
+			} else if (e instanceof ApiError && e.code === 'over_cap') {
+				cascadeError = `This cascade’s search now matches ${(e.body as { count: number }).count.toLocaleString()} questions, more than a cascade may hold.`;
 			} else if (isRetriable(e)) cascadeError = 'Duplicating a cascade needs a connection.';
 			// The server refused it, or this device could not store it: not the connection.
 			else cascadeError = 'The cascade could not be duplicated. Try again.';
@@ -640,6 +662,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 						answer={card.answer}
 						settings={v.cascade!}
 						typing={card.typed.found}
+						entered={lastFound}
 						font={dsp.answer_font}
 						size={dsp.answer_size_px}
 						spacing={dsp.answer_spacing}

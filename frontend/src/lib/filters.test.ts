@@ -127,6 +127,15 @@ describe('ceilings', () => {
 	};
 	const ctx: CeilingContext = { quizType: 'anagram', lexicon, maxTileValue: 10 };
 
+	it('opens a Length row at 1 to 15, or 1 to 6 on leaves, before the lexicon’s figures arrive', () => {
+		// The builder's first row is made with no context yet.
+		expect(defaultRange(filterDef('length'), null, 'anagram')).toEqual({ min: 1, max: 15 });
+		expect(defaultRange(filterDef('length'), null, 'leave_value')).toEqual({ min: 1, max: 6 });
+		expect(defaultRange(filterDef('length'), ctx)).toEqual({ min: 1, max: 15 });
+		// A ceiling the lexicon decides waits for it.
+		expect(defaultRange(filterDef('num_anagrams'), null, 'anagram').max).toBe(filterDef('num_anagrams').floor ?? 0);
+	});
+
 	it('opens each row at its floor and its own ceiling, refused there, and names the ceiling above it', () => {
 		for (const [type, ceiling] of [
 			['num_anagrams', 13],
