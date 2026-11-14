@@ -211,6 +211,12 @@ export class SyncEngine {
 				// produced. Dropped here, with nothing pulled, the device's own rows
 				// for a level a finish made would be cleared before the server's
 				// arrived, and the operations queued on it refused and lost.
+				// The server never answers a full pull this way; one that did would
+				// be asked again without end, so that is taken for no connection.
+				if (cursor === null) {
+					this.setStatus('offline');
+					return;
+				}
 				cursor = null;
 				continue;
 			}

@@ -550,6 +550,20 @@ describe('the sync engine', () => {
 		expect((await a.db.get('quizzes', newId))!.pending).toBeUndefined();
 	});
 
+	it('resync_required in answer to a full pull is not asked a third time', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'C');
+		const before = a.requests.length;
+		a.tamper = (req, send) => {
+			const r = send(req);
+			return { ...r, body: { sync_seq: (r.body as SyncResponse).sync_seq, results: [], resync_required: true } };
+		};
+		await a.sync();
+		expect(a.requests.length - before).toBe(2); // the sync, then one full pull
+		expect(a.engine.status).toBe('offline');
+		expect(await a.db.count('outbox')).toBe(1);
+	});
+
 	it('a 200 that is not the sync endpoint’s is no connection: nothing is applied and the cursor stays', async () => {
 		const { server, a } = await setup();
 		await a.play(Q1, 'C');
