@@ -298,11 +298,20 @@ export class DownloadManager {
 		// Judged again after the pass, so a cascade the budget just dropped is not fetched back.
 		const pol = await policy(this.db, this.now());
 		const wanted = [...pol.wanted];
-		for (const id of wanted) await this.distributionFor(id);
-		for (const id of wanted) await this.questionRows(id);
+		// A cascade the quota path dropped during this pass is wanted no longer
+		// (it is marked, as the next pass's policy will read): fetched back by
+		// a later step of the same pass, it would take the room just made.
+		const each = async (step: (id: string) => Promise<void>) => {
+			for (const id of wanted) {
+				if ((await getMeta(this.db, 'budget_dropped')).includes(id)) continue;
+				await step(id);
+			}
+		};
+		await each((id) => this.distributionFor(id));
+		await each((id) => this.questionRows(id));
 		// Keys come before any cascade's answers: they make every level playable.
-		for (const id of wanted) await this.keys(id);
-		for (const id of wanted) await this.cards(id);
+		await each((id) => this.keys(id));
+		await each((id) => this.cards(id));
 		await this.evict();
 		await this.totals();
 	}

@@ -572,10 +572,14 @@ describe('the download manager', () => {
 			return put(...args);
 		}) as typeof put;
 		await b.db.delete('distributions', 'english');
+		expect(await b.count('quiz_questions', C1)).toBe(3);
 		await b.dl.run();
-		// The retry succeeded after the drop pass took the older cascade.
+		// The retry succeeded after the drop pass took the older cascade: its
+		// rows are gone, and it is marked so that the pass does not fetch it back.
 		expect(await b.db.get('distributions', 'english')).toBeDefined();
 		expect(b.dl.noRoom).toBe(false);
+		expect(await b.count('quiz_questions', C1)).toBe(0);
+		expect(await getMeta(b.db, 'budget_dropped')).toEqual([C1]);
 		quota = 2;
 		await b.db.delete('distributions', 'english');
 		await expect(b.dl.run()).rejects.toThrow();
