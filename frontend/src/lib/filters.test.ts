@@ -132,6 +132,8 @@ describe('ceilings', () => {
 		expect(defaultRange(filterDef('length'), null, 'anagram')).toEqual({ min: 1, max: 15 });
 		expect(defaultRange(filterDef('length'), null, 'leave_value')).toEqual({ min: 1, max: 6 });
 		expect(defaultRange(filterDef('length'), ctx)).toEqual({ min: 1, max: 15 });
+		// An order filter's ranks start at 1.
+		expect(defaultRange(filterDef('probability_order'), ctx).min).toBe(1);
 		// A ceiling the lexicon decides waits for it.
 		expect(defaultRange(filterDef('num_anagrams'), null, 'anagram').max).toBe(filterDef('num_anagrams').floor ?? 0);
 	});

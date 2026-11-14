@@ -6364,8 +6364,7 @@ pointer and no row, a startup with no pointer opening no per-user database,
 removing an account's data with **no** pending logout deleting its row and its
 database while the other account's survive, and the whole path running with
 `indexedDB.databases()` deleted from the global, since Safari and Firefox lack
-it. They also assert that `storageLine`'s figures for an account that is not
-signed in come from its `accounts` row with **no `open` on its database**, and
+it. They also assert that `storageLine`'s figures (a function no page calls today) for an account that is not signed in come from its `accounts` row with **no `open` on its database**, and
 cover the queued logout end to end: removing the data of an account that
 **does** hold an unacknowledged logout leaving a row carrying its id, username
 and flag alone, absent from `storageLine`, and deleted once the request goes
@@ -6385,11 +6384,9 @@ The rebase tests cover: a rejected `finish` removing the quiz it created in
 the overlay; rejected grades on a trashed cascade disappearing from the overlay
 although no server row changed; an applied `finish` with a different outcome
 kind showing the notice and one differing only in question count staying
-silent; a pulled quiz with a new seed being rebuilt; a pull that only echoes the
-device's own operations touching a handful of overlay rows and no base rows; the
+silent; a pulled quiz with a new seed being rebuilt; a pull that only echoes the device's own operations emptying the overlay, the grades then read from the base; the
 outbox keeping one `move_cursor` per quiz, re-appended after a queued
-`finish_segment`; the engine draining a 600-batch outbox back to back; a pull
-a stale-rejected change to a cascade's settings reverting it while the other
+`finish_segment`; the engine draining a 600-batch outbox back to back; a stale-rejected change to a cascade's settings reverting it while the other
 device's change stands; a second device building a
 Source quiz from a pull that carries no question rows; a reset pulled with no
 graded rows completing its rebuild at the last page; a cascade outside the
@@ -6397,132 +6394,65 @@ download window fetching its index lists and materialising on first open, and,
 when it leaves the window with nothing pending, dropping every question row,
 position and card while keeping its cascade, quiz and attempt rows, then on
 reopen fetching index lists and graded rows and materialising with every
-grade intact; a cascade created while a full pull is in flight surviving the
-last page with its grades; a level promoted from an acknowledged `finish`
-while a full pull is in flight surviving the last page; the staging swap
-surviving a browser kill between two cascades' transactions, with the cursor
-unadvanced and the next pull converging; a pull for an out-of-window cascade
+grade intact; a cascade created while a full pull is in flight surviving the last page; a level promoted from an acknowledged `finish` by a full pull's own response keeping its rows and the answers queued on it; **a tab closed between two cascades' transactions** leaving the cursor unadvanced, the first cascade's acknowledged operation gone with its rows and the second's acknowledged `finish` still in the outbox, so the next sync sends it again and the answers queued on the level it made, beyond that sync's batch, are kept; **a level's own `finish` queued behind the batch that made the level** being applied with everything studied after it, whether it clears the level or descends from it, the base holding the server's level with no answer yet after the first acknowledgement; answers queued behind the finish that reset their quiz being counted once it is acknowledged; an answer regraded behind that batch being promoted as the server has it; a pull for an out-of-window cascade
 writing no question rows and leaving its quizzes pending; a grades fetch whose
 attempt differs from the base row being discarded and the device syncing
-again; a grades fetch cut off after its first page leaving the quiz **pending**
-and fetched again, because the rows it wrote fall short of the quiz row's
+again; a grades fetch cut off after its first page being made again, because the rows it wrote fall short of the quiz row's
 `correct_count + missed_count`, while the same fetch run to `question_count`
-clears the flag in one pass; the 1,200-operation outbox vector with its `finish` dropped in replay
+clears the flag in one pass; an outbox of the 1,200-operation vector's shape (1,002 operations, built by hand) with its `finish` dropped in replay
 showing one `stale_attempt` notice counting the grades behind it; the drop
 pass removing a 300,000-question cascade's rows within budget; a full
 segmented attempt pushed as the device emits it producing no `bad_cursor` or
-`bad_segment` rejection and its `finish` applied, not `ungraded`; an
-out-of-window cascade re-entering the window through a pull ending with every
-grade present, its pending mark surviving the index-list fetch until the
-grades arrive; grade rows arriving in a pull for a pending quiz being written
+`bad_segment` rejection and its `finish` applied, not `ungraded`; an out-of-window cascade opened again ending with every grade present; grade rows arriving in a pull for a pending quiz being written
 nowhere and the quiz staying pending until the full sequence runs; a new
 unplayed quiz materialising with an index-list fetch and no grades request,
 and the drop pass leaving such a quiz unflagged; a cascade active on another
 device but never opened here holding no question rows and no cards until first
-open, one over the automatic keep threshold on such a device keeping nothing
-until then, a cascade opened here 15 days ago and studied elsewhere
-yesterday leaving this device's window, a cascade studied continuously for 15
-days staying in the window and never dropped under an open player, and an
-export of a never-opened cascade counting as an open; an out-of-window
-cascade whose rows the drop pass spared for its pending operations staying in
-`question_rows_for`, receiving another device's grade on those rows, and
-having no quiz flagged pending, then surviving a resync with its rows and its
-`finish` intact; an
+open, one over the automatic keep threshold being kept automatically once it is opened, a cascade opened here 15 days ago leaving this device's window, a grade recording an open while a `trash_cascade` and a `set_cascade_options` record none, and the drop pass sparing the rows of an out-of-window cascade that holds pending operations or whose player is open; an
 offline restore of a quiz with no local rows leaving it
-pending until first open; a cascade whose large cleared level was exported
-from the Trash (its rows fetched for that) leaving the window, the cleared
-rows dropped, and a second Trash export fetching them again; a Trash export of
-a cleared quiz holding only part of its rows, or its rows without positions,
-or a set that fails the hash check, fetching them before it writes anything;
+pending until first open; an export of a quiz holding only part of its rows, or a set that fails the hash check, reporting the rows missing before it writes anything;
 a pull that reports a pending quiz cleared clearing its flag; eviction taking an automatically kept cascade's answers while
 sparing its rows and its question keys, and taking
-them in **last-opened order, oldest first** — three cascades over the limit with
-distinct last-open times, the oldest losing its answers first and the one opened
-this morning last, and none exempt while the total is over the limit — with the
+them in **last-opened order, oldest first** — three cascades with distinct last-open times and a limit that fits two, the oldest alone losing its answers — with the
 player then showing that cascade's questions from the `questions` store and
 "answer needs a connection" on the reveal, grading still saved, and a
 questions-only export of it still written from local data; a **typed** anagram
 card of that cascade falling back to flashcard mode, its grade starting Correct
 and Toggle deciding it, rather than every entry counting wrong; a card whose key
 never arrived, from a download stopped part way, reading "this question needs a
-connection", emitting no grade, and its level marked still downloading, with a
+connection", emitting no grade, with a
 questions-only export of that cascade falling back to the server, and the last
 card of that card's run emitting no `finish_segment` while the player names how
 many questions still need a connection; the download
-manager fetching every in-window cascade's keys with `keys=1` before any
-cascade's answers, and a restored quiz's per-quiz sequence fetching the
-cascade's missing keys too; a tombstone and a full pull's deletion each removing
-a cascade's `questions` and `cards` entries with its rows, and its `meta`
-entries too — its last-open time and its budget-dropped mark — so the device's
-sizes stop counting it; the drop pass
-removing a cascade's question keys along with its rows, and the next open
-fetching both back from the card pages;
-a quiz cleared offline getting a provisional `cleared_at` from the operation's
-`at`, and a cascade trashed offline a provisional `trashed_at`, both entries
-reading "deleted forever 30 days after this syncs", the trashed cascade still listed in
-the Trash while it is gone from the Cascades page, and the acknowledged rows
-replacing both; the drop pass dropping the least recently opened unkept cascade
-when the base's rows and keys pass `ROW_STORAGE_BUDGET`, before its 14 days are
-up, and skipping one that holds pending operations or has its player open; the
-same pass taking its two tiers in order, so an **automatically kept** cascade,
+manager fetching every in-window cascade's keys with `keys=1` before any cascade's answers; a tombstone removing a cascade with its question rows and its last-open time; the drop pass removing a cascade's question keys along with its rows, and the next open fetching the rows back with every grade;
+a quiz cleared offline and a cascade trashed offline each listed in the Trash as provisional, with no date it is deleted forever, the trashed cascade gone from the Cascades page, and the acknowledged row replacing the cascade's; the drop pass dropping the least recently opened unkept cascade
+when the base's rows and keys pass `ROW_STORAGE_BUDGET`, before its 14 days are up; the same pass taking its two tiers in order, so an **automatically kept** cascade,
 even the least recently opened, is dropped only once every unkept one is gone,
 and then oldest first with none exempt; a cascade the budget dropped **while it was
 still inside the window** being marked in `meta` and left alone by the next
-pull's download manager — no index list, no grades, no keys, no cards, absent
-from `question_rows_for`, its quizzes pending — so the pass settles in one run
+pull's download manager — no index list, no grades, no keys, no cards, absent from `question_rows_for` — so the pass settles in one run
 instead of dropping and refetching the same cascade forever, then opening it
 clearing the mark and fetching it back whole, a marked cascade over
 `AUTO_KEEP_OFFLINE_ROWS` counting as neither wanted nor kept until it is
-opened, and the same mark left by the
-quota path's drop so its retry refetches nothing; a `QuotaExceededError` thrown by a pull's per-cascade transaction
-leaving the cursor unadvanced and the outbox intact, running the drop pass **and
-then the answer eviction**, in that order, and
-retrying once, and on a second failure showing "not enough room on this
-device" while studying continues; the same error thrown by an **`applyLocally`**
+opened, and the same mark left by a forced drop (in the scale tier); a `QuotaExceededError` thrown by a pull's per-cascade transaction leaving the cursor unadvanced and the outbox intact, asking once for room to be made and making the pull again with the same batch, which then loses nothing, and on a second failure reporting no room, with the status no longer "Syncing…", the staging rows left for the next pull and studying continuing until a later sync applies everything; the same error thrown by an **`applyLocally`**
 instead, where the grade reached neither the overlay nor the outbox: the player
 stays on that card with the storage message in place of the grade, Show / Next
 advances nothing, and the grade is written once a cascade is removed and the
 retry succeeds; the download manager reading a missing
-distribution's tiles from the `distributions` store and never from `meta`; a page of a pull written while the player is on
-the quiz changing nothing the player reads until the last page; a `finish`
-rejected `ungraded` after a `not_found` grade dropping the finish and leaving
-the missing questions to grade; an acknowledged offline
-`finish` leaving its new level playable with no network request, a
-same-count, different-set promotion refused by `new_quiz_questions_hash` and
-refetched with the notice, and a device-created quiz never triggering an
-index-list fetch after acknowledgement; a `finish` the device computed as
+distribution's tiles from the `distributions` store; a `finish` rejected `ungraded` after a `not_found` grade being dropped and leaving the missing question to grade; an acknowledged offline `finish` leaving its new level playable in the one request that acknowledged it, with no index list asked for, and a same-count, different-set promotion refused by `new_quiz_questions_hash`, its list marked to be fetched, with the notice; a `finish` the device computed as
 `cleared` that the server applied as `descended` leaving the finished quiz
 rebuilt from the server's seed with no grades, the reverse leaving the base's
 graded rows untouched with no fetch, and a `finish_segment` computed as
 `drilled` but applied as `continued` dropping the drill quiz with no request,
-and the same for a `finish` the server answered `completed` or `reshuffled`
-where the device had built a new level — the `completed` case showing the
-came-out-differently notice and the Complete badge from the pulled row and
-**no completion screen**, since the counters it reports were reset by that
-same finish; a completion this device computed while three finishes another
-device had made were still unpulled showing **this device's own** counts on the
-screen, with no notice, since the outcome matched, and nothing fetching the
-server's higher numbers afterwards;
+and the same for a `finish` the server answered `completed` where the device had built a new level, with the came-out-differently notice and `completed_at` from the pulled row;
 a `finish` acknowledged on its second send, after a lost response, promoting
 its rows with no notice; the fast path taking a batch of applied grades
-without touching the other pending grades' overlay rows or replaying them,
-decided from each pulled question group's `min_updated_seq` and not from the
-grade values, so the full path still runs for a batch whose group carries a
-`min_updated_seq` below the response's `sync_seq` although every grade in it
-matches what this device sent, as well as for one holding a rejection or a row
-from another device, and likewise for a batch whose **cascade, quiz or attempt**
-row carries an `updated_seq` below that sequence, or whose tombstone carries
-such a `seq`, read from the pulled rows themselves and never from the sequence
-the device stamps them with; every base row carrying the sequence of the response that
-wrote it, so a full pull deletes the rows an earlier pull wrote and spares
-those a creation, a promotion or a grades fetch wrote while it was in flight;
+without touching the other pending grades' overlay rows or reading the cascade's other pending operations; every base row carrying the sequence of the response that
+wrote it, so a full pull deletes the rows an earlier pull wrote and spares those a creation or a promotion wrote while it was in flight;
 a `restore_quiz` rejected with reason `error` dropping its overlay quiz row and
 showing the could-not-be-restored notice; a batch whose only acknowledged
 operation is an applied `purge_cascade` taking the fast path with its tombstone
-still applied in step 2, and the grades still queued behind the batch limit for
-that cascade dropped when the full path next runs; a `finish` rejected `not_deepest` with every grade kept
-showing the `not_deepest` sentence alone, and one rejected `stale_attempt` with
-42 dropped grades showing both sentences; **two offline finishes in one batch**,
+still applied in step 2; a `finish` rejected `stale_attempt` with dropped grades showing both sentences; **two offline finishes in one batch**,
 the first rejected `not_deepest` and the second — with the grades on the level it
 created — rejected `not_found` because that level never reached the server,
 showing **one** notice, the `not_deepest` one, whose count covers both levels'
@@ -6530,63 +6460,75 @@ dropped grades and which never says the cascade was deleted, while the same
 `not_found` on a cascade the pull's tombstone removed does show the deletion
 sentence, and grades rejected `not_found` for questions the server's own miss set
 lacks show the came-out-differently sentence with their count and no deletion
-sentence; a `questions_hash` mismatch found after
-materialisation refetching the list; the drop pass running after a pull; a cleared quiz
+sentence; the drop pass running after a pull; a cleared quiz
 pulled by a new device arriving as one row with no question rows, restorable
 offline and pending until online, and a Trash export of it fetching its
 rows; a `finish` clearing a quiz leaving that quiz's rows and positions in
-the base, so a Trash export of it works offline, until the cascade leaves the
-window; a pull that reports a quiz cleared never flagging it pending; grade
-rows pulled for a pending quiz of a cascade with a pending `trash_cascade`
-being written nowhere; a full pull deleting no base row of a cascade with
+the base, so a Trash export of it works offline; a pull that reports a quiz cleared never flagging it pending; a full pull deleting no base row of a cascade with
 pending operations although it is absent from `question_rows_for`; a `stale`
 grade beside an applied `finish` with a matching outcome showing the grade's
 own sentence; a new order-filter row opening at rank 1; the drop pass in a
-browser without Web Locks skipping the running tab's open cascade; a quiz restored on acknowledgment and fetched at once surviving
-the next drop pass, while a `trash_cascade`, `purge_quiz` or
-`set_quiz_options` does not refresh a cascade's last-open time; the drop
+browser without Web Locks skipping the running tab's open cascade; the drop
 pass skipping a cascade whose player is open in a second tab that holds its
-Web Lock; a Catalan cascade pulled from another device having its
-distribution stored before Available offline, and typed mode on one whose
+Web Lock; a cascade pulled from another device having its distribution fetched and stored, and typed mode on one whose
 distribution is missing showing "needs a connection"; a `set_quiz_options`
-with a segment size above the cap `/api/auth/me` reported being refused on
-the device, while a quiz **already** holding a larger size keeps playing and the
-player's Settings prefill the cap rather than a cascade's larger stored size for
-levels made from now on, so a lowered cap never sends a value the server
-refuses; a resync on a device holding five 300,000-question cascades
+with a segment size above the cap `/api/auth/me` reported being refused on the device; a resync on a device holding five 300,000-question cascades
 comparing base and pull within the [scale test](#scale-tests)'s budget; the
 Cascades page showing **Available offline**, not the download label, for a
-cascade opened inside the window; the `stale`,
-`stale_attempt` and `not_active` grade notices for grades with no finish of
-this device behind them; a `finish` rejected `not_active` showing the
-finished-elsewhere sentence; and a restored quiz whose options the server
-built from cascade options changed elsewhere taking the server's row; a
-cascade over `AUTO_KEEP_OFFLINE_ROWS` not being dropped when it leaves the
+cascade opened inside the window; the `stale_attempt` grade notice for grades with no finish of this device behind them; a `finish` rejected `not_active` showing the
+finished-elsewhere sentence; a cascade over `AUTO_KEEP_OFFLINE_ROWS` not being dropped when it leaves the
 window, and eviction taking its cards all the same; cards fetched
-without definitions, the cascade's setting turned on offline, the player showing
-words only, and the cards refetched with definitions on reconnect, read from
+without definitions, the cascade's setting turned on offline, and the cards refetched with definitions on reconnect, read from
 the cascade as the device sees it, before the change is sent; a first sync
 sending `cursor: null`; a `resync_required` response answered by a
 `cursor: null` pull that sends the same batch again, replacing the base and replaying the rest
 of the outbox with nothing lost, a batch holding a finish with answers queued
-on the level it made included, refetching no index list and recomputing no
-positions for a quiz whose seed is unchanged, and deleting a quiz the full pull
+on the level it made included, and deleting a quiz the full pull
 did not carry; an interrupted pull converging on the next
 sync; a `426` acknowledging its operations and applying their pull (the level
 an acknowledged finish made stays, with the answers queued on it), showing **reload to keep syncing**
 rather than a waiting count, keeping the rest of the outbox and the grades that
 follow it, and still showing that state after a reload the service worker
-answered from its cache, until a sync succeeds; a `503` resending the same batch
-after `Retry-After` with the outbox intact; and `429`
-backoff honouring `Retry-After`. The **download manager** has its own: a `429`
-on a card, keys, index-list or grades page pausing that cascade's fetches until
-`Retry-After` and then finishing them, with its progress indicator unchanged and
-no page lost or refetched twice; ten kept 300,000-question cascades draining
-through a bucket that answers `429` from the 120th request of each minute and
-completing rather than stalling or spinning; and a page the player needs on the
-current card taking priority, so the download manager starts nothing while one
-is outstanding and the card shows its answer instead of "answer needs a
-connection".
+answered from its cache, until a sync succeeds; a `503` and a `429` each resending the same batch with the outbox intact (the wait itself is a stand-in the tests do not time); a change stream the browser gave up being opened again after a wait that doubles, one the browser is reopening itself being left to it, and one refused while the account needs to log in staying closed. The **download manager** has its own: a `429` on a cards page being waited out and that page fetched again, with no page lost or fetched twice; and a page the player needs on the current card taking priority, so the download manager starts nothing while one is outstanding.
+
+**Not asserted by any test today.** Each of these is behaviour this plan
+states and the code is written to; none has a test whose body would fail if it
+broke, so none should be read as covered: the full path being chosen from a
+pulled question group's `min_updated_seq`, or from a cascade, quiz or attempt
+row's `updated_seq` or a tombstone's `seq`, below the response's `sync_seq`
+(which path ran is not observed by any test); grades queued behind an applied
+`purge_cascade` being dropped when the full path next runs; a page of a pull
+written while the player is on the quiz changing nothing the player reads until
+the last page; a pending mark surviving the index-list fetch until the grades
+arrive, and a cascade re-entering the window through a pull rather than an
+open; a `questions_hash` mismatch found after materialisation refetching the
+list; a cleared level's rows fetched for a Trash export being dropped when the
+cascade leaves the window and fetched again for a second export, and an export
+of rows that lack positions; a restored quiz's sequence fetching the cascade's
+missing keys, its surviving the next drop pass, and its taking the server's
+options row; a full pull's deletion removing a cascade's `questions` and
+`cards` entries and its budget-dropped mark and sizes (a tombstone's removal of
+keys and cards is not asserted either: the device in that test holds none); the
+keys coming back on the open after a drop; a cascade studied for 15 days
+staying in the window, one studied elsewhere leaving it, and an export counting
+as an open; a `purge_quiz` or `set_quiz_options` not refreshing the last-open
+time; the quota path's retry refetching nothing, and **the drop pass running
+before the answer eviction** when a pull finds no room (the engine test sees
+only that room was asked for once); a completion computed while another
+device's finishes were unpulled showing this device's own counts, the
+came-out-differently path opening **no completion screen**, and a `finish` the
+server answered `reshuffled`; a `finish` rejected `not_deepest` with every
+grade kept showing its sentence alone, and the `stale` and `not_active` grade
+notices with no finish behind them; a quiz already holding a segment size above
+a lowered cap still playing, and Settings prefilling the cap (`clampPrefill`);
+a grades-fetch row written while a full pull is in flight being spared; a
+resync refetching no index list for an unchanged seed; the budget pass's own
+skip of a cascade with pending operations (the window's pass is tested); the
+second and third cascades' order under eviction; `429`s on keys, index-list and
+grades pages, the progress indicator across one, and ten 300,000-question
+cascades draining through a bucket that answers `429` from the 120th request of
+a minute; and a multi-page full pull promoting a level. `Retry-After`'s length
+is never timed.
 
 The **export formatters** are held to one set of fixtures on both sides.
 `contract-fixtures/export/` covers all three quiz types, the four selections,
@@ -6911,6 +6853,18 @@ they run in parallel and leave nothing behind.
     (`sync_faults.rs`) runs this case at 130,000 questions, as `pull.rs` runs
     the grades endpoint's; the [scale tests](#scale-tests) cover the finish at
     300,000.
+  - The event stream: another device of the account hears of a change at
+    once, the device that made it and another account do not, and a stream
+    needs the session and the account it names; with `SYNC_STREAMS_PER_USER`
+    at 2 and `SYNC_STREAM_RATE_PER_MINUTE` at 5, a third stream while two are
+    open is a `429` and takes no place, another account's count is its own, a
+    stream the client closed gives its place back, and an open past the
+    minute's rate is a `429` with a place free, while `POST /api/sync` is
+    limited by neither.
+  - Shared device settings merging per setting by the later `at`, coming back
+    on every response, refusing malformed shares and a `NUL`, and a share
+    stamped decades ahead being kept as five minutes from now at most, so the
+    next share takes the setting back.
 - **Other integration tests** (`cargo test`, `TEST_DATABASE_URL`) drive the real
   router in-process, covering:
   - the auth flows, including the reset-password response taking the same time
@@ -7160,14 +7114,17 @@ through the ordinary endpoints, so there is still no test-only path.
   login replaced the cookie the request was for. With unsent work, the dialog names the count and says those
   changes sync at
   the next login here, and **Remove this account's data from this device**
-  deletes the per-user database after naming what that discards, and drops that
-  account from the accounts list while a logout still queued for it is sent on
-  the next connection with no account signed in. A second
+  deletes the per-user database after naming what that discards. A second
   account logging in on the same browser sees none of the first account's
-  cascades, and its Account page lists **both** accounts with their totals and
-  removes the first one's data, leaving its own untouched. Removing its **own**
-  data from the same line clears the signed-in pointer and lands on the login
-  page.
+  cascades, and the browser's `accounts` store (which the journey reads, since
+  no page lists it) holds both; no logout is sent while it is signed in.
+  Logging out with its **own** data removed lands on the log-in page and
+  leaves the store holding the first account alone, which then logs in and
+  finds its cascades. **No page lists the accounts with data on a device or
+  removes another account's data** (see [On the device](#on-the-device)), so
+  no journey does either; the row left for a logout still queued, and its
+  going once the request is through, are covered by the unit tests of
+  `lib/local/accounts.ts` alone.
 - **Switching accounts in another tab:** as Alice, grade twenty cards offline
   in one tab; in a second tab, log out and log in as Bob; see the first tab show
   **signed out in another tab** at once and stop syncing. Reconnect, and see
@@ -7199,7 +7156,7 @@ through the ordinary endpoints, so there is still no test-only path.
   spec sees a Cascades row's quiz type after its name.
 - **Deleting the account** from `/account`, with a second account's data also on
   the browser, lands on the log-in page, leaves no per-user database or
-  `accounts` row for the deleted account — so the browser's accounts list holds only the second — and a reload offers the login page rather than the deleted
+  `accounts` row for the deleted account — so the browser's `accounts` store, read by the journey, holds only the second — and a reload offers the login page rather than the deleted
   account's cascades. On a second browser context still signed in as that
   account, the next sync answers `401`, it shows **Log in to sync** with its
   cascades still readable, and its Account page still offers to remove them.
@@ -7216,11 +7173,7 @@ through the ordinary endpoints, so there is still no test-only path.
   left click only focuses the input, the next card's input has the focus with
   no click, and switching modes mid-card clears the entries. Two answers typed on one line (`RETAINS NASTIER`) stay in the input
   with "not an anagram of the question" and the card, with every anagram then found,
-  still grades correct. With **Enter bound to Toggle grade**, Enter on a typed
-  word submits it and leaves the grade alone, and Enter on an empty input
-  reveals the answer; with **`Shift+T` bound to Toggle grade**, typing a `T`
-  with Shift held puts `T` in the input; and both bindings act as bound once
-  the input loses focus and in flashcard mode.
+  still grades correct. That the typed input keeps Enter and `Shift+T` when they are bound to Toggle grade is a unit test's (`inputOwns`), not a journey's; the controls journey checks only that Ctrl+Backspace still acts as Previous from the input.
 - With **alphabetical order** on, entering answers in order grades correct, and
   an out-of-order answer reveals the card at once, missed, with "Out of order".
   With the option off, the same sequence grades correct.
@@ -7252,11 +7205,7 @@ through the ordinary endpoints, so there is still no test-only path.
   shows the question count, from the `questions` store, and drops the entry count
   rather than blocking or showing a line count it cannot know. Online, export a
   cascade with definitions the device never downloaded, so it comes from the
-  server through a token, and double-click **Download**: one file arrives and the
-  app stays on screen, the second request having been answered `204` inside the
-  hidden frame. The download reaches the server rather than the service worker,
-  and the frame never loads the app: no second sync leader, no second member on
-  the account `BroadcastChannel`. All of this runs with the production security
+  server through a token, and double-click **Export**: one file arrives, the dialog stays on screen, and exactly one export request is answered `200`. (That a second use of a token is answered `204` is the [integration test](#integration-tests)'s; the button is disabled while the first press is at work, so the journey may send no second request at all. Nothing in the journey looks at the service worker, the sync leader or the account's `BroadcastChannel`, so the frame never loading the app is not asserted beyond the dialog staying up.) All of this runs with the production security
   headers and the build's own `<meta>` policy on, so a `frame-ancestors` or
   `X-Frame-Options` change that blocked the frame would fail here. The suite's
   first journey also asserts that the app **boots** under that policy, with no
@@ -7318,9 +7267,7 @@ through the ordinary endpoints, so there is still no test-only path.
   "downloads when online" note and the ladder's "waiting for download" level,
   go online and see it download without opening the cascade, then open it and
   play.
-- Over the answer limit with two automatic keeps, see the least recently
-  opened one's answers freed while its questions still show in the player, and
-  the Account page list both with their answer and key sizes. Go offline
+- Over the answer limit with two automatic keeps, see the least recently opened one's answers freed while its questions still show in the player (no page lists what the device holds; the journey reads the stores). Go offline
   and see that cascade's badge read "answers need a connection" rather than a
   download bar at zero, and see it return to progress on reconnecting.
 - Over `ROW_STORAGE_BUDGET`, lowered with a test constant, see the least
@@ -7328,12 +7275,9 @@ through the ordinary endpoints, so there is still no test-only path.
   **automatically** kept one takes the total over, and the kept one's rows held
   while its player is open; then, with a second automatic keep and nothing
   unkept left, see the oldest automatically kept cascade dropped once its player
-  closes, then the next. See the Account page's total against the budget, and
-  the dropped cascades absent from its list of cascades on this device rather
-  than sitting in it at zero bytes. Stay online for several sync cycles and see them stay
+  closes, then the next. Stay online for several sync cycles and see them stay
   dropped — the storage total steady, no download progress reappearing, and the
-  Cascades page offering "open to download" — then open one and see it come
-  back whole and listed again.
+  Cascades page offering "open to download" — then open one and see it come back whole.
 - Trash a cascade offline and see it listed in the Trash with "deleted forever 30 days
   after this syncs", not missing from the cascades list and the Trash alike.
 - In the Settings of a large cascade, type a segment size for the level being
@@ -7346,17 +7290,15 @@ through the ordinary endpoints, so there is still no test-only path.
   blank standing for a tile.
 - **Desktop controls:**
   - Left click shows and advances, right click toggles, and middle click goes
-    back, with no context menu appearing; a double click advances once, and a
-    wheel binding fires once per flick.
-  - Clicks on the side rails do nothing to the quiz.
+    back, with no context menu appearing; with the repeat guard at its default of
+    off, both clicks of a double click count; and a wheel binding fires once
+    per flick.
+  - Clicks on the status bar do nothing to the quiz.
   - Rebind Toggle grade to the wheel and to `Shift+T` in the player's
     Settings, under Device Settings, and see both work, survive a reload, and
     **not** reach a second browser context, which keeps the defaults: controls
     are per device.
-  - Bind wheel-down to Show / Next, reveal a Definition card whose definition
-    overflows the panel, and see wheel-down advance without scrolling the text,
-    the capture box having warned it would, while the scrollbar and the Page
-    Down key still reach the end of the definition and wheel-up still scrolls.
+  - (Not covered by a journey: wheel-down bound to Show / Next over a definition that overflows its panel, advancing without scrolling the text after the capture box's warning, with the scrollbar, Page Down and wheel-up still scrolling.)
   - A binding can't be removed from an action that has only one, and Escape
     cancels capture instead of being bound, leaving Settings open.
   - Binding a stroke that already belongs to another action **moves** it, with

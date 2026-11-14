@@ -244,10 +244,19 @@ describe('the sync engine', () => {
 	});
 
 	it('an acknowledged offline finish leaves its new level playable with no index-list fetch', async () => {
-		const { a } = await setup();
+		const server = new FakeServer();
+		server.create({ id: C1, source_id: Q1, count: 5 });
+		const needs: string[] = [];
+		const a = await Dev.make(server, undefined, { onSynced: (o) => void needs.push(...o.needsIndexList) });
+		await a.open(C1);
+		await a.sync();
 		await a.play(Q1, 'CCCMM');
 		const { newId } = await a.finish(Q1);
+		const before = a.requests.length;
 		await a.sync();
+		// One request, and no list asked for: the rows the device built are the level's.
+		expect(a.requests.length - before).toBe(1);
+		expect(needs).toEqual([]);
 		const rows = await a.rows(newId);
 		expect(rows).toHaveLength(2);
 		expect(rows.every((r) => r.position !== null)).toBe(true);
