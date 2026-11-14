@@ -27,8 +27,12 @@ OPS_TFVARS_KEY=acrodont/prod.tfvars
 OPS_NAME=$(basename "$0")
 OPS_APP_FAMILY=acrodont
 OPS_SSM_PREFIX=/acrodont/production
-# Resource types whose loss is data loss or an outage.
-OPS_DANGEROUS_TYPES='^(aws_db_instance|aws_db_subnet_group|aws_s3_bucket.*|aws_vpc|aws_subnet|aws_kms_key|aws_ecr_repository)$'
+# Resource types whose loss is data loss or an outage: the data and what
+# holds it, and what cannot be replaced without work outside Terraform (a
+# new load balancer needs the hand-made DNS alias repointed, a new
+# certificate its validation records, a new topic its subscription confirmed)
+# or without the site going down (the cluster, the service, the target group).
+OPS_DANGEROUS_TYPES='^(aws_db_instance|aws_db_subnet_group|aws_s3_bucket.*|aws_vpc|aws_subnet|aws_kms_key|aws_ecr_repository|aws_lb|aws_lb_target_group|aws_acm_certificate|aws_ecs_cluster|aws_ecs_service|aws_sns_topic)$'
 # Paths whose change means the app images must be rebuilt.
 OPS_IMAGE_PATHS='^(backend/|frontend/|docker/|contract-fixtures/|scripts/(backup|restore|ops_master_psql|drill)\.py$)'
 # CLI v2 pages long output through less, which swallows the rest of a script.
@@ -413,6 +417,31 @@ ops_wait_release() {
   ops_wait_healthy
 }
 
+# Restarts the service on the task definition it has, so that its tasks read
+# their parameters again, and waits until the restart has taken. The image and
+# the size are the same before and after, so ops_wait_release could not tell a
+# restart that took from one the circuit breaker rolled back: this compares
+# deployments. The restart is the deployment update-service returns; the
+# service must settle with that one as its PRIMARY. A rollback settles on
+# another.
+ops_restart_service() {
+  local new primary
+  new=$(aws ecs update-service --cluster "$OPS_CLUSTER" --service "$OPS_SERVICE" --force-new-deployment --output json \
+    | jq -r '[.service.deployments[]? | select(.status == "PRIMARY") | .id][0] // empty') || ops_die "the restart could not be asked for"
+  [[ -n "$new" ]] || ops_die "ECS did not say which deployment the restart is: aws ecs describe-services --cluster $OPS_CLUSTER --services $OPS_SERVICE"
+  ops_say "the service is restarting to read the new value"
+  [[ "$(ops_desired_count)" != 0 ]] || return 0
+  ops_say "waiting for the deployment to settle (startup is allowed several minutes; failed starts roll it back)"
+  sleep 20
+  ops_wait_settled
+  primary=$(ops_describe_service | jq -r '[.services[0].deployments[]? | select(.status == "PRIMARY") | .id][0] // empty') || primary=""
+  if [[ "$primary" != "$new" ]]; then
+    ops_show_events
+    ops_die "the restart did not take: the service settled on deployment [${primary:-none}], not the restart's [$new]. The tasks serving now may still hold the old values, and a task that starts later reads the new ones"
+  fi
+  ops_wait_healthy
+}
+
 # The AWS waiter gives up after ten minutes, so it is asked three times.
 ops_wait_healthy() {
   local arn round
@@ -556,16 +585,22 @@ ops_describe_task() {
 # A task ECS does not describe ("MISSING") is new (eventual consistency) or
 # long forgotten (a laptop that slept): stopped once seen, or after 5 minutes.
 ops_wait_task_stopped() {
-  local arn=$1 seen=0 unseen=0 status
+  local arn=$1 seen=0 unseen=0 failed=0 status
   while :; do
     sleep 10
     status=$(ops_describe_task "$arn" 2>/dev/null | jq -r 'if (.tasks | length) == 0 then "MISSING" else .tasks[0].lastStatus end' 2>/dev/null) || status=""
     [[ "$status" == STOPPED ]] && return 0
     if [[ "$status" == MISSING ]]; then
-      unseen=$((unseen + 1))
+      unseen=$((unseen + 1)) failed=0
       { ((seen)) || ((unseen >= 30)); } && return 0
     elif [[ -n "$status" ]]; then
-      seen=1 unseen=0
+      seen=1 unseen=0 failed=0
+    else
+      # The call itself fails (an expired sign-in, no network). The task runs
+      # on whatever this does, so it is not given up on: it is said, once a
+      # minute, with what to do.
+      failed=$((failed + 1))
+      ((failed % 6 != 0)) || ops_say "cannot ask ECS about the task (for $((failed / 6)) min): it may still be running. If your sign-in has expired, run  aws sso login  in another terminal and this carries on"
     fi
   done
 }
@@ -597,12 +632,28 @@ ops_task_exit() {
 }
 
 # Runs SCRIPT with bash in a one-off ops task (ENV_JSON: extra environment as
-# [{name, value}]), prints its log, and returns the container's exit code.
+# [{name, value}]), prints its log, and returns the container's exit code: 2
+# when ECS cannot say what it was, 125 when no task was started at all.
+#
+# Callers run this as `ops_run_ops_script ... || rc=$?`, and bash turns
+# `set -e` off inside a function called that way, so each step that must not
+# be carried on from is checked here by hand: a run-task that failed or
+# started nothing (an expired sign-in, no Fargate capacity) would otherwise
+# leave an empty ARN to be waited on, with "it may still be running" said of
+# a task that never existed.
 ops_run_ops_script() {
   local script=$1 env=${2:-[]} overrides arn code
   overrides=$(jq -cn --arg s "$script" --argjson env "$env" \
-    '{containerOverrides: [{name: "ops", environment: $env, command: ["bash", "-c", $s]}]}')
-  arn=$(ops_run_task "$overrides")
+    '{containerOverrides: [{name: "ops", environment: $env, command: ["bash", "-c", $s]}]}') || overrides=""
+  if [[ -z "$overrides" ]]; then
+    ops_say "the task's command and environment could not be put together: no ops task was started, so nothing ran"
+    return 125
+  fi
+  arn=$(ops_run_task "$overrides") || arn=""
+  if [[ -z "$arn" ]]; then
+    ops_say "no ops task was started, so nothing ran and nothing is still running"
+    return 125
+  fi
   ops_say "running $arn"
   ops_wait_task_stopped "$arn"
   ops_task_logs "$arn" || true

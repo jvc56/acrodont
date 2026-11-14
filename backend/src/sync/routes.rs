@@ -76,15 +76,30 @@ struct Request {
 /// At most this many shared device settings per account, each name this long.
 const MAX_SHARED_SETTINGS: usize = 64;
 const MAX_SHARED_NAME: usize = 40;
-/// At most this many bytes of shared device settings in one request.
+/// At most this many bytes of shared device settings in one request, and
+/// held by one account.
 const MAX_SHARED_BYTES: usize = 16 * 1024;
+
+/// Whether any text in `v` holds a NUL, which Postgres stores in neither
+/// text nor jsonb: the merge below would fail on it instead of refusing it.
+fn has_nul(v: &Value) -> bool {
+    match v {
+        Value::String(s) => s.contains('\0'),
+        Value::Array(a) => a.iter().any(has_nul),
+        Value::Object(m) => m.iter().any(|(k, e)| k.contains('\0') || has_nul(e)),
+        _ => false,
+    }
+}
 
 /// A request's shared device settings (PLAN.md § Settings → This device, or
 /// all of them): an object of setting name to `{value, at}`, the time it was
 /// shared, which is written back in one form so the merge can compare it.
 /// What a value means is the frontend's to check, as it does with values
-/// from an older build.
-fn parse_device_settings(v: Option<&Value>) -> ApiResult<Option<Value>> {
+/// from an older build. **The time is clamped** like every other device time
+/// the server compares (PLAN.md § Operations, "Device clocks are clamped"):
+/// `least(at, now + 5 minutes)`, so a device whose clock is months ahead wins
+/// a merge by five minutes at most, not until the calendar catches up.
+fn parse_device_settings(v: Option<&Value>, now: DateTime<Utc>) -> ApiResult<Option<Value>> {
     let Some(v) = v else { return Ok(None) };
     if v.is_null() {
         return Ok(None);
@@ -102,8 +117,12 @@ fn parse_device_settings(v: Option<&Value>) -> ApiResult<Option<Value>> {
             .get("at")
             .and_then(Value::as_str)
             .and_then(|s| s.parse::<DateTime<Utc>>().ok())
-            .ok_or_else(|| bad("device_settings needs each setting's at"))?;
+            .ok_or_else(|| bad("device_settings needs each setting's at"))?
+            .min(now + chrono::Duration::minutes(5));
         let value = e.get("value").ok_or_else(|| bad("device_settings needs each setting's value"))?;
+        if has_nul(value) {
+            return Err(bad("device_settings holds a character that cannot be stored"));
+        }
         out.insert(
             k.clone(),
             json!({ "value": value, "at": at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true) }),
@@ -114,24 +133,31 @@ fn parse_device_settings(v: Option<&Value>) -> ApiResult<Option<Value>> {
 
 /// Merges shared device settings into the account's: per setting, the later
 /// `at` wins, so two devices sharing the same setting agree on the last one.
-/// A merge past MAX_SHARED_SETTINGS settings changes nothing.
+/// A merge past MAX_SHARED_SETTINGS settings, or that would leave the account
+/// holding more than MAX_SHARED_BYTES of them, changes nothing: every sync
+/// response carries them all, and they are outside the storage limit.
 async fn share_device_settings(state: &AppState, user: Uuid, device: Uuid, shared: &Value) -> ApiResult<()> {
     let mut tx = state.db.begin().await?;
     let merged = sqlx::query(
-        "UPDATE users SET device_settings = (
-             SELECT coalesce(jsonb_object_agg(k, CASE
-                        WHEN n.v IS NULL THEN o.v
-                        WHEN o.v IS NULL THEN n.v
-                        WHEN (n.v->>'at')::timestamptz >= (o.v->>'at')::timestamptz THEN n.v
-                        ELSE o.v END), '{}'::jsonb)
-             FROM jsonb_each(users.device_settings) AS o(k, v)
-             FULL JOIN jsonb_each($2::text::jsonb) AS n(k, v) USING (k))
+        "WITH kept AS (SELECT device_settings FROM users WHERE id = $1 FOR UPDATE),
+              merged AS (
+                  SELECT coalesce(jsonb_object_agg(k, CASE
+                             WHEN n.v IS NULL THEN o.v
+                             WHEN o.v IS NULL THEN n.v
+                             WHEN (n.v->>'at')::timestamptz >= (o.v->>'at')::timestamptz THEN n.v
+                             ELSE o.v END), '{}'::jsonb) AS settings
+                  FROM jsonb_each((SELECT device_settings FROM kept)) AS o(k, v)
+                  FULL JOIN jsonb_each($2::text::jsonb) AS n(k, v) USING (k))
+         UPDATE users SET device_settings = merged.settings
+         FROM merged
          WHERE id = $1
-           AND (SELECT count(*) FROM jsonb_object_keys(users.device_settings || $2::text::jsonb)) <= $3",
+           AND (SELECT count(*) FROM jsonb_object_keys(merged.settings)) <= $3
+           AND octet_length(merged.settings::text) <= $4",
     )
     .bind(user)
     .bind(shared.to_string())
     .bind(MAX_SHARED_SETTINGS as i64)
+    .bind(MAX_SHARED_BYTES as i32)
     .execute(&mut *tx)
     .await?;
     // The other devices take the shared values at once (sync::notify).
@@ -224,7 +250,7 @@ fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Reques
         });
     }
     ops.sort_by_key(|o| o.device_seq);
-    let device_settings = parse_device_settings(obj.get("device_settings"))?;
+    let device_settings = parse_device_settings(obj.get("device_settings"), Utc::now())?;
     Ok(Request { device_id, app_version, cursor, page_token, question_rows_for, ops, device_settings })
 }
 
@@ -450,7 +476,11 @@ async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, Api
     // Operations → Monitoring; infra/alarms.tf).
     for (op, r) in req.ops.iter().zip(&results) {
         if r.status == "rejected" {
-            tracing::info!(op_type = %op.op_type, reason = r.reason.as_deref().unwrap_or(""), "sync operation rejected");
+            // The type is a metric dimension (infra/alarms.tf), so only the
+            // server's own names are logged: a client's invented types would
+            // each mint a custom metric.
+            let op_type = if OP_TYPES.contains(&op.op_type.as_str()) { op.op_type.as_str() } else { "unknown" };
+            tracing::info!(op_type, reason = r.reason.as_deref().unwrap_or(""), "sync operation rejected");
         }
     }
     tx.commit().await.map_err(transient)?;
@@ -598,7 +628,7 @@ async fn grades(
     .fetch_optional(&state.db)
     .await?
     .ok_or(ApiError::NotFound)?;
-    let end = (from + limit).min(i64::from(i32::MAX));
+    let end = from.saturating_add(limit).min(i64::from(i32::MAX));
     let start = from.min(i64::from(i32::MAX)) as i32;
     let mut conn = state.db.acquire().await?;
     let chunks = crate::cards::load_range(&mut conn, quiz, start, end as i32).await?;

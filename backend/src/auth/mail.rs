@@ -291,6 +291,18 @@ impl EmailCaps {
         entries.push((now, ip));
         true
     }
+
+    /// Forgets every address with nothing sent in the window. Run on a timer
+    /// (`purge::spawn`): `try_reserve` only clears the address it is asked about.
+    pub fn prune(&self) {
+        let window_start = self.clock.now() - Duration::hours(24);
+        let mut sent = self.sent.lock().expect("caps lock");
+        sent.retain(|_, entries| {
+            entries.retain(|(at, _)| *at > window_start);
+            !entries.is_empty()
+        });
+        sent.shrink_to_fit();
+    }
 }
 
 pub fn confirmation_email(public_url: &str, to: &str, code: &str) -> Email {
@@ -429,5 +441,21 @@ mod tests {
         assert!(!caps.try_reserve("x@y.z", "10.0.2.1".parse().unwrap()));
         clock.advance(Duration::hours(24) + Duration::seconds(1));
         assert!(caps.try_reserve("x@y.z", a));
+    }
+
+    #[test]
+    fn pruning_forgets_addresses_outside_the_window() {
+        let clock = Arc::new(Clock::system());
+        let caps = EmailCaps::new(clock.clone());
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        assert!(caps.try_reserve("old@y.z", ip));
+        clock.advance(Duration::hours(23));
+        assert!(caps.try_reserve("new@y.z", ip));
+        caps.prune();
+        assert_eq!(caps.sent.lock().unwrap().len(), 2);
+        clock.advance(Duration::hours(2));
+        caps.prune();
+        let sent = caps.sent.lock().unwrap();
+        assert_eq!(sent.keys().collect::<Vec<_>>(), ["new@y.z"]);
     }
 }

@@ -282,3 +282,86 @@ async fn a_restored_chain_quiz_stays_a_chain(pool: sqlx::PgPool) {
             .unwrap();
     assert_eq!((prog.as_str(), seg, is_chain), ("drill", 0, true));
 }
+
+/// Two accounts with cleared quizzes past retention, in the order the purge
+/// takes them.
+async fn two_accounts_with_old_trash(app: &TestApp) -> [(Uuid, Setup); 2] {
+    let mut accounts = Vec::new();
+    for name in ["first", "second"] {
+        let user = app.signed_in(name).await.user_id.unwrap();
+        let s = Setup::new(5);
+        insert_cascade(app, user, &s).await;
+        insert_cleared_chains(app, user, &s, 3, 40).await;
+        accounts.push((user, s));
+    }
+    accounts.try_into().ok().unwrap()
+}
+
+async fn cleared_left(app: &TestApp, user: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM quizzes WHERE user_id = $1 AND status = 'cleared'")
+        .bind(user)
+        .fetch_one(app.db())
+        .await
+        .unwrap()
+}
+
+/// What a purge frees is counted from the rows with today's sizes. Rows kept
+/// under a smaller figure (another release's sizes) take it to zero, never
+/// below: a negative figure fails its CHECK, and that error once stopped the
+/// run for every account.
+#[sqlx::test]
+async fn a_purge_that_frees_more_than_was_counted_stops_at_zero(pool: sqlx::PgPool) {
+    let app = app_with(pool, &[]).await;
+    let [(a, sa), (b, _)] = two_accounts_with_old_trash(&app).await;
+    sqlx::query("UPDATE cascades SET storage_bytes = 1 WHERE id = $1").bind(sa.cascade_id).execute(app.db()).await.unwrap();
+    sqlx::query("UPDATE users SET storage_bytes = 1 WHERE id = $1").bind(a).execute(app.db()).await.unwrap();
+    assert!(acrodont::purge::run_once(&app.state).await.unwrap());
+    assert_eq!(cleared_left(&app, a).await, 0);
+    assert_eq!(cleared_left(&app, b).await, 0);
+    let (cascade, user): (i64, i64) = sqlx::query_as(
+        "SELECT c.storage_bytes, u.storage_bytes FROM cascades c JOIN users u ON u.id = c.user_id WHERE c.id = $1",
+    )
+    .bind(sa.cascade_id)
+    .fetch_one(app.db())
+    .await
+    .unwrap();
+    assert_eq!((cascade, user), (0, 0));
+}
+
+/// One account whose purge fails does not stop the run: the other accounts
+/// are purged, the later steps still run, and the run reports the failure.
+#[sqlx::test]
+async fn one_failing_account_does_not_stop_the_purge(pool: sqlx::PgPool) {
+    let app = app_with(pool, &[]).await;
+    let [(a, _), (b, _)] = two_accounts_with_old_trash(&app).await;
+    // The first account's quizzes cannot be deleted.
+    sqlx::query(
+        "CREATE FUNCTION refuse_delete() RETURNS trigger LANGUAGE plpgsql AS
+         $$ BEGIN RAISE EXCEPTION 'this account cannot be purged'; END $$",
+    )
+    .execute(app.db())
+    .await
+    .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE TRIGGER refuse BEFORE DELETE ON quizzes FOR EACH ROW WHEN (OLD.user_id = '{a}') EXECUTE FUNCTION refuse_delete()"
+    )))
+    .execute(app.db())
+    .await
+    .unwrap();
+    // Something for a later step to do: an abandoned registration.
+    let mut c = app.client();
+    c.post("/api/auth/register", json!({"username": "stale", "email": "stale@example.com", "password": common::PASSWORD})).await;
+    sqlx::query("UPDATE email_confirmations SET expires_at = now() - interval '8 days' WHERE user_id = (SELECT id FROM users WHERE username = 'stale')")
+        .execute(app.db())
+        .await
+        .unwrap();
+
+    let run = acrodont::purge::run_once(&app.state).await;
+    assert!(run.unwrap_err().to_string().contains("purge_trash"));
+    assert_eq!(cleared_left(&app, a).await, 3, "the failing account's transaction rolled back whole");
+    assert_eq!(cleared_left(&app, b).await, 0, "the next account was purged");
+    let stale: i64 = sqlx::query_scalar("SELECT count(*) FROM users WHERE username = 'stale'").fetch_one(app.db()).await.unwrap();
+    assert_eq!(stale, 0, "the later steps ran");
+    // The lock was given back: the next run is not turned away.
+    assert!(acrodont::purge::run_once(&app.state).await.is_err());
+}

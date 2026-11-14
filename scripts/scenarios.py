@@ -234,8 +234,8 @@ def trash(s: Seeder) -> None:
 # The searches `limits` fills an account with, broadest first.
 FILLER_SEARCHES = [length(2, 15), length(2, 8), length(7, 8), length(2, 6), length(6, 6), length(5, 5),
                    length(4, 4), length(3, 3), length(2, 2), small(2, 2, 3)]
-# At most this many fillers a run: a 100 MB account on the 154-word fixture
-# catalog would need thousands.
+# At most this many fillers a run: a 10 MB account on the 154-word fixture
+# catalog would need hundreds.
 MAX_FILLERS = 60
 
 
@@ -245,7 +245,7 @@ def limits(s: Seeder) -> None:
 
     Each filler is the broadest search whose cascade, by the preview's
     `storage_bytes`, still fits under the limit. On CSW24 a handful fill the
-    default 100 MB. The fixture catalog's cascades are a few tens of KB, so
+    default 10 MB. The fixture catalog's cascades are a few tens of KB, so
     there run it on a stack with a lowered limit:
     `./scripts/dev.py --fixtures --env MAX_STORAGE_BYTES_PER_USER=1000000 --scenario limits`.
     """

@@ -5,6 +5,15 @@
 account (see "Implementation status" below). The decisions D1–D6 were taken
 as recommended.
 
+**Since then** the limits this file names have changed: registration closes
+at **750** accounts (`MAX_ACCOUNTS`), not 50; the per-account cascade count
+gave way to one storage limit of 10 MB; and the question ceiling is 300,000.
+PLAN.md has today's figures, and where this file says otherwise it is the
+figure of the day it was written. Acrodont also has one SSE stream now,
+`/api/sync/events`, where sections 13 and 14 say "no SSE"; what they
+conclude still holds, since the stream is fed through `NOTIFY` on every
+instance, is not compressed, and closes on shutdown.
+
 ## Implementation status (2026-11-09)
 
 After this plan was written, the owner set the scale: one user at first, up to

@@ -8,9 +8,9 @@ import { display } from '$lib/player/display.svelte';
 import { recordTotals } from '$lib/local/accounts';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';
-import { userDb } from '$lib/local/open';
-import { DownloadManager, openPlayers } from './downloads';
-import { electLeader, listenForChanges, startTriggers, SyncEngine, type SyncStatus } from './engine';
+import { onUpdatedElsewhere, userDb } from '$lib/local/open';
+import { DownloadManager, httpApiFor, openPlayers } from './downloads';
+import { electLeader, listenForChanges, startTriggers, SyncEngine, transportFor, type EngineHooks, type SyncStatus } from './engine';
 import type { Notice } from './notices';
 
 class SyncState {
@@ -21,6 +21,8 @@ class SyncState {
 	progress = $state(0);
 	/** The cascade this tab's player has open (the drop pass skips it). */
 	openCascade = $state<string | null>(null);
+	/** The last download pass found no room on this device, even after dropping what it may. */
+	noRoom = $state(false);
 	/** Operations waiting in the outbox; null until counted, so "Synced" is never shown unread. */
 	pending = $state<number | null>(null);
 	/** Cascades a rebase changed: a player showing one refreshes (step 5). */
@@ -92,21 +94,41 @@ function downloadInBackground() {
 	void dm
 		.run()
 		.then(() => (again ? dm.run() : undefined))
-		.then(() => {
-			syncState.progress += 1;
-			post({ kind: 'progress' });
-		})
-		.catch(() => undefined);
+		.catch(() => undefined)
+		.then(() => passDone(dm));
+}
+
+/** A download pass ended, well or not: badges changed, here and in every other tab, and whether there was room. */
+function passDone(dm: DownloadManager) {
+	syncState.progress += 1;
+	syncState.noRoom = dm.noRoom;
+	post({ kind: 'progress', noRoom: dm.noRoom });
 }
 let channel: BroadcastChannel | null = null;
 let stop: (() => void) | null = null;
+/** The account whose notices `syncState.notices` holds. */
+let noticesOf: string | null = null;
+
+// A newer build in another tab took the database (its `versionchange` closed
+// this tab's connection): this tab can no longer sync, so it stops and gives
+// the account's sync lock up, or the tab on the new build could never lead and
+// nothing would be sent while this one stayed open. What this tab had queued
+// is in the database, which the new build now holds and sends from.
+onUpdatedElsewhere(() => stopSync());
+
+function reloadDeviceSettings() {
+	void display.reload();
+	void controls.reload();
+}
 
 type Message =
 	| { kind: 'status'; status: SyncStatus }
 	| { kind: 'kick' }
 	| { kind: 'notices'; notices: Notice[] }
 	| { kind: 'changed'; ids: string[] }
-	| { kind: 'progress' };
+	/** The leader took shared device settings: an open player in any tab shows them. */
+	| { kind: 'settings' }
+	| { kind: 'progress'; noRoom?: boolean };
 
 function post(m: Message) {
 	channel?.postMessage(m);
@@ -116,8 +138,11 @@ function post(m: Message) {
 export function startSync(userId: string): () => void {
 	stopSync();
 	currentUser = userId;
+	keepNoticesFor(userId);
 	syncState.pending = null;
-	void refreshPending();
+	syncState.noRoom = false;
+	// A database that cannot be opened is counted when it can be.
+	void refreshPending().catch(() => undefined);
 	if (typeof BroadcastChannel !== 'undefined') {
 		channel = new BroadcastChannel(`acrodont-sync-${userId}`);
 		channel.onmessage = (ev) => {
@@ -130,7 +155,11 @@ export function startSync(userId: string): () => void {
 			}
 			else if (m.kind === 'notices' && !syncState.leader) syncState.notices = [...syncState.notices, ...m.notices];
 			else if (m.kind === 'changed') syncState.changed = { ids: m.ids, tick: syncState.changed.tick + 1 };
-			else if (m.kind === 'progress') syncState.progress += 1;
+			else if (m.kind === 'settings') reloadDeviceSettings();
+			else if (m.kind === 'progress') {
+				syncState.progress += 1;
+				if (!syncState.leader && m.noRoom !== undefined) syncState.noRoom = m.noRoom;
+			}
 		};
 	}
 	const release = electLeader(userId, () => {
@@ -138,9 +167,12 @@ export function startSync(userId: string): () => void {
 		let stopListening: (() => void) | null = null;
 		let cancelled = false;
 		syncState.leader = true;
+		// A database that cannot be opened leaves nothing to lead with; one a
+		// newer build has already upgraded stops this sync (open.ts).
 		void userDb(userId).then((db) => {
-			if (cancelled) return;
-			const e = new SyncEngine(db, {
+			// Only for the account this tab still runs as.
+			if (cancelled || session.userId !== userId) return;
+			const hooks: EngineHooks = {
 				// The download manager's turn after every pull; never awaited by the
 				// cycle, since its grades fetch syncs first.
 				onSynced: (o) => {
@@ -149,19 +181,27 @@ export function startSync(userId: string): () => void {
 						syncState.changed = { ids, tick: syncState.changed.tick + 1 };
 						post({ kind: 'changed', ids });
 					}
-					void downloads
-						?.run()
-						.then(() => {
-							// A finished pass changes badges here and in every other tab.
-							syncState.progress += 1;
-							post({ kind: 'progress' });
-						})
-						.catch(() => undefined);
+					const dm = downloads;
+					if (dm)
+						void dm
+							.run()
+							.catch(() => undefined)
+							.then(() => passDone(dm));
 				},
-				// A shared display setting or the controls changed: an open player shows them.
+				// A shared display setting or the controls changed: an open player
+				// shows them, in this tab and in every other.
 				onDeviceSettings: () => {
-					void display.reload();
-					void controls.reload();
+					reloadDeviceSettings();
+					post({ kind: 'settings' });
+				},
+				// A pull with no room: what the download manager may drop, dropped.
+				makeRoom: async () => {
+					await downloads?.makeRoom();
+				},
+				onNoRoom: () => {
+					if (downloads) downloads.noRoom = true;
+					syncState.noRoom = true;
+					post({ kind: 'progress', noRoom: true });
 				},
 				onStatus: (s) => {
 					syncState.status = s;
@@ -173,9 +213,13 @@ export function startSync(userId: string): () => void {
 					syncState.notices = [...syncState.notices, ...n];
 					post({ kind: 'notices', notices: n });
 				}
-			});
+			};
+			// Every request names the account this engine was started for, not
+			// whichever the tab runs as at the moment the request leaves.
+			const e = new SyncEngine(db, hooks, { transport: transportFor(userId) });
 			engine = e;
 			downloads = new DownloadManager(db, {
+				api: httpApiFor(userId),
 				sync: () => e.sync(),
 				openElsewhere: openPlayers,
 				openHere: () => syncState.openCascade,
@@ -188,7 +232,7 @@ export function startSync(userId: string): () => void {
 			void getMeta(db, 'device').then(({ device_id }) => {
 				if (!cancelled) stopListening = listenForChanges(e, userId, device_id);
 			});
-		});
+		}, () => undefined);
 		return () => {
 			cancelled = true;
 			stopListening?.();
@@ -198,17 +242,30 @@ export function startSync(userId: string): () => void {
 			syncState.leader = false;
 		};
 	});
-	stop = () => {
+	const mine = () => {
 		release();
 		channel?.close();
 		channel = null;
 	};
-	return stop;
+	stop = mine;
+	return () => {
+		// Only the sync this call started: a later one is not this caller's to stop.
+		if (stop === mine) stopSync();
+	};
 }
 
+/**
+ * Stops syncing in this tab: the lock is given up, and nothing here names the
+ * account any more, so a count or a sync asked for later (a Log out that
+ * outlived its wait) does not open the account's database again.
+ */
 export function stopSync() {
 	stop?.();
 	stop = null;
+	currentUser = null;
+	// The stopped engine says nothing more: its last word, "Syncing…" if a
+	// request was out, is not left standing.
+	syncState.status = 'idle';
 }
 
 /** After a local write: half a second later, by this tab or by the leader. */
@@ -229,9 +286,23 @@ export async function syncNow() {
 
 /** Operations waiting in the outbox: whether any are (the sync status), and how many (the logout warning). */
 export async function refreshPending() {
-	if (!currentUser) return;
-	const db = await userDb(currentUser);
-	syncState.pending = await db.count('outbox');
+	const user = currentUser;
+	if (!user) return;
+	const db = await userDb(user);
+	const pending = await db.count('outbox');
+	// Counted for the account this tab was syncing when it asked.
+	if (currentUser === user) syncState.pending = pending;
+}
+
+/**
+ * The account this tab runs as, or none: a notice is the account's it was
+ * raised for, so those of another are taken off the screen, rather than stay
+ * on the log-in page and into the session of whoever uses the tab next. A tab
+ * that only stopped syncing for its account keeps that account's notices.
+ */
+export function keepNoticesFor(userId: string | null) {
+	if (noticesOf !== userId) syncState.notices = [];
+	noticesOf = userId;
 }
 
 export function dismissNotice(n: Notice) {

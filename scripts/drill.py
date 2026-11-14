@@ -6,7 +6,9 @@ newest nightly dump into a Postgres it starts inside its own task, never on the
 production instance (birdtest's drill once filled production's storage and
 pushed its autoscaling up for good), then checks what a restore must deliver:
 
-  1. the dump restores with pg_restore --exit-on-error;
+  1. the dump (the newest whose run finished: it has its .ok marker and the
+     size the marker names) restores with pg_restore --exit-on-error, as the
+     app role into a database that role owns, the way a real restore is made;
   2. the schema is complete: every table the schema-only dump names exists,
      and _sqlx_migrations holds at least one applied migration;
   3. the data is there: users exist, and every cascade's questions are present;
@@ -43,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import restore  # noqa: E402  (BUMP_SQL, BUMP: the same step a real restore runs)
 
 PORT = 55433
+APP_ROLE = "acrodont_app"
 
 
 class DrillFailed(Exception):
@@ -50,12 +53,38 @@ class DrillFailed(Exception):
 
 
 def newest_dump(s3, bucket: str) -> str:
+    """The newest daily dump a successful run finished (restore.check_complete):
+    a failed run's truncated object under a later day's key is passed over."""
     keys: List[str] = []
     for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix="daily/"):
         keys += [o["Key"] for o in page.get("Contents", []) if o["Key"].endswith(".dump")]
     if not keys:
         raise DrillFailed(f"no daily dump in s3://{bucket}/daily/")
-    return max(keys)
+    for key in sorted(keys, reverse=True):
+        try:
+            restore.check_complete(s3, bucket, key)
+            return key
+        except restore.Incomplete as e:
+            print(f"drill: passing over a dump: {e}")
+    raise DrillFailed(f"none of the {len(keys)} dumps in s3://{bucket}/daily/ is complete")
+
+
+def fetch_schema(s3, bucket: str, key: str, work: Path) -> Optional[Path]:
+    """The schema-only dump beside `key`, or None when the bucket holds none
+    (an older dump): the rest is still checked. Any other failure to fetch it
+    (access denied, the network) fails the drill, so that the table check is
+    never skipped in silence."""
+    schema_key = key.replace(".dump", ".schema.sql")
+    path = work / Path(schema_key).name
+    try:
+        s3.download_file(bucket, schema_key, str(path))
+    except Exception as e:
+        code = str(getattr(e, "response", {}).get("Error", {}).get("Code", ""))
+        if code not in ("404", "NoSuchKey", "NotFound"):
+            raise
+        print(f"drill: no s3://{bucket}/{schema_key}: the tables are not compared with it")
+        return None
+    return path
 
 
 def as_postgres(cmd: List[str]) -> List[str]:
@@ -86,7 +115,11 @@ def start_postgres(work: Path) -> Path:
                      "-o", f"-p {PORT} -c listen_addresses=127.0.0.1 -k {work}", "start"]),
         stdout=subprocess.DEVNULL)
     os.environ["PGUSER"] = "postgres"
-    run(as_postgres(["createdb", "-h", "127.0.0.1", "-p", str(PORT), "acrodont"]))
+    # As a real restore is made (docs/runbook.md, Restoring): into a database
+    # owned by the app role, by that role, which is no superuser. A restore
+    # only a superuser could make would pass here and fail in production.
+    run(as_postgres(["createuser", "-h", "127.0.0.1", "-p", str(PORT), APP_ROLE]))
+    run(as_postgres(["createdb", "-h", "127.0.0.1", "-p", str(PORT), "-O", APP_ROLE, "acrodont"]))
     return data
 
 
@@ -112,6 +145,8 @@ def check(dump: Path, schema: Optional[Path]) -> List[str]:
     if migrations < 1:
         raise DrillFailed("no applied migration recorded")
     users = int(psql("SELECT count(*) FROM users"))
+    if users < 1:
+        raise DrillFailed("no users after the restore")
     cascades = int(psql("SELECT count(*) FROM cascades"))
     empty = int(psql("SELECT count(*) FROM cascades c WHERE c.question_keys = '' OR NOT EXISTS "
                      "(SELECT 1 FROM quizzes z JOIN quiz_cards k ON k.quiz_id = z.id WHERE z.cascade_id = c.id)"))
@@ -172,16 +207,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             key = newest_dump(s3, args.s3_bucket)
             dump = work / Path(key).name
             s3.download_file(args.s3_bucket, key, str(dump))
-            schema = work / Path(key.replace(".dump", ".schema.sql")).name
-            try:
-                s3.download_file(args.s3_bucket, key.replace(".dump", ".schema.sql"), str(schema))
-            except Exception:  # an older dump without its schema file: check the rest
-                schema = None
+            schema = fetch_schema(s3, args.s3_bucket, key, work)
             print(f"drill: s3://{args.s3_bucket}/{key} ({dump.stat().st_size} bytes)")
         if os.geteuid() == 0:
             shutil.chown(str(dump), "postgres")
         data = start_postgres(work)
-        run(as_postgres(["pg_restore", "-h", "127.0.0.1", "-p", str(PORT), "-d", "acrodont",
+        run(as_postgres(["pg_restore", "-h", "127.0.0.1", "-p", str(PORT), "-U", APP_ROLE, "-d", "acrodont",
                          "--no-owner", "--no-privileges", "--exit-on-error", str(dump)]))
         for line in check(dump, schema):
             print(f"drill: {line}")

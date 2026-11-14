@@ -114,6 +114,8 @@ async fn save(State(state): State<AppState>, Session(user): Session, ApiJson(b):
     let mut errors = Vec::new();
     if n == 0 || n > 100 {
         errors.push(PathError::new(&[], "name", "The name must be 1–100 characters."));
+    } else if b.name.contains('\0') {
+        errors.push(PathError::new(&[], "name", super::validate::NOT_STORABLE));
     }
     // The tree is validated as it is for a preview, for everything that does
     // not need a lexicon.

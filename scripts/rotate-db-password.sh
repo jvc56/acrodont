@@ -117,15 +117,8 @@ if ((signing)); then
 fi
 
 if ((restart)); then
-  live=$(ops_live_release) || ops_die "cannot read what the service runs"
-  aws ecs update-service --cluster "$OPS_CLUSTER" --service "$OPS_SERVICE" --force-new-deployment \
-    --query 'service.serviceName' --output text >/dev/null
-  ops_say "the service is restarting to read the new value"
-  trap 'rm -rf "$OPS_TMP"' EXIT
-  if [[ "$(ops_desired_count)" != 0 ]]; then
-    ops_wait_release "${live%% *}" "${live#* }"
-    ops_check_site
-  fi
+  ops_restart_service
+  [[ "$(ops_desired_count)" == 0 ]] || ops_check_site
 fi
 trap 'rm -rf "$OPS_TMP"' EXIT
 ops_say "done"

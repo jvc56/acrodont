@@ -100,6 +100,9 @@ PLAN_NORMAL='{"resource_changes": [
   {"address": "aws_db_instance.main", "type": "aws_db_instance", "change": {"actions": ["no-op"]}}]}'
 PLAN_DB_REPLACE='{"resource_changes": [
   {"address": "aws_db_instance.main", "type": "aws_db_instance", "change": {"actions": ["delete", "create"]}}]}'
+PLAN_LB_REPLACE='{"resource_changes": [
+  {"address": "aws_lb.main", "type": "aws_lb", "change": {"actions": ["delete", "create"]}},
+  {"address": "aws_lb_listener.https", "type": "aws_lb_listener", "change": {"actions": ["delete", "create"]}}]}'
 PLAN_SNS_ONLY='{"resource_changes": [
   {"address": "aws_sns_topic.alarms", "type": "aws_sns_topic", "change": {"actions": ["update"]}}]}'
 S3_TFVARS="$FAKE_DIR/s3/state-bucket/acrodont/prod.tfvars"
@@ -274,7 +277,13 @@ printf '%s' "$PLAN_DB_REPLACE" > "$FAKE_DIR/plan.json"
 answers nope y
 if ACRODONT_ALLOW_DESTRUCTIVE_PLAN=yes run deploy.sh; then fail "a mistyped confirmation applied a destructive plan"; fi
 ! called "$TF apply" || fail "a mistyped confirmation applied"
-pass "the plan gate refuses a database replacement (nothing applied); passes it only when allowed and typed"
+fresh "$A" "$A" "$B"
+printf '%s' "$PLAN_LB_REPLACE" > "$FAKE_DIR/plan.json"
+answers y
+if run deploy.sh; then fail "deploy.sh applied a plan that replaces the load balancer"; fi
+said "aws_lb.main: delete then create" || fail "the load balancer's replacement is not named"
+! called "$TF apply" || fail "a refused plan was applied"
+pass "the plan gate refuses a database replacement (nothing applied); passes it only when allowed and typed; a load balancer's replacement too"
 
 fresh "$A" "$A" "$B"
 printf '{"tag": "0123456789ab", "cpu": "1024", "memory": "2048"}' > "$FAKE_DIR/ecs/running.json"
@@ -286,7 +295,14 @@ answers y
 if FAKE_ROLLBACK=1 run deploy.sh; then fail "a release ECS rolled back counted as deployed"; fi
 said "ECS rolled the release back" || fail "the rollback during the deploy is not reported"
 ! called "curl" || fail "the site was checked after a rollback"
-pass "deploy.sh refuses when ECS already rolled back, and reports a rollback during the wait"
+fresh "$A" "$A" "$B"
+printf '{"tag": "%s", "cpu": "1024", "memory": "2048"}' "$B" > "$FAKE_DIR/ecs/running.json"
+answers y
+run deploy.sh || fail "deploy.sh did not finish a release whose apply had stopped part-way"
+said "stopped part-way" || fail "the part-way apply is not recognised"
+! said "rollback.sh first" || fail "a part-way apply was taken for a rollback"
+[[ "$(s3_tag)" == "$B" ]] || fail "prod.tfvars was not uploaded after finishing the release"
+pass "deploy.sh refuses when ECS already rolled back, and reports a rollback during the wait; a release applied part-way is finished"
 
 fresh "$A" "$A" "$B"
 answers y
@@ -315,7 +331,12 @@ fresh "$A" "$A" "$B"
 answers y
 FAKE_CI_SCHEDULED="completed failure" run deploy.sh || fail "a red scheduled run refused the deploy"
 said "WARNING: the latest scheduled CI run on main is failure" || fail "a red scheduled run did not warn"
-called "gh run list --workflow ci.yml --branch main --commit $(git -C "$R" rev-parse HEAD)" || fail "CI was not checked on main's run of the exact commit"
+called "gh run list --workflow ci.yml --branch main --commit $(git -C "$R" rev-parse HEAD) --event push" || fail "CI was not checked on main's push run of the exact commit"
+echo stray > "$R/backend/src/stray.rs"
+fresh "$A" "$A" "$B"
+if run deploy.sh; then fail "deploy.sh built images from a tree holding an untracked file"; fi
+said "untracked files" || fail "the untracked file is not named"
+rm "$R/backend/src/stray.rs"
 echo dirty >> "$R/README.md"
 fresh "$A" "$A" "$B"
 if run deploy.sh; then fail "deploy.sh deployed a dirty tree"; fi
@@ -470,7 +491,19 @@ rm "$FAKE_DIR/ssm/acrodont_production_DATABASE_URL"
 rc=0; run prod-sql.sh "SELECT 1" || rc=$?
 ((rc != 0)) || fail "a task that never started its container counted as success"
 said "unable to pull secrets" || fail "the stopped reason is not shown"
-pass "prod-sql.sh: SQL byte for byte (arg or stdin) to psql in the task, the container's exit code, --as-master, the size cap"
+# A run-task that fails, or starts nothing, ends there: no task is waited for
+# (under `timeout`, since waiting on a task that does not exist never ends).
+for refusal in error capacity; do
+  fresh "$B"
+  rc=0
+  FAKE_RUN_TASK_FAIL=$refusal timeout 60 "$R/scripts/prod-sql.sh" "SELECT 1" > "$WORK/out" 2>&1 < /dev/null || rc=$?
+  [[ "$rc" == 125 ]] || fail "prod-sql.sh exited $rc, not 125, for a run-task that started nothing ($refusal)"
+  said "no ops task was started" || fail "a run-task that started nothing ($refusal) is not said to have started nothing"
+  ! called "describe-tasks" || fail "a task that was never started was waited for ($refusal)"
+  ! said "may still be running" || fail "a task that was never started is said to be perhaps running ($refusal)"
+done
+said "RESOURCE:FARGATE" || fail "why ECS started no task is not shown"
+pass "prod-sql.sh: SQL byte for byte (arg or stdin) to psql in the task, the container's exit code, --as-master, the size cap, a run-task that starts nothing"
 
 # ---------------------------------------------------------------------------
 # confirm-user.sh
@@ -543,6 +576,17 @@ run rotate-db-password.sh --signing-key || fail "rotate-db-password.sh --signing
 said "EVERYONE IS SIGNED OUT" || fail "--signing-key did not warn"
 { ! called "run-task" && called "update-service"; } || fail "--signing-key should restart and touch no role"
 fresh "$B"
+answers y
+if FAKE_RESTART_ROLLBACK=1 run rotate-db-password.sh; then fail "a restart that was rolled back counted as a rotation"; fi
+{ said "the restart did not take" && said "--resume"; } || fail "a rolled-back restart is not named, or does not say --resume"
+fresh "$B"
+answers y
+rc=0
+FAKE_RUN_TASK_FAIL=error timeout 60 "$R/scripts/rotate-db-password.sh" > "$WORK/out" 2>&1 < /dev/null || rc=$?
+((rc != 0 && rc != 124)) || fail "rotate-db-password.sh exited $rc when its task could not be started"
+{ said "no ops task was started" && said "--resume"; } || fail "a task that could not be started is not said, or does not say --resume"
+{ ! called "describe-tasks" && ! called "update-service"; } || fail "a task that never started was waited for, or the service restarted"
+fresh "$B"
 ssm_put DATABASE_URL 'postgres://postgres:pw@h:5432/acrodont'
 answers y
 if run rotate-db-password.sh; then fail "a DATABASE_URL for another role was rotated"; fi
@@ -574,6 +618,75 @@ run init-db-roles.sh || fail "a second init-db-roles.sh failed"
 pass "init-db-roles.sh: missing parameters created (never overwritten), roles made from the task's own URLs; safe to rerun"
 
 # ---------------------------------------------------------------------------
+# cutover-db.sh
+# ---------------------------------------------------------------------------
+fresh "$B"
+answers y
+run cutover-db.sh acrodont_restored || fail "cutover-db.sh failed"
+[[ "$(ssm_get DATABASE_URL)" == "${APP_URL/5432\/acrodont?/5432/acrodont_restored?}" ]] \
+  || fail "DATABASE_URL changed beyond its database: $(ssm_get DATABASE_URL)"
+[[ "$(ssm_get BACKUP_DATABASE_URL)" == "${BACKUP_URL/5432\/acrodont?/5432/acrodont_restored?}" ]] \
+  || fail "BACKUP_DATABASE_URL changed beyond its database: $(ssm_get BACKUP_DATABASE_URL)"
+in_order "aws ecs run-task" \
+         "aws ssm put-parameter --name /acrodont/production/DATABASE_URL --type SecureString --overwrite --value file://" \
+         "aws ssm put-parameter --name /acrodont/production/BACKUP_DATABASE_URL --type SecureString --overwrite --value file://" \
+         "aws ecs update-service --cluster acrodont --service acrodont --force-new-deployment" \
+         "aws elbv2 wait"
+[[ "$(head -1 "$FAKE_DIR/psql/1.args")" == psql ]] || fail "the database was not checked as the app role"
+grep -qx "WF_U=acrodont_app" "$FAKE_DIR/psql/1.env" && grep -qx "WF_DB=acrodont_restored" "$FAKE_DIR/psql/1.env" \
+  || fail "the check did not connect to the new database as acrodont_app"
+! grep -q "^WF_P=" "$FAKE_DIR/psql/1.env" || fail "the password was left in the task's environment for psql's children"
+for want in "pg_get_userbyid(datdba)" "has_schema_privilege('public', 'CREATE')" "NOT EXISTS (SELECT FROM users)" "FROM _sqlx_migrations"; do
+  grep -qF "$want" "$FAKE_DIR/psql/1.stdin" || fail "the check's SQL lacks: $want"
+done
+! grep -rqF "oldpw" "$FAKE_DIR/calls.log" "$FAKE_DIR/runtask" "$WORK/out" || fail "a password travelled in a call, an override or the output"
+: > "$FAKE_DIR/calls.log"
+# Both parameters naming the database does not say the tasks have read them:
+# a rerun writes nothing, and checks and restarts all the same.
+answers y
+run cutover-db.sh acrodont_restored || fail "a second cutover-db.sh failed"
+! called "put-parameter" || fail "a rerun wrote parameters that already name the database"
+in_order "aws ecs run-task" "aws ecs update-service --cluster acrodont --service acrodont --force-new-deployment" "aws elbv2 wait"
+# The restart fails after both parameters are written: the rerun it asks for finishes the job.
+fresh "$B"
+answers y
+if FAKE_UPDATE_SERVICE_FAIL=1 run cutover-db.sh acrodont_restored; then fail "a cutover whose restart failed counted as done"; fi
+said "STOPPED PART-WAY" || fail "a cutover that stopped before its restart does not say so"
+[[ "$(ssm_get BACKUP_DATABASE_URL)" == "${BACKUP_URL/5432\/acrodont?/5432/acrodont_restored?}" ]] || fail "the stand-in did not stop after the parameter writes"
+: > "$FAKE_DIR/calls.log"
+answers y
+run cutover-db.sh acrodont_restored || fail "the rerun after a failed restart failed"
+called "aws ecs update-service --cluster acrodont --service acrodont --force-new-deployment" \
+  || fail "the rerun after a failed restart did not restart the service: its tasks stay on the old database"
+! said "nothing to do" || fail "a cutover that never restarted was taken as finished"
+# A restart the circuit breaker rolls back settles on another deployment: not "done".
+fresh "$B"
+answers y
+if FAKE_RESTART_ROLLBACK=1 run cutover-db.sh acrodont_restored; then fail "a restart that was rolled back counted as a cutover"; fi
+said "the restart did not take" || fail "a rolled-back restart is not named"
+! said "done:" || fail "a rolled-back restart was reported as done"
+fresh "$B"
+answers y
+if FAKE_PSQL_EXIT=3 run cutover-db.sh acrodont_restored; then fail "a database the app cannot use was cut over to"; fi
+said "nothing changed" || fail "the refusal does not say nothing changed"
+{ ! called "put-parameter" && ! called "update-service"; } || fail "a refused cutover wrote a parameter or restarted the service"
+fresh "$B"
+answers n
+if run cutover-db.sh acrodont_restored; then fail "a declined cutover went ahead"; fi
+! called "put-parameter" || fail "a declined cutover wrote a parameter"
+fresh "$B"
+for bad_name in "" "Acrodont" "a b" "x;DROP" "acrodont?sslmode=disable"; do
+  if run cutover-db.sh "$bad_name"; then fail "cutover-db.sh took the database name '$bad_name'"; fi
+done
+! called "aws" || fail "a refused name reached AWS"
+fresh "$B"
+ssm_put BACKUP_DATABASE_URL "${BACKUP_URL/5432\/acrodont?/5432/acrodont_restored?}"
+answers y
+run cutover-db.sh acrodont_restored || fail "finishing a part-way cutover failed"
+[[ "$(ssm_get DATABASE_URL)" == "${APP_URL/5432\/acrodont?/5432/acrodont_restored?}" ]] || fail "a part-way cutover was not finished"
+pass "cutover-db.sh: the new database checked as the app role first, both URLs repointed (nothing else in them), restart; refused, declined, bad names; a rerun restarts; a failed or rolled-back restart is not done"
+
+# ---------------------------------------------------------------------------
 # check-alerts.sh, prod-shell.sh, onboard-deployer.sh
 # ---------------------------------------------------------------------------
 fresh "$B"
@@ -581,7 +694,7 @@ run check-alerts.sh || fail "check-alerts.sh failed"
 in_order "set-alarm-state --alarm-name acrodont-no-dump-36h --state-value OK" \
          "set-alarm-state --alarm-name acrodont-no-dump-36h --state-value ALARM" \
          "set-alarm-state --alarm-name acrodont-no-dump-36h --state-value OK"
-[[ "$(grep -c "test-event-pattern" "$FAKE_DIR/calls.log")" == 8 ]] || fail "not every pattern case was tested"
+[[ "$(grep -c "test-event-pattern" "$FAKE_DIR/calls.log")" == 10 ]] || fail "not every pattern case was tested"
 called "aws rds describe-event-subscriptions --subscription-name acrodont-db-events" || fail "the RDS subscription was not checked"
 fresh "$B"
 if FAKE_SNS_PENDING=1 run check-alerts.sh; then fail "an unconfirmed subscription passed"; fi
@@ -590,8 +703,11 @@ fresh "$B"
 if FAKE_RULE_BROKEN=acrodont-backup-failed run check-alerts.sh; then fail "a rule matching successes passed"; fi
 said "acrodont-backup-failed: a backup task exiting 0 -> True, expected False" || fail "the broken rule is not reported"
 fresh "$B"
+if FAKE_RULE_EXIT_CODE_ONLY=acrodont-drill-failed run check-alerts.sh; then fail "a rule blind to a task that never starts passed"; fi
+said "acrodont-drill-failed: a drill task that never started -> False, expected True" || fail "the blind rule is not reported"
+fresh "$B"
 if FAKE_RDS_SUB_STATUS=creating run check-alerts.sh; then fail "an inactive RDS subscription passed"; fi
-pass "check-alerts.sh: subscription confirmed, alarm forced ALARM then OK, patterns positive and negative, RDS subscription"
+pass "check-alerts.sh: subscription confirmed, alarm forced ALARM then OK, patterns positive and negative (a task that never started included), RDS subscription"
 
 fresh "$B"
 run prod-shell.sh || fail "prod-shell.sh failed"
@@ -628,8 +744,17 @@ said "the plan shows changes" || fail "the changes are not reported"
 fresh "$B"
 if FAKE_TF_VERSION=1.10.5 run onboard-deployer.sh; then fail "onboarding passed with terraform 1.10"; fi
 said "too old" || fail "an old terraform is not reported"
+fresh "$B"
+FAKE_NO_OUTPUTS=1 FAKE_PLAN_RC=2 run onboard-deployer.sh || fail "onboard-deployer.sh failed on a stack never applied"
+said "the first setup" || fail "a stack never applied is not recognised"
+in_order "$TF init" "aws s3 cp s3://state-bucket/acrodont/prod.tfvars" "$TF plan -input=false -detailed-exitcode -lock=false -var-file=prod.tfvars"
+! called "apply" || fail "the first setup applied something"
+fresh "$B"
+if FAKE_NO_OUTPUTS=1 FAKE_PLAN_RC=0 run onboard-deployer.sh; then fail "an empty state with nothing to add passed"; fi
+fresh "$B"
+if FAKE_NO_OUTPUTS=1 FAKE_PLAN_RC=1 run onboard-deployer.sh; then fail "a failed first plan passed"; fi
 write_env
-pass "onboard-deployer.sh: settings written from answers, init against the shared state, a plan that must show no changes"
+pass "onboard-deployer.sh: settings written from answers, init against the shared state, a plan that must show no changes; before the first apply, one that must show the stack to add"
 
 # ---------------------------------------------------------------------------
 # runbook-check.sh

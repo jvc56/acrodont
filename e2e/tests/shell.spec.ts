@@ -52,8 +52,12 @@ test('the service worker serves the shell offline', async ({ page, context }) =>
 	await context.setOffline(true);
 	await page.goto('/login');
 	await expect(page.getByLabel('Username')).toBeVisible();
+	// A route never visited: the worker answers it with the shell, and the app,
+	// signed out, goes to the log-in page. The browser's own offline page has a
+	// body too, so it is the app's form that is looked for.
 	await page.goto('/cascades/00000000-0000-4000-8000-000000000000').catch(() => undefined);
-	await expect(page.locator('body')).not.toBeEmpty();
+	await expect(page).toHaveURL(/\/login$/);
+	await expect(page.getByLabel('Username')).toBeVisible();
 	await context.setOffline(false);
 });
 

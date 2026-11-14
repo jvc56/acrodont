@@ -31,7 +31,13 @@ test('updating the app @serial @full', async ({ context }) => {
 	test.setTimeout(600_000);
 	const a = await context.newPage();
 	await newUser(a, 'upd');
-	const player = await createCascade(a, { name: 'Update' });
+	// The second tab's cascade is its own. A 426 applies its operations and
+	// their pull like a 200, and a tab on the cascade another tab has just
+	// studied follows it to the next card, as after any sync: on the first
+	// tab's cascade the second would be moved off its revealed card by the
+	// first tab's answer, which is no part of what an update does to it.
+	const other = await createCascade(a, { name: 'Update, second tab' });
+	await createCascade(a, { name: 'Update' });
 	await a.evaluate(async () => {
 		await navigator.serviceWorker.ready;
 	});
@@ -40,7 +46,7 @@ test('updating the app @serial @full', async ({ context }) => {
 	const old = await build(a);
 	// A second tab on the old build, with a card revealed.
 	const b = await context.newPage();
-	await b.goto(player);
+	await b.goto(other);
 	await expect(b.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
 	await press(b, 'Space');
 	await expect(b.locator('[data-grade="correct"]')).toBeVisible();

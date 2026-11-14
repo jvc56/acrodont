@@ -38,6 +38,12 @@ variable "domain_name" {
   }
 }
 
+variable "redirect_www" {
+  description = "Also answer www.<domain_name>, with a 301 to the bare domain: the certificate gains the name and both listeners redirect it. Its DNS records are made out of band like the others: the certificate's second validation record (acm_validation_records) and an alias for www to the load balancer. Changing it replaces the certificate."
+  type        = bool
+  default     = false
+}
+
 variable "mail_from" {
   description = "From address; defaults to no-reply@domain_name. SES sends only from the verified domain."
   type        = string

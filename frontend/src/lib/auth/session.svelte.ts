@@ -7,6 +7,7 @@ import {
 	getAccount,
 	recordLogin,
 	recordLogout,
+	removeAccountData,
 	retryQueuedLogout,
 	signedIn,
 	SIGNED_IN_CHANNEL,
@@ -35,20 +36,39 @@ class Session {
 
 export const session = new Session();
 
-/** The queued logout's request, with the CSRF token whenever the cookie is there. */
+/** How long the queued logout's request may take before it is left for the next try. */
+export const LOGOUT_TIMEOUT_MS = 15_000;
+
+/**
+ * The queued logout's request, with the CSRF token whenever the cookie is
+ * there. A connection that accepts the request and never answers (a hotel's
+ * sign-in page) is given up after `LOGOUT_TIMEOUT_MS` and counts as no
+ * connection: the flag stays and the request is made again later.
+ */
 export async function sendQueuedLogout(): Promise<LogoutOutcome> {
-	const headers: Record<string, string> = {};
-	const csrf = readCookie(CSRF_COOKIE);
-	if (csrf) headers[CSRF_HEADER] = csrf;
+	const giveUp = new AbortController();
+	const timer = setTimeout(() => giveUp.abort(), LOGOUT_TIMEOUT_MS);
+	const send = () => {
+		const headers: Record<string, string> = {};
+		const csrf = readCookie(CSRF_COOKIE);
+		if (csrf) headers[CSRF_HEADER] = csrf;
+		return fetch('/api/auth/logout', { method: 'POST', headers, credentials: 'same-origin', signal: giveUp.signal });
+	};
 	try {
-		const r = await fetch('/api/auth/logout', {
-			method: 'POST',
-			headers,
-			credentials: 'same-origin'
-		});
+		let r = await send();
+		if (r.status === 403) {
+			// A session cookie whose CSRF cookie is gone (a browser that cleared
+			// part of its site data). /api/auth/me sets the token again for a
+			// session that still holds, so the logout can clear the cookie
+			// rather than leave it valid on a machine someone else may use.
+			const me = await fetch('/api/auth/me', { credentials: 'same-origin', signal: giveUp.signal });
+			if (me.ok && readCookie(CSRF_COOKIE)) r = await send();
+		}
 		return { status: r.status };
 	} catch {
 		return { networkError: true };
+	} finally {
+		clearTimeout(timer);
 	}
 }
 
@@ -79,7 +99,10 @@ onUpdatedElsewhere(() => {
 
 let channel: BroadcastChannel | null = null;
 let onlineHooked = false;
-/** Bumped by every login: a session check begun before one must not judge the new session. */
+/**
+ * Bumped by every login and logout: a session check begun before one must not
+ * judge the new session, nor bring back the account that has just logged out.
+ */
 let logins = 0;
 
 export async function initSession() {
@@ -150,9 +173,17 @@ export async function adoptSession(me: Me): Promise<Me> {
 	return me;
 }
 
-/** Always completes locally; the server request is queued and retried. */
-export async function logout() {
+/**
+ * Always completes locally; the server request is queued and retried.
+ * `removeData` is "Remove this account's data from this device": done here,
+ * before the request is sent, because it needs no connection and the request
+ * may be a long time settling on a network that accepts it and stalls. The
+ * account's row keeps the queued logout (accounts.ts), so the request
+ * outlives the removal.
+ */
+export async function logout(opts: { removeData?: boolean } = {}) {
 	const id = session.userId;
+	logins++;
 	if (id) await recordLogout(id);
 	closeUserDb();
 	session.userId = null;
@@ -160,11 +191,13 @@ export async function logout() {
 	session.isAdmin = false;
 	session.username = '';
 	bindUser(null);
+	if (opts.removeData && id) await removeAccountData(id);
 	await retryQueuedLogout(sendQueuedLogout);
 }
 
 /** After DELETE /api/account succeeded: the session is already void. */
 export function forgetSession() {
+	logins++;
 	closeUserDb();
 	session.userId = null;
 	session.me = null;

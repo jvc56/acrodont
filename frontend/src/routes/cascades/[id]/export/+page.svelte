@@ -74,12 +74,19 @@
 		})();
 	});
 
+	/** How many recounts have started: a plain counter, not state. */
+	let recounts = 0;
+
 	/** The questions the selection holds, from the `questions` store; the entries too when the cards are here. */
 	async function recount() {
 		if (!db || !cascade) return;
+		// Only the latest count is shown: an earlier selection's, finishing late, is dropped.
+		const turn = ++recounts;
 		const q = await localInput(db, cascade, { ...choices, format: 'txt', lines: 'questions' });
+		if (turn !== recounts) return;
 		count = 'input' in q ? selection(q.input).length : null;
 		const a = await localInput(db, cascade, { ...choices, format: 'txt', lines: 'answers' });
+		if (turn !== recounts) return;
 		entries = 'input' in a && cascade.quiz_type === 'anagram' ? selection(a.input).reduce((n, e) => n + (e.q.words?.length ?? 0), 0) : null;
 	}
 
@@ -117,11 +124,19 @@
 		const input = r.input;
 		const type = choices.format === 'csv' ? 'text/csv' : 'text/plain';
 		const worker = new Worker(new URL('../../../../lib/export/worker.ts', import.meta.url), { type: 'module' });
-		const blob = await new Promise<Blob>((resolve) => {
-			worker.onmessage = (ev) => resolve(ev.data as Blob);
-			worker.postMessage({ input: $state.snapshot(input), type });
-		});
-		worker.terminate();
+		let blob: Blob;
+		try {
+			blob = await new Promise<Blob>((resolve, reject) => {
+				worker.onmessage = (ev) => resolve(ev.data as Blob);
+				// A worker that fails to load or throws sends no message: without
+				// these the export waited for one for good.
+				worker.onerror = (ev) => reject(new Error(ev.message || 'the export worker failed'));
+				worker.onmessageerror = () => reject(new Error('the export worker sent something unreadable'));
+				worker.postMessage({ input: $state.snapshot(input), type });
+			});
+		} finally {
+			worker.terminate();
+		}
 		save(blob, exportFilename(cascade.name, { ...choices, level: input.choices.level }));
 		return true;
 	}
@@ -172,7 +187,7 @@
 			}
 			await server();
 		} catch {
-			message = 'The export could not be made. Check your connection.';
+			message = navigator.onLine ? 'The export could not be made. Try again.' : 'The export could not be made. Check your connection.';
 		} finally {
 			busy = false;
 		}

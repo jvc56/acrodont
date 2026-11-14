@@ -62,7 +62,7 @@ export type NodeState = RowState | GroupState;
 
 export function newRow(type: ConditionType, quizType: QuizType, ctx: CeilingContext | null): RowState {
 	const def = filterDef(type);
-	const r = defaultRange(def, ctx);
+	const r = defaultRange(def, ctx, quizType);
 	return {
 		kind: 'row',
 		key: newKey(),

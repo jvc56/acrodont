@@ -40,14 +40,22 @@ test('segments and progression', async ({ page }) => {
 	const rows = page.locator('[data-status-rows]');
 	const bar = async () => (await rows.locator('p').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim());
 	await expect.poll(bar, { timeout: 30_000 }).toEqual(['Level 1 of 1', 'Pass 1', '1 / 18 (0.00%)', '0 ✓ 0 ✗', 'Segment 1 of 4', 'Pass 1', '1 / 5 (0.00%)', '0 ✓ 0 ✗']);
+	// One card graded: the level's percentage is coloured by its threshold, and the
+	// segment's own, now shown, carries no colour: a segment has no threshold.
+	await expect(page.locator('[data-grade="correct"], [data-grade="missed"]')).toHaveCount(0);
+	await press(page, 'Space');
+	await expect(page.locator('[data-grade="correct"], [data-grade="missed"]')).toBeVisible();
+	await press(page, 'Space');
+	const segmentGrades = rows.locator('[data-status-row="segment"] ~ p').last();
+	await expect(segmentGrades).toContainText('1 ✓ 0 ✗ (100.00%)');
+	await expect(rows.locator('[data-on-track]')).toHaveCount(1);
+	await expect(segmentGrades.locator('[data-on-track]')).toHaveCount(0);
 	// Segment 1 with two misses: they are drilled at once, as the segment's second pass. The
 	// Level row stays on Level 1, waiting at the next segment's first card, with the segment's grades.
 	expect(await playLevel(page, (i) => i < 2)).toBe('Segment 1 of 4 done, 2 missed. Now drilling them.');
 	await expect
 		.poll(bar)
 		.toEqual(['Level 1 of 2', 'Pass 1', '6 / 18 (27.78%)', '3 ✓ 2 ✗ (60.00%)', 'Segment 1 of 4', 'Pass 2', '1 / 2 (0.00%)', '0 ✓ 0 ✗']);
-	// The segment's own percentage carries no colour: a segment has no threshold.
-	await expect(rows.locator('[data-status-row="segment"] ~ p [data-on-track]')).toHaveCount(0);
 	// Cleared down to nothing: back to segment 2 at the right question.
 	expect(await playLevel(page, () => false)).toBe('Drill done. Back to Level 1, segment 2 of 4.');
 	await expect(page.getByText('6 / 18')).toBeVisible();
@@ -94,7 +102,7 @@ test('segments and progression', async ({ page }) => {
 	await d.getByLabel('When a quiz is finished below the clear threshold').selectOption('drill');
 	await expect(d.locator('[data-level-saved]')).toBeVisible();
 	await close(page);
-	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2: 50%. Replaced with its 1 missed questions.');
+	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2: 50%. Replaced with its 1 missed question.');
 	await expect(page.getByText('Level 2 of 2')).toBeVisible();
 
 	// The cascade on Drill: the quiz in progress keeps its own; the next new one takes it.

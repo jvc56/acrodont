@@ -28,6 +28,9 @@ pub const MAX_WORD_LIST_ENTRIES: usize = 300_000;
 pub const MAX_TEXT_CHARS: usize = 500;
 /// An In Word List entry holds at most 300 characters.
 pub const MAX_ENTRY_CHARS: usize = 300;
+/// Postgres stores no NUL in text: said as a field error, where the insert
+/// would otherwise fail as a `500`.
+pub const NOT_STORABLE: &str = "This holds a character that cannot be stored.";
 pub const USE_DOT: &str = "use `.` for any single tile";
 
 pub struct TargetInfo<'a> {
@@ -273,7 +276,9 @@ impl Validator<'_> {
             return None;
         }
         // A range that includes everything is valid: it matches every candidate.
-        if min > i64::from(u32::MAX) || max > i64::from(u32::MAX) {
+        // A saved search keeps its bounds in INTEGER columns, and is validated
+        // with no target and so no ceiling: nothing real is near this.
+        if min > i64::from(i32::MAX) || max > i64::from(i32::MAX) {
             self.err(path, "max", "The bound is too large.");
             return None;
         }
@@ -281,6 +286,10 @@ impl Validator<'_> {
     }
 
     fn text_len(&mut self, s: &str, field: &str, path: &[usize]) -> bool {
+        if s.contains('\0') {
+            self.err(path, field, NOT_STORABLE);
+            return false;
+        }
         if s.chars().count() > MAX_TEXT_CHARS {
             self.err(path, field, format!("This is longer than the {MAX_TEXT_CHARS}-character limit."));
             return false;
@@ -379,6 +388,10 @@ impl Validator<'_> {
             // Entries are stored one per line.
             if e.is_empty() || e.contains('\n') {
                 self.err(path, "entries", "An entry is empty or holds a line break.");
+                return None;
+            }
+            if e.contains('\0') {
+                self.err(path, "entries", NOT_STORABLE);
                 return None;
             }
             if e.chars().count() > MAX_ENTRY_CHARS {

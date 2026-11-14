@@ -325,6 +325,47 @@ async fn leave_upload_rules(pool: sqlx::PgPool) {
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
 }
 
+/// Postgres refuses a NUL in a text parameter; a name holding one is said to
+/// be wrong (or not found), never answered `500`.
+#[sqlx::test]
+async fn a_nul_in_a_form_field_or_a_name_is_not_a_server_error(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("ADMIN_UPLOAD_RATE_PER_MINUTE", "1000")]).await;
+    let mut a = admin(&app).await;
+    let r = a
+        .upload(
+            "/api/admin/lexicons",
+            &[("name", "LX"), ("letter_distribution", "e\0n")],
+            "x.tsv",
+            b"BAT\t1\tx\n",
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.json());
+    assert_eq!(error_lines(&r), vec![Value::Null]);
+    let r = a
+        .upload(
+            "/api/admin/leave-sets",
+            &[("lexicon", "L\0X")],
+            "x.csv",
+            b"AB,1\n",
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.json());
+    assert_eq!(error_lines(&r), vec![Value::Null]);
+    let r = a
+        .upload(
+            "/api/admin/letter-distributions",
+            &[("name", "e\0n")],
+            "en.csv",
+            ENGLISH.as_bytes(),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.json());
+    assert_eq!(count(&app, "letter_distributions").await, 0);
+    // The one catalog route that takes a name in its path, with no session.
+    let r = app.client().get("/api/letter-distributions/e%00n").await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
 #[sqlx::test]
 async fn many_errors_report_the_first_thousand_and_the_total(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
@@ -809,21 +850,52 @@ async fn catalog_reads_are_limited_per_ip(pool: sqlx::PgPool) {
 #[sqlx::test]
 async fn non_admins_get_not_found_on_every_admin_route(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
-    let mut root = admin(&app).await;
+    // The catalog holds items, and the paths name them: a route that lost its
+    // admin check would answer something other than 404 (a 409 for an item in
+    // use, a 400 for the file, a 204 or 201), or change a row.
+    let mut root = app.seed_fixture_catalog("root").await;
     let mut user = app.signed_in("plain").await;
+    let id = |sql: &'static str| {
+        let db = app.db().clone();
+        async move {
+            sqlx::query_scalar::<_, i32>(sql)
+                .fetch_one(&db)
+                .await
+                .unwrap()
+        }
+    };
+    let dist = id("SELECT id::int FROM letter_distributions WHERE name = 'english'").await;
+    let lex = id("SELECT id::int FROM lexicons WHERE name = 'EN-FIX'").await;
+    let leaves = id("SELECT s.id FROM leave_sets s JOIN lexicons l ON l.id = s.lexicon_id WHERE l.name = 'EN-FIX'").await;
+    let state = || {
+        let db = app.db().clone();
+        async move {
+            sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+                "SELECT (SELECT count(*) FROM letter_distributions), (SELECT count(*) FROM lexicons),
+                        (SELECT count(*) FROM leave_sets),
+                        (SELECT sum(definitions_revision)::bigint FROM lexicons),
+                        (SELECT sum(values_revision)::bigint FROM leave_sets)",
+            )
+            .fetch_one(&db)
+            .await
+            .unwrap()
+        }
+    };
+    let before = state().await;
     let routes = [
-        ("GET", "/api/admin/catalog"),
-        ("POST", "/api/admin/letter-distributions"),
-        ("POST", "/api/admin/lexicons"),
-        ("POST", "/api/admin/leave-sets"),
-        ("POST", "/api/admin/lexicons/1/definitions"),
-        ("POST", "/api/admin/leave-sets/1/values"),
-        ("DELETE", "/api/admin/letter-distributions/1"),
-        ("DELETE", "/api/admin/lexicons/1"),
-        ("DELETE", "/api/admin/leave-sets/1"),
+        ("GET", "/api/admin/catalog".to_owned()),
+        ("POST", "/api/admin/letter-distributions".to_owned()),
+        ("POST", "/api/admin/lexicons".to_owned()),
+        ("POST", "/api/admin/leave-sets".to_owned()),
+        ("POST", format!("/api/admin/lexicons/{lex}/definitions")),
+        ("POST", format!("/api/admin/leave-sets/{leaves}/values")),
+        // The leave set first: nothing refers to it, so only the admin check keeps it.
+        ("DELETE", format!("/api/admin/leave-sets/{leaves}")),
+        ("DELETE", format!("/api/admin/lexicons/{lex}")),
+        ("DELETE", format!("/api/admin/letter-distributions/{dist}")),
     ];
-    for (method, path) in routes {
-        let r = match method {
+    for (method, path) in &routes {
+        let r = match *method {
             "GET" => user.get(path).await,
             "POST" => {
                 user.upload(path, &[("name", "x")], "x.csv", ENGLISH.as_bytes())
@@ -833,7 +905,7 @@ async fn non_admins_get_not_found_on_every_admin_route(pool: sqlx::PgPool) {
         };
         assert_eq!(r.status, StatusCode::NOT_FOUND, "{method} {path}");
     }
-    assert_eq!(count(&app, "letter_distributions").await, 0);
+    assert_eq!(state().await, before);
     // Revoking is_admin takes effect on the next request.
     assert_eq!(root.get("/api/admin/catalog").await.status, StatusCode::OK);
     sqlx::query("UPDATE users SET is_admin = false WHERE username = 'root'")

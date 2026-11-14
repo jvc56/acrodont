@@ -38,8 +38,8 @@ const FINISH_BUDGET: Duration = Duration::from_secs(20);
 const EXPORTS_BUDGET: Duration = Duration::from_secs(120);
 /// The ECS task's memory (`infra/variables.tf` `task_memory`, 2048 MiB).
 const TASK_MEMORY_BYTES: u64 = 2048 * 1024 * 1024;
-/// The ALB's idle timeout for admin uploads (`infra/alb.tf`).
-const UPLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+/// The app's own timeout for admin uploads, inside the ALB's idle timeout (`infra/alb.tf`).
+const UPLOAD_TIMEOUT: Duration = acrodont::catalog::routes::UPLOAD_TIMEOUT;
 const LEAVE_ROWS: usize = 1_000_000;
 /// One purge transaction taking a 300,000-question cascade with three levels.
 const PURGE_CASCADE_BUDGET: Duration = Duration::from_secs(30);
@@ -703,7 +703,9 @@ async fn an_incremental_pull_beside_60000_chain_quizzes(pool: sqlx::PgPool) {
         (acrodont::sync::pull::ATTEMPTS_SQL.to_owned(), "quiz_attempts_user_seq", true),
     ] {
         let plan = explain(&app, &sql, |q| {
-            let q = q.bind(user).bind(cursor).bind(cursor).bind(Uuid::nil());
+            // The range a pull asks for, open above: an empty one (cursor to
+            // cursor) would read nothing whatever the index did.
+            let q = q.bind(user).bind(cursor).bind(i64::MAX).bind(Uuid::nil());
             if attempts { q.bind(0).bind(50_001_i64) } else { q.bind(50_001_i64) }
         })
         .await;

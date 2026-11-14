@@ -91,9 +91,13 @@ fn is_valid_username(u: &str) -> bool {
     (3..=32).contains(&u.len()) && u.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
+/// No whitespace and no control character: an address holds neither, and a
+/// NUL among them is one Postgres takes in no text parameter, so the lookup
+/// that follows would fail (a `500` at register, and a `mail_failed` alarm
+/// from a reset request that any visitor can send) instead of being refused.
 fn is_valid_email(e: &str) -> bool {
     let n = e.chars().count();
-    if !(3..=254).contains(&n) || e.chars().any(char::is_whitespace) {
+    if !(3..=254).contains(&n) || e.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return false;
     }
     match e.rsplit_once('@') {
@@ -381,41 +385,71 @@ fn dummy_hash() -> &'static str {
     })
 }
 
+struct LoginUser {
+    id: Uuid,
+    username: String,
+    password_hash: String,
+    email_confirmed_at: Option<chrono::DateTime<chrono::Utc>>,
+    is_admin: bool,
+    session_generation: i32,
+    storage_bytes: i64,
+    storage_limit_bytes: Option<i64>,
+}
+
+/// The account `username` names when `password` is its password. An unknown
+/// username costs the same verify as a wrong password.
+async fn verified_user(state: &AppState, username: &str, password: String) -> ApiResult<Option<LoginUser>> {
+    let row = sqlx::query_as!(
+        LoginUser,
+        "SELECT id, username::text AS \"username!\", password_hash, email_confirmed_at,
+                is_admin, session_generation, storage_bytes, storage_limit_bytes
+         FROM users WHERE username = $1",
+        username,
+    )
+    .fetch_optional(&state.db)
+    .await?;
+    state
+        .argon2_verifies
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Ok(match row {
+        Some(r) => password::verify(password, r.password_hash.clone()).await?.then_some(r),
+        None => {
+            password::verify(password, dummy_hash().to_owned()).await?;
+            None
+        }
+    })
+}
+
 async fn login(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
     ApiJson(body): ApiJson<LoginBody>,
 ) -> ApiResult<Response> {
-    let username_key = body.username.trim().to_lowercase();
-    // Refused before any Argon2 verify when either failure bucket is empty.
-    if let Some(retry_after_secs) = state.limits.login_fail_ip.empty(&ip) {
-        return Err(ApiError::TooManyRequests { retry_after_secs });
+    let username = body.username.trim();
+    // No account has a name of another shape, so this one is refused as a
+    // wrong guess is, before it can cost a hash or become a limiter's key:
+    // the body may be megabytes long.
+    if !is_valid_username(username) {
+        return Err(ApiError::Unauthorized);
     }
-    if let Some(retry_after_secs) = state.limits.login_fail_username.empty(&username_key) {
-        return Err(ApiError::TooManyRequests { retry_after_secs });
+    let username_key = username.to_lowercase();
+    // A token is taken from both failure buckets before any Argon2 verify,
+    // and the request refused when either has none; both are given back
+    // unless the verify fails. Peeking first and taking afterwards let every
+    // request of a burst through.
+    state.limits.login_fail_ip.reserve(&ip)?;
+    if let Err(limited) = state.limits.login_fail_username.reserve(&username_key) {
+        state.limits.login_fail_ip.refund(&ip);
+        return Err(limited);
     }
-    state
-        .argon2_verifies
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let row = sqlx::query!(
-        "SELECT id, username::text AS \"username!\", password_hash, email_confirmed_at,
-                is_admin, session_generation, storage_bytes, storage_limit_bytes
-         FROM users WHERE username = $1",
-        body.username.trim() as &str,
-    )
-    .fetch_optional(&state.db)
-    .await?;
-    let ok = match &row {
-        Some(r) => password::verify(body.password, r.password_hash.clone()).await,
-        None => {
-            password::verify(body.password, dummy_hash().to_owned()).await;
-            false
-        }
-    };
-    let Some(user) = row.filter(|_| ok) else {
-        // A token is taken from both buckets only when the verify fails.
-        state.limits.login_fail_ip.take(&ip);
-        state.limits.login_fail_username.take(&username_key);
+    let outcome = verified_user(&state, username, body.password).await;
+    // Only a failed verify keeps its tokens: not a login that succeeds, and
+    // not one that was never judged (a `503` for a hashing turn, an error).
+    if !matches!(outcome, Ok(None)) {
+        state.limits.login_fail_ip.refund(&ip);
+        state.limits.login_fail_username.refund(&username_key);
+    }
+    let Some(user) = outcome? else {
         return Err(ApiError::Unauthorized);
     };
     if user.email_confirmed_at.is_none() {
@@ -514,6 +548,12 @@ async fn reset_password(
 ) -> ApiResult<Response> {
     state.limits.auth_ip.check(&ip)?;
     let email = body.email.trim().to_owned();
+    // No account has an address of another shape. The same answer as for any
+    // address, and before the address becomes a limiter's key: the body may
+    // be megabytes long.
+    if !is_valid_email(&email) {
+        return Ok((StatusCode::ACCEPTED, Json(json!({}))).into_response());
+    }
     // Checked against the caller and against the address named: the first
     // bounds bulk probing, the second stops one address being buried in reset
     // mail from many sources. The same answer for every address either way.
@@ -648,12 +688,19 @@ async fn reset_password_confirm(
 // Account
 // ---------------------------------------------------------------------------
 
+/// Password re-entry for Sign out everywhere and Delete account. Tries share
+/// Change password's bucket: a session cookie alone must not be a way to
+/// guess the account's password at full speed.
 async fn check_password(state: &AppState, user: &CurrentUser, password: String) -> ApiResult<()> {
+    // The try is counted once a hashing turn is held: a request turned away
+    // busy (503) was never judged, and spends none of the account's tries.
+    let turn = password::hashing_turn().await?;
+    state.limits.reset.check(&format!("pw:{}", user.id))?;
     let hash = sqlx::query_scalar!("SELECT password_hash FROM users WHERE id = $1", user.id)
         .fetch_optional(&state.db)
         .await?
         .ok_or(ApiError::Unauthorized)?;
-    if password::verify(password, hash).await {
+    if password::verify_in_turn(turn, password, hash).await {
         Ok(())
     } else {
         Err(ApiError::Fields(vec![FieldError::new(
@@ -681,8 +728,10 @@ async fn sign_out_everywhere(
          RETURNING session_generation",
         user.id
     )
-    .fetch_one(&state.db)
-    .await?;
+    .fetch_optional(&state.db)
+    .await?
+    // The account was deleted since the password was checked: its session is void.
+    .ok_or(ApiError::Unauthorized)?;
     Ok((
         SessionCookies::issue(&state, user.id, generation, None),
         StatusCode::NO_CONTENT,
@@ -707,8 +756,11 @@ async fn change_password(
     Session(user): Session,
     ApiJson(body): ApiJson<ChangePasswordBody>,
 ) -> ApiResult<Response> {
-    // Each try costs a hash and maybe a scoring: bounded per account, as a
-    // reset link's tries are.
+    // Each try costs a hash and maybe a scoring, and is a guess at the
+    // password: bounded per account, as a reset link's tries are. Counted
+    // once a hashing turn is held, so a request turned away busy (503)
+    // spends none.
+    let turn = password::hashing_turn().await?;
     state.limits.reset.check(&format!("pw:{}", user.id))?;
     let account = sqlx::query!(
         r#"SELECT username::text AS "username!", email::text AS "email!", password_hash
@@ -718,7 +770,7 @@ async fn change_password(
     .fetch_optional(&state.db)
     .await?
     .ok_or(ApiError::Unauthorized)?;
-    if !password::verify(body.current_password, account.password_hash).await {
+    if !password::verify_in_turn(turn, body.current_password, account.password_hash).await {
         return Err(ApiError::Fields(vec![FieldError::new(
             "current_password",
             "That password is not right.",

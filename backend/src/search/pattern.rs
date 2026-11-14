@@ -209,55 +209,69 @@ pub fn to_text(p: &Pattern, dist: &Distribution) -> String {
 pub struct Bag {
     pub literals: Vec<u8>,
     pub literal_total: usize,
-    /// One per `.` (all tiles) or set, most constrained first.
-    pub slots: Vec<TileSet>,
+    /// The distinct slots, one per `.` (all tiles) or set, each with how many
+    /// times the pattern holds it.
+    pub kinds: Vec<(TileSet, u32)>,
+    /// The number of slots, counting repeats.
+    pub slot_total: usize,
     pub star: bool,
 }
 
 impl Bag {
     pub fn new(p: &Pattern, ntiles: usize) -> Self {
         let mut literals = vec![0u8; ntiles];
-        let mut slots = Vec::new();
+        let mut kinds: Vec<(TileSet, u32)> = Vec::new();
+        let mut slot_total = 0;
         let mut star = false;
         let mut total = 0;
         for t in &p.toks {
-            match t {
+            let set = match t {
                 Tok::Tile(t) => {
                     literals[*t as usize] += 1;
                     total += 1;
+                    continue;
                 }
-                Tok::Any => slots.push(TileSet::all()),
-                Tok::Set(s, _) => slots.push(*s),
-                Tok::Star => star = true,
+                Tok::Star => {
+                    star = true;
+                    continue;
+                }
+                Tok::Any => TileSet::all(),
+                Tok::Set(s, _) => *s,
+            };
+            slot_total += 1;
+            match kinds.iter_mut().find(|(s, _)| *s == set) {
+                Some((_, n)) => *n += 1,
+                None => kinds.push((set, 1)),
             }
         }
-        slots.sort_by_key(|s| s.len());
-        Bag { literals, literal_total: total, slots, star }
+        Bag { literals, literal_total: total, kinds, slot_total, star }
     }
 
     pub fn only_literals(&self) -> bool {
-        self.slots.is_empty() && !self.star
+        self.kinds.is_empty() && !self.star
     }
 
     /// Anagram Match: the word uses exactly the pattern's tiles; `*` allows extras.
     pub fn anagram(&self, counts: &[u8], len: usize) -> bool {
-        let need = self.literal_total + self.slots.len();
+        let need = self.literal_total + self.slot_total;
         if (self.star && len < need) || (!self.star && len != need) {
             return false;
         }
-        let mut rem = [0u8; 256];
+        let mut rem: Vec<(Tile, u32)> = Vec::new();
         for (t, (&c, &l)) in counts.iter().zip(&self.literals).enumerate() {
             if c < l {
                 return false;
             }
-            rem[t] = c - l;
+            if c > l {
+                rem.push((t as Tile, u32::from(c - l)));
+            }
         }
-        if self.slots.is_empty() {
+        if self.kinds.is_empty() {
             return true;
         }
         // Without `*`, every remaining tile fills a slot; with it, the slots
         // take any of the remaining tiles and the rest are the extras.
-        assign(&self.slots, 0, &mut rem, counts.len())
+        Assignment::new(&self.kinds, &rem).fill(self.slot_total) == self.slot_total
     }
 
     /// Subanagram Match: every tile of the word can be taken from the pattern.
@@ -265,59 +279,99 @@ impl Bag {
         if self.star {
             return true;
         }
-        if len > self.literal_total + self.slots.len() {
+        if len > self.literal_total + self.slot_total {
             return false;
         }
-        let mut left: Vec<Tile> = Vec::new();
+        let mut left: Vec<(Tile, u32)> = Vec::new();
+        let mut total = 0;
         for (t, (&c, &l)) in counts.iter().zip(&self.literals).enumerate() {
-            for _ in l..c.max(l) {
-                left.push(t as Tile);
+            if c > l {
+                left.push((t as Tile, u32::from(c - l)));
+                total += usize::from(c - l);
             }
         }
-        if left.is_empty() {
+        if total == 0 {
             return true;
         }
-        if left.len() > self.slots.len() {
+        if total > self.slot_total {
             return false;
         }
-        let mut used = vec![false; self.slots.len()];
-        place(&left, 0, &self.slots, &mut used)
+        Assignment::new(&self.kinds, &left).fill(total) == total
     }
 }
 
-/// Fills every slot (from `i`) with a distinct remaining tile it accepts.
-fn assign(slots: &[TileSet], i: usize, rem: &mut [u8; 256], ntiles: usize) -> bool {
-    if i == slots.len() {
-        return true;
-    }
-    for t in 0..ntiles {
-        if rem[t] > 0 && slots[i].contains(t as Tile) {
-            rem[t] -= 1;
-            let ok = assign(slots, i + 1, rem, ntiles);
-            rem[t] += 1;
-            if ok {
-                return true;
-            }
-        }
-    }
-    false
+/// Puts tiles into slots that accept them, one tile to a slot: a bipartite
+/// matching between the distinct tiles (each with a count) and the distinct
+/// slots (each with a count), grown one tile at a time along augmenting
+/// paths. Placing one tile looks at each (tile, slot) pair at most once, so a
+/// candidate costs at most its length times that, whatever the pattern holds.
+struct Assignment<'a> {
+    kinds: &'a [(TileSet, u32)],
+    tiles: &'a [(Tile, u32)],
+    /// `placed[i * kinds.len() + k]`: how many of tile `i` sit in slots of kind `k`.
+    placed: Vec<u32>,
+    /// How many slots of each kind are taken.
+    taken: Vec<u32>,
+    seen_kind: Vec<bool>,
+    seen_tile: Vec<bool>,
 }
 
-/// Places every leftover word tile (from `i`) into a distinct accepting slot.
-fn place(left: &[Tile], i: usize, slots: &[TileSet], used: &mut [bool]) -> bool {
-    if i == left.len() {
-        return true;
-    }
-    for s in 0..slots.len() {
-        if !used[s] && slots[s].contains(left[i]) {
-            used[s] = true;
-            if place(left, i + 1, slots, used) {
-                return true;
-            }
-            used[s] = false;
+impl<'a> Assignment<'a> {
+    fn new(kinds: &'a [(TileSet, u32)], tiles: &'a [(Tile, u32)]) -> Self {
+        Assignment {
+            kinds,
+            tiles,
+            placed: vec![0; kinds.len() * tiles.len()],
+            taken: vec![0; kinds.len()],
+            seen_kind: vec![false; kinds.len()],
+            seen_tile: vec![false; tiles.len()],
         }
     }
-    false
+
+    /// How many tiles can be placed, stopping at `want`.
+    fn fill(&mut self, want: usize) -> usize {
+        let mut done = 0;
+        for i in 0..self.tiles.len() {
+            for _ in 0..self.tiles[i].1 {
+                if done == want {
+                    return done;
+                }
+                self.seen_kind.fill(false);
+                self.seen_tile.fill(false);
+                if !self.place(i) {
+                    // No further tile of this kind can be placed either.
+                    break;
+                }
+                done += 1;
+            }
+        }
+        done
+    }
+
+    /// Places one more of tile `i`, moving tiles already placed if it must.
+    fn place(&mut self, i: usize) -> bool {
+        self.seen_tile[i] = true;
+        let n = self.kinds.len();
+        for k in 0..n {
+            if self.seen_kind[k] || !self.kinds[k].0.contains(self.tiles[i].0) {
+                continue;
+            }
+            self.seen_kind[k] = true;
+            if self.taken[k] < self.kinds[k].1 {
+                self.taken[k] += 1;
+                self.placed[i * n + k] += 1;
+                return true;
+            }
+            for j in 0..self.tiles.len() {
+                if !self.seen_tile[j] && self.placed[j * n + k] > 0 && self.place(j) {
+                    self.placed[j * n + k] -= 1;
+                    self.placed[i * n + k] += 1;
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 /// Pattern Match: an anchored match of the tokens against the tiles in order.
@@ -409,5 +463,89 @@ mod tests {
         assert!(bag("C S . . E").subanagram(&c, 4));
         assert!(!bag("C S . E").subanagram(&c, 4));
         assert!(bag("L *").subanagram(&c, 4));
+    }
+
+    /// The matcher before it was a matching: every tile tried in every slot.
+    fn brute(slots: &[TileSet], tiles: &[Tile], all_tiles: bool) -> bool {
+        fn go(slots: &[TileSet], used: &mut [bool], tiles: &[Tile], i: usize, skips: usize) -> bool {
+            if i == tiles.len() {
+                return true;
+            }
+            for s in 0..slots.len() {
+                if !used[s] && slots[s].contains(tiles[i]) {
+                    used[s] = true;
+                    let ok = go(slots, used, tiles, i + 1, skips);
+                    used[s] = false;
+                    if ok {
+                        return true;
+                    }
+                }
+            }
+            skips > 0 && go(slots, used, tiles, i + 1, skips - 1)
+        }
+        // Subanagram places every tile; Anagram fills every slot and may leave tiles over.
+        let skips = if all_tiles { 0 } else { tiles.len().saturating_sub(slots.len()) };
+        (all_tiles || tiles.len() >= slots.len()) && go(slots, &mut vec![false; slots.len()], tiles, 0, skips)
+    }
+
+    #[test]
+    fn slots_are_matched_as_the_exhaustive_search_matches_them() {
+        // Every pattern of up to four slots drawn from these sets, against
+        // every bag of up to five of the tiles 1..=3.
+        let sets: Vec<TileSet> =
+            [&[1u8][..], &[2], &[1, 2], &[2, 3], &[1, 2, 3]].iter().map(|t| TileSet::from_tiles(t)).collect();
+        let mut x: u64 = 7;
+        let mut next = |n: usize| {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((x >> 33) % n as u64) as usize
+        };
+        for _ in 0..4000 {
+            let slots: Vec<TileSet> = (0..next(5)).map(|_| sets[next(sets.len())]).collect();
+            let tiles: Vec<Tile> = (0..next(6)).map(|_| 1 + next(3) as Tile).collect();
+            let toks = slots.iter().map(|s| Tok::Set(*s, Vec::new())).collect();
+            let plain = Bag::new(&Pattern { toks }, 4);
+            let mut toks: Vec<Tok> = slots.iter().map(|s| Tok::Set(*s, Vec::new())).collect();
+            toks.push(Tok::Star);
+            let starred = Bag::new(&Pattern { toks }, 4);
+            let mut counts = [0u8; 4];
+            for &t in &tiles {
+                counts[t as usize] += 1;
+            }
+            let n = tiles.len();
+            assert_eq!(plain.subanagram(&counts, n), brute(&slots, &tiles, true), "sub {slots:?} {tiles:?}");
+            assert_eq!(
+                plain.anagram(&counts, n),
+                n == slots.len() && brute(&slots, &tiles, true),
+                "anagram {slots:?} {tiles:?}"
+            );
+            assert_eq!(starred.anagram(&counts, n), brute(&slots, &tiles, false), "starred {slots:?} {tiles:?}");
+        }
+    }
+
+    /// A pattern of one set many times over once cost a factorial of tries for
+    /// a word it does not match. The work runs on its own thread so that a
+    /// matcher that does not come back fails the test instead of hanging it.
+    #[test]
+    fn many_identical_sets_are_answered_at_once() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // Tiles 1..=3 stand for A, E, I; tile 4 is in no set.
+            let set = TileSet::from_tiles(&[1, 2, 3]);
+            let toks: Vec<Tok> = (0..62).map(|_| Tok::Set(set, vec![1, 2, 3])).collect();
+            let plain = Bag::new(&Pattern { toks: toks.clone() }, 5);
+            let starred = Bag::new(&Pattern { toks: toks.into_iter().chain([Tok::Star]).collect() }, 5);
+            // Twelve tiles the sets take, then one they do not.
+            let mut out = Vec::new();
+            for _ in 0..10_000 {
+                out.push(plain.subanagram(&[0, 4, 4, 4, 1], 13));
+                out.push(plain.subanagram(&[0, 20, 20, 22, 0], 62));
+                out.push(plain.anagram(&[0, 20, 20, 21, 1], 62));
+                out.push(starred.anagram(&[0, 20, 20, 21, 30], 91));
+                out.push(starred.anagram(&[0, 20, 20, 22, 30], 92));
+            }
+            let _ = tx.send(out);
+        });
+        let out = rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the matcher did not come back");
+        assert_eq!(out[..5], [false, true, false, false, true]);
     }
 }

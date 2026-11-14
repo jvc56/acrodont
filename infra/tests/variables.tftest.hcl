@@ -52,12 +52,59 @@ run "defaults_plan" {
     error_message = "the app runs on Spot by default"
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.down) == 1
-    error_message = "a running service has its down alarm"
+    condition     = length(aws_cloudwatch_metric_alarm.down) == 1 && length(aws_cloudwatch_metric_alarm.app_5xx) == 1
+    error_message = "a running service has its down alarm and its application 5xx alarm"
+  }
+  assert {
+    condition     = length(aws_lb_listener_rule.www) == 0
+    error_message = "www is answered only when redirect_www asks for it"
   }
   assert {
     condition     = aws_db_instance.main.backup_retention_period == 7 && aws_db_instance.main.allocated_storage == 20
     error_message = "the database defaults changed"
+  }
+  assert {
+    condition     = one(aws_lb_target_group.web.health_check).interval * one(aws_lb_target_group.web.health_check).unhealthy_threshold >= 300
+    error_message = "the target group's health check must ride out a five-minute database restart before the task is replaced"
+  }
+  assert {
+    condition     = local.backend_health_check.interval * local.backend_health_check.retries >= 300
+    error_message = "the backend container's health check must ride out the same five minutes: ECS replaces a task whose container is unhealthy whatever the target group says"
+  }
+  assert {
+    condition     = jsonencode(local.task_failed_any_of) == "[{\"containers\":{\"exitCode\":[{\"anything-but\":0}]}},{\"stopCode\":[\"TaskFailedToStart\"]}]"
+    error_message = "the backup and drill failure rules changed: change task_pattern in scripts/lib/ops_fakes.py with them, which scripts/check-alerts.sh is checked against"
+  }
+  assert {
+    condition = alltrue([
+      for t in concat(values(aws_cloudwatch_event_target.task_failed), [aws_cloudwatch_event_target.deploy_failed]) : alltrue([
+        for p in regexall("<([^>]*)>", t.input_transformer[0].input_template) : contains(keys(t.input_transformer[0].input_paths), p[0])
+      ])
+    ])
+    error_message = "a mail template holds <...> that is not a key of its input_paths: EventBridge reads it as a placeholder"
+  }
+  assert {
+    condition     = anytrue([for r in aws_s3_bucket_lifecycle_configuration.backups.rule : length(r.abort_incomplete_multipart_upload) == 1])
+    error_message = "the backups bucket must abort unfinished multipart uploads"
+  }
+}
+
+run "www_redirects_to_the_bare_domain" {
+  command = plan
+  variables {
+    redirect_www = true
+  }
+  assert {
+    condition     = contains(aws_acm_certificate.site.subject_alternative_names, "www.acrodont.example.org")
+    error_message = "redirect_www must put www on the certificate"
+  }
+  assert {
+    condition = length(aws_lb_listener_rule.www) == 2 && alltrue([
+      for r in aws_lb_listener_rule.www :
+      one(one(r.action).redirect).host == "acrodont.example.org" && one(one(r.action).redirect).status_code == "HTTP_301"
+      && contains(one(one(r.condition).host_header).values, "www.acrodont.example.org")
+    ])
+    error_message = "redirect_www must answer www on both listeners with a 301 to the bare domain"
   }
 }
 
@@ -72,7 +119,7 @@ run "on_demand_and_no_tasks" {
     error_message = "use_fargate_spot = false must use on-demand Fargate"
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.down) == 0 && length(aws_cloudwatch_metric_alarm.backend_memory_high) == 0
+    condition     = length(aws_cloudwatch_metric_alarm.down) == 0 && length(aws_cloudwatch_metric_alarm.backend_memory_high) == 0 && length(aws_cloudwatch_metric_alarm.app_5xx) == 0
     error_message = "a stack with no tasks must not page"
   }
 }

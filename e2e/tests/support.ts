@@ -19,7 +19,8 @@ function stem(email: string): string {
 		.replace(/[^a-z0-9.@\-_+]/g, '_');
 }
 
-function fromOutbox(email: string): string | undefined {
+/** The newest mail to `email` in the outbox that carries `field`: that field's value. */
+function fromOutbox(email: string, field = 'confirmation_code'): string | undefined {
 	const dir = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '.stack', `${PROJECT}.outbox`);
 	if (!existsSync(dir)) return undefined;
 	const prefix = `${stem(email)}.`;
@@ -29,9 +30,24 @@ function fromOutbox(email: string): string | undefined {
 		.reverse();
 	for (const f of files) {
 		const doc = JSON.parse(readFileSync(resolve(dir, f), 'utf8'));
-		if (doc.confirmation_code) return doc.confirmation_code;
+		if (doc[field]) return doc[field];
 	}
 	return undefined;
+}
+
+/**
+ * What a person takes from their mail: the confirmation code or the reset
+ * token of the newest message to `email`, read from the stack's outbox once
+ * it is there (a reset's mail follows its response).
+ */
+export async function mailed(email: string, field: 'confirmation_code' | 'reset_token'): Promise<string> {
+	const deadline = Date.now() + 30_000;
+	for (;;) {
+		const found = fromOutbox(email, field);
+		if (found) return found;
+		if (Date.now() > deadline) throw new Error(`no mail with a ${field} for ${email} in the outbox`);
+		await new Promise((r) => setTimeout(r, 250));
+	}
 }
 
 function code(email: string): string {

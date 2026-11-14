@@ -3,7 +3,7 @@
 // that applies operations through the shared rules.
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resetSeed } from '$lib/cascade/order';
 import { applyLocally, APPLY_STORES, type NewOp } from '$lib/local/apply';
 import { openUserDb, type UserDb } from '$lib/local/db';
@@ -12,7 +12,8 @@ import type { QuizRow } from '$lib/local/rows';
 import { storeCreated, type Created } from '$lib/local/created';
 import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
-import { SyncEngine } from './engine';
+import { bindUser, USER_HEADER } from '$lib/api';
+import { electLeader, listenForChanges, STREAM_REOPEN_MS, SyncEngine, transportFor, type EngineHooks, type SyncStatus } from './engine';
 import type { Notice } from './notices';
 import type { Reply, SyncRequest, SyncResponse } from './protocol';
 import { FakeServer, type NewCascade } from './testing/fake-server';
@@ -25,19 +26,21 @@ class Dev {
 	db!: UserDb;
 	engine!: SyncEngine;
 	notices: Notice[] = [];
+	statuses: SyncStatus[] = [];
 	requests: SyncRequest[] = [];
 	/** Stands between the engine and the server: may rewrite the request or the reply. */
 	tamper: ((req: SyncRequest, send: (r: SyncRequest) => Reply) => Reply | Promise<Reply>) | null = null;
 	online = true;
 
-	static async make(server: FakeServer): Promise<Dev> {
+	/** `through` stands between the engine and the device's database; `hooks` are the engine's. */
+	static async make(server: FakeServer, through: (db: UserDb) => UserDb = (db) => db, hooks: EngineHooks = {}): Promise<Dev> {
 		const d = new Dev();
 		globalThis.indexedDB = new IDBFactory();
 		d.db = await openUserDb(USER);
 		await initMeta(d.db, USER, 'alice');
 		d.engine = new SyncEngine(
-			d.db,
-			{ onNotices: (n) => d.notices.push(...n) },
+			through(d.db),
+			{ onNotices: (n) => d.notices.push(...n), onStatus: (s) => d.statuses.push(s), ...hooks },
 			{
 				transport: async (req) => {
 					if (!d.online) throw new TypeError('offline');
@@ -171,7 +174,7 @@ describe('the sync engine', () => {
 		expect((await getMeta(a.db, 'sync')).cursor).toBeGreaterThan(0);
 	});
 
-	it('a pull that only echoes the device’s own operations takes the fast path and empties the overlay', async () => {
+	it('a pull that only echoes the device’s own operations empties the overlay, and its grades are then read from the base', async () => {
 		const { a } = await setup();
 		await a.play(Q1, 'CCM');
 		expect(await a.db.count('overlay_quiz_questions')).toBe(3);
@@ -242,10 +245,19 @@ describe('the sync engine', () => {
 	});
 
 	it('an acknowledged offline finish leaves its new level playable with no index-list fetch', async () => {
-		const { a } = await setup();
+		const server = new FakeServer();
+		server.create({ id: C1, source_id: Q1, count: 5 });
+		const needs: string[] = [];
+		const a = await Dev.make(server, undefined, { onSynced: (o) => void needs.push(...o.needsIndexList) });
+		await a.open(C1);
+		await a.sync();
 		await a.play(Q1, 'CCCMM');
 		const { newId } = await a.finish(Q1);
+		const before = a.requests.length;
 		await a.sync();
+		// One request, and no list asked for: the rows the device built are the level's.
+		expect(a.requests.length - before).toBe(1);
+		expect(needs).toEqual([]);
 		const rows = await a.rows(newId);
 		expect(rows).toHaveLength(2);
 		expect(rows.every((r) => r.position !== null)).toBe(true);
@@ -443,7 +455,7 @@ describe('the sync engine', () => {
 		expect(await a.db.count('outbox')).toBe(0);
 	});
 
-	it('a 426 acknowledges its operations and says reload to keep syncing until a sync succeeds', async () => {
+	it('a 426 acknowledges its operations, takes their pull and says reload to keep syncing until a sync succeeds', async () => {
 		const { server, a } = await setup();
 		await a.play(Q1, 'CC');
 		a.tamper = (req, send) => {
@@ -454,14 +466,57 @@ describe('the sync engine', () => {
 		expect(a.engine.status).toBe('reload');
 		expect(await a.db.count('outbox')).toBe(0);
 		expect((await getMeta(a.db, 'sync')).upgrade_required).toBe(true);
+		// The grades it pushed are in the base as the server has them, not only
+		// in an overlay the acknowledgement cleared.
+		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
+		expect((await a.quiz(Q1))!.correct_count).toBe(2);
+		// After a reload (a new engine on the same database) it still says so
+		// from its first moment, never "Syncing…", while the server answers 426.
+		const said: SyncStatus[] = [];
+		const reloaded = new SyncEngine(
+			a.db,
+			{ onStatus: (st) => said.push(st) },
+			{ transport: async (req) => ({ ...server.sync(JSON.parse(JSON.stringify(req))), status: 426 }), wait: async () => undefined }
+		);
+		await reloaded.sync();
+		expect(said).toEqual(['reload', 'reload']);
 		a.tamper = null;
-		void server;
 		await a.play(Q1, 'C', 2);
 		await a.sync();
 		expect((await getMeta(a.db, 'sync')).upgrade_required).toBe(false);
+		expect(a.engine.status).toBe('idle');
 	});
 
-	it('resync_required drops the acknowledged operations, replaces the base from a full pull and keeps the rest', async () => {
+	it('a 426 that acknowledges a finish keeps the level it made and the operations queued on it', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'CCMMM');
+		const { newId } = await a.finish(Q1, '7');
+		await a.play(newId, 'C');
+		// One more answer on the new level while the batch is in flight.
+		let late = false;
+		a.tamper = async (req, send) => {
+			const r = send(req);
+			if (!req.ops?.length) return r;
+			if (!late) {
+				late = true;
+				await a.play(newId, 'C', 1);
+			}
+			return { ...r, status: 426 };
+		};
+		await a.sync();
+		expect(a.engine.status).toBe('reload');
+		expect(texts(a)).toEqual([]);
+		expect((await a.outbox()).map((e) => e.op.type)).toEqual(['grade']);
+		expect((await a.rows(newId)).map((r) => r.grade).sort()).toEqual(['correct', 'correct', null]);
+		expect((await a.db.get('quizzes', newId))!.pending).toBeUndefined();
+		a.tamper = null;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect((await a.db.get('quizzes', newId))!.correct_count).toBe(2);
+	});
+
+	it('resync_required sends the batch again with a full pull, replaces the base and loses nothing', async () => {
 		const { server, a } = await setup();
 		const b = await second(server);
 		await b.play(Q1, 'CCCCC');
@@ -475,9 +530,91 @@ describe('the sync engine', () => {
 		await a.sync();
 		const nulls = a.requests.filter((r) => r.cursor === null);
 		expect(nulls.length).toBe(2); // the first sync and the resync
+		expect(nulls[1].ops!.length).toBe(1); // the batch, answered from the server's record
 		expect(await a.db.count('outbox')).toBe(0);
 		expect((await a.rows(Q1)).map((r) => r.position)).not.toEqual(before); // B's finish reset it
 		expect(await a.db.get('cascades', 'c2000000-0000-4000-8000-000000000000')).toBeDefined();
+	});
+
+	it('resync_required on a batch holding a finish keeps the level it made and the operations queued on it', async () => {
+		const { server, a } = await setup();
+		await a.play(Q1, 'CCMMM');
+		const { newId } = await a.finish(Q1, '7');
+		await a.play(newId, 'C');
+		const built = (await a.rows(newId)).map((r) => [r.question_idx, r.position]).sort();
+		server.floor = server.seq + 1;
+		// One more answer on the new level while the refused batch is in flight.
+		// Each request carries the batch's seven operations and no more, so that
+		// answer is still in the outbox, behind the batch, when the full pull is
+		// applied: the rest of the outbox, replayed.
+		let late = false;
+		a.tamper = async (req, send) => {
+			const r = send({ ...req, ops: req.ops?.slice(0, 7) });
+			if (!late && req.ops?.length) {
+				late = true;
+				await a.play(newId, 'C', 1);
+			}
+			return r;
+		};
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect((await a.outbox()).map((e) => e.op.type)).toEqual(['grade']);
+		// The device's own rows for the level were promoted by the full pull's
+		// response: all three, where the device had placed them, with the one
+		// grade the server holds. No index list was needed.
+		const base = await a.db.getAllFromIndex('quiz_questions', 'quiz_id', newId);
+		expect(base.map((r) => [r.question_idx, r.position]).sort()).toEqual(built);
+		expect(base.filter((r) => r.grade === 'correct')).toHaveLength(1);
+		expect((await a.db.get('quizzes', newId))!.pending).toBeUndefined();
+		expect((await a.db.get('quizzes', newId))!.correct_count).toBe(1);
+		// The answer still waiting was replayed onto them.
+		expect((await a.quiz(newId))!.correct_count).toBe(2);
+		a.tamper = null;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect((await a.db.get('quizzes', newId))!.correct_count).toBe(2);
+		expect((await a.rows(newId)).filter((r) => r.grade === 'correct').length).toBe(2);
+	});
+
+	it('resync_required in answer to a full pull is not asked a third time', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'C');
+		const before = a.requests.length;
+		a.tamper = (req, send) => {
+			// An engine that went on asking would never return: past a fourth
+			// request the connection drops, so that it fails the count below.
+			if (a.requests.length - before > 4) throw new TypeError('asked without end');
+			const r = send(req);
+			return { ...r, body: { sync_seq: (r.body as SyncResponse).sync_seq, results: [], resync_required: true } };
+		};
+		await a.sync();
+		expect(a.requests.length - before).toBe(2); // the sync, then one full pull
+		expect(a.engine.status).toBe('offline');
+		expect(await a.db.count('outbox')).toBe(1);
+	});
+
+	it('a 200 that is not the sync endpoint’s is no connection: nothing is applied and the cursor stays', async () => {
+		const { server, a } = await setup();
+		await a.play(Q1, 'C');
+		const cursor = (await getMeta(a.db, 'sync')).cursor;
+		// A sign-in page answered in the server's place.
+		a.tamper = () => ({ status: 200, body: '<html>Sign in to this network</html>', retryAfter: null });
+		await a.sync();
+		expect(a.engine.status).toBe('offline');
+		expect((await getMeta(a.db, 'sync')).cursor).toBe(cursor);
+		expect(await a.db.count('outbox')).toBe(1);
+		// The same in place of a later page: the pull is not applied short.
+		server.pageRows = 1;
+		await a.db.put('meta', { cursor: null, last_sync_at: null }, 'sync');
+		a.tamper = (req, send) => (req.page_token ? { status: 200, body: '<html></html>', retryAfter: null } : send(req));
+		await a.sync();
+		expect(a.engine.status).toBe('offline');
+		expect((await getMeta(a.db, 'sync')).cursor).toBeNull();
+		a.tamper = null;
+		await a.sync();
+		expect(a.engine.status).toBe('idle');
+		expect(await a.db.count('outbox')).toBe(0);
 	});
 
 	it('a full pull deletes a quiz it did not carry and spares a cascade created while it was in flight', async () => {
@@ -566,6 +703,135 @@ describe('the sync engine', () => {
 
 
 describe('the rebase, continued', () => {
+	// A batch boundary between the finish that made a level and that level's own
+	// finish: the first acknowledgement promotes the level while its answers
+	// are still waiting. `through` sends only the batch's first operations.
+	const through = (a: Dev, n: number) => {
+		a.tamper = (req, send) => send({ ...req, ops: req.ops!.slice(0, n) });
+	};
+
+	it('a level’s finish queued behind the batch that made the level is applied, with everything studied after it', async () => {
+		const { server, a } = await setup();
+		await a.play(Q1, 'CCMMM');
+		const l2 = await a.finish(Q1, '7');
+		await a.play(l2.newId, 'CCC');
+		await a.finish(l2.newId, '8');
+		// Level 2 cleared; Level 1's second attempt is studied on.
+		await a.play(Q1, 'CC');
+		expect(await a.db.count('outbox')).toBe(12);
+		through(a, 6); // the five grades and the finish that made Level 2
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect((await a.outbox()).map((e) => e.op.type)).toEqual(['grade', 'grade', 'grade', 'finish', 'grade', 'grade']);
+		// The base holds the server's Level 2, with no answer yet; the view counts all three.
+		expect((await a.db.getAllFromIndex('quiz_questions', 'quiz_id', l2.newId)).map((r) => r.grade)).toEqual([null, null, null]);
+		expect((await a.db.get('quizzes', l2.newId))!.correct_count).toBe(0);
+		a.tamper = null;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(server.cascades.get(C1)!.sim.quizzes.get(l2.newId)!.state.active).toBe(false);
+		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
+		expect((await a.rows(Q1)).filter((r) => r.grade === 'correct')).toHaveLength(2);
+	});
+
+	it('a level’s finish that descends, queued behind the batch that made the level, keeps the level below it', async () => {
+		const { server, a } = await setup();
+		await a.play(Q1, 'CCMMM');
+		const l2 = await a.finish(Q1, '7');
+		await a.play(l2.newId, 'CMM');
+		const l3 = await a.finish(l2.newId, '8');
+		expect(l3.result.outcome).toBe('descended');
+		await a.play(l3.newId, 'C');
+		through(a, 6);
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(5);
+		// Level 2's promoted rows are in the order of the attempt the server has.
+		const base = await a.db.get('quizzes', l2.newId);
+		expect(base!.attempt).toBe(1);
+		expect((await a.db.getAllFromIndex('quiz_questions', 'quiz_id', l2.newId)).map((r) => r.position).sort()).toEqual([0, 1, 2]);
+		expect(base!.pending).toBeUndefined();
+		a.tamper = null;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(server.cascades.get(C1)!.sim.quizzes.has(l3.newId)).toBe(true);
+		expect((await a.db.get('quizzes', l3.newId))!.correct_count).toBe(1);
+		expect((await a.db.get('quizzes', l2.newId))!.attempt).toBe(2);
+	});
+
+	it('answers queued behind the finish that reset their quiz are counted once it is acknowledged, and the quiz can be finished', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'CCMMM');
+		await a.finish(Q1, '7');
+		await a.play(Q1, 'CC');
+		through(a, 6);
+		await a.sync();
+		expect((await a.quiz(Q1))!.correct_count).toBe(2);
+		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(0);
+		expect((await a.rows(Q1)).filter((r) => r.grade === 'correct')).toHaveLength(2);
+		a.tamper = null;
+		await a.sync();
+		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(texts(a)).toEqual([]);
+	});
+
+	it('an answer regraded behind the finish that made its level is promoted as the server has it', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'CCMMM');
+		const l2 = await a.finish(Q1, '7');
+		await a.play(l2.newId, 'CM');
+		// The first card again, the other way, past the batch.
+		await a.play(l2.newId, 'M');
+		through(a, 8);
+		await a.sync();
+		const row = (await a.rows(l2.newId)).find((r) => r.position === 0)!;
+		expect((await a.db.get('quiz_questions', [l2.newId, row.question_idx]))!.grade).toBe('correct');
+		expect(row.grade).toBe('missed');
+		const q = (await a.quiz(l2.newId))!;
+		expect([q.correct_count, q.missed_count]).toEqual([0, 2]);
+		a.tamper = null;
+		await a.sync();
+		const s = (await a.db.get('quizzes', l2.newId))!;
+		expect([s.correct_count, s.missed_count]).toEqual([0, 2]);
+		expect(texts(a)).toEqual([]);
+	});
+
+	it('a level made and cleared inside one batch keeps its rows, so a restore of it queued behind keeps the answers given after', async () => {
+		const { server, a } = await setup();
+		await a.play(Q1, 'CCMMM');
+		const l2 = await a.finish(Q1, '7');
+		await a.play(l2.newId, 'CCC');
+		await a.finish(l2.newId, '8');
+		expect((await a.quiz(l2.newId))!.status).toBe('cleared');
+		// Out of the Trash and studied again, past the batch.
+		await a.apply({ type: 'restore_quiz', quiz_id: l2.newId, shuffle_seed: '9' });
+		await a.play(l2.newId, 'CC');
+		through(a, 10); // five grades, the finish that made Level 2, its three grades and its finish
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect((await a.outbox()).map((e) => e.op.type)).toEqual(['restore_quiz', 'grade', 'grade']);
+		// The base holds the cleared level as the server has it: every question, in the finished attempt's order, graded.
+		const base = (await a.db.get('quizzes', l2.newId))!;
+		expect([base.status, base.attempt, base.pending]).toEqual(['cleared', 1, undefined]);
+		const rows = await a.db.getAllFromIndex('quiz_questions', 'quiz_id', l2.newId);
+		expect(rows.map((r) => r.position).sort()).toEqual([0, 1, 2]);
+		expect(rows.map((r) => r.grade)).toEqual(['correct', 'correct', 'correct']);
+		// The restored attempt is still there to study, with its two answers.
+		const shown = (await a.quiz(l2.newId))!;
+		expect([shown.status, shown.attempt, shown.pending, shown.correct_count]).toEqual(['active', 2, undefined, 2]);
+		a.tamper = null;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		const sq = server.cascades.get(C1)!.sim.quizzes.get(l2.newId)!;
+		expect(sq.state.active).toBe(true);
+		expect((await a.db.get('quizzes', l2.newId))!.correct_count).toBe(2);
+		expect((await a.rows(l2.newId)).filter((r) => r.grade === 'correct')).toHaveLength(2);
+	});
+
 	it('a finish acknowledged on its second send, after a lost response, promotes its rows with no notice', async () => {
 		const { a } = await setup();
 		await a.play(Q1, 'CCCMM');
@@ -671,6 +937,27 @@ describe('the rebase, continued', () => {
 		expect(await a.db.count('outbox')).toBe(1);
 	});
 
+	it('a full pull that carries a cascade with pending operations deletes no quiz of it that the pull did not carry', async () => {
+		const { a } = await setup();
+		// A base quiz the server does not have, older than the pull, in a cascade the pull does carry.
+		const stale = 'dead0000-0000-4000-8000-000000000000';
+		await a.db.put('quizzes', { ...((await a.db.get('quizzes', Q1)) as QuizRow), id: stale });
+		await a.play(Q1, 'C');
+		a.tamper = (req, send) => send({ ...req, ops: [] });
+		await a.db.put('meta', { cursor: null, last_sync_at: null }, 'sync');
+		await a.sync();
+		expect(a.requests.at(-1)!.cursor).toBeNull();
+		expect(await a.db.count('outbox')).toBe(1);
+		expect(await a.db.get('quizzes', stale)).toBeDefined();
+		// Once nothing is pending, the next full pull removes it.
+		a.tamper = null;
+		await a.sync();
+		expect(await a.db.count('outbox')).toBe(0);
+		await a.db.put('meta', { ...(await getMeta(a.db, 'sync')), cursor: null }, 'sync');
+		await a.sync();
+		expect(await a.db.get('quizzes', stale)).toBeUndefined();
+	});
+
 	it('a finish rejected not_active, and grades rejected stale_attempt with no finish behind them, say it was finished elsewhere', async () => {
 		const { server, a } = await setup();
 		await a.play(Q1, 'CCMMM');
@@ -699,7 +986,7 @@ describe('the rebase, continued', () => {
 		expect(texts(a)).toEqual(['Level 1 was finished on another device. 2 answers from this device weren’t kept.']);
 	});
 
-	it('not_found on a purged cascade says it was deleted; not_found for a question the server’s level lacks says it came out differently', async () => {
+	it('not_found on a purged cascade says it was deleted', async () => {
 		const { server, a } = await setup();
 		const b = await second(server);
 		await b.apply({ type: 'trash_cascade', cascade_id: C1 });
@@ -711,6 +998,63 @@ describe('the rebase, continued', () => {
 			'This cascade was deleted, on another device or by the Trash’s retention period. 2 answers from this device weren’t kept.'
 		]);
 		expect(await a.db.get('cascades', C1)).toBeUndefined();
+	});
+
+	it('a level the server built from a different set of the same size is not promoted: its list is fetched, the notice shown, and its finish refused ungraded after a not_found grade', async () => {
+		const server = new FakeServer();
+		server.create({ id: C1, source_id: Q1, count: 5 });
+		const needs: string[] = [];
+		const a = await Dev.make(server, undefined, { onSynced: (o) => void needs.push(...o.needsIndexList) });
+		await a.open(C1);
+		await a.sync();
+		const byPos = (await a.rows(Q1)).sort((x, y) => x.position! - y.position!);
+		const q1 = (await a.quiz(Q1))!;
+		// A, offline: misses the last three, finishes, answers all of its Level 2 and finishes that.
+		await a.play(Q1, 'CCMMM');
+		const l2 = await a.finish(Q1, '7');
+		await a.play(l2.newId, 'CCC');
+		await a.finish(l2.newId, '8');
+		// Another device, a second later, misses the first card and gets the third.
+		const grade = (pos: number, g: string) => ({
+			type: 'grade',
+			quiz_id: Q1,
+			attempt: q1.attempt,
+			attempt_seed: q1.shuffle_seed,
+			question_idx: byPos[pos].question_idx,
+			grade: g
+		});
+		remote(server, [grade(0, 'missed'), grade(2, 'correct')]);
+		const refused: string[] = [];
+		a.tamper = (req, send) => {
+			const r = send(req);
+			const types = new Map(((req.ops ?? []) as { id: string; type: string }[]).map((o) => [o.id, o.type]));
+			for (const x of (r.body as SyncResponse).results ?? []) if (x.status === 'rejected') refused.push(`${types.get(x.op_id)} ${x.reason}`);
+			return r;
+		};
+		await a.sync();
+		// A's two answers the other device changed, its answer to the question the
+		// server's Level 2 lacks, and then the finish of that level.
+		expect(refused).toEqual(['grade stale', 'grade stale', 'grade not_found', 'finish ungraded']);
+		// The server's Level 2 holds three questions too, but not the same three.
+		const theirs = server.cascades.get(C1)!.sim.quizzes.get(l2.newId)!;
+		const want = [byPos[0], byPos[3], byPos[4]].map((r) => r.question_idx).sort((x, y) => x - y);
+		expect([...theirs.questions].sort((x, y) => x - y)).toEqual(want);
+		expect(theirs.state.active).toBe(true);
+		// A's finish of it was refused: one of the server's three has no answer.
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(texts(a)).toEqual([
+			'Level 1 came out differently on the server because of changes made on another device. 1 answer from this device wasn’t kept.',
+			'Level 1 was also answered on another device. 2 answers from this device weren’t kept.'
+		]);
+		// The device's own rows for it are gone and its list is to be fetched;
+		// the two answers the server kept are there, the third is still to give.
+		expect(needs).toContain(l2.newId);
+		const base = (await a.db.get('quizzes', l2.newId))!;
+		expect(base.status).toBe('active');
+		expect([base.question_count, base.correct_count + base.missed_count]).toEqual([3, 2]);
+		expect(await a.db.count('overlay_quiz_questions')).toBe(0);
+		const kept = await a.db.getAllFromIndex('quiz_questions', 'quiz_id', l2.newId);
+		expect(kept.map((r) => r.question_idx).sort((x, y) => x - y)).toEqual([byPos[3], byPos[4]].map((r) => r.question_idx).sort((x, y) => x - y));
 	});
 
 	it('a full segmented attempt pushed as the device emits it has no bad_cursor or bad_segment and its finish applies', async () => {
@@ -812,6 +1156,351 @@ describe('the rebase, continued', () => {
 	}, 600_000);
 });
 
+const C2 = 'c2000000-0000-4000-8000-000000000000';
+const Q2 = 'a2000000-0000-4000-8000-000000000000';
+
+/**
+ * A database whose n-th rebase transaction (the one per cascade, which holds
+ * the outbox and the staging stores) cannot be opened, with the error given:
+ * no room on the device, or the tab going away.
+ */
+function failing(which: (n: number) => boolean, error: () => unknown) {
+	let n = 0;
+	return (db: UserDb): UserDb =>
+		new Proxy(db, {
+			get(target, prop) {
+				if (prop === 'transaction') {
+					return (stores: string | string[], mode?: IDBTransactionMode) => {
+						if (Array.isArray(stores) && stores.includes('outbox') && stores.includes('staging_cascades') && which(++n)) throw error();
+						return (target.transaction as (s: unknown, m?: IDBTransactionMode) => unknown)(stores, mode);
+					};
+				}
+				const v = Reflect.get(target, prop);
+				return typeof v === 'function' ? v.bind(target) : v;
+			}
+		});
+}
+const noRoom = () => new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+
+type AnyFn = (...args: unknown[]) => unknown;
+const bound = (target: object, prop: string | symbol) => {
+	const v = Reflect.get(target, prop);
+	return typeof v === 'function' ? (v as AnyFn).bind(target) : v;
+};
+
+/**
+ * A database on which a write fails part way through a transaction that has
+ * already written: the n-th transaction of a kind — `rebase`, the one per
+ * cascade, or `page`, the one that writes a pull's page — fails at its first
+ * `put` to `store`.
+ *
+ * `quota` fails it as a browser out of room does: the transaction is aborted,
+ * for real, so everything it wrote is rolled back; its `error` names the
+ * quota; and the write's own promise reports only the abort. `bug` throws an
+ * error that is not IndexedDB's and leaves the transaction open.
+ */
+function failingWrite(kind: 'rebase' | 'page', store: string, how: 'quota' | 'bug', which: (n: number) => boolean) {
+	let n = 0;
+	return (db: UserDb): UserDb =>
+		new Proxy(db, {
+			get(target, prop) {
+				if (prop !== 'transaction') return bound(target, prop);
+				return (stores: string | string[], mode?: IDBTransactionMode) => {
+					const tx = (target.transaction as AnyFn)(stores, mode) as object & { abort(): void; objectStore(name: string): object };
+					const has = (name: string) => Array.isArray(stores) && stores.includes(name);
+					const mine = kind === 'rebase' ? has('outbox') && has('staging_cascades') : !has('outbox') && has('quizzes') && has('staging_quizzes');
+					if (!mine || !which(++n)) return tx;
+					let failed = false;
+					return new Proxy(tx, {
+						get(t, p) {
+							if (p === 'error' && failed) return noRoom();
+							if (p !== 'objectStore') return bound(t, p);
+							return (name: string) => {
+								const st = t.objectStore(name);
+								if (name !== store) return st;
+								return new Proxy(st, {
+									get(inner, sp) {
+										if (sp !== 'put') return bound(inner, sp);
+										return () => {
+											if (how === 'bug') throw new Error('a bug in the rebase');
+											failed = true;
+											t.abort();
+											return Promise.reject(new DOMException('The transaction was aborted.', 'AbortError'));
+										};
+									}
+								});
+							};
+						}
+					});
+				};
+			}
+		});
+}
+
+/** Two cascades, and a device that has opened and pulled both. */
+async function two(through?: (db: UserDb) => UserDb, hooks?: EngineHooks) {
+	const server = new FakeServer();
+	server.create({ id: C1, source_id: Q1, count: 5 });
+	server.create({ id: C2, source_id: Q2, count: 5 });
+	const a = await Dev.make(server, through, hooks);
+	await a.open(C1);
+	await a.open(C2);
+	return { server, a };
+}
+
+describe('a pull that cannot be applied', () => {
+	it('a tab closed between two cascades’ transactions keeps the second cascade’s acknowledged finish, and the next sync loses nothing', async () => {
+		// The first sync's two cascades are transactions 1 and 2; the batch's are 3 and 4.
+		const { server, a } = await two(
+			failing((n) => n === 4, () => new Error('the tab is gone'))
+		);
+		await a.sync();
+		const cursor = (await getMeta(a.db, 'sync')).cursor;
+		await a.play(Q1, 'C');
+		await a.play(Q2, 'CCMMM');
+		const l2 = await a.finish(Q2, '7');
+		await a.play(l2.newId, 'CC');
+		// The batch ends at the finish; the two answers on the level it made wait.
+		a.tamper = (req, send) => send({ ...req, ops: req.ops!.slice(0, -2) });
+		await expect(a.sync()).rejects.toThrow('the tab is gone');
+		// Not left reading "Syncing…".
+		expect(a.engine.status).toBe('offline');
+		expect((await getMeta(a.db, 'sync')).cursor).toBe(cursor);
+		// The first cascade's operation went with its rows; the second's are all still queued.
+		expect((await a.outbox()).map((e) => e.op.type)).toEqual(['grade', 'grade', 'grade', 'grade', 'grade', 'finish', 'grade', 'grade']);
+		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(1);
+		// The next sync's batch again stops short of the level's answers.
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect((await a.outbox()).map((e) => e.op.type)).toEqual(['grade', 'grade']);
+		expect((await a.rows(l2.newId)).filter((r) => r.grade === 'correct')).toHaveLength(2);
+		expect((await a.db.get('quizzes', l2.newId))!.pending).toBeUndefined();
+		a.tamper = null;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(server.cascades.get(C2)!.sim.quizzes.get(l2.newId)!.state.active).toBe(true);
+		expect((await a.db.get('quizzes', l2.newId))!.correct_count).toBe(2);
+	});
+
+	it('a quota error in a cascade’s transaction makes room and pulls once more, with the outbox untouched', async () => {
+		let made = 0;
+		const full: string[] = [];
+		// The batch's cascade is the third rebase transaction. It fails at its
+		// first base quiz row, after it has taken the acknowledged operations out
+		// of the outbox: the abort is what puts them back.
+		const { a } = await two(
+			failingWrite('rebase', 'quizzes', 'quota', (n) => n === 3),
+			{ makeRoom: () => void made++, onNoRoom: () => full.push('no room') }
+		);
+		await a.sync();
+		await a.play(Q1, 'CCMMM');
+		const l2 = await a.finish(Q1, '7');
+		await a.play(l2.newId, 'C');
+		await a.sync();
+		expect(made).toBe(1);
+		expect(full).toEqual([]);
+		expect(a.engine.status).toBe('idle');
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect((await a.db.get('quizzes', l2.newId))!.correct_count).toBe(1);
+		// The same batch went twice; the server answered the second from its records.
+		const sent = a.requests.filter((r) => r.ops?.length);
+		expect(sent.map((r) => r.ops!.length)).toEqual([7, 7]);
+		expect(sent[1].cursor).toBe(sent[0].cursor);
+	});
+
+	it('a second quota error says not enough room, leaves the cursor and the outbox, and stops reading Syncing…', async () => {
+		let made = 0;
+		const full: string[] = [];
+		let stuck = true;
+		const { a } = await two(
+			failingWrite('rebase', 'quizzes', 'quota', (n) => n > 2 && stuck),
+			{ makeRoom: () => void made++, onNoRoom: () => full.push('no room') }
+		);
+		await a.sync();
+		const cursor = (await getMeta(a.db, 'sync')).cursor;
+		await a.play(Q1, 'CCMMM');
+		const l2 = await a.finish(Q1, '7');
+		await a.play(l2.newId, 'C');
+		await a.sync();
+		expect(made).toBe(1);
+		expect(full).toEqual(['no room']);
+		expect(a.statuses.at(-1)).toBe('idle');
+		expect((await getMeta(a.db, 'sync')).cursor).toBe(cursor);
+		expect(await a.db.count('outbox')).toBe(7);
+		expect(await a.db.count('staging_quizzes')).toBeGreaterThan(0); // the next pull's to discard
+		// Studying goes on with what is local, and once there is room the sync loses nothing.
+		await a.play(l2.newId, 'C', 1);
+		stuck = false;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(await a.db.count('staging_quizzes')).toBe(0);
+		expect((await a.db.get('quizzes', l2.newId))!.correct_count).toBe(2);
+	});
+});
+
+describe('a pull that cannot be applied, continued', () => {
+	it('a quota error while a page of the pull is written makes room and pulls once more, with the outbox untouched', async () => {
+		let made = 0;
+		const full: string[] = [];
+		// The first sync writes one page; the batch's pull is the second.
+		const { a } = await two(
+			failingWrite('page', 'staging_quizzes', 'quota', (n) => n === 2),
+			{ makeRoom: () => void made++, onNoRoom: () => full.push('no room') }
+		);
+		await a.sync();
+		const cursor = (await getMeta(a.db, 'sync')).cursor;
+		await a.play(Q1, 'CC');
+		await a.sync();
+		expect(made).toBe(1);
+		expect(full).toEqual([]);
+		expect(a.engine.status).toBe('idle');
+		expect(await a.db.count('outbox')).toBe(0);
+		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
+		const sent = a.requests.filter((r) => r.ops?.length);
+		expect(sent.map((r) => r.ops!.length)).toEqual([2, 2]);
+		expect(sent.map((r) => r.cursor)).toEqual([cursor, cursor]);
+	});
+
+	it('an error that is not IndexedDB’s, part way through a cascade, rolls that cascade back: its acknowledged operations stay queued', async () => {
+		let broken = true;
+		const { a } = await two(failingWrite('rebase', 'quizzes', 'bug', (n) => n > 2 && broken));
+		await a.sync();
+		const cursor = (await getMeta(a.db, 'sync')).cursor;
+		await a.play(Q1, 'CCMMM');
+		const l2 = await a.finish(Q1, '7');
+		await a.play(l2.newId, 'C');
+		await expect(a.sync()).rejects.toThrow('a bug in the rebase');
+		expect((await getMeta(a.db, 'sync')).cursor).toBe(cursor);
+		// Nothing of the cascade's transaction was kept: not the outbox without
+		// its seven operations, not a base without the level they made.
+		expect(await a.db.count('outbox')).toBe(7);
+		expect(await a.db.get('quizzes', l2.newId)).toBeUndefined();
+		expect((await a.quiz(l2.newId))!.correct_count).toBe(1);
+		broken = false;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect((await a.db.get('quizzes', l2.newId))!.correct_count).toBe(1);
+	});
+
+	it('an acknowledged operation of another cascade, lying between this cascade’s, stays queued until its own cascade’s transaction', async () => {
+		// The batch's cascades are transactions 3 and 4: the tab goes before the second.
+		const { a } = await two(failing((n) => n === 4, () => new Error('the tab is gone')));
+		await a.sync();
+		const q = (await a.quiz(Q1))!;
+		const move = (position: number) =>
+			a.apply({ type: 'move_cursor', quiz_id: Q1, attempt: q.attempt, attempt_seed: q.shuffle_seed, position });
+		await a.play(Q1, 'C');
+		await move(1);
+		await a.play(Q2, 'C');
+		await a.play(Q1, 'C', 1);
+		// While the batch is out the cursor moves again: the queued move is
+		// replaced by one with a new device_seq, so the first cascade's three
+		// acknowledged entries span a range that holds three entries, one of
+		// them the second cascade's.
+		let moved = false;
+		a.tamper = async (req, send) => {
+			const r = send(req);
+			if (!moved && req.ops?.length) {
+				moved = true;
+				await move(2);
+			}
+			return r;
+		};
+		await expect(a.sync()).rejects.toThrow('the tab is gone');
+		const left = await a.outbox();
+		expect(left.map((e) => [e.cascade_id, e.op.type])).toEqual([
+			[C2, 'grade'],
+			[C1, 'move_cursor']
+		]);
+		a.tamper = null;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect((await a.db.get('quizzes', Q2))!.correct_count).toBe(1);
+		expect((await a.db.get('quizzes', Q1))!.cursor).toBe(2);
+	});
+});
+
+describe('the change stream', () => {
+	class Stream {
+		static made: Stream[] = [];
+		readyState = 0;
+		onopen: (() => void) | null = null;
+		onerror: (() => void) | null = null;
+		closed = false;
+		constructor(public url: string) {
+			Stream.made.push(this);
+		}
+		addEventListener() {}
+		close() {
+			this.closed = true;
+			this.readyState = 2;
+		}
+		/** The server's answer was not a stream: the browser gives up. */
+		refuse() {
+			this.readyState = 2;
+			this.onerror?.();
+		}
+		/** The connection dropped: the browser is opening it again itself. */
+		drop() {
+			this.readyState = 0;
+			this.onerror?.();
+		}
+	}
+	const engineSaying = (status: SyncStatus) => ({ status, schedule: () => undefined }) as unknown as SyncEngine;
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+		Stream.made = [];
+	});
+
+	it('a stream the browser gave up is opened again after a wait that doubles; a dropped one is left to the browser', () => {
+		vi.useFakeTimers();
+		vi.stubGlobal('EventSource', Stream);
+		const stop = listenForChanges(engineSaying('idle'), USER, 'device-1');
+		expect(Stream.made).toHaveLength(1);
+		Stream.made[0].drop();
+		vi.advanceTimersByTime(STREAM_REOPEN_MS * 10);
+		expect(Stream.made).toHaveLength(1);
+		Stream.made[0].refuse(); // a 502 while the server is replaced
+		vi.advanceTimersByTime(STREAM_REOPEN_MS - 1);
+		expect(Stream.made).toHaveLength(1);
+		vi.advanceTimersByTime(1);
+		expect(Stream.made).toHaveLength(2);
+		expect(Stream.made[1].url).toBe(Stream.made[0].url);
+		Stream.made[1].refuse();
+		vi.advanceTimersByTime(STREAM_REOPEN_MS * 2 - 1);
+		expect(Stream.made).toHaveLength(2);
+		vi.advanceTimersByTime(1);
+		expect(Stream.made).toHaveLength(3);
+		// Opened: the next wait is the first one again.
+		Stream.made[2].readyState = 1;
+		Stream.made[2].onopen?.();
+		Stream.made[2].refuse();
+		vi.advanceTimersByTime(STREAM_REOPEN_MS);
+		expect(Stream.made).toHaveLength(4);
+		// Stopped while waiting: nothing more is opened.
+		Stream.made[3].refuse();
+		stop();
+		vi.advanceTimersByTime(STREAM_REOPEN_MS * 100);
+		expect(Stream.made).toHaveLength(4);
+	});
+
+	it('a stream refused while the account is signed out stays closed', () => {
+		vi.useFakeTimers();
+		vi.stubGlobal('EventSource', Stream);
+		listenForChanges(engineSaying('needs_login'), USER, 'device-1');
+		Stream.made[0].refuse();
+		vi.advanceTimersByTime(STREAM_REOPEN_MS * 100);
+		expect(Stream.made).toHaveLength(1);
+	});
+});
+
 describe('authentication while offline', () => {
 	it('a 401 keeps the data and the outbox and says log in to sync; studying continues', async () => {
 		const { a } = await setup();
@@ -825,5 +1514,164 @@ describe('authentication while offline', () => {
 		a.tamper = null;
 		await a.sync();
 		expect(await a.db.count('outbox')).toBe(0);
+	});
+
+	// A same-tab change of account while a sync is under way. The engine goes
+	// over the real client (`transportFor`) to a stand-in `fetch` that checks
+	// the account binding as the server does: a header that is not the session
+	// cookie's user is a 401 with nothing applied.
+	const OTHER = '22222222-2222-4222-8222-222222222222';
+	const switching = async (onSwitch: (engine: SyncEngine) => void) => {
+		const { server, a } = await setup();
+		await a.play(Q1, 'CC');
+		let cookie = USER;
+		const sent: { user: string | null; ops: number }[] = [];
+		const applied: number[] = [];
+		vi.stubGlobal('fetch', async (_url: string, init: { headers: Record<string, string>; body: string }) => {
+			const user = init.headers[USER_HEADER] ?? null;
+			const req = JSON.parse(init.body) as SyncRequest;
+			sent.push({ user, ops: req.ops?.length ?? 0 });
+			if (user !== cookie) return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
+			applied.push(req.ops?.length ?? 0);
+			const r = server.sync(req);
+			return new Response(JSON.stringify(r.body), { status: r.status });
+		});
+		bindUser(USER);
+		const statuses: SyncStatus[] = [];
+		let switched = false;
+		const engine: SyncEngine = new SyncEngine(
+			a.db,
+			{ onStatus: (s) => statuses.push(s) },
+			{
+				transport: transportFor(USER),
+				wait: async () => undefined,
+				// The engine asks the time between reading its batch and sending it:
+				// the other account logs in at that moment.
+				now: () => {
+					if (!switched) {
+						switched = true;
+						cookie = OTHER;
+						bindUser(OTHER);
+						onSwitch(engine);
+					}
+					return new Date();
+				}
+			}
+		);
+		await engine.sync();
+		return { a, engine, sent, applied, statuses };
+	};
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		bindUser(null);
+	});
+
+	it('a batch read before another account logged in here is sent under its own account, refused 401, and stays in the outbox', async () => {
+		const { a, engine, sent, applied, statuses } = await switching(() => undefined);
+		// The request named the account the engine was started for, not the tab's new one.
+		expect(sent).toEqual([{ user: USER, ops: 2 }]);
+		expect(applied).toEqual([]);
+		expect(engine.status).toBe('needs_login');
+		expect(statuses).toEqual(['syncing', 'needs_login']);
+		expect(await a.db.count('outbox')).toBe(2);
+		expect((await a.quiz(Q1))!.correct_count).toBe(2);
+	});
+
+	it('an engine stopped by the change of account sends nothing and tells the tab nothing more', async () => {
+		const { a, engine, sent, statuses } = await switching((e) => e.stop());
+		expect(sent).toEqual([]);
+		expect(statuses).toEqual(['syncing']);
+		expect(await a.db.count('outbox')).toBe(2);
+		// Stopped for good: a later trigger does not send either.
+		await engine.sync();
+		expect(sent).toEqual([]);
+	});
+
+	it('an answer that arrives after the engine was stopped is not used, and a 401 among them is not reported', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'CC');
+		const cursor = (await getMeta(a.db, 'sync')).cursor;
+		const said = a.statuses.length;
+		a.tamper = (req, send) => {
+			const r = send(req);
+			a.engine.stop();
+			return r;
+		};
+		await a.sync();
+		expect(a.statuses.slice(said)).toEqual(['syncing']);
+		expect(texts(a)).toEqual([]);
+		// Applied on the server, still queued here: acknowledged from its records at the account's next sync.
+		expect(await a.db.count('outbox')).toBe(2);
+		expect((await getMeta(a.db, 'sync')).cursor).toBe(cursor);
+	});
+});
+
+/** Web Locks as far as the election uses them: one holder a name, the rest queued in order. */
+class FakeLocks {
+	private held = new Set<string>();
+	private queue: { name: string; grant: () => void; signal?: AbortSignal }[] = [];
+
+	request(name: string, options: { signal?: AbortSignal }, callback: () => Promise<void> | void): Promise<void> {
+		return new Promise<void>((resolve, reject) => {
+			const grant = () => {
+				this.held.add(name);
+				void Promise.resolve(callback()).then(() => {
+					this.held.delete(name);
+					resolve();
+					this.next(name);
+				});
+			};
+			options.signal?.addEventListener('abort', () => {
+				const i = this.queue.findIndex((q) => q.grant === grant);
+				if (i < 0) return;
+				this.queue.splice(i, 1);
+				reject(new DOMException('The request was aborted.', 'AbortError'));
+			});
+			if (this.held.has(name)) this.queue.push({ name, grant, signal: options.signal });
+			else grant();
+		});
+	}
+
+	private next(name: string) {
+		const i = this.queue.findIndex((q) => q.name === name);
+		if (i >= 0) this.queue.splice(i, 1)[0].grant();
+	}
+}
+
+describe('the leader election', () => {
+	const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+	const withLocks = async (run: () => Promise<void>) => {
+		const before = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+		Object.defineProperty(globalThis, 'navigator', { value: { locks: new FakeLocks() }, configurable: true });
+		try {
+			await run();
+		} finally {
+			if (before) Object.defineProperty(globalThis, 'navigator', before);
+		}
+	};
+
+	it('a tab that stops waiting for the lock never leads, and the next tab in line does', async () => {
+		await withLocks(async () => {
+			const leading: string[] = [];
+			const tab = (name: string) =>
+				electLeader(USER, () => {
+					leading.push(name);
+					return () => leading.splice(leading.indexOf(name), 1);
+				});
+			const first = tab('first');
+			const second = tab('second');
+			const third = tab('third');
+			await tick();
+			expect(leading).toEqual(['first']);
+			// The second tab logs out while it waits; then the leader goes.
+			second();
+			first();
+			await tick();
+			expect(leading).toEqual(['third']);
+			third();
+			await tick();
+			expect(leading).toEqual([]);
+		});
 	});
 });

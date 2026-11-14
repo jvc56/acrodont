@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { newUser, openPlayerSettings } from './support';
+import { newUser, openPlayerSettings, press } from './support';
 
 // A smoke run of the builder against the seeded fixture catalog (PLAN.md §
 // Creating a cascade): preview as filters change, then Create Cascade.
@@ -66,10 +66,18 @@ test('the builder previews and creates a cascade', async ({ page }) => {
 	await page.getByRole('button', { name: 'Create Cascade' }).click();
 	await expect(page).toHaveURL(/\/cascades\/[0-9a-f-]{36}$/);
 	await expect(page.getByText(/^1 \/ 18$/)).toBeVisible({ timeout: 30_000 });
+	// The original moves on a card, so the copy's first card is told from it.
+	await press(page, 'Space');
+	await press(page, 'Space');
+	await expect(page.getByText(/^2 \/ 18$/)).toBeVisible();
 	await openPlayerSettings(page);
 	await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Duplicate cascade' }).click();
 	await page.getByRole('alertdialog').getByRole('button', { name: 'Duplicate', exact: true }).click();
 	await expect(page).not.toHaveURL(new RegExp(page.url().split('/').pop()!), { timeout: 30_000 });
+	// The player is the copy's, at its first card, and Back is the original's, where it was left.
+	await expect(page.getByText(/^1 \/ 18$/)).toBeVisible({ timeout: 30_000 });
+	await page.goBack();
+	await expect(page.getByText(/^2 \/ 18$/)).toBeVisible({ timeout: 30_000 });
 	await page.goto('/');
 	await expect(page.getByRole('link', { name: 'Sevens again (2)', exact: true })).toBeVisible({ timeout: 30_000 });
 	await expect(page.getByRole('link', { name: 'Sevens again', exact: true })).toBeVisible();

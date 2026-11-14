@@ -424,6 +424,13 @@ fn validation_messages() {
     assert!(field(&f, w, range("num_anagrams", 0, a)).is_none());
     assert!(field(&f, w, range("num_anagrams", 0, a - 1)).is_none());
     assert!(field(&f, w, range("num_anagrams", 0, a + 1)).unwrap().1.contains(&a.to_string()));
+    // A saved search is validated with no target, and so with no ceiling: a
+    // bound its INTEGER column cannot hold is a field error, not a failed insert.
+    let big = parse_tree(&and(vec![range("point_value", 0, 3_000_000_000)])).unwrap();
+    let e = validate(&big, w, None).unwrap_err();
+    assert_eq!((e[0].field.as_str(), e[0].message.as_str()), ("max", "The bound is too large."));
+    let fits = parse_tree(&and(vec![range("point_value", 0, i64::from(i32::MAX))])).unwrap();
+    assert!(validate(&fits, w, None).is_ok());
     let la = f.en_leaves.max_num_anagrams as i64;
     assert!(la < a);
     let lvq = QuizType::LeaveValue;

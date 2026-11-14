@@ -12,7 +12,7 @@
 	import { describe } from '$lib/auth/errors';
 	import { forgetSession, logout, session } from '$lib/auth/session.svelte';
 	import { removeAccountData } from '$lib/local/accounts';
-	import { closeUserDb } from '$lib/local/open';
+	import { closeUserDb, countUnsent } from '$lib/local/open';
 	import SettingRow from '$lib/components/SettingRow.svelte';
 	import { syncNow, syncState } from '$lib/sync/runtime.svelte';
 
@@ -95,14 +95,31 @@
 	}
 
 	async function doLogout() {
-		const id = session.userId;
 		// The app tries to sync first, then always completes locally.
 		if (navigator.onLine) await Promise.race([syncNow(), new Promise((r) => setTimeout(r, 5000))]).catch(() => undefined);
-		await logout();
+		const id = session.userId;
 		if (removeData && id) {
-			closeUserDb();
-			await removeAccountData(id);
+			// Whatever that sync did not send is about to be deleted with the rest:
+			// a long outbox still draining, a server asking the device to wait, a
+			// sync led by another tab, a tab that has stopped syncing. Counted now
+			// from the account's own database, and asked about, whatever the status
+			// line above was showing; a count that cannot be made is asked about too.
+			const left = await countUnsent(id);
+			if (left !== 0) {
+				const ok = await confirmAction({
+					title: 'Discard changes that haven’t synced?',
+					body:
+						left === null
+							? 'This device’s copy could not be checked for changes that haven’t synced. Removing this account’s data from this device discards any there are for good. Log out without removing the data and they will sync the next time you log in here.'
+							: `${left === 1 ? '1 change hasn’t' : `${left} changes haven’t`} synced yet. Removing this account’s data from this device discards ${left === 1 ? 'it' : 'them'} for good. Log out without removing the data and ${left === 1 ? 'it' : 'they'} will sync the next time you log in here.`,
+					action: 'Remove and log out',
+					destructive: true
+				});
+				if (!ok) return;
+			}
 		}
+		// The removal is part of the logout, ahead of its request: it needs no connection.
+		await logout({ removeData });
 		await goto('/login', { replaceState: true });
 	}
 

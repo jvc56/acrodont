@@ -239,16 +239,19 @@ impl Chunk {
     /// Sets one question's grade here, in memory; [`store`] writes it. The
     /// time is kept to the second.
     pub fn set(&mut self, slot: usize, grade: Grade, at: DateTime<Utc>, seq: i64, device: Uuid) {
+        // A chunk names at most 255 devices, the reach of the byte that
+        // points into them; one past that is not named, nor kept (a device
+        // id is the caller's to choose, so the list would grow with every
+        // request that named a new one), and its grade is then decided by
+        // sequence and time like another device's.
         let by = match self.devices.iter().position(|d| *d == device) {
-            Some(i) => i + 1,
-            None => {
+            Some(i) => u8::try_from(i + 1).ok(),
+            None if self.devices.len() < usize::from(u8::MAX) => {
                 self.devices.push(device);
-                self.devices.len()
+                u8::try_from(self.devices.len()).ok()
             }
+            None => None,
         };
-        // A chunk names at most 255 devices; one past that is not named, and
-        // its grade is then decided by sequence and time like another device's.
-        let by = u8::try_from(by).ok();
         self.states[slot] = State { grade: grade_byte(Some(grade)), at: Some(at.timestamp()), seq: Some(seq), by };
         self.updated_seq = self.updated_seq.max(seq);
     }
@@ -520,6 +523,20 @@ mod tests {
         assert_eq!(c.updated_seq, 5);
         assert_eq!(c.card(0).grade, None);
         assert_eq!(c.card(0).graded_by, None);
+    }
+
+    #[test]
+    fn a_chunk_keeps_no_more_devices_than_it_can_name() {
+        let mut c = chunk(0, None, 2);
+        let at = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        for d in 1..=300u128 {
+            c.set(0, Grade::Correct, at, d as i64, Uuid::from_u128(d));
+        }
+        assert_eq!(c.devices.len(), 255);
+        assert_eq!(c.card(0).graded_by, None, "the 300th is not named");
+        // One already named still is.
+        c.set(1, Grade::Missed, at, 301, Uuid::from_u128(255));
+        assert_eq!(c.card(1).graded_by, Some(Uuid::from_u128(255)));
     }
 
     #[test]

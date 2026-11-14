@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE users SET storage_bytes = storage_bytes + $2 WHERE id = $1",
+  "query": "UPDATE users SET storage_bytes = greatest(storage_bytes + $2, 0) WHERE id = $1",
   "describe": {
     "columns": [],
     "parameters": {
@@ -11,5 +11,5 @@
     },
     "nullable": []
   },
-  "hash": "ed920a5a8965d20d1232d933c44a6c47017c821a256c097703eb5b8a192449a8"
+  "hash": "15f10ef21d55b2c75483c0214d47d92f6b88dc330ad537dfa656b17199ecf9ee"
 }

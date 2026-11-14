@@ -86,6 +86,24 @@ async fn register_reports_every_field_error_at_once(pool: sqlx::PgPool) {
     assert!(app.settled_mail_to("nope").await.is_empty());
 }
 
+/// A NUL, or any other control character, in an address is a field error at
+/// register, never a `500` from the database, and a reset request naming one
+/// is answered like any other.
+#[sqlx::test]
+async fn an_address_holding_a_control_character_is_refused(pool: sqlx::PgPool) {
+    let app = TestApp::new(pool).await;
+    let mut c = app.client();
+    for email in ["a\u{0}@example.com", "a@exam\u{0}ple.com", "a\u{7}b@example.com", "a\u{9b}@example.com"] {
+        let r = c.post("/api/auth/register", reg("nul_user", email)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{email:?}");
+        assert_eq!(r.json()["errors"][0]["field"], "email", "{email:?}");
+        let r = c.post("/api/auth/reset-password", json!({ "email": email })).await;
+        assert_eq!(r.status, StatusCode::ACCEPTED, "{email:?}");
+    }
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM users").fetch_one(app.db()).await.unwrap();
+    assert_eq!(n, 0);
+}
+
 #[sqlx::test]
 async fn taken_username_is_a_field_error_and_sends_no_email(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
@@ -1047,6 +1065,107 @@ async fn login_failure_limits(pool: sqlx::PgPool) {
         .await;
     assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(app.state.argon2_verifies.load(Ordering::Relaxed), before);
+}
+
+/// Failed logins arriving together are limited as they are one after another:
+/// each takes its token before its verify, so a burst cannot all pass a
+/// bucket it would empty.
+#[sqlx::test]
+async fn concurrent_failed_logins_cannot_pass_the_limit(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("LOGIN_FAILURES_PER_IP_PER_MINUTE", "3"), ("LOGIN_FAILURES_PER_USERNAME_PER_MINUTE", "3")]).await;
+    app.signed_in("vera").await;
+    let guess = |username: &str| json!({"username": username, "password": "bad-guess"});
+    let count = |statuses: &[StatusCode], s: StatusCode| statuses.iter().filter(|x| **x == s).count();
+
+    // Eight at once from one address, each for another username.
+    let before = app.state.argon2_verifies.load(Ordering::Relaxed);
+    let mut c: Vec<_> = (0..8).map(|_| app.client_from("203.0.113.40")).collect();
+    let [c0, c1, c2, c3, c4, c5, c6, c7] = &mut c[..] else { unreachable!() };
+    let r = tokio::join!(
+        c0.post("/api/auth/login", guess("nobody0")),
+        c1.post("/api/auth/login", guess("nobody1")),
+        c2.post("/api/auth/login", guess("nobody2")),
+        c3.post("/api/auth/login", guess("nobody3")),
+        c4.post("/api/auth/login", guess("nobody4")),
+        c5.post("/api/auth/login", guess("nobody5")),
+        c6.post("/api/auth/login", guess("nobody6")),
+        c7.post("/api/auth/login", guess("nobody7")),
+    );
+    let statuses = [r.0.status, r.1.status, r.2.status, r.3.status, r.4.status, r.5.status, r.6.status, r.7.status];
+    assert_eq!(count(&statuses, StatusCode::UNAUTHORIZED), 3, "{statuses:?}");
+    assert_eq!(count(&statuses, StatusCode::TOO_MANY_REQUESTS), 5, "{statuses:?}");
+    assert_eq!(app.state.argon2_verifies.load(Ordering::Relaxed) - before, 3);
+
+    // Eight at once for one username, each from another address.
+    let before = app.state.argon2_verifies.load(Ordering::Relaxed);
+    let mut c: Vec<_> = (0..8).map(|i| app.client_from(&format!("192.0.2.{i}"))).collect();
+    let [c0, c1, c2, c3, c4, c5, c6, c7] = &mut c[..] else { unreachable!() };
+    let r = tokio::join!(
+        c0.post("/api/auth/login", guess("vera")),
+        c1.post("/api/auth/login", guess("vera")),
+        c2.post("/api/auth/login", guess("vera")),
+        c3.post("/api/auth/login", guess("vera")),
+        c4.post("/api/auth/login", guess("vera")),
+        c5.post("/api/auth/login", guess("vera")),
+        c6.post("/api/auth/login", guess("vera")),
+        c7.post("/api/auth/login", guess("vera")),
+    );
+    let statuses = [r.0.status, r.1.status, r.2.status, r.3.status, r.4.status, r.5.status, r.6.status, r.7.status];
+    assert_eq!(count(&statuses, StatusCode::UNAUTHORIZED), 3, "{statuses:?}");
+    assert_eq!(count(&statuses, StatusCode::TOO_MANY_REQUESTS), 5, "{statuses:?}");
+    assert_eq!(app.state.argon2_verifies.load(Ordering::Relaxed) - before, 3);
+    // A request refused for the username gave its address's token back.
+    let r = app.client_from("192.0.2.7").post("/api/auth/login", guess("nobody")).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+}
+
+/// A username or address no account could have never becomes a limiter's key
+/// and costs no hash, however long it is.
+#[sqlx::test]
+async fn an_impossible_username_or_address_is_refused_before_any_limit(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("RESET_RATE_PER_HOUR", "1")]).await;
+    let mut c = app.client();
+    let before = app.state.argon2_verifies.load(Ordering::Relaxed);
+    let long = "x".repeat(100_000);
+    for _ in 0..15 {
+        let r = c.post("/api/auth/login", json!({"username": long, "password": "bad-guess"})).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(app.state.argon2_verifies.load(Ordering::Relaxed), before);
+    // The reset request answers as it does for any address, and spends
+    // neither the caller's hourly bucket nor one of the address's own.
+    for _ in 0..3 {
+        let r = c.post("/api/auth/reset-password", json!({ "email": long })).await;
+        assert_eq!(r.status, StatusCode::ACCEPTED);
+    }
+    let r = c.post("/api/auth/reset-password", json!({ "email": "someone@example.com" })).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+}
+
+/// Password re-entry behind a session is limited per account, with Change
+/// password: a stolen session cookie is not a way to guess the password.
+#[sqlx::test]
+async fn password_re_entry_is_limited_per_account(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("RESET_RATE_PER_HOUR", "3")]).await;
+    let mut c = app.signed_in("wren").await;
+    let wrong = json!({ "password": "wrong-password" });
+    assert_eq!(c.post("/api/account/sign-out-everywhere", wrong.clone()).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(c.delete("/api/account", wrong.clone()).await.status, StatusCode::BAD_REQUEST);
+    let r = c
+        .post("/api/account/password", json!({"current_password": "wrong-password", "new_password": PASSWORD}))
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    // The fourth try, by any of the three, is refused before a verify.
+    for r in [
+        c.post("/api/account/sign-out-everywhere", wrong.clone()).await,
+        c.delete("/api/account", json!({ "password": PASSWORD })).await,
+    ] {
+        assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+        assert!(r.retry_after().is_some());
+    }
+    // Another account's tries are its own.
+    let mut other = app.signed_in("xena").await;
+    assert_eq!(other.post("/api/account/sign-out-everywhere", json!({ "password": PASSWORD })).await.status, StatusCode::NO_CONTENT);
 }
 
 #[sqlx::test]

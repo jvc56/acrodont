@@ -7,11 +7,14 @@
 #            scripts. About 5 minutes.
 #   Main     a push to main, and a manual run on any branch: the Push tier,
 #            plus make test-e2e-main (update.spec and the @env passes, each on
-#            its own stack, side by side) and the seeding check.
+#            its own stack, side by side), the seeding check and the ops image
+#            check (make test-ops-image: the image builds, and the restore
+#            drill passes in it on a dump of a seeded stack).
 #   Nightly  04:30 UTC on main: the Main tier, plus make test-scale. A failure
 #            opens (or comments on) one issue.
 #
-# The seeding check also runs on a push that changes scripts/ (or this file).
+# The seeding check also runs on a push that changes scripts/ (or this file),
+# and the ops image check on one that changes scripts/ or docker/ (or this file).
 # A manual run (workflow_dispatch, any branch) is also how a branch gets the
 # scale suite before it merges: never run `make test-scale` locally for that.
 #
@@ -182,13 +185,14 @@ jobs:
           path: e2e/test-results
           if-no-files-found: ignore
 
-  # Which paths a push changed, for the seeding check.
+  # Which paths a push changed, for the seeding and ops image checks.
   changes:
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       seeding: ${{ steps.filter.outputs.seeding }}
+      ops: ${{ steps.filter.outputs.ops }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -200,6 +204,13 @@ jobs:
           filters: |
             seeding:
               - 'scripts/**'
+              - '.github/workflows/ci.yml'
+            ops:
+              - 'scripts/**'
+              - 'docker/**'
+              - 'backend/migrations/**'
+              - 'docker-compose.yml'
+              - 'Makefile'
               - '.github/workflows/ci.yml'
 
   # § End-to-end tests → What the tests reuse: "CI runs it once more with
@@ -223,6 +234,28 @@ jobs:
       - name: make test-e2e-seeding (seeding under a two-a-minute upload limit)
         run: make test-e2e-seeding
 
+  # The ops image is otherwise first built inside the first release, and
+  # backup.py and drill.py first run in production: the image builds here and
+  # imports boto3, backup.py dumps a seeded stack from inside it with its own
+  # pg_dump, and the drill restores that dump inside it. A migration the app
+  # role cannot restore shows here, so the migrations are among its paths.
+  ops-image:
+    needs: changes
+    if: ${{ !cancelled() && (github.ref == 'refs/heads/main' || github.event_name != 'push' || needs.changes.outputs.ops == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.98"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: backend
+          shared-key: e2e-release
+      - name: make test-ops-image (the ops image builds; the restore drill passes in it on a dump of a seeded stack)
+        run: make test-ops-image
+
   terraform:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -241,6 +274,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: make ops-check (operator scripts against fakes, runbook blocks parse)
         run: make ops-check
+      - name: make contract-check (the generators still write the checked-in contract fixtures)
+        run: make contract-check
 
   scale:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -268,8 +303,10 @@ jobs:
   # scheduled run, in any job, opens (or comments on) one issue, and
   # scripts/deploy.sh warns.
   nightly-failure:
-    needs: [lint, unit-backend, unit-frontend, integration, e2e-core, e2e-main, seeding, terraform, scripts, scale]
-    if: failure() && github.event_name == 'schedule'
+    needs: [lint, unit-backend, unit-frontend, integration, e2e-core, e2e-main, seeding, ops-image, terraform, scripts, scale]
+    # A job that runs out its timeout-minutes may end as cancelled, which
+    # failure() does not count: a hung scale run must open the issue too.
+    if: ${{ always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-24.04
     permissions:
       issues: write

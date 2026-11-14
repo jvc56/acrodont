@@ -29,6 +29,8 @@ export interface RebaseOutcome {
 	needsIndexList: Set<string>;
 }
 
+export const newOutcome = (): RebaseOutcome => ({ notices: [], changed: new Set(), needsIndexList: new Set() });
+
 const REBASE_STORES: StoreName[] = [...BASE, ...STAGING, ...OVERLAY, 'outbox', 'meta', 'questions', 'cards'];
 
 /**
@@ -178,8 +180,6 @@ export interface RebaseCtx {
 	device_id: string;
 	max_quiz_questions: number;
 	now: () => Date;
-	/** False for a response that carried no pull (`resync_required`, `426`): the cursor stays. */
-	advance?: boolean;
 }
 
 /**
@@ -187,26 +187,29 @@ export interface RebaseCtx {
  * The cursor advances only once every cascade's transaction has committed, so
  * an interrupted rebase leaves it unadvanced and the next pull converges.
  */
-export async function rebase(db: UserDb, st: PullState, acked: Acked[], ctx: RebaseCtx): Promise<RebaseOutcome> {
-	const out: RebaseOutcome = { notices: [], changed: new Set(), needsIndexList: new Set() };
+export async function rebase(
+	db: UserDb,
+	st: PullState,
+	acked: Acked[],
+	ctx: RebaseCtx,
+	// The caller's own, when it wants what the cascades already committed
+	// produced (their notices) from a rebase that then failed.
+	out: RebaseOutcome = newOutcome()
+): Promise<RebaseOutcome> {
 
-	// Step 1: drop every acknowledged operation, applied or rejected.
-	{
-		const tx = db.transaction(['outbox'], 'readwrite');
-		const outbox = tx.objectStore('outbox');
-		// A batch is the outbox's first entries, and device_seq only grows, so
-		// when the range from its first to its last holds exactly the acknowledged
-		// entries it goes in one request rather than one per entry.
-		const seqs = acked.map((a) => a.entry.device_seq);
-		const range = seqs.length ? IDBKeyRange.bound(Math.min(...seqs), Math.max(...seqs)) : null;
-		if (range && (await outbox.count(range)) === seqs.length) await outbox.delete(range);
-		else await Promise.all(seqs.map((k) => outbox.delete(k)));
-		await tx.done;
-	}
-
+	// Step 1 is done cascade by cascade, inside each one's transaction: an
+	// acknowledged operation leaves the outbox together with the rows its
+	// acknowledgement promotes. Dropped on their own first, a tab closed before
+	// a cascade's transaction would forget that a finish of this batch made a
+	// level, and the operations queued on that level would be refused in the
+	// next replay and lost.
 	const byCascade = new Map<string, Acked[]>();
+	const loose: Acked[] = [];
 	for (const a of acked) {
-		if (!a.entry.cascade_id) continue;
+		if (!a.entry.cascade_id) {
+			loose.push(a);
+			continue;
+		}
 		const list = byCascade.get(a.entry.cascade_id) ?? [];
 		list.push(a);
 		byCascade.set(a.entry.cascade_id, list);
@@ -218,22 +221,89 @@ export async function rebase(db: UserDb, st: PullState, acked: Acked[], ctx: Reb
 		await rebaseCascade(db, st, id, workFor(byCascade.get(id) ?? []), ctx, out);
 	}
 
-	const tx = db.transaction(['meta'], 'readwrite');
-	if (ctx.advance !== false) {
-		await writeMeta(tx as unknown as RwTx, 'sync', {
-			cursor: st.seq,
-			last_sync_at: ctx.now().toISOString(),
-			upgrade_required: false
-		});
-	}
+	const tx = db.transaction(['meta', 'outbox'], 'readwrite');
+	// An acknowledged operation that names no cascade goes with the cursor.
+	await dropAcked(tx as unknown as RwTx, loose);
+	await writeMeta(tx as unknown as RwTx, 'sync', {
+		cursor: st.seq,
+		last_sync_at: ctx.now().toISOString(),
+		upgrade_required: false
+	});
 	await tx.done;
 	return out;
 }
 
+/** Step 1: the acknowledged operations, applied or rejected, leave the outbox. */
+async function dropAcked(tx: RwTx, acked: Acked[]) {
+	if (!acked.length) return;
+	const outbox = tx.objectStore('outbox');
+	// A batch is the outbox's first entries, and device_seq only grows, so
+	// when the range from its first to its last holds exactly the acknowledged
+	// entries it goes in one request rather than one per entry. Exactly, by
+	// key and not by count: these are one cascade's, and another cascade's
+	// acknowledged entry can lie between them while one of these has since
+	// been replaced (a newer move_cursor takes a new device_seq). The counts
+	// then agree, and the range would take the other cascade's entry before
+	// the transaction that applies its rows.
+	const seqs = new Set(acked.map((a) => a.entry.device_seq));
+	const range = IDBKeyRange.bound(Math.min(...seqs), Math.max(...seqs));
+	const held = await outbox.getAllKeys(range);
+	if (held.length === seqs.size && held.every((k) => seqs.has(k as number))) await outbox.delete(range);
+	else await Promise.all([...seqs].map((k) => outbox.delete(k)));
+}
+
+/**
+ * The grades the server holds for a quiz an applied operation of this batch
+ * created or reset: those of the batch's own applied `grade` operations on
+ * the pulled attempt, in order, under whatever the pull itself carried for
+ * the quiz. Another device may have graded the attempt as well (a batch
+ * answered from the server's records, after a lost response, can be behind
+ * it): those grades are here only because the pull carries them, from the old
+ * cursor, and they are written last so that they stand.
+ */
+async function serverGrades(tx: RwTx, pq: QuizRow, work: CascadeWork, S: number) {
+	const grades = new Map<number, Pick<QuestionRow, 'grade' | 'graded_at'>>();
+	for (const a of work.acked) {
+		const op = a.entry.op;
+		if (a.result.status !== 'applied' || op.type !== 'grade' || op.quiz_id !== pq.id) continue;
+		if (op.attempt !== pq.attempt || BigInt(op.attempt_seed as string) !== BigInt(pq.shuffle_seed)) continue;
+		grades.set(op.question_idx as number, { grade: op.grade as QuestionRow['grade'], graded_at: op.at });
+	}
+	const pulled = await tx.objectStore('staging_quiz_questions').index('quiz_id').getAll(pq.id);
+	// A quiz new to the base had its pulled rows written there as they came.
+	if (work.created.has(pq.id)) {
+		for (const r of await tx.objectStore('quiz_questions').index('quiz_id').getAll(pq.id)) if (r.seq === S) pulled.push(r);
+	}
+	for (const r of pulled) if (r.grade !== null) grades.set(r.question_idx, { grade: r.grade, graded_at: r.graded_at });
+	return grades;
+}
+
 async function rebaseCascade(db: UserDb, st: PullState, C: string, work: CascadeWork, ctx: RebaseCtx, out: RebaseOutcome) {
-	const S = st.seq;
 	const tx = db.transaction(REBASE_STORES, 'readwrite') as unknown as RwTx;
 	tx.done.catch(() => undefined);
+	try {
+		await rebaseCascadeIn(tx, st, C, work, ctx, out);
+	} catch (e) {
+		// A transaction aborted for want of room says so itself; the request in
+		// flight at that moment reports only the abort. Nothing of it was kept:
+		// this cascade's acknowledged operations are still in the outbox.
+		const cause = tx.error ?? e;
+		// An error that is not IndexedDB's leaves the transaction open, and it
+		// would commit what it had done so far: the acknowledged operations gone
+		// from the outbox with their rows half applied and the replay cut short.
+		// Aborted, as `applyLocally` aborts, the cascade is as it was.
+		try {
+			tx.abort();
+		} catch {
+			// Already aborted.
+		}
+		throw cause;
+	}
+}
+
+async function rebaseCascadeIn(tx: RwTx, st: PullState, C: string, work: CascadeWork, ctx: RebaseCtx, out: RebaseOutcome) {
+	const S = st.seq;
+	await dropAcked(tx, work.acked);
 	// What is still pending here is counted, and read in full only by the paths
 	// that need every entry: on the fast path the work stays proportional to
 	// the acknowledged batch, whatever an offline session left queued behind it.
@@ -358,10 +428,28 @@ async function rebaseCascade(db: UserDb, st: PullState, C: string, work: Cascade
 	} else {
 		// Step 3: promote the rows this device built for a quiz an applied
 		// operation created or reset, then delete the rest of the overlay.
+		// The overlay's rows also show what the operations still waiting did to
+		// the quiz (their grades; a later finish's new order), and the base is
+		// the server's: a promoted row takes the device's question and the
+		// server's grade and place. The replay below then puts each waiting
+		// grade back and counts it. Promoted with a waiting grade already on it,
+		// the row would add nothing to the quiz's count in the replay, and the
+		// level's own finish, queued behind, would be refused `ungraded` and
+		// dropped with everything studied after it.
 		const oq = tx.objectStore('overlay_quiz_questions');
+		const qs = tx.objectStore('quiz_questions');
 		for (const quizId of promote) {
-			const qs = tx.objectStore('quiz_questions');
-			await Promise.all((await oq.index('quiz_id').getAll(quizId)).map((r) => qs.put({ ...r, seq: S })));
+			const pq = (await tx.objectStore('quizzes').get(quizId))!;
+			const ovq = await tx.objectStore('overlay_quizzes').get(quizId);
+			const grades = await serverGrades(tx, pq, work, S);
+			let rows = await oq.index('quiz_id').getAll(quizId);
+			if (!ovq || ovq.attempt !== pq.attempt || ovq.shuffle_seed !== pq.shuffle_seed) rows = withPositions(rows, pq.shuffle_seed);
+			await Promise.all(
+				rows.map((r) => {
+					const g = grades.get(r.question_idx);
+					return qs.put({ ...r, grade: g?.grade ?? null, graded_at: g?.graded_at ?? null, seq: S });
+				})
+			);
 		}
 		await clearOverlay(tx, C);
 		// Step 4: replay the outbox, in device_seq order, with the same rules.
@@ -431,19 +519,33 @@ async function settleQuiz(
 	const n = pq.question_count;
 	const graded = pq.correct_count + pq.missed_count;
 
+	const ovq = await tx.objectStore('overlay_quizzes').get(pq.id);
+
 	// A quiz the pull reports cleared: its rows and positions stay as they are.
+	// One this batch both made and cleared has none in the base yet, and a
+	// cleared quiz's rows never travel: the device's own are promoted, on their
+	// hash, like any created quiz's. Left in the overlay they would be deleted
+	// with it, and a restore of the level still waiting in the outbox would
+	// find no rows, mark it pending, and have every answer given after it
+	// refused `not_found` in the replay.
 	if (pq.status === 'cleared') {
 		await base.put(mergeQuiz(pq, false));
+		if (work.created.has(pq.id) && ovq && !ovq.pending && ovq.questions_hash === pq.questions_hash) promote.add(pq.id);
 		return;
 	}
 
 	// Promotion: the device's rows for a quiz an applied operation created or
-	// reset, when the pulled row's attempt and seed (and, for a created quiz,
-	// its question hash) equal those of the rows the device built.
-	const ovq = await tx.objectStore('overlay_quizzes').get(pq.id);
-	if (ovq && !ovq.pending && ovq.attempt === pq.attempt && ovq.shuffle_seed === pq.shuffle_seed) {
+	// reset. A created quiz's rows are promoted when their question hash equals
+	// the pulled row's: its questions are fixed for life, so they are the right
+	// rows even when a finish still waiting in the outbox has since given the
+	// overlay a later attempt of it (step 3 places them by the pulled seed). A
+	// reset quiz's are promoted when the pulled row's attempt and seed equal
+	// those of the rows the device built; otherwise the base's own rows are
+	// rebuilt below.
+	if (ovq && !ovq.pending) {
 		const created = work.created.has(pq.id);
-		if ((created && ovq.questions_hash === pq.questions_hash) || (!created && work.reset.has(pq.id))) {
+		const same = ovq.attempt === pq.attempt && ovq.shuffle_seed === pq.shuffle_seed;
+		if ((created && ovq.questions_hash === pq.questions_hash) || (!created && same && work.reset.has(pq.id))) {
 			await base.put(mergeQuiz(pq, false));
 			promote.add(pq.id);
 			return;

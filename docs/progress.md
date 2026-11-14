@@ -2,6 +2,12 @@
 
 Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
 
+The phase records below are of their day. Where a figure or a decision in
+them has changed since, PLAN.md has today's: in particular the storage limit
+is 10 MB (not 100 MB), `MAX_ACCOUNTS` is 750 (not 50), Change password is
+back on the Account page, and the player's Settings disable Duplicate
+cascade (not Start over) when storage is full.
+
 ## Current
 
 - **Phase:** 8 — Production, prepared up to the steps that need credentials
@@ -621,8 +627,8 @@ the authoritative sequence; in short:
 - PQ-015 (cascade limit as a client constant) — superseded by PQ-023: there is no cascade limit; `/api/auth/me` and every sync response report the account's storage.
 - PQ-016 (expired-session journey TTL 20 s, not 2 s) — provisional.
 - PQ-017 (forty-cascade drop pass; ROW_BYTES 150; "only the kept one") — provisional.
-- PQ-018 (answer-limit journey vs "never its cards") — provisional.
-- PQ-019 (device scale cases at a tenth; the first-sync budget) — decided: the budget is the measurement, 150 s for one heavily played cascade (49–107 s measured at the 130,000 cap).
+- PQ-018 (answer-limit journey vs "never its cards") — decided (see `plan-questions.md`; listed here as provisional until 2026-11-13).
+- PQ-019 (device scale cases at a tenth; the first-sync budget) — decided: the budget is the measurement, 150 s for one heavily played cascade (49–107 s measured at the 130,000 cap). Since then: 300 s, at the 300,000-question ceiling (see the Phase 7 note above and `scale-first-sync.scale.ts`).
 - PQ-023 (one storage limit, 100 MB; saved searches and the Trash count; 300,000 questions; no count cap) — decided 2026-11-11.
 
 ## Known failing tests

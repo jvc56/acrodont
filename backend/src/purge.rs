@@ -19,6 +19,9 @@ pub fn spawn(state: AppState) {
         let mut tick = tokio::time::interval(Duration::from_secs(state.config.purge_interval_seconds.max(1)));
         loop {
             tick.tick().await;
+            // This instance's own in-memory limits, whoever holds the lock.
+            state.limits.prune();
+            state.email_caps.prune();
             if let Err(e) = run_once(&state).await {
                 tracing::error!(error = %e, "purge run failed");
             }
@@ -40,14 +43,49 @@ pub async fn run_once(state: &AppState) -> anyhow::Result<bool> {
     result.map(|_| true)
 }
 
+/// Every step runs whatever the others did: a step that fails is logged and
+/// the run goes on, so one account's bad row cannot also stop every other
+/// account's purge, the pruning and the recount, hour after hour.
 async fn run_locked(state: &AppState) -> anyhow::Result<()> {
-    purge_trash(state).await?;
-    prune_sync_records(state).await?;
-    delete_stale_unconfirmed(state).await?;
-    prune_export_tokens(state).await?;
-    prune_catalog_status(state).await?;
-    recount_storage(state).await?;
-    Ok(())
+    let mut failed = Vec::new();
+    let mut step = |name: &'static str, result: anyhow::Result<()>| {
+        if let Err(e) = result {
+            tracing::error!(step = name, error = %e, "purge step failed");
+            failed.push(name);
+        }
+    };
+    step("purge_trash", purge_trash(state).await);
+    step("prune_sync_records", prune_sync_records(state).await);
+    step("delete_stale_unconfirmed", delete_stale_unconfirmed(state).await.map(drop));
+    step("prune_export_tokens", prune_export_tokens(state).await.map(drop));
+    step("prune_catalog_status", prune_catalog_status(state).await.map(drop));
+    step("recount_storage", recount_storage(state).await.map(drop));
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("these steps failed: {}", failed.join(", ")))
+    }
+}
+
+/// Counts the accounts a per-account step failed for, logging each, so the
+/// step can go on to the next account and still report that it failed.
+struct Failures(u64);
+
+impl Failures {
+    fn note(&mut self, what: &'static str, user: Uuid, result: anyhow::Result<()>) {
+        if let Err(e) = result {
+            tracing::error!(%user, error = %e, "{what} failed for an account; going on to the next");
+            self.0 += 1;
+        }
+    }
+
+    fn done(self, what: &'static str) -> anyhow::Result<()> {
+        if self.0 == 0 {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("{what} failed for {} accounts", self.0))
+        }
+    }
 }
 
 /// Each user's storage total recounted from their cascades and saved
@@ -77,58 +115,65 @@ async fn users_with_trash(state: &AppState, days: i32) -> anyhow::Result<Vec<Uui
 pub async fn purge_trash(state: &AppState) -> anyhow::Result<()> {
     let days = state.config.trash_retention_days as i32;
     let cap = i64::from(state.config.purge_max_quizzes_per_user_per_run);
+    let mut failures = Failures(0);
     for user in users_with_trash(state, days).await? {
-        let mut tx = state.db.begin().await?;
-        sqlx::query!("SELECT id FROM users WHERE id = $1 FOR UPDATE", user).fetch_one(&mut *tx).await?;
-        let seq = sqlx::query_scalar!("UPDATE users SET sync_seq = sync_seq + 1 WHERE id = $1 RETURNING sync_seq", user)
-            .fetch_one(&mut *tx)
-            .await?;
-        // The account's devices drop what was purged at once (sync::notify).
-        crate::sync::notify::changed(&mut tx, user, None).await?;
-        let quizzes: Vec<Uuid> = sqlx::query_scalar!(
-            "SELECT q.id FROM quizzes q JOIN cascades c ON c.id = q.cascade_id
-             WHERE q.user_id = $1 AND q.status = 'cleared' AND c.trashed_at IS NULL
-               AND q.cleared_at < now() - make_interval(days => $2)
-             ORDER BY q.cleared_at, q.id LIMIT $3",
+        failures.note("purging the trash", user, purge_user_trash(state, user, days, cap).await);
+    }
+    failures.done("purging the trash")
+}
+
+/// One account's turn, in one transaction.
+async fn purge_user_trash(state: &AppState, user: Uuid, days: i32, cap: i64) -> anyhow::Result<()> {
+    let mut tx = state.db.begin().await?;
+    sqlx::query!("SELECT id FROM users WHERE id = $1 FOR UPDATE", user).fetch_one(&mut *tx).await?;
+    let seq = sqlx::query_scalar!("UPDATE users SET sync_seq = sync_seq + 1 WHERE id = $1 RETURNING sync_seq", user)
+        .fetch_one(&mut *tx)
+        .await?;
+    // The account's devices drop what was purged at once (sync::notify).
+    crate::sync::notify::changed(&mut tx, user, None).await?;
+    let quizzes: Vec<Uuid> = sqlx::query_scalar!(
+        "SELECT q.id FROM quizzes q JOIN cascades c ON c.id = q.cascade_id
+         WHERE q.user_id = $1 AND q.status = 'cleared' AND c.trashed_at IS NULL
+           AND q.cleared_at < now() - make_interval(days => $2)
+         ORDER BY q.cleared_at, q.id LIMIT $3",
+        user,
+        days,
+        cap
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    if !quizzes.is_empty() {
+        // What they free, per cascade, read before they go.
+        let freed = crate::storage::quizzes_bytes(&mut tx, &quizzes).await?;
+        sqlx::query!("DELETE FROM quizzes WHERE id = ANY($1)", &quizzes).execute(&mut *tx).await?;
+        for (cascade, bytes) in freed {
+            crate::storage::add_to_cascade(&mut tx, user, cascade, -bytes, seq).await?;
+        }
+        sqlx::query!(
+            "INSERT INTO sync_tombstones (user_id, entity, entity_id, seq)
+             SELECT $1, 'quiz', q, $3 FROM UNNEST($2::uuid[]) AS q
+             ON CONFLICT (user_id, entity, entity_id) DO UPDATE SET seq = EXCLUDED.seq, deleted_at = now()",
             user,
-            days,
-            cap
+            &quizzes,
+            seq
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    if (quizzes.len() as i64) < cap {
+        let cascades: Vec<Uuid> = sqlx::query_scalar!(
+            "SELECT id FROM cascades WHERE user_id = $1 AND trashed_at < now() - make_interval(days => $2)
+             ORDER BY trashed_at, id",
+            user,
+            days
         )
         .fetch_all(&mut *tx)
         .await?;
-        if !quizzes.is_empty() {
-            // What they free, per cascade, read before they go.
-            let freed = crate::storage::quizzes_bytes(&mut tx, &quizzes).await?;
-            sqlx::query!("DELETE FROM quizzes WHERE id = ANY($1)", &quizzes).execute(&mut *tx).await?;
-            for (cascade, bytes) in freed {
-                crate::storage::add_to_cascade(&mut tx, user, cascade, -bytes, seq).await?;
-            }
-            sqlx::query!(
-                "INSERT INTO sync_tombstones (user_id, entity, entity_id, seq)
-                 SELECT $1, 'quiz', q, $3 FROM UNNEST($2::uuid[]) AS q
-                 ON CONFLICT (user_id, entity, entity_id) DO UPDATE SET seq = EXCLUDED.seq, deleted_at = now()",
-                user,
-                &quizzes,
-                seq
-            )
-            .execute(&mut *tx)
-            .await?;
+        for c in cascades {
+            crate::sync::ops::purge_cascade_rows(&mut tx, user, c, seq).await?;
         }
-        if (quizzes.len() as i64) < cap {
-            let cascades: Vec<Uuid> = sqlx::query_scalar!(
-                "SELECT id FROM cascades WHERE user_id = $1 AND trashed_at < now() - make_interval(days => $2)
-                 ORDER BY trashed_at, id",
-                user,
-                days
-            )
-            .fetch_all(&mut *tx)
-            .await?;
-            for c in cascades {
-                crate::sync::ops::purge_cascade_rows(&mut tx, user, c, seq).await?;
-            }
-        }
-        tx.commit().await?;
     }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -146,25 +191,31 @@ pub async fn prune_sync_records(state: &AppState) -> anyhow::Result<()> {
     )
     .fetch_all(&state.db)
     .await?;
+    let mut failures = Failures(0);
     for user in users {
-        let mut tx = state.db.begin().await?;
-        sqlx::query!("SELECT id FROM users WHERE id = $1 FOR UPDATE", user).fetch_one(&mut *tx).await?;
-        let highest = sqlx::query_scalar!(
-            "WITH gone AS (DELETE FROM sync_tombstones WHERE user_id = $1 AND deleted_at < now() - make_interval(days => $2)
-                           RETURNING seq)
-             SELECT max(seq) FROM gone",
-            user,
-            days
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        if let Some(h) = highest {
-            sqlx::query!("UPDATE users SET sync_floor_seq = greatest(sync_floor_seq, $2) WHERE id = $1", user, h)
-                .execute(&mut *tx)
-                .await?;
-        }
-        tx.commit().await?;
+        failures.note("pruning tombstones", user, prune_user_tombstones(state, user, days).await);
     }
+    failures.done("pruning tombstones")
+}
+
+async fn prune_user_tombstones(state: &AppState, user: Uuid, days: i32) -> anyhow::Result<()> {
+    let mut tx = state.db.begin().await?;
+    sqlx::query!("SELECT id FROM users WHERE id = $1 FOR UPDATE", user).fetch_one(&mut *tx).await?;
+    let highest = sqlx::query_scalar!(
+        "WITH gone AS (DELETE FROM sync_tombstones WHERE user_id = $1 AND deleted_at < now() - make_interval(days => $2)
+                       RETURNING seq)
+         SELECT max(seq) FROM gone",
+        user,
+        days
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if let Some(h) = highest {
+        sqlx::query!("UPDATE users SET sync_floor_seq = greatest(sync_floor_seq, $2) WHERE id = $1", user, h)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
     Ok(())
 }
 
