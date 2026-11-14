@@ -13,7 +13,7 @@ import type { Notice } from './notices';
 import { questionRowsFor } from './policy';
 import { BATCH_OPS, type Reply, type SyncRequest, type SyncResponse, type Transport } from './protocol';
 import { clearStaging, newPull, writePage, type PullState } from './pull';
-import { rebase, type Acked, type RebaseOutcome } from './rebase';
+import { newOutcome, rebase, type Acked, type RebaseOutcome } from './rebase';
 
 export type SyncStatus =
 	| 'idle'
@@ -31,7 +31,18 @@ export interface EngineHooks {
 	onSynced?: (o: RebaseOutcome) => void | Promise<void>;
 	/** A display setting or the controls changed here, taken from the account's shared ones. */
 	onDeviceSettings?: () => void;
+	/**
+	 * A pull's write found no room on the device: the drop pass, then the answer
+	 * eviction (§ On the device, "A quota error is handled"). The pull is then
+	 * made once more.
+	 */
+	makeRoom?: () => void | Promise<void>;
+	/** That second try found no room either: "not enough room on this device". */
+	onNoRoom?: () => void;
 }
+
+/** IndexedDB's refusal for want of room, as a failed write or an aborted transaction reports it. */
+const isQuota = (e: unknown) => e instanceof DOMException && e.name === 'QuotaExceededError';
 
 /** POST /api/sync over fetch, with the session cookie, CSRF token and user binding. */
 export const fetchTransport: Transport = async (req: SyncRequest): Promise<Reply> => {
@@ -116,6 +127,10 @@ export class SyncEngine {
 					this.again = false;
 					await this.cycle();
 				} while (this.again && !this.stopped && this.status === 'idle');
+			} catch (e) {
+				// A cycle that threw did not sync: never left reading "Syncing…".
+				if (this.status === 'syncing') this.setStatus('offline');
+				throw e;
 			} finally {
 				this.running = null;
 			}
@@ -152,6 +167,7 @@ export class SyncEngine {
 		let cursor = sync.cursor;
 		// Device settings shared here and not yet sent go with the first request.
 		let shares: SharedSettings | null = await pendingShares(this.db);
+		let madeRoom = false;
 		for (;;) {
 			const batch: OutboxEntry[] = await this.db.getAll('outbox', undefined, BATCH_OPS);
 			const qrf = await questionRowsFor(this.db, this.now());
@@ -204,9 +220,33 @@ export class SyncEngine {
 			// are taken, so what was just pushed stays on the device as the server
 			// has it.
 			const st = newPull(Number(body.sync_seq), cursor === null, qrf);
-			const pulled = await this.pullPages(st, body, device_id, cursor);
-			if (!pulled) return;
-			const o = await rebase(this.db, st, acked, rctx);
+			const o = newOutcome();
+			try {
+				const pulled = await this.pullPages(st, body, device_id, cursor);
+				if (!pulled) return;
+				await rebase(this.db, st, acked, rctx, o);
+			} catch (e) {
+				// What the cascades already applied had to say is still said.
+				this.emit(o);
+				if (!isQuota(e)) throw e;
+				// No room for the pull. The failed write took nothing with it: the
+				// cursor has not moved, the staging rows are the next pull's to
+				// discard, and an operation leaves the outbox only in the transaction
+				// that applies its cascade's rows. Make room, and pull once more:
+				// the server answers what it already recorded from its records.
+				if (!madeRoom) {
+					madeRoom = true;
+					try {
+						await this.hooks.makeRoom?.();
+						continue;
+					} catch (e2) {
+						if (!isQuota(e2)) throw e2;
+					}
+				}
+				this.hooks.onNoRoom?.();
+				this.setStatus('idle');
+				return;
+			}
 			if (reply.status === 426) {
 				// The rest of the outbox waits, and "reload to keep syncing" shows
 				// until a sync succeeds.
@@ -293,26 +333,57 @@ export function startTriggers(engine: SyncEngine): () => void {
 	};
 }
 
+/** `EventSource.CLOSED`: the browser has given the stream up. */
+const STREAM_CLOSED = 2;
+/** The wait before a closed stream is opened again, doubling up to the stream's own lifetime. */
+export const STREAM_REOPEN_MS = 5_000;
+export const STREAM_REOPEN_MAX_MS = 300_000;
+
 /**
  * Telling the other devices (PLAN.md § The sync cycle): the server's stream of
  * `changed` events for this account, each a change another device synced,
  * which this device syncs at once rather than at its next 30-second sync. A
  * stream opened again (the server ends each after a few minutes; a network
  * drops) syncs too, since a change may have come while it was closed. The
- * browser reconnects by itself; a stream the server refuses (signed out) is
- * left closed, and the 30-second sync carries on alone.
+ * browser reconnects by itself after a dropped connection; a stream it gives
+ * up, because the answer was not a stream, is opened again after a wait; and
+ * one refused because the account is signed out is left closed, and the
+ * 30-second sync carries on alone.
  */
 export function listenForChanges(engine: SyncEngine, userId: string, deviceId: string): () => void {
 	if (typeof EventSource === 'undefined') return () => undefined;
 	const q = new URLSearchParams({ user: userId, device: deviceId });
-	const es = new EventSource(`/api/sync/events?${q}`);
+	let es: EventSource | null = null;
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	let delay = STREAM_REOPEN_MS;
 	let opened = false;
-	es.addEventListener('changed', () => engine.schedule(0));
-	es.onopen = () => {
-		if (opened) engine.schedule(0);
-		opened = true;
+	let stopped = false;
+	const open = () => {
+		timer = null;
+		const stream = new EventSource(`/api/sync/events?${q}`);
+		es = stream;
+		stream.addEventListener('changed', () => engine.schedule(0));
+		stream.onopen = () => {
+			delay = STREAM_REOPEN_MS;
+			if (opened) engine.schedule(0);
+			opened = true;
+		};
+		stream.onerror = () => {
+			// A dropped connection leaves the stream CONNECTING and the browser
+			// opens it again. An answer that is not a stream (a 502 while the
+			// server is replaced, a 429) closes it for good, so it is opened again
+			// here, each time after twice as long, unless the account is signed out.
+			if (stopped || stream.readyState !== STREAM_CLOSED || engine.status === 'needs_login') return;
+			timer = setTimeout(open, delay);
+			delay = Math.min(delay * 2, STREAM_REOPEN_MAX_MS);
+		};
 	};
-	return () => es.close();
+	open();
+	return () => {
+		stopped = true;
+		if (timer) clearTimeout(timer);
+		es?.close();
+	};
 }
 
 /**

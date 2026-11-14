@@ -181,6 +181,15 @@ export function startSync(userId: string): () => void {
 					reloadDeviceSettings();
 					post({ kind: 'settings' });
 				},
+				// A pull with no room: what the download manager may drop, dropped.
+				makeRoom: async () => {
+					await downloads?.makeRoom();
+				},
+				onNoRoom: () => {
+					if (downloads) downloads.noRoom = true;
+					syncState.noRoom = true;
+					post({ kind: 'progress', noRoom: true });
+				},
 				onStatus: (s) => {
 					syncState.status = s;
 					void refreshPending();

@@ -15,6 +15,7 @@ import {
 	type QuizRow
 } from '$lib/local/rows';
 import { STAGING } from '$lib/local/db';
+import type { RwTx } from '$lib/local/view';
 import type { Changes, Tombstone } from './protocol';
 
 export interface PullState {
@@ -64,6 +65,16 @@ export async function writePage(db: UserDb, st: PullState, changes: Changes) {
 		'readwrite'
 	);
 	tx.done.catch(() => undefined);
+	try {
+		await writeRows(tx as unknown as RwTx, st, changes);
+	} catch (e) {
+		// A transaction aborted for want of room says so itself; the request in
+		// flight at that moment reports only the abort.
+		throw tx.error ?? e;
+	}
+}
+
+async function writeRows(tx: RwTx, st: PullState, changes: Changes) {
 	const S = st.seq;
 	const mark = (cascade: string | undefined | null, rowSeq: number) => {
 		if (!cascade) return;

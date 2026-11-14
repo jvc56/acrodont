@@ -3125,8 +3125,11 @@ brings the server's.
   drop pass to take. What the retry means depends on which write failed:
   - **A pull's per-cascade transaction or a download**: the sync cursor is left
     unadvanced, the staging rows are for the next pull to discard and the outbox
-    is untouched, so nothing the user did is lost and studying continues on what
-    is already local.
+    is untouched (a cascade whose transaction had already committed has had its
+    acknowledged operations dropped with it, and no other), so nothing the user
+    did is lost and studying continues on what is already local. For a pull the
+    retry is the same request made again, which the server answers from its
+    records.
   - **An `applyLocally`**: the aborted unit **is** what the user just did. The
     grade, cursor move or finish reached neither the overlay nor the outbox, so
     the player cannot pretend it was saved and cannot advance past the card. It
@@ -3443,7 +3446,15 @@ positions from an older attempt. An interrupted pull, or a browser closed
 between two cascades' transactions, leaves the cursor unadvanced and staging
 rows the next pull discards, and re-pulling from the old cursor converges:
 1. Drop every outbox operation the server has now acknowledged, whether applied
-   or rejected, and note which cascades they touched.
+   or rejected, and note which cascades they touched. **Each cascade's are
+   dropped inside that cascade's transaction** (steps 2 to 4), never ahead of
+   it: what an acknowledged `finish` created is known only from its result, so
+   an operation that left the outbox before its cascade's rows were applied
+   would, after a closed tab, leave the next pull unable to tell that the level
+   was made here, and the answers queued on that level would be refused in the
+   replay. A cascade whose transaction did not commit still holds its
+   operations, the next sync sends them again, and the server answers them
+   from its records.
 2. Write the server's rows into the **base** stores. Two different things can
    follow. A **rebuild** happens when a pulled quiz's `(attempt, shuffle_seed)`
    differs from the base's, or the base does not have the quiz: its question
@@ -3506,7 +3517,21 @@ rows the next pull discards, and re-pulling from the old cursor converges:
    same size can differ. So a finish never ends with a fetch, and an offline
    finish's new level is playable the moment it is acknowledged. Promoted rows
    are stamped with the response's `sync_seq`, like the quiz row they belong
-   to, so a full pull in flight never deletes them. When the
+   to, so a full pull in flight never deletes them. **A promoted row takes
+   the device's question and the server's grade and place**: the overlay's
+   rows also show what the operations still waiting in the outbox did to the
+   quiz, and the base is the server's. So a promoted row carries a grade only
+   when an applied `grade` of this batch, or the pull itself, gave it one, and
+   the replay in step 4 puts the waiting grades back and counts each. Promoted
+   with a waiting grade already on it, the row would add nothing to the quiz
+   row's counters in the replay, and the level's own `finish`, queued behind,
+   would be refused `ungraded` and dropped with everything studied after it —
+   which is every offline session whose 500-operation batch boundary falls
+   between the finish that made a level and that level's finish. For the same
+   reason a **created** quiz is promoted on its question hash alone: when a
+   `finish` still waiting has since given the overlay a later attempt of it,
+   the rows are the right questions in another order, and they are placed by
+   the pulled row's seed. When the
    hashes differ, the rows are dropped, the index list fetched, and the
    outcome-mismatch notice shown, since grades on the missing questions were
    not kept. When the server's outcome carries no new quiz at all (a
@@ -3611,7 +3636,11 @@ within a second or two of the change:
   trigger above; a stream opened again syncs, since a change may have come
   while it was closed; a listener that loses its connection tells every stream
   to sync; and a stream the server refuses (signed out) stays closed, leaving
-  the 30-second sync.
+  the 30-second sync. A browser opens a stream again by itself only after a
+  dropped connection: an answer that is not a stream (a `502` while the server
+  is being replaced, a `429`) ends it for good, so the device opens a new one
+  itself, after 5 seconds and then twice as long each time up to five minutes,
+  unless the sync engine says the account needs to log in.
 
 ### Conflicts
 

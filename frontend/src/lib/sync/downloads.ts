@@ -243,14 +243,23 @@ export class DownloadManager {
 		return this.call(fn);
 	}
 
+	/**
+	 * The quota path's two passes: the drop pass as though the row budget were
+	 * exceeded, then the answer eviction as though its limit were. Also run for
+	 * a pull that found no room (the sync engine's `makeRoom`).
+	 */
+	async makeRoom() {
+		await this.dropPass(await policy(this.db, this.now()), { force: true });
+		await this.evict({ force: true });
+	}
+
 	/** A unit of work; a QuotaExceededError runs the drop pass, then eviction, and retries once. */
 	private async unit<T>(fn: () => Promise<T>): Promise<T> {
 		try {
 			return await fn();
 		} catch (e) {
 			if (!isQuota(e)) throw e;
-			await this.dropPass(await policy(this.db, this.now()), { force: true });
-			await this.evict({ force: true });
+			await this.makeRoom();
 			try {
 				return await fn();
 			} catch (e2) {
