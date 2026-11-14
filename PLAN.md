@@ -2770,7 +2770,7 @@ interrupted by an update, and a user who never accepts keeps the old version
 until the `426` line. IndexedDB schema upgrades run from versioned migrations,
 and every tab listens for `versionchange` on its connections: the tab still
 running the old build closes them and shows "Acrodont was updated in another tab
-— reload to continue", so the new build's upgrade is never **blocked** by an
+— reload to continue" (a `versionchange` that names no new version is a deletion, the account's data removed at a logout in another tab: the connection is closed and nothing is shown or stopped for it), so the new build's upgrade is never **blocked** by an
 old tab holding the previous version open. That tab can no longer sync, so it
 **stops syncing and gives up the account's sync lock** at the same moment (as
 does an old-build tab that finds the database already upgraded when it opens
@@ -3890,9 +3890,9 @@ of divergence (see [Monitoring](#deployment-and-operations)).
   device**, which deletes the per-user database and, when the outbox is not
   empty, says how many changes that discards. **That is asked whenever
   anything is unsent, whatever the sync status reads**: after the sync the
-  logout tries first, the outbox is counted again, and if it is not empty —
+  logout tries first, the outbox is counted again, from the account's own database rather than from what the tab's sync last read, and if it is not empty —
   a long outbox still draining, a server that asked the device to wait, a
-  sync another tab leads — a confirmation names the count and says that
+  sync another tab leads, a tab that has stopped syncing (signed out in another tab) and was studied in since — or could not be counted, a confirmation names the count (or says it could not be checked) and says that
   removing discards those changes for good, and that logging out without
   removing keeps them for the next login here; declined, nothing is logged
   out or removed. **The removal does not wait for the network**: it is done
@@ -6445,7 +6445,7 @@ in another tab and not keeping the lock; an account's notices staying while
 the tab only stops and restarts syncing for it, and going when it logs out or
 another account starts syncing in the tab; and a sync or a count asked for
 after a logout that removed the account's data not making its database
-again. (The layout's two lines that call these, at a change of account and
+again; the count before a removal reading the outbox in a tab that has stopped syncing, leaving no connection open, making no database that is not there, and answering "not known" for one it cannot read or open in time; and a tab whose database another tab's removal deleted not being told it was updated, and syncing again. (The layout's two lines that call these, at a change of account and
 at the "updated in another tab" state, are not exercised by a test.) A fixture unscoped
 database at each earlier version opens at the current one with its rows and
 pointer intact.
@@ -6595,7 +6595,7 @@ grades pages, the progress indicator across one, and ten 300,000-question
 cascades draining through a bucket that answers `429` from the 120th request of
 a minute; a multi-page full pull promoting a level, and rows a promotion wrote while a full pull was in flight being spared by it; a full pull sparing the graded rows of a cascade with pending operations that is absent from `question_rows_for`; a `426` state surviving a reload that the service worker answered from its cache (the engine's first status is tested, the worker is not); and the Account page's
 confirmation before a logout that removes data with changes still unsent (the
-count and the question are the page's own, and no journey logs out that way).
+count is tested in `runtime.test.ts`; the question is the page's own, and no journey logs out that way).
 `Retry-After`'s length is never timed.
 
 The **export formatters** are held to one set of fixtures on both sides.

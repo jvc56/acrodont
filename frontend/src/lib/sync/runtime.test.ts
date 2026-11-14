@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { session } from '$lib/auth/session.svelte';
 import { userDbName } from '$lib/local/accounts';
 import { USER_DB_VERSION } from '$lib/local/db';
-import { closeUserDb, userDb } from '$lib/local/open';
+import { closeUserDb, countUnsent, userDb } from '$lib/local/open';
 import { keepNoticesFor, refreshPending, startSync, stopSync, syncNow, syncState } from './runtime.svelte';
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -194,5 +194,81 @@ describe('one account after another in a tab', () => {
 		await syncNow();
 		await refreshPending();
 		expect(await userDbExists(A)).toBe(false);
+	});
+});
+
+/** Deletes the account's database as a logout that removes its data does; says whether an open connection held it up. */
+function removeUserDb(userId: string): Promise<{ blocked: boolean }> {
+	return new Promise((done, failed) => {
+		let blocked = false;
+		const r = indexedDB.deleteDatabase(userDbName(userId));
+		r.onblocked = () => (blocked = true);
+		r.onsuccess = () => done({ blocked });
+		r.onerror = () => failed(r.error);
+	});
+}
+
+describe('the unsent changes counted before an account’s data is removed', () => {
+	it('are counted in a tab that has stopped syncing, from the account’s own database', async () => {
+		session.userId = A;
+		const db = await userDb(A, 'alice');
+		const stop = startSync(A);
+		await vi.waitFor(() => expect(syncState.pending).toBe(0));
+		// Signed out in another tab: this tab stops syncing, keeps its data, and is studied in.
+		stop();
+		await db.put('outbox', { device_seq: 1, op: { type: 'move_cursor' } } as never);
+		await db.put('outbox', { device_seq: 2, op: { type: 'move_cursor' } } as never);
+
+		expect(await countUnsent(A)).toBe(2);
+
+		// The count's connection is closed: the removal that follows waits for nothing.
+		closeUserDb();
+		await tick();
+		expect(await removeUserDb(A)).toEqual({ blocked: false });
+	});
+
+	it('are none for a database that is not on the device, which the count does not make', async () => {
+		expect(await countUnsent(B)).toBe(0);
+		expect(await userDbExists(B)).toBe(false);
+	});
+
+	it('are not known, rather than none, when the database cannot be read or does not open in time', async () => {
+		// A database with no outbox to count.
+		(
+			await openDB(userDbName(A), 1, {
+				upgrade(db) {
+					db.createObjectStore('meta');
+				}
+			})
+		).close();
+		expect(await countUnsent(A)).toBeNull();
+
+		// An open that is never answered.
+		const real = indexedDB.open.bind(indexedDB);
+		indexedDB.open = (() => ({})) as unknown as typeof indexedDB.open;
+		try {
+			expect(await countUnsent(B, 20)).toBeNull();
+		} finally {
+			indexedDB.open = real;
+		}
+	});
+});
+
+describe('another tab removes the account’s data at its logout', () => {
+	it('this tab is not told it was updated, and syncs again when the account logs back in', async () => {
+		session.userId = A;
+		await userDb(A, 'alice');
+		const stop = startSync(A);
+		await vi.waitFor(() => expect(asked).toEqual(['/api/sync']));
+		// The other tab logs out: this one reads "Signed out in another tab" and stops.
+		stop();
+		// And removes the data: the deletion closes this tab's connection, and is not held up by it.
+		expect(await removeUserDb(A)).toEqual({ blocked: false });
+		expect(session.updatedInAnotherTab).toBe(false);
+
+		// Logged in again there: this tab resumes, on a database made anew.
+		startSync(A);
+		await vi.waitFor(() => expect(asked).toEqual(['/api/sync', '/api/sync']));
+		expect(syncState.leader).toBe(true);
 	});
 });
