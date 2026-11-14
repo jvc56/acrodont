@@ -7172,7 +7172,9 @@ through the ordinary endpoints, so there is still no test-only path.
   build running after one reload. With `MIN_APP_VERSION` raised past the old
   build, see **reload to keep syncing**, press its reload while online and see it
   clear, where a plain browser reload had not; and with a second tab open on the
-  old build and a card revealed in it, accept the update in the first tab and
+  old build and a card revealed in it (a card of another cascade: a `426`
+  applies its pull, so a tab on the cascade the first tab answers in follows it
+  to the next card, as after any sync), accept the update in the first tab and
   see only that tab reload, the second keep its revealed card, show that the app
   was updated in another tab, finish that card from the old build's cache, and
   report the update rather than block the new build's IndexedDB upgrade.
