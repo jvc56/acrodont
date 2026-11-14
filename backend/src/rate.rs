@@ -146,6 +146,9 @@ pub struct Limiters {
     pub login_fail_ip: FailureBuckets<IpAddr>,
     pub login_fail_username: FailureBuckets<String>,
     pub sync: Keyed<Uuid>,
+    /// Opens of the event stream, `SYNC_STREAM_RATE_PER_MINUTE` per user; how
+    /// many one account holds open at once is counted by `sync::notify::Hub`.
+    pub sync_stream: Keyed<Uuid>,
     pub download: Keyed<Uuid>,
     pub search: Keyed<Uuid>,
     pub export: Keyed<Uuid>,
@@ -163,6 +166,7 @@ impl Limiters {
                 c.login_failures_per_username_per_minute,
             ),
             sync: Keyed::per_minute(c.sync_rate_per_minute),
+            sync_stream: Keyed::per_minute(c.sync_stream_rate_per_minute),
             download: Keyed::per_minute(c.download_rate_per_minute),
             search: Keyed::per_minute(c.search_rate_per_minute),
             export: Keyed::per_minute(c.export_rate_per_minute),
@@ -180,6 +184,7 @@ impl Limiters {
         self.login_fail_ip.prune();
         self.login_fail_username.prune();
         self.sync.prune();
+        self.sync_stream.prune();
         self.download.prune();
         self.search.prune();
         self.export.prune();

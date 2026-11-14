@@ -95,8 +95,11 @@ fn has_nul(v: &Value) -> bool {
 /// all of them): an object of setting name to `{value, at}`, the time it was
 /// shared, which is written back in one form so the merge can compare it.
 /// What a value means is the frontend's to check, as it does with values
-/// from an older build.
-fn parse_device_settings(v: Option<&Value>) -> ApiResult<Option<Value>> {
+/// from an older build. **The time is clamped** like every other device time
+/// the server compares (PLAN.md § Operations, "Device clocks are clamped"):
+/// `least(at, now + 5 minutes)`, so a device whose clock is months ahead wins
+/// a merge by five minutes at most, not until the calendar catches up.
+fn parse_device_settings(v: Option<&Value>, now: DateTime<Utc>) -> ApiResult<Option<Value>> {
     let Some(v) = v else { return Ok(None) };
     if v.is_null() {
         return Ok(None);
@@ -114,7 +117,8 @@ fn parse_device_settings(v: Option<&Value>) -> ApiResult<Option<Value>> {
             .get("at")
             .and_then(Value::as_str)
             .and_then(|s| s.parse::<DateTime<Utc>>().ok())
-            .ok_or_else(|| bad("device_settings needs each setting's at"))?;
+            .ok_or_else(|| bad("device_settings needs each setting's at"))?
+            .min(now + chrono::Duration::minutes(5));
         let value = e.get("value").ok_or_else(|| bad("device_settings needs each setting's value"))?;
         if has_nul(value) {
             return Err(bad("device_settings holds a character that cannot be stored"));
@@ -246,7 +250,7 @@ fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Reques
         });
     }
     ops.sort_by_key(|o| o.device_seq);
-    let device_settings = parse_device_settings(obj.get("device_settings"))?;
+    let device_settings = parse_device_settings(obj.get("device_settings"), Utc::now())?;
     Ok(Request { device_id, app_version, cursor, page_token, question_rows_for, ops, device_settings })
 }
 

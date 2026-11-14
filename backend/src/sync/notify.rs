@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::{Query, State};
@@ -72,6 +72,11 @@ pub async fn changed(conn: &mut PgConnection, user: Uuid, device: Option<Uuid>) 
     Ok(())
 }
 
+/// What an open past the account's limit is told to wait: the client opens
+/// the stream again after a wait of its own, and syncs every 30 seconds
+/// meanwhile, so nothing depends on the figure.
+const OVER_LIMIT_RETRY_SECS: u64 = 60;
+
 /// This instance's listener and the streams it feeds.
 #[derive(Clone)]
 pub struct Hub {
@@ -81,6 +86,8 @@ pub struct Hub {
 struct Inner {
     tx: broadcast::Sender<Note>,
     started: OnceCell<()>,
+    /// Open streams per account: an account with none has no entry.
+    open: Mutex<HashMap<Uuid, u32>>,
     /// Set when the server shuts down: every stream ends, so a graceful
     /// shutdown is not held open by them; the browsers reconnect elsewhere.
     closing: tokio::sync::watch::Sender<bool>,
@@ -92,6 +99,7 @@ impl Default for Hub {
             inner: Arc::new(Inner {
                 tx: broadcast::channel(1024).0,
                 started: OnceCell::new(),
+                open: Mutex::new(HashMap::new()),
                 closing: tokio::sync::watch::channel(false).0,
             }),
         }
@@ -108,6 +116,25 @@ impl Hub {
         self.inner.closing.subscribe()
     }
 
+    /// A place among the account's open streams, held until the value
+    /// returned is dropped, or `None` when the account already holds `max`.
+    /// A stream costs a task, a receiver and a connection for five minutes,
+    /// and without a count one account could hold every connection there is.
+    pub fn admit(&self, user: Uuid, max: u32) -> Option<Admitted> {
+        let mut open = self.inner.open.lock().expect("stream count lock");
+        let n = open.entry(user).or_insert(0);
+        if *n >= max {
+            return None;
+        }
+        *n += 1;
+        Some(Admitted { hub: self.clone(), user })
+    }
+
+    /// The streams the account holds open on this instance.
+    pub fn open_streams(&self, user: Uuid) -> u32 {
+        self.inner.open.lock().expect("stream count lock").get(&user).copied().unwrap_or(0)
+    }
+
     /// The notes from now on; the first call starts the listener and waits (a
     /// few seconds at most) until it listens, so no change after it is missed.
     pub async fn subscribe(&self, db: &PgPool) -> broadcast::Receiver<Note> {
@@ -121,6 +148,24 @@ impl Hub {
             })
             .await;
         rx
+    }
+}
+
+/// One stream's place in its account's count, given back when dropped.
+pub struct Admitted {
+    hub: Hub,
+    user: Uuid,
+}
+
+impl Drop for Admitted {
+    fn drop(&mut self) {
+        let mut open = self.hub.inner.open.lock().expect("stream count lock");
+        if let Some(n) = open.get_mut(&self.user) {
+            *n -= 1;
+            if *n == 0 {
+                open.remove(&self.user);
+            }
+        }
     }
 }
 
@@ -179,11 +224,21 @@ pub async fn events(
         return Err(ApiError::Unauthorized);
     }
     let device: Option<Uuid> = q.get("device").and_then(|s| s.parse().ok());
+    // Both limits are per account and per instance, like every other one: how
+    // often it opens a stream, and how many it holds open (a device needs one).
+    state.limits.sync_stream.check(&user.id)?;
+    let admitted = state
+        .changes
+        .admit(user.id, state.config.sync_streams_per_user)
+        .ok_or(ApiError::TooManyRequests { retry_after_secs: OVER_LIMIT_RETRY_SECS })?;
     let mut notes = state.changes.subscribe(&state.db).await;
     let mut closing = state.changes.closing();
     let (out, stream) = mpsc::channel::<Result<Event, Infallible>>(4);
     let account = user.id;
     tokio::spawn(async move {
+        // Held for the stream's life: the task ends when the client goes, the
+        // lifetime is up or the server shuts down, and the place is free again.
+        let _admitted = admitted;
         let end = tokio::time::sleep(STREAM_LIFETIME);
         tokio::pin!(end);
         loop {
@@ -231,5 +286,22 @@ mod tests {
         assert!(server.reaches(u, Some(a)));
         assert!(Note { user: None, device: None }.reaches(Uuid::new_v4(), None));
         assert!(Note::parse("nonsense").is_none());
+    }
+
+    #[test]
+    fn an_account_holds_no_more_streams_than_its_limit() {
+        let hub = Hub::default();
+        let (alice, bob) = (Uuid::new_v4(), Uuid::new_v4());
+        let first = hub.admit(alice, 2).expect("the first");
+        let second = hub.admit(alice, 2).expect("the second");
+        assert!(hub.admit(alice, 2).is_none(), "a third is refused");
+        assert!(hub.admit(bob, 2).is_some(), "another account's count is its own");
+        assert_eq!(hub.open_streams(bob), 0, "and a place dropped is given back");
+        drop(first);
+        assert_eq!(hub.open_streams(alice), 1);
+        let third = hub.admit(alice, 2).expect("a place freed is taken again");
+        drop((second, third));
+        assert_eq!(hub.open_streams(alice), 0);
+        assert!(hub.inner.open.lock().unwrap().is_empty(), "an account with no stream has no entry");
     }
 }

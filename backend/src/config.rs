@@ -56,6 +56,10 @@ pub struct Config {
     pub export_rate_per_minute: u32,
     pub admin_upload_rate_per_minute: u32,
     pub catalog_rate_per_minute: u32,
+    /// Opens of `GET /api/sync/events` a minute, per user.
+    pub sync_stream_rate_per_minute: u32,
+    /// Event streams one account may hold open at once on this instance.
+    pub sync_streams_per_user: u32,
     pub login_failures_per_ip_per_minute: u32,
     pub login_failures_per_username_per_minute: u32,
     pub auth_rate_per_ip_per_minute: u32,
@@ -152,6 +156,8 @@ impl Config {
             export_rate_per_minute: r.parse_rate("EXPORT_RATE_PER_MINUTE", 10)?,
             admin_upload_rate_per_minute: r.parse_rate("ADMIN_UPLOAD_RATE_PER_MINUTE", 10)?,
             catalog_rate_per_minute: r.parse_rate("CATALOG_RATE_PER_MINUTE", 300)?,
+            sync_stream_rate_per_minute: r.parse_rate("SYNC_STREAM_RATE_PER_MINUTE", 30)?,
+            sync_streams_per_user: r.parse_rate("SYNC_STREAMS_PER_USER", 16)?,
             login_failures_per_ip_per_minute: r
                 .parse_rate("LOGIN_FAILURES_PER_IP_PER_MINUTE", 10)?,
             login_failures_per_username_per_minute: r

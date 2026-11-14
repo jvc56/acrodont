@@ -699,7 +699,11 @@ an object of setting name to `{ value, at }`, `at` being when it was shared.
 Sharing writes the value to this device's `meta` store (`shared_device`) as
 pending, and the next sync carries the pending values in the request's
 `device_settings`; the server merges them in, the later `at` winning per
-setting, so two devices sharing the same setting agree on the last one.
+setting, so two devices sharing the same setting agree on the last one. The
+server keeps `at` as `least(at, now + 5 minutes)`, as it clamps every device
+time it compares (see [Operations](#operations)), so a device whose clock is
+months ahead wins a merge by five minutes at most and the next real share
+takes the setting back.
 **Every sync response carries the account's `device_settings`**, and a device
 takes each value whose `at` is later than the last it took for that setting
 (also kept in `shared_device`), made valid as a stored value from another
@@ -3632,6 +3636,15 @@ within a second or two of the change:
   timeouts, and ends after five minutes, when the browser opens it again with
   the session checked again; the server's shutdown ends every stream, so a
   deploy is not held open by them.
+- **An account's streams are limited**, per instance like every other limit,
+  because each holds a connection, a task and a receiver for its five minutes
+  and is the one request a signed-in caller can hold open for nothing: at most
+  `SYNC_STREAMS_PER_USER` (16) open at once, and `SYNC_STREAM_RATE_PER_MINUTE`
+  (30) opens a minute. A device needs one stream, held by the tab that leads
+  its syncing, and opens it once every five minutes, so neither is in reach of
+  a person's devices. An open past either is a `429` with `Retry-After`; the
+  device opens the stream again later (below) and syncs every 30 seconds
+  meanwhile.
 - **Nothing depends on a note arriving.** A device still syncs on every
   trigger above; a stream opened again syncs, since a change may have come
   while it was closed; a listener that loses its connection tells every stream
@@ -5055,7 +5068,9 @@ Security generally:
 - `/api/admin/*` requires `is_admin`, and non-admins get `404`, so the admin
   surface is not advertised.
 - `governor` rate limits on auth endpoints, and per-user limits on search,
-  preview, cascade creation, saving and loading a saved search, sync, export, admin uploads, and
+  preview, cascade creation, saving and loading a saved search, sync, opening the
+  [event stream](#telling-the-other-devices) (`SYNC_STREAM_RATE_PER_MINUTE`, with
+  `SYNC_STREAMS_PER_USER` open at once), export, admin uploads, and
   the card, question-list and grades pages, which are the expensive calls. Each
   has a named refill rate in [Configuration](#configuration):
   `DOWNLOAD_RATE_PER_MINUTE` for the one shared bucket over the card,
@@ -5249,7 +5264,7 @@ person to write it copies names rather than choosing them.
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/grades?from=<idx>&limit=<n>` | The quiz's graded rows for the attempt its row names, which for a cleared quiz is the attempt it finished on (its grades each dated that finish, the quiz's `last_activity_at`, since a cleared quiz keeps no grade times), as the parallel arrays a pull uses, in idx order, with the quiz row's `attempt` and `shuffle_seed` so the device can tell whether they belong to the order it holds. `from` is an **index, not an offset**, as on the card pages: the response holds the graded rows whose `question_idx` is in `from … from+limit−1`, `limit` ≤ 50,000, so the device pages the index space by `from += limit` until `from` reaches the cascade's `question_count` and a sparse page — most of a quiz's questions may be ungraded — means nothing is left behind. The questions endpoint below reads `from` the other way, as an offset into a dense list, which is why the two are written `<idx>` and `<n>`. There is no `min_updated_seq` here, which only a pull's fast path needs; the device stamps these rows with the sequence of the sync it made before the fetch. Not cacheable. Fetched when the device materialises a quiz whose rows it dropped on leaving the download window; never part of a pull. If the device's quiz row names a different attempt or seed, the device discards the response, syncs and fetches again. `404` for another user's or a purged quiz. |
 | `POST` | `/api/cascades/:id/export-token` | Body: the export's choices, as the query of the export row below. Checks the session, `X-Acrodont-User`, the cascade and quiz, and `EXPORT_RATE_PER_MINUTE`, answering `401`, `404` and `429` with `Retry-After` exactly as any other request does, which a navigation could not show the page; on success returns `{ url }`, the export URL with a token valid for **60 seconds and one use**, bound to this user and these choices: a PASETO under the HKDF-derived export key, which any task can verify and no session validator can decrypt, its use recorded in `export_tokens_spent` (see [Exporting words](#exporting-words)). The dialog navigates a hidden `<iframe>` to it at once, and mints a new one for any retry |
 | `GET` | `/api/cascades/:id/export?scope=<cascade\|quiz>&quiz_id=<uuid>&which=<all\|correct\|missed\|ungraded>&format=<txt\|csv>&lines=<answers\|questions>&columns=<list>&order=<study\|alphabetical>&definitions=<0\|1>&hooks=<0\|1>&decimals=<0-3>&token=<token>` | The same file the device builds locally (see [Exporting words](#exporting-words)), streamed as `text/plain` or `text/csv` with a `Content-Disposition` filename. Used when the device doesn't have what the export needs. `token` is the single-use, 60-second token the row above issued for exactly these choices; it is the request's proof of account, since a download navigation cannot send a header, and an expired, reused or mismatched token answers `204 No Content`, which the dialog's hidden frame discards. `404` for another user's or a purged cascade, and for a `quiz_id` that is not this cascade's, has been purged, or is unknown. |
-| `GET` | `/api/sync/events?user=<id>&device=<id>` | Server-Sent Events: a `changed` event whenever another device of the account syncs a change (see [Telling the other devices](#telling-the-other-devices)). The session cookie, and `user` in place of `X-Acrodont-User`, which `EventSource` cannot send; a mismatch or no session is a `401`. Ends after five minutes |
+| `GET` | `/api/sync/events?user=<id>&device=<id>` | Server-Sent Events: a `changed` event whenever another device of the account syncs a change (see [Telling the other devices](#telling-the-other-devices)). The session cookie, and `user` in place of `X-Acrodont-User`, which `EventSource` cannot send; a mismatch or no session is a `401`. An open past the account's `SYNC_STREAM_RATE_PER_MINUTE` or with `SYNC_STREAMS_PER_USER` already open is a `429` with `Retry-After`. Ends after five minutes |
 | `POST` | `/api/sync` | Body `{ device_id, app_version, cursor, page_token?, question_rows_for[], ops[], device_settings? }` (`device_settings`: values shared with all the account's devices, see [This device, or all of them](#this-device-or-all-of-them)), where `app_version` is the frontend build's **monotonic integer build number**, injected into the SPA at build time and compared numerically against `MIN_APP_VERSION` (see [Configuration](#configuration)) — never a hash or a semver string, so "too old to sync" is one comparison and raising the floor is one number in the task definition; the build's git hash is logged beside it for support but decides nothing. `question_rows_for` lists every cascade whose question rows this device holds or wants: in its window and not [budget-dropped](#on-the-device), kept automatically by size, **or whose base already holds question rows** (at most `MAX_QUESTION_ROWS_FOR`, 1,000 cascades, a protocol bound rather than a quota: a device holding rows for more splits them across requests; 1,001 is a `400`). The third case is what keeps a cascade the drop pass spared for its pending operations from going stale: the device holds its rows, so it must keep receiving their changes. A cascade the device holds no rows for and will not open is left out, and stays pending on the device. It is expected on every non-paged request, an omitted field means an empty list, ids that belong to another user or no longer exist are ignored, and the server omits `quiz_questions` rows for every other cascade. `cursor` is `null` for a full pull (a first sync or a resync), whose operations are pushed like any other's → `{ results: [{ op_id, status, reason?, outcome?, new_quiz_question_count?, new_quiz_questions_hash? }], changes: { cascades[], quizzes[], quiz_questions[], quiz_attempts[], tombstones[] }, sync_seq, next_page_token?, resync_required?, storage: { used, limit }, device_settings }`. `storage` is on every `200` and `426` response: the account's [storage](#storage-limit) and its effective limit, as numbers, read after the push so it counts what the push's finishes and purges changed; the device keeps them in `meta`. Pulled `cascades[]` rows carry `storage_bytes`, decimal text like every 64-bit value. `outcome` is set on an applied `finish` (a `finish_outcome`) or `finish_segment` (`drilled` or `continued`), and `new_quiz_question_count` and `new_quiz_questions_hash` whenever a quiz was created, reset or restored: the created quiz's when one was created, otherwise the reset or restored quiz's own; a repeated operation returns the recorded fields unchanged; pulled `quizzes[]` rows carry `questions_hash`. |
 
 On the wire, `quiz_questions` changes are grouped per quiz as parallel arrays
@@ -5578,6 +5593,8 @@ startup rather than falling back to a default.
 | `ADMIN_UPLOAD_MAX_BYTES` | `104857600` (100 MB) | |
 | `API_MAX_BODY_BYTES` | `16777216` (16 MB) | JSON request bodies, sized for a 300,000-entry In Word List |
 | `SYNC_RATE_PER_MINUTE` | `120` | Per-user sync requests; sized so a full offline attempt drains in minutes |
+| `SYNC_STREAM_RATE_PER_MINUTE` | `30` | Per-user; opens of `GET /api/sync/events`. A device opens its stream once every five minutes |
+| `SYNC_STREAMS_PER_USER` | `16` | Event streams one account may hold open at once on an instance; an open past it is a `429`. A device holds one, in the tab that leads its syncing (one per tab only where the browser has no Web Locks) |
 | `DOWNLOAD_RATE_PER_MINUTE` | `120` | Per-user; the one shared bucket over the card, question-list and grades pages. Sized for one 300,000-question cascade's reopen per minute |
 | `SEARCH_RATE_PER_MINUTE` | `30` | Per-user; search, preview, cascade creation, saving a search and loading one (`GET /api/searches/:id`) |
 | `EXPORT_RATE_PER_MINUTE` | `10` | Per-user; server-streamed exports, counted when the dialog asks for an export token, since that is the request whose `429` the page can see |
