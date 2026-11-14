@@ -250,7 +250,10 @@ async function dropAcked(tx: RwTx, acked: Acked[]) {
  * The grades the server holds for a quiz an applied operation of this batch
  * created or reset: those of the batch's own applied `grade` operations on
  * the pulled attempt, in order, under whatever the pull itself carried for
- * the quiz. Nothing else can be there, since the attempt began in this batch.
+ * the quiz. Another device may have graded the attempt as well (a batch
+ * answered from the server's records, after a lost response, can be behind
+ * it): those grades are here only because the pull carries them, from the old
+ * cursor, and they are written last so that they stand.
  */
 async function serverGrades(tx: RwTx, pq: QuizRow, work: CascadeWork, S: number) {
 	const grades = new Map<number, Pick<QuestionRow, 'grade' | 'graded_at'>>();
@@ -500,9 +503,18 @@ async function settleQuiz(
 	const n = pq.question_count;
 	const graded = pq.correct_count + pq.missed_count;
 
+	const ovq = await tx.objectStore('overlay_quizzes').get(pq.id);
+
 	// A quiz the pull reports cleared: its rows and positions stay as they are.
+	// One this batch both made and cleared has none in the base yet, and a
+	// cleared quiz's rows never travel: the device's own are promoted, on their
+	// hash, like any created quiz's. Left in the overlay they would be deleted
+	// with it, and a restore of the level still waiting in the outbox would
+	// find no rows, mark it pending, and have every answer given after it
+	// refused `not_found` in the replay.
 	if (pq.status === 'cleared') {
 		await base.put(mergeQuiz(pq, false));
+		if (work.created.has(pq.id) && ovq && !ovq.pending && ovq.questions_hash === pq.questions_hash) promote.add(pq.id);
 		return;
 	}
 
@@ -514,7 +526,6 @@ async function settleQuiz(
 	// reset quiz's are promoted when the pulled row's attempt and seed equal
 	// those of the rows the device built; otherwise the base's own rows are
 	// rebuilt below.
-	const ovq = await tx.objectStore('overlay_quizzes').get(pq.id);
 	if (ovq && !ovq.pending) {
 		const created = work.created.has(pq.id);
 		const same = ovq.attempt === pq.attempt && ovq.shuffle_seed === pq.shuffle_seed;

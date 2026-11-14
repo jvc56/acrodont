@@ -3496,7 +3496,13 @@ rows the next pull discards, and re-pulling from the old cursor converges:
    leaves the window, so a level finished on this device can still be exported
    from the Trash offline, and a device holding none of its rows, or only part
    of them, fetches them when a restore or an export needs them (see
-   [Downloads](#on-the-device)). So the player never sees a
+   [Downloads](#on-the-device)). A level that **one batch both made and
+   cleared** has no rows in the base yet, and a cleared quiz's rows never
+   travel: its rows are the device's own, promoted in step 3 on their hash
+   like any created quiz's. Deleted with the overlay instead, they would leave
+   a restore of that level still waiting in the outbox with nothing to reset,
+   and every answer given after the restore would be refused in the replay.
+   So the player never sees a
    quiz with a new order and no grades. A quiz that an operation applied in
    this batch created or reset takes neither path here **when the pulled quiz
    row's `(attempt, shuffle_seed)` equals that of the rows the device built
@@ -6394,7 +6400,7 @@ download window fetching its index lists and materialising on first open, and,
 when it leaves the window with nothing pending, dropping every question row,
 position and card while keeping its cascade, quiz and attempt rows, then on
 reopen fetching index lists and graded rows and materialising with every
-grade intact; a cascade created while a full pull is in flight surviving the last page; a level promoted from an acknowledged `finish` by a full pull's own response keeping its rows and the answers queued on it; **a tab closed between two cascades' transactions** leaving the cursor unadvanced, the first cascade's acknowledged operation gone with its rows and the second's acknowledged `finish` still in the outbox, so the next sync sends it again and the answers queued on the level it made, beyond that sync's batch, are kept; **a level's own `finish` queued behind the batch that made the level** being applied with everything studied after it, whether it clears the level or descends from it, the base holding the server's level with no answer yet after the first acknowledgement; answers queued behind the finish that reset their quiz being counted once it is acknowledged; an answer regraded behind that batch being promoted as the server has it; a pull for an out-of-window cascade
+grade intact; a cascade created while a full pull is in flight surviving the last page; a level promoted from an acknowledged `finish` by a full pull's own response keeping its rows and the answers queued on it; **a tab closed between two cascades' transactions** leaving the cursor unadvanced, the first cascade's acknowledged operation gone with its rows and the second's acknowledged `finish` still in the outbox, so the next sync sends it again and the answers queued on the level it made, beyond that sync's batch, are kept; **a level's own `finish` queued behind the batch that made the level** being applied with everything studied after it, whether it clears the level or descends from it, the base holding the server's level with no answer yet after the first acknowledgement; answers queued behind the finish that reset their quiz being counted once it is acknowledged; an answer regraded behind that batch being promoted as the server has it; **a level made and cleared inside one acknowledged batch** keeping its rows in the base, in the finished attempt's order and graded, so that a restore of it queued behind the batch keeps the answers given after it; a pull for an out-of-window cascade
 writing no question rows and leaving its quizzes pending; a grades fetch whose
 attempt differs from the base row being discarded and the device syncing
 again; a grades fetch cut off after its first page being made again, because the rows it wrote fall short of the quiz row's

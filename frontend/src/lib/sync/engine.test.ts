@@ -769,6 +769,39 @@ describe('the rebase, continued', () => {
 		expect(texts(a)).toEqual([]);
 	});
 
+	it('a level made and cleared inside one batch keeps its rows, so a restore of it queued behind keeps the answers given after', async () => {
+		const { server, a } = await setup();
+		await a.play(Q1, 'CCMMM');
+		const l2 = await a.finish(Q1, '7');
+		await a.play(l2.newId, 'CCC');
+		await a.finish(l2.newId, '8');
+		expect((await a.quiz(l2.newId))!.status).toBe('cleared');
+		// Out of the Trash and studied again, past the batch.
+		await a.apply({ type: 'restore_quiz', quiz_id: l2.newId, shuffle_seed: '9' });
+		await a.play(l2.newId, 'CC');
+		through(a, 10); // five grades, the finish that made Level 2, its three grades and its finish
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect((await a.outbox()).map((e) => e.op.type)).toEqual(['restore_quiz', 'grade', 'grade']);
+		// The base holds the cleared level as the server has it: every question, in the finished attempt's order, graded.
+		const base = (await a.db.get('quizzes', l2.newId))!;
+		expect([base.status, base.attempt, base.pending]).toEqual(['cleared', 1, undefined]);
+		const rows = await a.db.getAllFromIndex('quiz_questions', 'quiz_id', l2.newId);
+		expect(rows.map((r) => r.position).sort()).toEqual([0, 1, 2]);
+		expect(rows.map((r) => r.grade)).toEqual(['correct', 'correct', 'correct']);
+		// The restored attempt is still there to study, with its two answers.
+		const shown = (await a.quiz(l2.newId))!;
+		expect([shown.status, shown.attempt, shown.pending, shown.correct_count]).toEqual(['active', 2, undefined, 2]);
+		a.tamper = null;
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		const sq = server.cascades.get(C1)!.sim.quizzes.get(l2.newId)!;
+		expect(sq.state.active).toBe(true);
+		expect((await a.db.get('quizzes', l2.newId))!.correct_count).toBe(2);
+		expect((await a.rows(l2.newId)).filter((r) => r.grade === 'correct')).toHaveLength(2);
+	});
+
 	it('a finish acknowledged on its second send, after a lost response, promotes its rows with no notice', async () => {
 		const { a } = await setup();
 		await a.play(Q1, 'CCCMM');
