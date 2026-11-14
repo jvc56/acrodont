@@ -491,7 +491,19 @@ rm "$FAKE_DIR/ssm/acrodont_production_DATABASE_URL"
 rc=0; run prod-sql.sh "SELECT 1" || rc=$?
 ((rc != 0)) || fail "a task that never started its container counted as success"
 said "unable to pull secrets" || fail "the stopped reason is not shown"
-pass "prod-sql.sh: SQL byte for byte (arg or stdin) to psql in the task, the container's exit code, --as-master, the size cap"
+# A run-task that fails, or starts nothing, ends there: no task is waited for
+# (under `timeout`, since waiting on a task that does not exist never ends).
+for refusal in error capacity; do
+  fresh "$B"
+  rc=0
+  FAKE_RUN_TASK_FAIL=$refusal timeout 60 "$R/scripts/prod-sql.sh" "SELECT 1" > "$WORK/out" 2>&1 < /dev/null || rc=$?
+  [[ "$rc" == 125 ]] || fail "prod-sql.sh exited $rc, not 125, for a run-task that started nothing ($refusal)"
+  said "no ops task was started" || fail "a run-task that started nothing ($refusal) is not said to have started nothing"
+  ! called "describe-tasks" || fail "a task that was never started was waited for ($refusal)"
+  ! said "may still be running" || fail "a task that was never started is said to be perhaps running ($refusal)"
+done
+said "RESOURCE:FARGATE" || fail "why ECS started no task is not shown"
+pass "prod-sql.sh: SQL byte for byte (arg or stdin) to psql in the task, the container's exit code, --as-master, the size cap, a run-task that starts nothing"
 
 # ---------------------------------------------------------------------------
 # confirm-user.sh
@@ -567,6 +579,13 @@ fresh "$B"
 answers y
 if FAKE_RESTART_ROLLBACK=1 run rotate-db-password.sh; then fail "a restart that was rolled back counted as a rotation"; fi
 { said "the restart did not take" && said "--resume"; } || fail "a rolled-back restart is not named, or does not say --resume"
+fresh "$B"
+answers y
+rc=0
+FAKE_RUN_TASK_FAIL=error timeout 60 "$R/scripts/rotate-db-password.sh" > "$WORK/out" 2>&1 < /dev/null || rc=$?
+((rc != 0 && rc != 124)) || fail "rotate-db-password.sh exited $rc when its task could not be started"
+{ said "no ops task was started" && said "--resume"; } || fail "a task that could not be started is not said, or does not say --resume"
+{ ! called "describe-tasks" && ! called "update-service"; } || fail "a task that never started was waited for, or the service restarted"
 fresh "$B"
 ssm_put DATABASE_URL 'postgres://postgres:pw@h:5432/acrodont'
 answers y

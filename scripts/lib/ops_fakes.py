@@ -27,6 +27,8 @@ FAKE_APPLY_RC (0), FAKE_APPLY_TOUCH_S3 (another deployer uploads prod.tfvars
 during the apply), FAKE_ROLLBACK (the circuit breaker keeps the old task
 definition), FAKE_CI / FAKE_CI_SCHEDULED ("completed success", or "none"),
 FAKE_TASK_EXIT (overrides a one-off task's exit code), FAKE_PSQL_EXIT,
+FAKE_RUN_TASK_FAIL ("error": run-task itself fails, as with an expired
+sign-in; "capacity": it answers with no task and a failure),
 FAKE_TG_FAIL_ROUNDS (target-in-service waits that time out first),
 FAKE_CURL_FAIL, FAKE_SNS_PENDING, FAKE_RDS_SUB_STATUS (active),
 FAKE_RULE_BROKEN (a rule whose pattern matches every ECS event),
@@ -267,6 +269,12 @@ TASKBIN["acrodont-master-psql"] = TASKBIN["psql"]
 
 
 def run_task(opt):
+    refused = os.environ.get("FAKE_RUN_TASK_FAIL")
+    if refused == "capacity":
+        out(json.dumps({"tasks": [], "failures": [{"reason": "RESOURCE:FARGATE", "detail": "Capacity is unavailable at this time."}]}))
+        return
+    if refused:
+        fail("An error occurred (ExpiredTokenException) when calling the RunTask operation: The security token included in the request is expired", 254)
     n = count("task_count")
     overrides = json.loads(opt.get("--overrides", "{}"))
     c = (overrides.get("containerOverrides") or [{}])[0]

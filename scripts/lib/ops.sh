@@ -632,12 +632,28 @@ ops_task_exit() {
 }
 
 # Runs SCRIPT with bash in a one-off ops task (ENV_JSON: extra environment as
-# [{name, value}]), prints its log, and returns the container's exit code.
+# [{name, value}]), prints its log, and returns the container's exit code: 2
+# when ECS cannot say what it was, 125 when no task was started at all.
+#
+# Callers run this as `ops_run_ops_script ... || rc=$?`, and bash turns
+# `set -e` off inside a function called that way, so each step that must not
+# be carried on from is checked here by hand: a run-task that failed or
+# started nothing (an expired sign-in, no Fargate capacity) would otherwise
+# leave an empty ARN to be waited on, with "it may still be running" said of
+# a task that never existed.
 ops_run_ops_script() {
   local script=$1 env=${2:-[]} overrides arn code
   overrides=$(jq -cn --arg s "$script" --argjson env "$env" \
-    '{containerOverrides: [{name: "ops", environment: $env, command: ["bash", "-c", $s]}]}')
-  arn=$(ops_run_task "$overrides")
+    '{containerOverrides: [{name: "ops", environment: $env, command: ["bash", "-c", $s]}]}') || overrides=""
+  if [[ -z "$overrides" ]]; then
+    ops_say "the task's command and environment could not be put together: no ops task was started, so nothing ran"
+    return 125
+  fi
+  arn=$(ops_run_task "$overrides") || arn=""
+  if [[ -z "$arn" ]]; then
+    ops_say "no ops task was started, so nothing ran and nothing is still running"
+    return 125
+  fi
   ops_say "running $arn"
   ops_wait_task_stopped "$arn"
   ops_task_logs "$arn" || true
