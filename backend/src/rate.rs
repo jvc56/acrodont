@@ -232,6 +232,27 @@ mod tests {
         assert!(matches!(k.check(&1), Err(ApiError::TooManyRequests { .. })), "a spent key is kept");
     }
 
+    /// The sync limit as a draining device meets it, at the default
+    /// `SYNC_RATE_PER_MINUTE` of 120: 120 requests at once, then one every
+    /// half second, and a refusal asks for the wait to the next token rounded
+    /// up to a whole second, which is one. A device that waits that second
+    /// finds two tokens, so a drain is never slower than two requests a second
+    /// for the limit's sake (PLAN.md § The sync cycle, the 600-request drain).
+    #[test]
+    fn the_sync_limit_is_a_burst_then_two_a_second_and_a_refusal_asks_one_second() {
+        let k = Keyed::<u8>::per_minute(120);
+        for i in 0..120 {
+            assert!(k.check(&1).is_ok(), "request {i} of the burst");
+        }
+        assert!(matches!(k.check(&1), Err(ApiError::TooManyRequests { retry_after_secs: 1 })));
+        std::thread::sleep(Duration::from_millis(1050));
+        assert!(k.check(&1).is_ok(), "the first token of the second waited");
+        assert!(k.check(&1).is_ok(), "and the second");
+        assert_eq!(ceil_secs(Duration::from_millis(1)), 1);
+        assert_eq!(ceil_secs(Duration::from_millis(500)), 1);
+        assert_eq!(ceil_secs(Duration::from_millis(1001)), 2);
+    }
+
     #[test]
     fn keyed_limits_per_key() {
         let k = Keyed::<u8>::per_minute(1);
