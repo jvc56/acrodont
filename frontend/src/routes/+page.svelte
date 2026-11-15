@@ -18,7 +18,7 @@
 	import { tick, untrack } from 'svelte';
 	import { cascadeSummaries, ladderText, offlineStates, type CascadeSummary } from '$lib/cascades/summary';
 	import { DEFAULT_STORAGE_LIMIT, finishesRefused, formatBytes, levelBytes, storageState } from '$lib/cascades/storage';
-	import { applyLocally, type NewOp } from '$lib/local/apply';
+	import { applyOrRefuse, CHANGE_REFUSED, type NewOp } from '$lib/local/apply';
 	import { confirmAction } from '$lib/confirm.svelte';
 	import { getMeta } from '$lib/local/meta';
 	import type { UserDb } from '$lib/local/db';
@@ -102,10 +102,13 @@
 		untrack(() => void refresh());
 	});
 
+	/** The rules refused the last change made from the list (Move to Trash on a cascade another tab already moved). */
+	let refused = $state(false);
+
 	async function write(op: NewOp) {
 		if (!db) return;
-		await applyLocally(db, op);
-		afterLocalWrite();
+		refused = !(await applyOrRefuse(db, op));
+		if (!refused) afterLocalWrite();
 		await refresh();
 		trashVersion++;
 	}
@@ -196,6 +199,7 @@
 			{/if}
 		</div>
 	</header>
+	{#if refused}<p class="mb-3 text-sm text-destructive" role="alert">{CHANGE_REFUSED}</p>{/if}
 		{#if list.length === 0 && noCatalog}
 		<!-- Nothing to build from yet: say so, and where to fix it. -->
 		<p class="text-muted-foreground">

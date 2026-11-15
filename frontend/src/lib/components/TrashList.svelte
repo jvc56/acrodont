@@ -13,7 +13,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { canDeleteForever, PAGE, trashGroups, type TrashEntry, type TrashGroup } from '$lib/cascades/summary';
 	import { formatBytes } from '$lib/cascades/storage';
-	import { applyLocally, type NewOp } from '$lib/local/apply';
+	import { applyOrRefuse, CHANGE_REFUSED, type NewOp } from '$lib/local/apply';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta } from '$lib/local/meta';
 	import { afterLocalWrite, syncState } from '$lib/sync/runtime.svelte';
@@ -39,9 +39,18 @@
 		void refresh();
 	});
 
-	async function write(op: NewOp) {
-		await applyLocally(db, op);
-		afterLocalWrite();
+	/** The entry whose Restore or Delete forever the rules refused, to say so beside it. */
+	let refused = $state<string | null>(null);
+
+	/**
+	 * A refused change (the entry was restored or deleted in another tab, or by
+	 * a sync, since the list was read) is said beside the entry, and the list is
+	 * read again either way.
+	 */
+	async function write(op: NewOp, entry: string) {
+		refused = null;
+		if (await applyOrRefuse(db, op)) afterLocalWrite();
+		else refused = entry;
 		await refresh();
 		await onchange();
 	}
@@ -50,8 +59,8 @@
 		const seed = new BigUint64Array(1);
 		crypto.getRandomValues(seed);
 		return e.kind === 'cascade'
-			? write({ type: 'restore_cascade', cascade_id: e.id })
-			: write({ type: 'restore_quiz', quiz_id: e.id, shuffle_seed: seed[0].toString() });
+			? write({ type: 'restore_cascade', cascade_id: e.id }, e.id)
+			: write({ type: 'restore_quiz', quiz_id: e.id, shuffle_seed: seed[0].toString() }, e.id);
 	}
 
 	async function deleteForever(e: TrashEntry) {
@@ -64,8 +73,8 @@
 		});
 		if (!ok) return;
 		return e.kind === 'cascade'
-			? write({ type: 'purge_cascade', cascade_id: e.id })
-			: write({ type: 'purge_quiz', quiz_id: e.id });
+			? write({ type: 'purge_cascade', cascade_id: e.id }, e.id)
+			: write({ type: 'purge_quiz', quiz_id: e.id }, e.id);
 	}
 
 	const date = (iso: string) => new Date(iso).toLocaleDateString();
@@ -83,6 +92,10 @@
 		{/if}
 	</div>
 	{#if loaded && groups.length === 0}<p class="text-muted-foreground">The Trash is empty.</p>{/if}
+	<!-- An entry the list no longer shows cannot carry its own line. -->
+	{#if refused && !groups.some((g) => g.entries.some((e) => e.id === refused))}
+		<p class="mb-3 text-sm text-destructive" role="alert">{CHANGE_REFUSED}</p>
+	{/if}
 	<ul class="space-y-3">
 		{#each groups as g (g.cascade.id)}
 			{@const n = shown(g)}
@@ -111,6 +124,7 @@
 										<Button size="sm" variant="outline" onclick={() => deleteForever(e)}>Delete forever ({formatBytes(e.bytes)})</Button>
 									{/if}
 								</span>
+								{#if refused === e.id}<span class="w-full text-sm text-destructive" role="alert">{CHANGE_REFUSED}</span>{/if}
 								{#if g.notHere}<span class="w-full text-xs text-muted-foreground">Downloads when online.</span>{/if}
 							</li>
 						{/each}

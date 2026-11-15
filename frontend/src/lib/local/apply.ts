@@ -595,6 +595,29 @@ export async function applyLocally(db: UserDb, fields: NewOp, clock: () => Date 
 	}
 }
 
+/**
+ * What a page says when the rules refuse a change one of its buttons made:
+ * the line Create Cascade and Duplicate cascade end a refusal with.
+ */
+export const CHANGE_REFUSED = 'The change could not be made. Try again.';
+
+/**
+ * `applyLocally` for a page's own buttons (a setting, Move to Trash, Restore,
+ * Delete forever): null when the rules refuse the operation, which nothing
+ * then holds. The page offered it from what it last read, and another tab or
+ * a sync has changed that since (a cascade restored twice, a level's options
+ * changed after it was finished), so the page reads again and says
+ * CHANGE_REFUSED. Any other failure is thrown, as `applyLocally` throws it.
+ */
+export async function applyOrRefuse(db: UserDb, fields: NewOp, clock?: () => Date): Promise<Applied | null> {
+	try {
+		return await applyLocally(db, fields, clock);
+	} catch (e) {
+		if (e instanceof Rejected) return null;
+		throw e;
+	}
+}
+
 /** The operations waiting to be sent, in `device_seq` order. */
 export async function pendingOps(db: UserDb): Promise<OutboxEntry[]> {
 	return db.getAll('outbox');

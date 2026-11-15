@@ -13,7 +13,7 @@ import rules from '../../../../contract-fixtures/cascade/rules.json';
 import { questionsHash, shuffle } from '$lib/cascade/order';
 import { nextBoundary, Rejected, runIndicator, runIndicatorText, type Progression, type QuizState } from '$lib/cascade/rules';
 import { userDbName } from './accounts';
-import { applyLocally, APPLY_STORES, type NewOp } from './apply';
+import { applyLocally, applyOrRefuse, APPLY_STORES, CHANGE_REFUSED, type NewOp } from './apply';
 import { openUserDb, upgradeFrom, USER_DB_VERSION, type UserDb } from './db';
 import { getMeta, initMeta } from './meta';
 import { CASCADE_SETTING_DEFAULTS, type CascadeRow, type QuestionRow, type QuizRow } from './rows';
@@ -474,5 +474,30 @@ describe("a cascade's settings", () => {
 				reason: 'invalid'
 			});
 		}
+	});
+});
+
+describe('a change a page’s button makes', () => {
+	it('is answered null when the rules refuse it, with nothing queued, where applyLocally throws; one they take is applied', async () => {
+		const db = await freshDb();
+		await seed(db, { cascade_id: 'c1', source_id: 'q1', count: 5, seed: 1n });
+		// Restore, pressed in a tab still showing the cascade as trashed after another tab restored it.
+		expect(await applyOrRefuse(db, { type: 'restore_cascade', cascade_id: 'c1' })).toBeNull();
+		// Delete forever on a level that is being studied again.
+		expect(await applyOrRefuse(db, { type: 'purge_quiz', quiz_id: 'q1' })).toBeNull();
+		expect(await db.count('outbox')).toBe(0);
+		await expect(applyLocally(db, { type: 'restore_cascade', cascade_id: 'c1' })).rejects.toBeInstanceOf(Rejected);
+		// Move to Trash is taken, once.
+		expect((await applyOrRefuse(db, { type: 'trash_cascade', cascade_id: 'c1' }))?.entry.op.type).toBe('trash_cascade');
+		expect(await applyOrRefuse(db, { type: 'trash_cascade', cascade_id: 'c1' })).toBeNull();
+		expect(await db.count('outbox')).toBe(1);
+		// The line the page then shows is the one Create and Duplicate end a refusal with.
+		expect(CHANGE_REFUSED).toMatch(/could not be .*\. Try again\.$/);
+	});
+
+	it('throws what is not a refusal by the rules', async () => {
+		const db = await freshDb();
+		db.close();
+		await expect(applyOrRefuse(db, { type: 'trash_cascade', cascade_id: 'c1' })).rejects.toBeDefined();
 	});
 });

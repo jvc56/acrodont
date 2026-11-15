@@ -29,7 +29,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { display, textStyle } from '$lib/player/display.svelte';
 	import { controls } from '$lib/player/controls.svelte';
-	import { applyLocally, type NewOp } from '$lib/local/apply';
+	import { applyOrRefuse, CHANGE_REFUSED, type NewOp } from '$lib/local/apply';
 	import { storeCreated, type Created } from '$lib/local/created';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta, recordOpen } from '$lib/local/meta';
@@ -403,12 +403,19 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		}
 	}
 
-	async function write(op: NewOp) {
-		if (!db) return;
-		await applyLocally(db, op);
-		afterLocalWrite();
+	/**
+	 * One change made from this page. False when the rules refused it (the page
+	 * was showing what another tab or a sync has since changed): the page says
+	 * so and reads again, so what it shows is true before the next press.
+	 */
+	async function write(op: NewOp): Promise<boolean> {
+		if (!db) return false;
+		const applied = await applyOrRefuse(db, op);
+		if (applied) afterLocalWrite();
+		else cascadeError = CHANGE_REFUSED;
 		await refreshSide();
 		await player?.load(true);
+		return applied !== null;
 	}
 
 	/**
@@ -421,7 +428,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		if (!c || !Object.keys(fields).length) return;
 		// Definitions, hooks or probability orders change what an answer holds: the cards in memory go first.
 		if (fields.show_definitions !== undefined || fields.show_hooks !== undefined || fields.show_probability !== undefined) player?.settingsChanged();
-		await write({ type: 'set_cascade_options', cascade_id: c.id, ...fields } as NewOp);
+		if (!(await write({ type: 'set_cascade_options', cascade_id: c.id, ...fields } as NewOp))) return;
 		// Switching mode mid-card resets its typed entries.
 		if (fields.answer_mode !== undefined) await player?.modeChanged();
 		await offer(key, fields);
@@ -464,8 +471,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		if (o.progression !== q.progression) op.progression = o.progression;
 		if (o.require_alphabetical !== q.require_alphabetical) op.require_alphabetical = o.require_alphabetical;
 		if (Object.keys(op).length <= 2) return;
-		await write(op as unknown as NewOp);
-		levelSaved++;
+		if (await write(op as unknown as NewOp)) levelSaved++;
 	}
 
 	/** The options the cascade's new levels start with: saved as soon as one is changed, like its other settings. */
@@ -545,6 +551,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	}
 
 	async function restore() {
+		cascadeError = null;
 		await write({ type: 'restore_cascade', cascade_id: id });
 	}
 
@@ -558,8 +565,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 			action: 'Move to Trash'
 		});
 		if (!ok) return;
-		await write({ type: 'trash_cascade', cascade_id: id });
-		await goto('/');
+		if (await write({ type: 'trash_cascade', cascade_id: id })) await goto('/');
 	}
 
 	let starting = $state<{ stage: 'server' | 'device'; progress: number; count: number | null } | null>(null);
@@ -731,6 +737,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	{:else if v.status === 'trashed'}
 		<p>This cascade is in the Trash.</p>
 		<Button class="mt-4" onclick={restore}>Restore</Button>
+		{#if cascadeError}<p class="mt-2 text-sm text-destructive" role="alert">{cascadeError}</p>{/if}
 		<div class="mt-6"><CascadeLadder {rows} /></div>
 	{/if}
 {/snippet}
@@ -1229,6 +1236,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 				<Button onclick={startOver}>Start over</Button>
 				<Button variant="outline" onclick={moveToTrash}>Move to Trash</Button>
 			</div>
+			{#if cascadeError}<p class="text-sm text-destructive" role="alert">{cascadeError}</p>{/if}
 		</div>
 	</div>
 {/if}

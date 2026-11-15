@@ -960,6 +960,17 @@ until its rows are fetched. A
 trashed cascade is one unit: the cleared quizzes listed under it can still be
 restored (which brings the cascade back) and exported, but Delete forever is
 shown only on the cascade itself, never on its quizzes.
+**A change the rules refuse is said, not dropped in silence.** A page offers
+Restore, Delete forever, Move to Trash or a setting from what it last read,
+and another tab or a sync may have changed that since (a cascade restored
+twice, a level deleted forever in one tab and restored in another). The
+operation is then refused on the device, nothing is queued, and the page says
+"The change could not be made. Try again." (`CHANGE_REFUSED`, the sentence
+Create Cascade and Duplicate cascade end a refusal with) and reads again, so
+it shows what is true before the next press: beside the entry in the Trash (above the
+list when the entry is no longer in it), above the Cascades page's list for
+its Move to Trash, and in the player under Restore on a trashed cascade, in
+Settings, and on the completion screen for its Move to Trash.
 
 ### Taking a quiz
 
@@ -5695,7 +5706,11 @@ Modules:
   `device_seq` in `meta`, and appends the operation to the
   outbox, all in one IndexedDB transaction, so two tabs can never mint the
   same sequence; the base is written only by the sync
-  engine. One tab at a time runs the sync engine and the download manager,
+  engine. A page's own buttons (a setting, Move to Trash, Restore, Delete
+  forever) go through `applyOrRefuse`, which answers null where the rules
+  refuse the operation, for the page to say so (see [Trash](#trash));
+  "use for all cascades" and Copy settings write only to cascades they have
+  just read as reachable, and call `applyLocally` directly. One tab at a time runs the sync engine and the download manager,
   elected with the Web Locks API (`navigator.locks.request` on a per-user
   lock held for as long as the tab runs as that account and can sync: it is
   given up at a logout, when the account is signed out in another tab, and
@@ -6771,7 +6786,7 @@ the tab only stops and restarts syncing for it, and going when it logs out or
 another account starts syncing in the tab; and a sync or a count asked for
 after a logout that removed the account's data not making its database
 again; **`tabMaySync`** being false once another tab activated a newer build, with the database left as it was, as it is once the database was taken or the account signed out elsewhere, and a tab stopped for it giving the lock to the waiting tab, sending nothing more, and leaving what it writes afterwards in the outbox that tab reads; **a sync asked for and waited for** (`syncAndWait`, `sendPending`): in the leading tab, the cascade's unsent operation sent before the answer and nothing asked when nothing of the cascade is unsent; the wait given up, with the operation still counted unsent, when the sync does not end; in a tab that does not lead, the leader asked on the channel and its answer waited for, and the wait given up when the leader's sync failed or no tab answers; and the leading tab answering another tab's request once its sync has ended (the Export dialog's sentence and Duplicate's call are the pages' own, exercised by no test); the count before a removal reading the outbox in a tab that has stopped syncing, leaving no connection open, making no database that is not there, and answering "not known" for one it cannot read or open in time; and a tab whose database another tab's removal deleted not being told it was updated, and syncing again. (The layout's two lines that call these, at a change of account and
-at the "updated in another tab" state, are not exercised by a unit test; the update journey walks the second.) A fixture unscoped
+at the "updated in another tab" state, are not exercised by a unit test; the update journey walks the second.) `applyOrRefuse` answering null, with nothing queued, for a Restore of a cascade that is not in the Trash, a Delete forever of a level being studied and a second Move to Trash, where `applyLocally` throws, and throwing what is not the rules' refusal (the line each page then shows is the page's own, exercised by no test). A fixture unscoped
 database at each earlier version opens at the current one with its rows and
 pointer intact.
 The rebase tests cover: a `finish` rejected `storage_limit` leaving its level
