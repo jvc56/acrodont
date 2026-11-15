@@ -128,6 +128,15 @@ function csvField(s: string): string {
 	return /[,"\r\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
 }
 
+/**
+ * A CSV cell of definition text. Definitions are free text an admin uploads,
+ * and a spreadsheet reads a cell that begins with `=`, `+`, `-`, `@`, tab or
+ * CR as a formula: one that does is written after an apostrophe.
+ */
+function textCell(s: string): string {
+	return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+}
+
 const hooksPair = (front?: string, back?: string) => `${splitTiles(front ?? '').join(' ')}|${splitTiles(back ?? '').join(' ')}`;
 
 function cell(input: ExportInput, q: ExportQuestion, g: Grade | undefined, col: Column): string {
@@ -140,11 +149,11 @@ function cell(input: ExportInput, q: ExportQuestion, g: Grade | undefined, col: 
 			return g ?? '';
 		case 'answer':
 			if (t === 'anagram') return q.words!.map((w) => w.word).join(' ');
-			if (t === 'definition') return q.definition!;
+			if (t === 'definition') return textCell(q.definition!);
 			return leaveValueText(q.value!, d);
 		case 'definition':
-			if (t === 'anagram') return q.words!.map((w) => w.definition ?? '').join(' | ');
-			if (t === 'definition') return q.definition!;
+			if (t === 'anagram') return textCell(q.words!.map((w) => w.definition ?? '').join(' | '));
+			if (t === 'definition') return textCell(q.definition!);
 			return '';
 		case 'hooks':
 			if (t === 'anagram') return q.words!.map((w) => hooksPair(w.front_hooks, w.back_hooks)).join(' / ');

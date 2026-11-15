@@ -101,6 +101,12 @@ def csv_field(s):
     return s
 
 
+def text_cell(s):
+    """A CSV cell of definition text: one a spreadsheet would read as a formula
+    is written after an apostrophe."""
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
+
 def hooks_pair(front, back):
     return " ".join(split_tiles(front or "")) + "|" + " ".join(split_tiles(back or ""))
 
@@ -115,13 +121,13 @@ def cell(case, q, g, col, d):
         if t == "anagram":
             return " ".join(w["word"] for w in q["words"])
         if t == "definition":
-            return q["definition"]
+            return text_cell(q["definition"])
         return leave_text(q["value"], d)
     if col == "definition":
         if t == "anagram":
-            return " | ".join(w.get("definition", "") for w in q["words"])
+            return text_cell(" | ".join(w.get("definition", "") for w in q["words"]))
         if t == "definition":
-            return q["definition"]
+            return text_cell(q["definition"])
         return ""
     if col == "hooks":
         if t == "anagram":
@@ -215,6 +221,42 @@ LEAVE_QUIZZES = [
     {"level": 1, "active": True, "order": [5, 2, 0, 4, 1, 3], "grades": {"1": "missed", "2": "correct", "5": "correct"}},
 ]
 
+# Definitions a spreadsheet would run as formulas when they open a CSV cell.
+FORMULA_ANAGRAM_QUESTIONS = [
+    {"idx": 0, "key": "AB", "words": [
+        {"word": "AB", "definition": "=HYPERLINK(\"http://x.test\",\"a muscle\")", "front_hooks": "CDFGJKLNSTW", "back_hooks": "AOSY"},
+        {"word": "BA", "definition": "=the soul", "front_hooks": "AO", "back_hooks": "ADGHLMNPRSTY"}]},
+    {"idx": 1, "key": "AD", "words": [
+        {"word": "AD", "definition": "+an advertisement", "front_hooks": "", "back_hooks": "DOSZ"},
+        {"word": "DA", "definition": "a father", "front_hooks": "", "back_hooks": ""}]},
+    {"idx": 2, "key": "AE", "words": [
+        {"word": "AE", "definition": "-one", "front_hooks": "", "back_hooks": ""},
+        {"word": "EA", "definition": "@a river", "front_hooks": "", "back_hooks": ""}]},
+    {"idx": 3, "key": "AG", "words": [
+        {"word": "AG", "definition": "@SUM(1,2)", "front_hooks": "", "back_hooks": ""}]},
+    {"idx": 4, "key": "AH", "words": [
+        {"word": "AH", "definition": "\tto exclaim", "front_hooks": "", "back_hooks": ""}]},
+    {"idx": 5, "key": "AI", "words": [
+        {"word": "AI", "definition": "\ra sloth", "front_hooks": "", "back_hooks": ""}]},
+    {"idx": 6, "key": "AL", "words": [
+        {"word": "AL", "definition": "a tree = an East Indian one", "front_hooks": "", "back_hooks": ""},
+        {"word": "LA", "definition": "=a note", "front_hooks": "", "back_hooks": ""}]},
+    {"idx": 7, "key": "AM", "words": [
+        {"word": "AM", "definition": "'=already quoted", "front_hooks": "", "back_hooks": ""}]},
+]
+FORMULA_ANAGRAM_QUIZZES = [
+    {"level": 1, "active": True, "order": [7, 6, 5, 4, 3, 2, 1, 0], "grades": {"0": "missed", "3": "correct"}},
+]
+FORMULA_DEF_QUESTIONS = [
+    {"idx": 0, "key": "AB", "definition": "=1+1", "front_hooks": "", "back_hooks": "S"},
+    {"idx": 1, "key": "AD", "definition": "-2, a negative", "front_hooks": "", "back_hooks": ""},
+    {"idx": 2, "key": "AE", "definition": "one", "front_hooks": "", "back_hooks": ""},
+    {"idx": 3, "key": "AG", "definition": "+\"plus\"", "front_hooks": "", "back_hooks": ""},
+]
+FORMULA_DEF_QUIZZES = [
+    {"level": 1, "active": True, "order": [0, 1, 2, 3], "grades": {"1": "missed"}},
+]
+
 WHICH = ["all", "correct", "missed", "ungraded"]
 
 
@@ -262,6 +304,21 @@ def cases():
         # The default lines for this type, kept as a named case.
         add(f"{t} default lines", data, {"scope": "cascade", "which": "all", "order": "study", "decimals": 1,
                                           "format": "txt", "lines": default_lines})
+
+    # Definitions that begin as a formula does: an apostrophe goes before the
+    # CSV cell that begins with one, and a word list writes them as they are.
+    for data in [
+        {"name": "Formulas", "quiz_type": "anagram", "tiles": EN_TILES,
+         "questions": FORMULA_ANAGRAM_QUESTIONS, "quizzes": FORMULA_ANAGRAM_QUIZZES},
+        {"name": "Formula defs", "quiz_type": "definition", "tiles": EN_TILES,
+         "questions": FORMULA_DEF_QUESTIONS, "quizzes": FORMULA_DEF_QUIZZES},
+    ]:
+        t = data["quiz_type"]
+        base = {"scope": "cascade", "which": "all", "order": "study", "decimals": 1}
+        add(f"formula {t} csv all", data,
+            {**base, "format": "csv", "columns": ["question", "answer", "definition", "hooks", "grade"]})
+        add(f"formula {t} csv definition first", data, {**base, "format": "csv", "columns": ["definition", "question"]})
+        add(f"formula {t} txt answers", data, {**base, "format": "txt", "lines": "answers"})
 
     # A quiz in the Trash: the attempt it finished on.
     trash = {"name": "Trash export", "quiz_type": "anagram", "tiles": EN_TILES, "questions": ANAGRAM_QUESTIONS,

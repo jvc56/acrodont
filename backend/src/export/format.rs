@@ -252,6 +252,13 @@ fn csv_field(s: &str) -> String {
     }
 }
 
+/// A CSV cell of definition text. Definitions are free text an admin uploads,
+/// and a spreadsheet reads a cell that begins with `=`, `+`, `-`, `@`, tab or
+/// CR as a formula: one that does is written after an apostrophe.
+fn text_cell(s: String) -> String {
+    if s.starts_with(['=', '+', '-', '@', '\t', '\r']) { format!("'{s}") } else { s }
+}
+
 fn hooks_pair(front: Option<&str>, back: Option<&str>) -> String {
     format!(
         "{}|{}",
@@ -269,12 +276,14 @@ fn cell(input: &ExportInput, q: &Question, g: Option<Grade>, col: Column) -> Str
         Column::Grade => g.map(|g| g.as_str().to_owned()).unwrap_or_default(),
         Column::Answer => match t {
             QuizType::Anagram => words().iter().map(|w| w.word.as_str()).collect::<Vec<_>>().join(" "),
-            QuizType::Definition => q.definition.clone().unwrap_or_default(),
+            QuizType::Definition => text_cell(q.definition.clone().unwrap_or_default()),
             QuizType::LeaveValue => leave_value_text(q.value.unwrap_or(0.0), d),
         },
         Column::Definition => match t {
-            QuizType::Anagram => words().iter().map(|w| w.definition.as_deref().unwrap_or("")).collect::<Vec<_>>().join(" | "),
-            QuizType::Definition => q.definition.clone().unwrap_or_default(),
+            QuizType::Anagram => {
+                text_cell(words().iter().map(|w| w.definition.as_deref().unwrap_or("")).collect::<Vec<_>>().join(" | "))
+            }
+            QuizType::Definition => text_cell(q.definition.clone().unwrap_or_default()),
             QuizType::LeaveValue => String::new(),
         },
         Column::Hooks => match t {

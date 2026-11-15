@@ -1579,6 +1579,19 @@ What ends up in the file, per quiz type:
   Leave Value `answer` is the value as the [Answers](#answers) rule writes it
   for exports (no `+`), and a Leave Value row's `definition` and `hooks` are
   empty; the dialog does not offer those columns for a Leave Value cascade. The header row is the column names in the order chosen.
+- **A definition is never a formula.** Definitions are free text an admin
+  uploads, and a spreadsheet runs a cell that begins with `=`, `+`, `-`, `@`,
+  a tab or a CR as a formula. So a CSV cell of definition text that begins
+  with one of those six is written with an apostrophe (`'`) before it, which a
+  spreadsheet shows as text: the `definition` cell (for an Anagram row the
+  joined cell, so only its first definition decides), and a Definition
+  quiz's `answer` cell, which is the same text. The apostrophe goes on before
+  the RFC 4180 quoting. No other cell is touched: a negative Leave Value
+  (`-8.4`) stays a number, and questions, hooks and grades hold tiles and
+  fixed words. A word list is not a spreadsheet and writes definitions as
+  they are. The device and the server do this identically, by the same
+  fixtures. Nothing reads an export back in, so nothing has to take the
+  apostrophe off again.
 - The file is named after the source, e.g. `CSW24 7s - L2 missed.txt`: the
   cascade name, then ` - L<level>` for a quiz export, then, after a single
   space, the selection's API value when it is not `all` (`correct`, `missed`
@@ -6625,7 +6638,11 @@ multi-word anagram answer cells, an anagram row whose definitions contain ` / `
 and one whose definition contains ` | ` (written as it is, since the cell is
 for reading),
 the `hooks` and `grade` cell forms including a word with four front hooks in
-tile order, leave values at every decimal setting, empty `definition` and
+tile order, definitions that begin with `=`, `+`, `-`, `@`, a tab and a CR
+(an apostrophe before the `definition` cell and a Definition quiz's `answer`
+cell, none before a later word's definition inside an Anagram cell, none in a
+word list, and none before a negative leave value),
+leave values at every decimal setting, empty `definition` and
 `hooks` cells for Leave Value rows, the
 filename rule applied to a default cascade name with `·` and `–` in it, to a
 name holding a character outside the Basic Multilingual Plane (one `_`, not
