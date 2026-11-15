@@ -5987,7 +5987,9 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
       before the old one drains, which is safe because Acrodont runs correctly
       as two instances.
     - **Startup and shutdown:** a circuit breaker rolls back a release whose
-      task cannot start, and an EventBridge rule mails why. `stopTimeout` is
+      task cannot start, and an EventBridge rule mails why. Terraform keeps
+      the app task definition's earlier revisions registered
+      (`skip_destroy`), so the revision it rolls back to exists. `stopTimeout` is
       120 s so graceful shutdown can finish a streaming export. The container
       health check's `startPeriod` (240 s) must stay at least twice the measured
       catalog load, which the backend logs as `load_ms`. `/health` fails

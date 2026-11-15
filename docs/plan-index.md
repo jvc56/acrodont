@@ -8,7 +8,7 @@ are not headings).
 
 | Heading | Lines |
 |---|---|
-| # Acrodont — Project Plan | 1–7852 |
+| # Acrodont — Project Plan | 1–7854 |
 |   ## Overview | 3–72 |
 |   ## Glossary | 73–91 |
 |   ## Cascade Rules | 92–625 |
@@ -87,25 +87,25 @@ are not headings).
 |     ### One command | 5829–5912 |
 |     ### How it is put together | 5913–5933 |
 |     ### Day to day | 5934–5957 |
-|   ## Deployment and Operations | 5958–6149 |
-|   ## Backups | 6150–6256 |
-|     ### What is backed up | 6156–6179 |
-|     ### Alarms | 6180–6192 |
-|     ### Restoring | 6193–6226 |
-|     ### The drill | 6227–6248 |
-|     ### Locally | 6249–6256 |
-|   ## Testing | 6257–7817 |
-|     ### The fixture catalog | 6273–6289 |
-|     ### Contract fixtures | 6290–6396 |
-|     ### Unit tests | 6397–6795 |
-|     ### Integration tests | 6796–7281 |
-|     ### End-to-end tests | 7282–7632 |
-|       #### What the tests reuse | 7289–7359 |
-|       #### The journeys | 7360–7632 |
-|     ### Scale tests | 7633–7748 |
-|     ### Zyzzyva parity | 7749–7768 |
-|     ### Running the tests | 7769–7817 |
-|   ## Delivery Phases | 7818–7852 |
+|   ## Deployment and Operations | 5958–6151 |
+|   ## Backups | 6152–6258 |
+|     ### What is backed up | 6158–6181 |
+|     ### Alarms | 6182–6194 |
+|     ### Restoring | 6195–6228 |
+|     ### The drill | 6229–6250 |
+|     ### Locally | 6251–6258 |
+|   ## Testing | 6259–7819 |
+|     ### The fixture catalog | 6275–6291 |
+|     ### Contract fixtures | 6292–6398 |
+|     ### Unit tests | 6399–6797 |
+|     ### Integration tests | 6798–7283 |
+|     ### End-to-end tests | 7284–7634 |
+|       #### What the tests reuse | 7291–7361 |
+|       #### The journeys | 7362–7634 |
+|     ### Scale tests | 7635–7750 |
+|     ### Zyzzyva parity | 7751–7770 |
+|     ### Running the tests | 7771–7819 |
+|   ## Delivery Phases | 7820–7854 |
 
 Notable anchors inside long sections:
 

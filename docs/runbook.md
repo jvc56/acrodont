@@ -261,6 +261,27 @@ release back. Terraform's state still names the failed release, so run
 `scripts/rollback.sh` before any other apply. The stopped tasks and the log
 group say why the release failed.
 
+**Old task definition revisions stay registered.** Each release makes a new
+revision of the `acrodont` task definition, and Terraform leaves the earlier
+ones `ACTIVE` (`skip_destroy`), so the revision the circuit breaker rolls
+back to always exists. The plan still shows the task definition as one to
+add and one to destroy: the destroy only drops the old revision from
+Terraform's state. `scripts/rollback.sh` does not use the old revisions: it
+applies the earlier image tag, which registers a new one. They cost nothing,
+hold no secret (only the names of the SSM parameters), and nothing prunes
+them, nor needs to: one a release is far from any ECS limit. To tidy the
+list, deregister by hand every revision but the one the service runs and the
+one before it:
+
+```bash
+export AWS_PAGER=""
+aws ecs list-task-definitions --family-prefix acrodont --status ACTIVE --sort DESC
+aws ecs deregister-task-definition --task-definition acrodont:REVISION
+```
+
+The ops, backup and drill task definitions are not kept this way: nothing
+rolls back to them. `terraform destroy` leaves the app revisions behind.
+
 ## Running SQL in production
 
 The database has no public address. SQL runs from an ops task inside the VPC:

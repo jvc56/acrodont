@@ -71,7 +71,13 @@ locals {
 }
 
 resource "aws_ecs_task_definition" "app" {
-  family                   = "acrodont"
+  family = "acrodont"
+  # A release replaces this resource with a new revision. Without this,
+  # Terraform deregisters the old revision first, and that is the revision
+  # the circuit breaker below rolls the service back to when the new one
+  # cannot start. Kept, old revisions pile up (one per release, free, no
+  # secret in them): docs/runbook.md, Rolling back, says how to prune.
+  skip_destroy             = true
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = var.task_cpu

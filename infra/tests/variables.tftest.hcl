@@ -48,6 +48,10 @@ run "defaults_plan" {
     error_message = "deploys must roll: the new task serves before the old one drains"
   }
   assert {
+    condition     = aws_ecs_task_definition.app.skip_destroy == true
+    error_message = "the app task definition's earlier revisions must stay registered: the circuit breaker rolls back to one"
+  }
+  assert {
     condition     = one(aws_ecs_service.app.capacity_provider_strategy).capacity_provider == "FARGATE_SPOT"
     error_message = "the app runs on Spot by default"
   }
