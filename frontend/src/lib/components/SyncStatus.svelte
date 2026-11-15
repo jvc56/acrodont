@@ -1,7 +1,7 @@
 <script lang="ts">
 	// The sync status (PLAN.md § Frontend: synced, syncing, offline with pending
-	// work, log in to sync, reload to keep syncing, not enough room on this
-	// device, signed out in another tab). It says what is happening as it
+	// work, log in to sync, reload to keep syncing, can't sync: reload, not
+	// enough room on this device, signed out in another tab). It says what is happening as it
 	// happens: changes waiting, then Syncing… while the device talks to the
 	// server, then Synced. The box keeps a fixed width with its label flush
 	// right, so a changing label never shifts what sits beside it.
@@ -27,6 +27,8 @@
 		if (session.signedOutInAnotherTab) return 'Signed out in another tab';
 		if (session.needsLogin || syncState.status === 'needs_login') return 'Log in to sync';
 		if (syncState.status === 'reload') return 'Reload to keep syncing';
+		// The server refused the sync request itself (engine.ts, `refuse`).
+		if (syncState.status === 'refused') return 'Can’t sync: reload';
 		// A download that found no room even after dropping what it may (downloads.ts).
 		if (syncState.noRoom) return 'Not enough room on this device';
 		switch (syncState.status) {
@@ -49,7 +51,8 @@
 {#if !(quiet && EVERYDAY.has(text))}
 <div class="relative flex max-w-40 min-w-0 items-center sm:w-40 sm:shrink-0 justify-end gap-2 text-sm whitespace-nowrap" role="status" title={text}>
 	<span class="inline-block h-2 w-2 shrink-0 rounded-full {compact && EVERYDAY.has(text) ? 'max-sm:hidden' : ''}" class:bg-green-600={text === 'Synced'} class:bg-muted-foreground={text !== 'Synced'}></span>
-	{#if syncState.status === 'reload'}
+	{#if syncState.status === 'reload' || text === 'Can’t sync: reload'}
+		<!-- Takes a newer build if one is waiting, and reloads either way. -->
 		<button class="truncate underline" onclick={applyUpdate}>{text}</button>
 	{:else if text === 'Log in to sync'}
 		<a class="truncate underline" href="/login">{text}</a>

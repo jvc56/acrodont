@@ -22,7 +22,19 @@ export type SyncStatus =
 	/** A 401: studying continues; "Log in to sync". */
 	| 'needs_login'
 	/** A 426: "reload to keep syncing". */
-	| 'reload';
+	| 'reload'
+	/** The server refused the request itself (a 4xx other than 401, 426 and 429): "Can't sync: reload". */
+	| 'refused';
+
+/**
+ * A request the server refused is not sent again sooner than this, whatever
+ * asks for a sync: the same batch would be refused the same way, and every
+ * answer, every 30 seconds and every change on another device would ask.
+ */
+export const REFUSED_RETRY_MS = 300_000;
+
+/** A 4xx that says the request itself is wrong: not the session (401), the build (426) or the rate (429). */
+const isRefusal = (status: number) => status >= 400 && status < 500 && status !== 401 && status !== 426 && status !== 429;
 
 export interface EngineHooks {
 	onStatus?: (s: SyncStatus) => void;
@@ -81,6 +93,8 @@ export class SyncEngine {
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private lastRun = 0;
 	private stopped = false;
+	/** When the server last refused a request (`Date.now()`), until a request is answered otherwise. */
+	private refusedAt: number | null = null;
 	private readonly transport: Transport;
 	private readonly now: () => Date;
 	private readonly appVersion: number;
@@ -214,12 +228,16 @@ export class SyncEngine {
 	private async cycle() {
 		this.lastRun = Date.now();
 		const sync = await getMeta(this.db, 'sync');
-		if (sync.upgrade_required) this.setStatus('reload');
+		// Refused a short while ago: nothing is sent, and the status stays.
+		const refused = this.refusedAt !== null && Date.now() - this.refusedAt < REFUSED_RETRY_MS;
+		if (refused) this.setStatus('refused');
+		else if (sync.upgrade_required) this.setStatus('reload');
 		else this.setStatus('syncing');
 		const { device_id } = await getMeta(this.db, 'device');
 		const server = await getMeta(this.db, 'server');
 		const rctx: RebaseCtx = { device_id, max_quiz_questions: server.max_quiz_questions, now: this.now };
 		await this.release(rctx);
+		if (refused) return;
 		let cursor = sync.cursor;
 		// Device settings shared here and not yet sent go with the first request.
 		let shares: SharedSettings | null = await pendingShares(this.db);
@@ -244,6 +262,11 @@ export class SyncEngine {
 				this.setStatus('needs_login');
 				return;
 			}
+			if (isRefusal(reply.status)) {
+				this.refuse();
+				return;
+			}
+			this.refusedAt = null;
 			if (reply.status !== 200 && reply.status !== 426) {
 				this.setStatus('offline');
 				return;
@@ -346,11 +369,23 @@ export class SyncEngine {
 			// page, it would advance the cursor past rows that never arrived.
 			if (!reply || reply.status !== 200 || !isSyncBody(reply.body)) {
 				if (reply?.status === 401) this.setStatus('needs_login');
+				else if (reply && isRefusal(reply.status)) this.refuse();
 				else if (reply) this.setStatus('offline');
 				return false;
 			}
 			page = reply.body;
 		}
+	}
+
+	/**
+	 * The server refused the request: "Can't sync: reload". The batch stays in
+	 * the outbox, whole, and is never dropped for it; the same request is made
+	 * again no sooner than REFUSED_RETRY_MS, or at once by the engine a reload
+	 * starts, which a newer build may send differently.
+	 */
+	private refuse() {
+		this.refusedAt = Date.now();
+		this.setStatus('refused');
 	}
 
 	private emit(o: RebaseOutcome) {

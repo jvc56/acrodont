@@ -14,7 +14,7 @@ import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
 import { bindUser, USER_HEADER } from '$lib/api';
 import { DownloadManager, type DownloadApi } from './downloads';
-import { electLeader, listenForChanges, STREAM_REOPEN_MS, SyncEngine, transportFor, type EngineHooks, type SyncStatus } from './engine';
+import { electLeader, listenForChanges, REFUSED_RETRY_MS, STREAM_REOPEN_MS, SyncEngine, transportFor, type EngineHooks, type SyncStatus } from './engine';
 import type { Notice } from './notices';
 import type { Reply, SyncRequest, SyncResponse } from './protocol';
 import { FakeServer, type NewCascade } from './testing/fake-server';
@@ -1495,6 +1495,94 @@ describe('operations held for a level the server built from another set', () => 
 		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
 		// Its two answers given twice, and the answer to the question the server's level lacks.
 		expect(texts(a)).toEqual(['Level 2 was finished on another device. 3 answers from this device weren’t kept.']);
+	});
+});
+
+describe('a sync the server refuses', () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	it('a 4xx other than 401, 426 and 429 says can’t sync, keeps the whole batch, and is not asked again for five minutes whatever asks', async () => {
+		const { server, a } = await setup();
+		await a.play(Q1, 'CC');
+		let refuse: number | null = 400;
+		a.tamper = (req, send) => (refuse ? { status: refuse, body: { error: 'invalid' }, retryAfter: null } : send(req));
+		const t0 = Date.now();
+		const now = vi.spyOn(Date, 'now').mockReturnValue(t0);
+		await a.sync();
+		expect(a.engine.status).toBe('refused');
+		expect(await a.db.count('outbox')).toBe(2);
+		const sent = a.requests.length;
+		// An answer, the 30-second sync, a change on another device: nothing is sent.
+		await a.play(Q1, 'C', 2);
+		await a.sync();
+		now.mockReturnValue(t0 + REFUSED_RETRY_MS - 1);
+		await a.sync();
+		expect(a.requests.length).toBe(sent);
+		expect(a.engine.status).toBe('refused');
+		expect(a.statuses).not.toContain('offline');
+		// Studying went on meanwhile: the answer is shown and queued.
+		expect((await a.quiz(Q1))!.correct_count).toBe(3);
+		// Five minutes on, the same batch is asked once more, and refused again (a 403 this time).
+		refuse = 403;
+		now.mockReturnValue(t0 + REFUSED_RETRY_MS);
+		await a.sync();
+		expect(a.requests.length).toBe(sent + 1);
+		expect((a.requests.at(-1)!.ops ?? []).length).toBe(3);
+		expect(a.engine.status).toBe('refused');
+		await a.sync();
+		expect(a.requests.length).toBe(sent + 1);
+		expect(await a.db.count('outbox')).toBe(3);
+		// A reload starts a new engine, which asks at once; the server takes it now.
+		refuse = null;
+		a.engine.stop();
+		a.start();
+		await a.sync();
+		expect(a.engine.status).toBe('idle');
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(server.cascades.get(C1)!.sim.quizzes.get(Q1)!.grades.size).toBe(3);
+	});
+
+	it('a refusal that passes clears itself at the next request that is answered', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'C');
+		a.tamper = () => ({ status: 422, body: null, retryAfter: null });
+		const t0 = Date.now();
+		const now = vi.spyOn(Date, 'now').mockReturnValue(t0);
+		await a.sync();
+		expect(a.engine.status).toBe('refused');
+		a.tamper = null;
+		now.mockReturnValue(t0 + REFUSED_RETRY_MS);
+		await a.sync();
+		expect(a.engine.status).toBe('idle');
+		expect(await a.db.count('outbox')).toBe(0);
+		// And the next sync is made when asked, with no wait.
+		await a.play(Q1, 'C', 1);
+		await a.sync();
+		expect(await a.db.count('outbox')).toBe(0);
+	});
+
+	it('a 500 or a 502 is still no connection, asked again at the next sync', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'C');
+		a.tamper = () => ({ status: 502, body: '<html>', retryAfter: null });
+		await a.sync();
+		expect(a.engine.status).toBe('offline');
+		const sent = a.requests.length;
+		await a.sync();
+		expect(a.requests.length).toBe(sent + 1);
+	});
+
+	it('a later page of a pull refused the same way says can’t sync and applies nothing', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'C');
+		a.tamper = (req, send) => {
+			if (req.page_token) return { status: 400, body: null, retryAfter: null };
+			const r = send(req);
+			return { ...r, body: { ...(r.body as SyncResponse), next_page_token: 'more' } };
+		};
+		await a.sync();
+		expect(a.engine.status).toBe('refused');
+		expect(await a.db.count('outbox')).toBe(1);
 	});
 });
 

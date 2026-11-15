@@ -140,7 +140,7 @@
 			<!-- Only changes that cannot sync now matter at logout. Online, a change
 			     syncs within a second, and the header's sync status shows that: a
 			     line here would come and go with every setting changed. -->
-			{#if (syncState.pending ?? 0) > 0 && (syncState.status === 'offline' || syncState.status === 'needs_login' || session.needsLogin)}
+			{#if (syncState.pending ?? 0) > 0 && (syncState.status === 'offline' || syncState.status === 'refused' || syncState.status === 'needs_login' || session.needsLogin)}
 				<p class="text-sm" role="status">
 					{syncState.pending === 1 ? '1 change hasn’t' : `${syncState.pending} changes haven’t`} synced yet. {syncState.pending === 1 ? 'It' : 'They'}
 					will sync the next time you log in on this device.

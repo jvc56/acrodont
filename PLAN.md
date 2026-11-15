@@ -912,9 +912,9 @@ response last reported, so they show offline too. The header also has
 **New cascade** and
 the sync status, which is [`SyncStatus`](#frontend) in every one of its states —
 **Synced**, **Waiting to sync**, **Syncing…**, **Offline**, **Log in to sync**,
-**not enough room on this device**, **signed out in another tab** and **reload to
-keep syncing** — since this is the page a user studies from and the last four
-are the ones that need acting on.
+**not enough room on this device**, **signed out in another tab**, **reload to
+keep syncing** and **Can't sync: reload** — since this is the page a user
+studies from and the last five are the ones that need acting on.
 
 ### Trash
 
@@ -1094,8 +1094,8 @@ as the term of the data model and the API.
   status bar, shown or hidden.
 - **The sync status shows what is happening**: "Waiting to sync" after an
   answer, "Syncing…" while the device talks to the server (a sync starts
-  within about a second of a write), then "Synced"; offline, log in, reload
-  and no room as they arise. It has a fixed width with its label flush right,
+  within about a second of a write), then "Synced"; offline, log in, reload,
+  can't sync and no room as they arise. It has a fixed width with its label flush right,
   so a changing label never shifts what is beside it.
 - **The sync status can be hidden**, with the status bar or by its own
   setting on the device (shown by default). Hidden, it is quiet rather than
@@ -3766,7 +3766,11 @@ acknowledgement's work proportional to its own batch; the
 [scale test](#scale-tests) asserts the budget. `429`
 backoff applies to sync like any other request, and so does `503`: the device
 resends the same batch after `Retry-After`, and nothing is dropped, because
-nothing was recorded.
+nothing was recorded. A `4xx` other than `401`, `426` and `429`, in answer to
+the request or to a later page of its pull, is a **refused** sync: nothing is
+applied and nothing dropped, the status reads "Can't sync: reload", and the
+same request is made again no sooner than five minutes later (see
+[`SyncStatus`](#frontend)).
 
 #### Telling the other devices
 
@@ -5802,10 +5806,28 @@ Components:
 - **`LeaveValue`**: formats a raw value with a sign and the cascade's number of
   decimal places.
 - **`FinishBanner`**: the non-blocking message after each finish.
-- **`SyncStatus`**: Synced, Waiting to sync, Syncing…, Offline, Log in to
+- **`SyncStatus`**: the list is closed. Synced, Waiting to sync, Syncing…,
+  Offline, Log in to
   sync, not enough room on this device, **signed out in another tab** (see
-  [Authentication while offline](#authentication-while-offline)), or
-  **reload to keep syncing** — the
+  [Authentication while offline](#authentication-while-offline)),
+  **Can't sync: reload** — the server refused the sync request itself, with a
+  `4xx` other than `401`, `426` and `429` (a `400` for a request it cannot
+  read, a `403` for a CSRF token it does not accept): the answer is
+  the same however often the same request is made, so this is not "Offline",
+  which promises a sync when the connection returns. The label is a button
+  that reloads the app, taking a newer build if one is waiting, since a
+  request this build sends wrongly is what a newer build would send
+  otherwise; if the refusal remains after a reload, it is the operator's to
+  look into. **The batch is never dropped for it**: the outbox stays whole,
+  studying continues and goes on being queued, and the Account page counts
+  what is unsent as it does offline. In this state the device asks the
+  server again **no sooner than every five minutes** (`REFUSED_RETRY_MS`),
+  whatever would otherwise start a sync (an answer, the 30-second timer, the
+  tab becoming visible, a change on another device), and at once from the
+  engine a reload starts; the first request answered otherwise ends the
+  state. A `5xx` other than `503`, and anything that is not an answer from
+  the sync endpoint, is still "Offline" and asked again at the next sync —
+  or **reload to keep syncing** — the
   `426` state (see [Deployment](#deployment-and-operations)), shown from the
   first `426` until a sync succeeds, because the app never reloads on its own,
   a plain reload is served the old build by the old worker, and its own reload
@@ -6844,7 +6866,7 @@ did not carry; a `resync_required` answered to a full pull being asked no third 
 sync; a `426` acknowledging its operations and applying their pull (the level
 an acknowledged finish made stays, with the answers queued on it), showing **reload to keep syncing**
 rather than a waiting count, keeping the rest of the outbox and the grades that
-follow it, and still showing that state from a new engine's first status on the same database, as after a reload, while the server answers `426`, until a sync succeeds; a `503` and a `429` each resending the same batch with the outbox intact (the wait itself is a stand-in the tests do not time); **a batch read before another account logged in in the same tab** being sent under the account the engine was started for, refused `401` by a stand-in server that checks the binding, and left in the outbox with "Log in to sync"; an engine stopped by that change of account sending nothing, using no answer that arrives after it was stopped and reporting no status; a change stream the browser gave up being opened again after a wait that doubles, one the browser is reopening itself being left to it, and one refused while the account needs to log in staying closed. The **download manager** has its own: a `429` on a cards page being waited out and that page fetched again, with no page lost or fetched twice; a write with no room dropping the least recently opened cascade, marking it, **not fetching it back in the rest of the same pass**, and retrying once, a second failure saying there is no room; and a page the player needs on the current card taking priority, so the download manager starts nothing while one is outstanding.
+follow it, and still showing that state from a new engine's first status on the same database, as after a reload, while the server answers `426`, until a sync succeeds; a `503` and a `429` each resending the same batch with the outbox intact (the wait itself is a stand-in the tests do not time); **a refused sync** (a `400`, then a `403`) reading "Can't sync", never "Offline", keeping the whole batch and the answers given meanwhile, sending nothing for five minutes whatever asks, asking once after them, and a new engine on the same database asking at once; a refusal ending at the first request answered otherwise, with no wait after it; a `502` still being no connection and asked again at the next sync; a later page of a pull refused the same way applying nothing; **a batch read before another account logged in in the same tab** being sent under the account the engine was started for, refused `401` by a stand-in server that checks the binding, and left in the outbox with "Log in to sync"; an engine stopped by that change of account sending nothing, using no answer that arrives after it was stopped and reporting no status; a change stream the browser gave up being opened again after a wait that doubles, one the browser is reopening itself being left to it, and one refused while the account needs to log in staying closed. The **download manager** has its own: a `429` on a cards page being waited out and that page fetched again, with no page lost or fetched twice; a write with no room dropping the least recently opened cascade, marking it, **not fetching it back in the rest of the same pass**, and retrying once, a second failure saying there is no room; and a page the player needs on the current card taking priority, so the download manager starts nothing while one is outstanding.
 
 **Not asserted by any test today.** Each of these is behaviour this plan
 states and the code is written to; none has a test whose body would fail if it
