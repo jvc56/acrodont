@@ -4920,6 +4920,12 @@ The flows are the conventional ones, built directly on Axum:
 
 - **Register** (`/register`): username, email and password. The server
   validates all fields and returns `400` with **every** field error at once.
+  An address must be ASCII: SES sends to no address whose local part holds
+  anything else and takes a domain only in its `xn--` form (the SES
+  `SendEmail` reference says so; it was not tried), and an address SES
+  refuses would log `alarm = "mail_failed"` at any visitor's will. One with
+  another character is the field error "We can't send mail to an address
+  with accented or non-Latin characters."
   **The strength rule**, which a reset's new password meets too: 8 to 128
   characters, then a `zxcvbn` score of at least 3, scored against the
   username, the address and the address's local part. zxcvbn matches each
@@ -6919,7 +6925,9 @@ they run in parallel and leave nothing behind.
     from any IP, however many addresses the requests come from, so the per-IP cap
     cannot be walked around with a fresh IP each time; and a replacement made under the cap still
     replaces the account and sends its code with the next registration after
-    the window; the purge task deletes stale unconfirmed accounts.
+    the window; the purge task deletes stale unconfirmed accounts. An
+    address with a character outside ASCII is a field error at register,
+    creating and sending nothing, and a reset asked for one is answered `202`.
   - A 300,000-question `finish` and reset complete within budget, and the reset
     is pulled by another device as one quiz row. The integration suite
     (`sync_faults.rs`) runs this case at 130,000 questions, as `pull.rs` runs

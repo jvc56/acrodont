@@ -95,15 +95,30 @@ fn is_valid_username(u: &str) -> bool {
 /// NUL among them is one Postgres takes in no text parameter, so the lookup
 /// that follows would fail (a `500` at register, and a `mail_failed` alarm
 /// from a reset request that any visitor can send) instead of being refused.
-fn is_valid_email(e: &str) -> bool {
+///
+/// And ASCII only. SES takes no address whose local part is not 7-bit ASCII
+/// (it does not support SMTPUTF8) and takes a domain only in its ASCII
+/// (Punycode, `xn--`) form: so says the SES `SendEmail` API reference, and
+/// nothing here was tried against SES. An address it refuses is a
+/// `mail_failed` alarm, which any visitor could then raise by registering one.
+fn email_error(e: &str) -> Option<&'static str> {
+    const INVALID: &str = "Enter a valid email address.";
     let n = e.chars().count();
     if !(3..=254).contains(&n) || e.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return false;
+        return Some(INVALID);
     }
     match e.rsplit_once('@') {
-        Some((local, domain)) => !local.is_empty() && !domain.is_empty() && !domain.contains('@'),
-        None => false,
+        Some((local, domain)) if !local.is_empty() && !domain.is_empty() && !domain.contains('@') => {}
+        _ => return Some(INVALID),
     }
+    if !e.is_ascii() {
+        return Some("We can't send mail to an address with accented or non-Latin characters.");
+    }
+    None
+}
+
+fn is_valid_email(e: &str) -> bool {
+    email_error(e).is_none()
 }
 
 // ---------------------------------------------------------------------------
@@ -149,8 +164,8 @@ async fn register(
             "Use 3–32 letters, digits or underscores.",
         ));
     }
-    if !is_valid_email(&email) {
-        errors.push(FieldError::new("email", "Enter a valid email address."));
+    if let Some(message) = email_error(&email) {
+        errors.push(FieldError::new("email", message));
     }
     errors.extend(password::check_strength("password", &body.password, &username, &email).await?);
     // A taken username is a field error, checked before anything that sends

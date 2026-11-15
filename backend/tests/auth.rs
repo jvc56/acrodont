@@ -104,6 +104,34 @@ async fn an_address_holding_a_control_character_is_refused(pool: sqlx::PgPool) {
     assert_eq!(n, 0);
 }
 
+/// SES sends to no address with a character outside ASCII (PLAN.md §
+/// Authentication → Register), so one is a field error at register, creates
+/// nothing and sends nothing; a reset request naming one is answered like any
+/// other and raises no alarm, since no account can have it.
+#[sqlx::test]
+async fn an_address_outside_ascii_is_refused(pool: sqlx::PgPool) {
+    let app = TestApp::new(pool).await;
+    let mut c = app.client();
+    for email in ["jos\u{e9}@example.com", "\u{7528}\u{6237}@example.com", "jose@ex\u{e4}mple.com"] {
+        let r = c.post("/api/auth/register", reg("ascii_user", email)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{email:?}");
+        assert_eq!(r.json()["errors"][0]["field"], "email", "{email:?}");
+        assert_eq!(
+            r.json()["errors"][0]["message"],
+            "We can't send mail to an address with accented or non-Latin characters.",
+            "{email:?}"
+        );
+        assert!(app.settled_mail_to(email).await.is_empty(), "{email:?}");
+        let r = c.post("/api/auth/reset-password", json!({ "email": email })).await;
+        assert_eq!(r.status, StatusCode::ACCEPTED, "{email:?}");
+    }
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM users").fetch_one(app.db()).await.unwrap();
+    assert_eq!(n, 0);
+    // The Punycode form of a domain is ASCII, and is taken.
+    let r = c.post("/api/auth/register", reg("ascii_user", "jose@xn--exmple-cua.com")).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+}
+
 #[sqlx::test]
 async fn taken_username_is_a_field_error_and_sends_no_email(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
