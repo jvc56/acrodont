@@ -23,7 +23,7 @@ export type SyncStatus =
 	| 'needs_login'
 	/** A 426: "reload to keep syncing". */
 	| 'reload'
-	/** The server refused the request itself (a 4xx other than 401, 426 and 429): "Can't sync: reload". */
+	/** The server refused the request itself (its own 4xx other than 401, 426 and 429): "Can't sync: reload". */
 	| 'refused';
 
 /**
@@ -33,8 +33,20 @@ export type SyncStatus =
  */
 export const REFUSED_RETRY_MS = 300_000;
 
-/** A 4xx that says the request itself is wrong: not the session (401), the build (426) or the rate (429). */
-const isRefusal = (status: number) => status >= 400 && status < 500 && status !== 401 && status !== 426 && status !== 429;
+/**
+ * The server's own word that the request itself is wrong: a 4xx that is not
+ * the session (401), the build (426) or the rate (429), carrying the body the
+ * API writes on every error it answers, `{ "error": "<code>", … }`
+ * (backend/src/error.rs). A 4xx without that body is not the server's: a
+ * proxy's 408 for an upload that stalled, a hotel sign-in page's 403 or 407.
+ * The same request may well be taken once the connection is back, so that is
+ * no connection, not a refusal.
+ */
+const isRefusal = (reply: Reply) => {
+	const { status, body } = reply;
+	if (status < 400 || status >= 500 || status === 401 || status === 426 || status === 429) return false;
+	return typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string';
+};
 
 export interface EngineHooks {
 	onStatus?: (s: SyncStatus) => void;
@@ -262,7 +274,7 @@ export class SyncEngine {
 				this.setStatus('needs_login');
 				return;
 			}
-			if (isRefusal(reply.status)) {
+			if (isRefusal(reply)) {
 				this.refuse();
 				return;
 			}
@@ -369,7 +381,7 @@ export class SyncEngine {
 			// page, it would advance the cursor past rows that never arrived.
 			if (!reply || reply.status !== 200 || !isSyncBody(reply.body)) {
 				if (reply?.status === 401) this.setStatus('needs_login');
-				else if (reply && isRefusal(reply.status)) this.refuse();
+				else if (reply && isRefusal(reply)) this.refuse();
 				else if (reply) this.setStatus('offline');
 				return false;
 			}

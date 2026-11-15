@@ -231,11 +231,14 @@ offline that long. To retire old builds, raise `min_app_version` with
 `scripts/set-setting.sh`. Devices below it get `426` after their operations
 are applied, and they offer "reload to keep syncing".
 
-A device whose sync request the server refuses outright (a `4xx` other than
-`401`, `426` and `429`) shows "Can't sync: reload". It keeps everything it has
+A device whose sync request the server itself refuses outright (a `4xx` other
+than `401`, `426` and `429`, with the API's JSON `error` body) shows "Can't
+sync: reload". It keeps everything it has
 not sent, never drops the batch, and asks again every five minutes and after a
 reload. A user who reports it has a request the server will not take: look
-for the `4xx` on `POST /api/sync` in the app's log.
+for the `4xx` on `POST /api/sync` in the app's log. A `4xx` from anything in
+front of the app (Nginx's or the load balancer's `408`, a network's sign-in
+page) has no such body and reads "Offline" on the device.
 
 Settings are changed the same way:
 

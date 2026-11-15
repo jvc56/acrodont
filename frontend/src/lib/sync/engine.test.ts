@@ -1663,11 +1663,11 @@ describe('operations held for a level the server built from another set', () => 
 describe('a sync the server refuses', () => {
 	afterEach(() => vi.restoreAllMocks());
 
-	it('a 4xx other than 401, 426 and 429 says can’t sync, keeps the whole batch, and is not asked again for five minutes whatever asks', async () => {
+	it('a 4xx of the server’s own other than 401, 426 and 429 says can’t sync, keeps the whole batch, and is not asked again for five minutes whatever asks', async () => {
 		const { server, a } = await setup();
 		await a.play(Q1, 'CC');
 		let refuse: number | null = 400;
-		a.tamper = (req, send) => (refuse ? { status: refuse, body: { error: 'invalid' }, retryAfter: null } : send(req));
+		a.tamper = (req, send) => (refuse ? { status: refuse, body: { error: refuse === 403 ? 'csrf' : 'invalid_request', message: 'ops' }, retryAfter: null } : send(req));
 		const t0 = Date.now();
 		const now = vi.spyOn(Date, 'now').mockReturnValue(t0);
 		await a.sync();
@@ -1707,7 +1707,7 @@ describe('a sync the server refuses', () => {
 	it('a refusal that passes clears itself at the next request that is answered', async () => {
 		const { a } = await setup();
 		await a.play(Q1, 'C');
-		a.tamper = () => ({ status: 422, body: null, retryAfter: null });
+		a.tamper = () => ({ status: 415, body: { error: 'unsupported_media_type' }, retryAfter: null });
 		const t0 = Date.now();
 		const now = vi.spyOn(Date, 'now').mockReturnValue(t0);
 		await a.sync();
@@ -1734,11 +1734,51 @@ describe('a sync the server refuses', () => {
 		expect(a.requests.length).toBe(sent + 1);
 	});
 
+	it('a 4xx that is not the server’s own answer (a proxy’s 408, a sign-in page’s 403 or 407) is no connection, asked again at the next sync', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'C');
+		// What stands between the device and the server answers in its own words, never in the API's.
+		const theirs: Reply[] = [
+			{ status: 408, body: '<html><body><h1>408 Request Time-out</h1></body></html>', retryAfter: null },
+			{ status: 403, body: '<html>Sign in to the hotel network</html>', retryAfter: null },
+			{ status: 407, body: null, retryAfter: null },
+			{ status: 400, body: { message: 'Bad Request' }, retryAfter: null },
+			{ status: 413, body: ['too large'], retryAfter: null }
+		];
+		for (const reply of theirs) {
+			a.tamper = () => reply;
+			const sent = a.requests.length;
+			await a.sync();
+			expect(a.engine.status).toBe('offline');
+			expect(a.requests.length).toBe(sent + 1);
+		}
+		expect(a.statuses).not.toContain('refused');
+		expect(await a.db.count('outbox')).toBe(1);
+		// The connection is back: the same batch is taken at the next sync, with no five-minute wait.
+		a.tamper = null;
+		await a.sync();
+		expect(a.engine.status).toBe('idle');
+		expect(await a.db.count('outbox')).toBe(0);
+	});
+
+	it('a later page of a pull answered by something else is no connection either, and applies nothing', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'C');
+		a.tamper = (req, send) => {
+			if (req.page_token) return { status: 408, body: '<html>', retryAfter: null };
+			const r = send(req);
+			return { ...r, body: { ...(r.body as SyncResponse), next_page_token: 'more' } };
+		};
+		await a.sync();
+		expect(a.engine.status).toBe('offline');
+		expect(await a.db.count('outbox')).toBe(1);
+	});
+
 	it('a later page of a pull refused the same way says can’t sync and applies nothing', async () => {
 		const { a } = await setup();
 		await a.play(Q1, 'C');
 		a.tamper = (req, send) => {
-			if (req.page_token) return { status: 400, body: null, retryAfter: null };
+			if (req.page_token) return { status: 400, body: { error: 'invalid_request', message: 'page_token' }, retryAfter: null };
 			const r = send(req);
 			return { ...r, body: { ...(r.body as SyncResponse), next_page_token: 'more' } };
 		};
