@@ -17,7 +17,7 @@
 	import TrashList from '$lib/components/TrashList.svelte';
 	import { tick, untrack } from 'svelte';
 	import { cascadeSummaries, ladderText, offlineStates, type CascadeSummary } from '$lib/cascades/summary';
-	import { DEFAULT_STORAGE_LIMIT, formatBytes, levelBytes, storageState } from '$lib/cascades/storage';
+	import { DEFAULT_STORAGE_LIMIT, finishesRefused, formatBytes, levelBytes, storageState } from '$lib/cascades/storage';
 	import { applyLocally, type NewOp } from '$lib/local/apply';
 	import { confirmAction } from '$lib/confirm.svelte';
 	import { getMeta } from '$lib/local/meta';
@@ -171,7 +171,12 @@
 						style={`width: ${Math.min(100, (used / Math.max(1, limit)) * 100)}%`}
 					></div>
 				</div>
-				{#if fill === 'over'}
+				{#if finishesRefused(used, limit)}
+					<p class="text-sm text-destructive">
+						Over your storage by {formatBytes(used - limit)}, more than five times its limit: levels can’t be finished, and cascades can’t
+						be created, until you make room. Empty the <a class="underline" href="#trash">Trash</a> or delete cascades.
+					</p>
+				{:else if fill === 'over'}
 					<p class="text-sm text-destructive">
 						Over your storage by {formatBytes(used - limit)}: you can keep studying, but can’t create cascades until you make room.
 						Empty the <a class="underline" href="#trash">Trash</a> or delete cascades.

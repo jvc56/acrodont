@@ -8,7 +8,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::sync::{assert_storage_consistent, play_and_finish, result, rows, Device};
+use common::sync::{assert_storage_consistent, finish_op, grades, play_and_finish, quiz_now, result, rows, Device};
 use common::{Client, TestApp};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -200,6 +200,71 @@ async fn a_finish_past_the_limit_still_applies(pool: sqlx::PgPool) {
     let (finish, _) = play_and_finish(&app, &mut d, level2, "MCCCCCCCC").await;
     assert_eq!(finish["status"], "applied");
     assert!(used(&app, user).await > after);
+    assert_storage_consistent(&app, user).await;
+}
+
+/// The one bound on studying (PLAN.md § Storage limit): at five times the
+/// limit exactly a finish still applies; past it a finish is rejected
+/// `storage_limit` and writes nothing, the grades behind it kept; a segment's
+/// finish that would make a level is refused the same way and one that makes
+/// none is not; and with room made the same level finishes.
+#[sqlx::test]
+async fn a_finish_past_five_times_the_limit_is_refused(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("SYNC_RATE_PER_MINUTE", "100000")]).await;
+    let mut c = app.seed_fixture_catalog("root").await;
+    let user = c.user_id.unwrap();
+    let r = c.post("/api/cascades", body("EN-FIX", "anagram", length(7, 7))).await;
+    let created = r.json();
+    let cascade: Uuid = created["cascade"]["id"].as_str().unwrap().parse().unwrap();
+    let source: Uuid = created["source_quiz"]["id"].as_str().unwrap().parse().unwrap();
+    let before = bytes_of(&created["cascade"]);
+    // Five times the limit is the account's figure, or up to four bytes more: not past it.
+    let limit = (before + 4) / 5;
+    set_limit(&app, user, Some(limit)).await;
+    let mut d = Device::new(c);
+    d.qrf = vec![cascade];
+    d.sync_all(vec![]).await;
+    let (finish, level2) = play_and_finish(&app, &mut d, source, "MMMMMMMMMCCCCCCCCC").await;
+    assert_eq!(finish["status"], "applied");
+    let after = before + attempt_bytes() + level_bytes(9, false);
+    assert_eq!(used(&app, user).await, after);
+    assert!(after > 5 * limit);
+
+    // Past it: the grades apply, the finish does not.
+    let (finish, _) = play_and_finish(&app, &mut d, level2, "MCCCCCCCC").await;
+    assert_eq!((finish["status"].as_str(), finish["reason"].as_str()), (Some("rejected"), Some("storage_limit")));
+    assert_eq!(used(&app, user).await, after);
+    assert_eq!((count(&app, "quiz_attempts").await, count(&app, "quizzes").await), (1, 2), "nothing written");
+    let graded: i32 = sqlx::query_scalar("SELECT correct_count + missed_count FROM quizzes WHERE id = $1").bind(level2).fetch_one(app.db()).await.unwrap();
+    assert_eq!(graded, 9, "the answers are kept");
+    assert_storage_consistent(&app, user).await;
+
+    // A segment's finish: refused when its run's miss would make a level...
+    let o = d.op("set_quiz_options", json!({ "quiz_id": level2, "segment_size": 5 }));
+    assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
+    let q = quiz_now(&app, level2).await;
+    let run = |d: &mut Device<'_>| {
+        d.op("finish_segment", json!({ "quiz_id": level2, "attempt": q.attempt, "attempt_seed": q.seed, "segment_end": 5,
+                                        "shuffle_seed": "77", "new_quiz_id": Uuid::new_v4() }))
+    };
+    let o = run(&mut d);
+    assert_eq!(result(&d.sync(vec![o]).await, 0)["reason"], "storage_limit");
+    assert_eq!(count(&app, "quizzes").await, 2);
+    // ...and applied when it missed nothing, since it adds nothing.
+    let mut ops = grades(&app, &mut d, level2, 0, "C").await;
+    ops.push(run(&mut d));
+    let r = d.sync(ops).await;
+    assert_eq!(result(&r, 1)["outcome"], "continued", "{:?}", r.json());
+    assert_eq!(used(&app, user).await, after);
+
+    // Still refused when asked again; with room made, the level finishes.
+    let (f, _) = finish_op(&app, &mut d, level2, "78").await;
+    assert_eq!(result(&d.sync(vec![f]).await, 0)["reason"], "storage_limit");
+    set_limit(&app, user, None).await;
+    let (f, _) = finish_op(&app, &mut d, level2, "79").await;
+    let r = d.sync(vec![f]).await;
+    assert_eq!(result(&r, 0)["status"], "applied", "{:?}", r.json());
+    assert_eq!(count(&app, "quiz_attempts").await, 2);
     assert_storage_consistent(&app, user).await;
 }
 

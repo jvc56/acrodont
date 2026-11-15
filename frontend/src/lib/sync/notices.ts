@@ -71,6 +71,8 @@ function levelSentence(op: OutboxEntry, reason: string, ctx: NoticeContext): str
 				: `Level ${n}’s segment size or place was changed on another device.`;
 		case 'ungraded':
 			return `Level ${n} has answers the server did not get. Finish it again.`;
+		case 'storage_limit':
+			return `Level ${n} wasn’t finished: your storage is more than five times its limit. Empty the Trash or delete cascades to make room, then finish it again.`;
 		default:
 			// invalid and error
 			return `Level ${n} could not be saved on the server.`;

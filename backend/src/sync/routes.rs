@@ -354,7 +354,10 @@ async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, Api
     .unwrap_or(1);
     // `now()` is the transaction's start and fixed for its length.
     let now: DateTime<Utc> = sqlx::query_scalar("SELECT now()").fetch_one(&mut *tx).await.map_err(transient)?;
-    let ctx = Ctx { user, device: req.device_id, seq, cap: state.config.max_quiz_questions, now };
+    let ctx = Ctx { user, device: req.device_id, seq, cap: state.config.max_quiz_questions,
+        storage_limit: state.config.max_storage_bytes_per_user,
+        now,
+    };
     // The batch's recorded operations and used device_seqs, read once rather
     // than twice per operation; each operation recorded below joins them, so
     // a repeat later in the same batch is answered exactly as before.

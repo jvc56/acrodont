@@ -38,6 +38,8 @@ pub struct Ctx {
     pub device: Uuid,
     pub seq: i64,
     pub cap: u32,
+    /// `MAX_STORAGE_BYTES_PER_USER`, where the account has no limit of its own.
+    pub storage_limit: u64,
     /// The transaction's `now()`, which is fixed for its length: device times
     /// are clamped to it plus five minutes without a round trip per operation.
     pub now: DateTime<Utc>,
@@ -384,6 +386,17 @@ async fn record_attempt(
     Ok(())
 }
 
+/// The one bound on studying: an account past five times its storage limit
+/// finishes nothing that adds rows (`storage_limit`), until it has made room.
+/// The sync holds the user row's lock, so the figure is the one this batch's
+/// earlier operations left.
+async fn check_storage(conn: &mut PgConnection, ctx: &Ctx) -> Result<(), OpError> {
+    if storage::usage(conn, ctx.user, ctx.storage_limit).await?.refuses_finishes() {
+        return Err(OpError::Rejected(Reason::StorageLimit));
+    }
+    Ok(())
+}
+
 async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult {
     let quiz = uuid_of(op, "quiz_id")?;
     let attempt = u32_of(op, "attempt")?;
@@ -400,6 +413,9 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
         return Err(OpError::Rejected(Reason::Ungraded));
     }
     id_free(conn, ctx.user, new_id).await?;
+    // After every other refusal, so each keeps its reason: this one says
+    // only that a finish the rules would take has no room.
+    check_storage(conn, ctx).await?;
     let at = clamp(ctx, at);
     let misses: Vec<u32> =
         cards::cards(conn, quiz).await?.into_iter().filter(|c| c.grade == Some(Grade::Missed)).map(|c| c.idx).collect();
@@ -408,7 +424,8 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
     let outcome = r.outcome();
     record_attempt(conn, ctx, &l, outcome, at).await?;
     // Studying never fails for storage (STORAGE_LIMIT_PLAN.md § S3): the
-    // attempt and any new level are counted, past the limit or not.
+    // attempt and any new level are counted, past the limit or not, up to
+    // the five times `check_storage` refused above.
     let mut added = storage::attempt_bytes();
     let mut fx = Effects { outcome: Some(outcome.as_str().to_owned()), ..Default::default() };
     match &r {
@@ -506,6 +523,10 @@ async fn finish_segment(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> 
     let mut added = 0;
     match &r {
         SegmentResult::Drilled(n) => {
+            // A run that makes a level adds rows, as a finish does; one that
+            // missed nothing adds none and is never refused. The savepoint
+            // takes back nothing: nothing is written before this.
+            check_storage(conn, ctx).await?;
             let (c, h) = insert_quiz(conn, ctx, new_id, l.cascade_id, quiz, n, at).await?;
             added = storage::level_bytes(c.into(), false);
             fx.outcome = Some("drilled".into());

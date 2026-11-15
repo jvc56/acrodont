@@ -283,6 +283,38 @@ describe('the sync engine', () => {
 		expect(texts(a)).toEqual(['Level 1 was finished on another device. 6 answers from this device weren’t kept.']);
 	});
 
+	it('a finish refused for storage leaves the level graded and unfinished with one notice, is not sent again, and applies once there is room', async () => {
+		const { server, a } = await setup();
+		// Far past five times the limit.
+		server.storageLimit = 1;
+		await a.play(Q1, 'CCCMM');
+		const { newId } = await a.finish(Q1, '404');
+		await a.play(newId, 'C');
+		// On the device the finish has reset Level 1 for its next attempt.
+		expect((await a.quiz(Q1))!.attempt).toBe(2);
+		await a.sync();
+		// The level it made on the device is gone with the answer given on it;
+		// Level 1 is as the server has it, every answer kept, the same attempt.
+		expect(await a.quiz(newId)).toBeUndefined();
+		const q = (await a.quiz(Q1))!;
+		expect([q.status, q.attempt, q.correct_count, q.missed_count]).toEqual(['active', 1, 3, 2]);
+		expect(server.attempts).toHaveLength(0);
+		expect(texts(a)).toEqual([
+			'Level 1 wasn’t finished: your storage is more than five times its limit. Empty the Trash or delete cascades to make room, then finish it again. 1 answer from this device wasn’t kept.'
+		]);
+		// Nothing is left to send: the refusal is not retried.
+		expect(await a.db.count('outbox')).toBe(0);
+		await a.sync();
+		expect((a.requests.at(-1)!.ops ?? []).length).toBe(0);
+		// With room made, the same level finishes.
+		server.storageLimit = 10_000_000;
+		const again = await a.finish(Q1, '405');
+		await a.sync();
+		expect((await a.quiz(again.newId))?.level).toBe(2);
+		expect(server.attempts).toHaveLength(1);
+		expect(a.notices).toHaveLength(1);
+	});
+
 	it('rejected grades on a trashed cascade disappear from the overlay although no server row changed', async () => {
 		const { server, a } = await setup();
 		const b = await second(server);

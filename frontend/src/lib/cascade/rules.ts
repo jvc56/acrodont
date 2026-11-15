@@ -24,6 +24,8 @@ export type Reason =
 	| 'not_cleared'
 	| 'not_trashed'
 	| 'bad_cursor'
+	/** The server's alone: a finish from an account past five times its storage limit. */
+	| 'storage_limit'
 	| 'invalid'
 	| 'error';
 

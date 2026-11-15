@@ -579,6 +579,31 @@ the user cannot act on, and offline the finish has already been played. Past
 the limit the account keeps studying, syncing, restoring and exporting; only
 creating a cascade, Duplicate and saving a search are refused.
 
+**Up to five times the limit.** Every finish adds an attempt row, and under
+Ladder a level, and nothing else an account does adds rows once creating is
+refused; so without a bound, an account that finishes a level in a loop
+would grow for ever. Once an account's storage is **past five times its
+limit**, the server rejects a `finish`, and a `finish_segment` whose run
+would make a drill level, with the reason `storage_limit`, writing nothing.
+The account's figure is read under the user row's lock the sync already
+holds, so an account stops at five times its limit plus what the one finish
+that crossed it added. No real study gets there: at the default 10 MB that
+is 50 MB, and the 40 MB past the limit are some 190,000 finished attempts,
+or about fourteen full-size 300,000-question levels. The grades behind a refused
+finish are kept, so the level stays fully answered and can be finished once
+room is made (the Trash emptied, a cascade deleted). **The device does not
+check this itself**: its storage figure is the server's last report, and the
+rules it shares with the server know nothing of storage. It plays the finish
+as it always does, sends it, and treats the refusal as it treats any rejected
+finish (see [Conflicts](#conflicts)): the operation leaves the outbox and is
+never sent again, the level the finish made on the device is dropped with
+any answers already given on it, the finished level returns as the server
+has it, and one notice says "Level N wasn't finished: your storage is more
+than five times its limit. Empty the Trash or delete cascades to make room,
+then finish it again." Nothing else queued is lost, and nothing loops:
+finishing again is the user's doing, and is refused again until there is
+room.
+
 - **Restores.** Restoring a quiz or a cascade adds no rows, so it is always
   allowed.
 - **The Trash counts**, because its rows are still stored and can be restored.
@@ -592,7 +617,9 @@ creating a cascade, Duplicate and saving a search are refused.
   empty the Trash or delete cascades to make room". Over the limit it says
   "Over your storage by 12 MB: you can keep studying, but can't create cascades
   until you make room", New cascade is disabled, and Duplicate is disabled
-  once storage is full.
+  once storage is full. Past five times the limit it says instead "Over your
+  storage by 41 MB, more than five times its limit: levels can't be finished,
+  and cascades can't be created, until you make room."
 
 ---
 
@@ -873,7 +900,9 @@ level, the cascade's [settings](#settings), **Duplicate** and
 meter (`data-storage` is `ok`, `almost` from 90%, or `over`). From 90% it adds
 "Almost full: empty the Trash or delete cascades to make room"; over the limit
 it says "Over your storage by 12 MB: you can keep studying, but can't create
-cascades until you make room", and **New cascade** is disabled. Both link to
+cascades until you make room" (past five times the limit, that levels can't
+be finished either: see [Storage limit](#storage-limit)), and **New cascade**
+is disabled. Both link to
 the Trash below. The figures are the ones `/api/auth/me` and every sync
 response last reported, so they show offline too. The header also has
 **New cascade** and
@@ -3195,8 +3224,8 @@ brings the server's.
 |---|---|---|---|
 | `grade` | quiz, attempt, attempt seed, question `idx`, grade, at (stored as `graded_at`, as `move_cursor`'s `at` is stored as `cursor_moved_at`; there is no separate `graded_at` field) | the quiz is active, its cascade is not trashed, the attempt and its seed match, the question is in the quiz (else `not found`), and the question is ungraded, or its current grade is from this device, or the device had seen the current grade (`seen_seq`, below), or the operation's `at` is later than the stored `graded_at` | Set the grade and the device that set it, and update counters. A device's own grades apply in `device_seq` order whatever their timestamps; `graded_at` only arbitrates between devices that changed the same question without seeing each other's change |
 | `move_cursor` | quiz, attempt, attempt seed, position, at | the quiz is active, its cascade is not trashed, the attempt and its seed match, the position is not below `run_start`, is below `next_boundary(quiz)` when the quiz has one and below the question count otherwise, and the cursor is unset, or was last set by this device, or had been seen by the device (`seen_seq`), or the new `at` is later | Set the cursor, `cursor_moved_at` and the device that moved it. The outbox keeps only the latest pending cursor per quiz, re-appended with a fresh `device_seq` (see [The sync cycle](#the-sync-cycle)). A rejected cursor move (`bad_cursor`) is logged but never counted in a notice; it is not the user's work |
-| `finish` | quiz, attempt, attempt seed, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, every question is graded, and `new_quiz_id` is not already a quiz (`invalid`) | Apply [Cascade Rules](#cascade-rules) using the server's grades and the quiz's own progression; any new quiz uses the device's id; record the attempt. A reset or new quiz starts at cursor 0, stamped with the operation's `at` and device. The attempt row and any new level are added to the cascade's and the account's [storage](#storage-limit), past the limit or not: studying never fails for storage. The result carries the outcome the server reached and the new quiz's question count and `questions_hash`, so the device can see when the server's grades led somewhere else (see [Conflicts](#conflicts)) |
-| `finish_segment` | quiz, attempt, attempt seed, segment end, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, its segment size is greater than 0, the segment end is a multiple of it strictly between 0 and the question count and greater than the cursor, every question before the segment end is graded, no quiz already exists for this quiz, attempt and segment end, and `new_quiz_id` is not already a quiz (`invalid`) | Create the drill quiz one level down from the misses in positions `run_start` … segment end − 1 (nothing if there are none), and set the cursor and `run_start` to the segment end, stamping `cursor_moved_at` and `cursor_device_id` from the operation; a drill quiz's level is added to the [storage](#storage-limit) as a finish's is. See [Segments](#segments) |
+| `finish` | quiz, attempt, attempt seed, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, every question is graded, `new_quiz_id` is not already a quiz (`invalid`), and the account is not past five times its [storage limit](#storage-limit) (`storage_limit`, checked last) | Apply [Cascade Rules](#cascade-rules) using the server's grades and the quiz's own progression; any new quiz uses the device's id; record the attempt. A reset or new quiz starts at cursor 0, stamped with the operation's `at` and device. The attempt row and any new level are added to the cascade's and the account's [storage](#storage-limit), past the limit or not: studying never fails for storage, up to five times the limit. The result carries the outcome the server reached and the new quiz's question count and `questions_hash`, so the device can see when the server's grades led somewhere else (see [Conflicts](#conflicts)) |
+| `finish_segment` | quiz, attempt, attempt seed, segment end, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, its segment size is greater than 0, the segment end is a multiple of it strictly between 0 and the question count and greater than the cursor, every question before the segment end is graded, no quiz already exists for this quiz, attempt and segment end, `new_quiz_id` is not already a quiz (`invalid`), and, when the run has a miss and so would make a drill quiz, the account is not past five times its [storage limit](#storage-limit) (`storage_limit`) | Create the drill quiz one level down from the misses in positions `run_start` … segment end − 1 (nothing if there are none), and set the cursor and `run_start` to the segment end, stamping `cursor_moved_at` and `cursor_device_id` from the operation; a drill quiz's level is added to the [storage](#storage-limit) as a finish's is. See [Segments](#segments) |
 | `set_cascade_options` | cascade, the changed [settings](#settings) (any of `segment_size`, `progression`, `require_alphabetical`, `clear_threshold`, `answer_mode`, `show_definitions`, `show_hooks`, `reveal_correct`, `show_found_count`, `show_probability`, `definition_column`, `leave_value_decimals`), at | the cascade exists, is neither trashed nor purged, every carried value is in range (segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, alphabetical order a flag, clear threshold 1–100, answer mode `flashcard` or `typed`, `show_definitions`, `show_hooks` and `reveal_correct` flags, leave value decimals 0–3; otherwise `invalid`, so an out-of-range value is a rejection and never a constraint violation recorded as `error`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit. The three quiz options affect only later quizzes; the clear threshold applies at once, to every finish from then on; the other settings apply at once, to what the player shows |
 | `set_quiz_options` | quiz, changed option fields (the three quiz options only: a `clear_threshold`, `answer_mode`, `show_definitions`, `show_hooks`, `reveal_correct` or `leave_value_decimals` is a `400`), at | the quiz is active, its cascade is not trashed, every carried value is in range as for `set_cascade_options`, `progression` and `segment_size` are not carried for a `segment_chain` quiz and `progression` is not carried for the Source quiz, which its rules ignore (`invalid`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit |
 | `restore_quiz` | quiz, shuffle seed | the quiz is cleared and not purged | Push it back as the new deepest level with a new attempt shuffled by the seed, cursor 0 stamped from the operation; bring back its cascade if it was trashed, and only then set `cleared_at` to now on its other cleared quizzes |
@@ -3264,6 +3293,9 @@ change that lost the `seen_seq` and timestamp comparison to another device's),
 `not_cleared` (restore or purge of a quiz that is not cleared), `not_trashed`
 (restore or purge of a cascade that is not trashed), `bad_cursor`
 (below `run_start`, or at or past the next boundary or the question count),
+`storage_limit` (a `finish`, or a `finish_segment` that would make a level,
+from an account past five times its [storage limit](#storage-limit); the
+server's alone, since the device's rules know nothing of storage),
 `invalid` (a malformed operation, including a `seen_seq` above the user's
 `sync_seq`) and `error` (a database error that is not transient, such as a
 constraint violation, inside the operation's savepoint; see
@@ -3748,7 +3780,9 @@ the size or place "was changed" would name a change nobody made; `bad_segment`
 keeps the sentence below for its other causes (no segment size, not a multiple
 of it, or past the question count) "Level N's
 segment size or place was changed on another device."; `ungraded` "Level N has
-answers the server did not get. Finish it again."; `invalid` and `error` as under
+answers the server did not get. Finish it again."; `storage_limit` "Level N
+wasn't finished: your storage is more than five times its limit. Empty the
+Trash or delete cascades to make room, then finish it again."; `invalid` and `error` as under
 [Operations](#operations). For a `restore_quiz`: `not_cleared` "This quiz was
 restored on another device."; `not_found` "This quiz was deleted, on another
 device or by the Trash's retention period."; `invalid` and `error` as under
@@ -5624,7 +5658,8 @@ Components:
 - **`lib/cascades/storage.ts`**: the account's [storage](#storage-limit) on
   the device: the per-row costs (`STORAGE_COSTS`, equal to
   `contract-fixtures/storage.json` by test), `DEFAULT_STORAGE_LIMIT` until the
-  server has reported one, `storageState` (`ok`, `almost` from 90%, `over`),
+  server has reported one, `storageState` (`ok`, `almost` from 90%, `over`), `finishesRefused` (past
+  five times the limit),
   `levelBytes` for one level's share, and `formatBytes` in decimal units. It
   imports nothing, so the session can read it without the local stores. The
   device shows the server's figures and counts only a level's share itself.
@@ -5987,7 +6022,19 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
   counted: allowing twice the live figure, 15 GB, the worst case still fits
   the starting allocation with the tenth that autoscaling keeps free and
   about 3 GB for Postgres itself, which is where the 750 comes from. A
-  realistic one is a small fraction of that. Filter specs
+  realistic one is a small fraction of that. The limit itself gates only
+  creating: studying takes an account past it, and **the hard bound on what
+  the formula counts is five times the limit**, where finishes are refused
+  (see [Storage limit](#storage-limit)). That is 50 MB an account and, were
+  all 750 there, 37.5 GB of live rows: inside what autoscaling may grow to
+  (100 GiB) and not inside the starting 20 GiB. Getting there takes every
+  account studying its way to five times its limit, about 190,000 finished
+  attempts each, and the RDS storage events say so long before. What the
+  bound does not cover is `sync_operations`: a `finish`, `finish_segment` or
+  `restore_quiz` record is kept for `SYNC_RETENTION_DAYS` whether it was
+  applied or rejected, a refused finish included, so a client that sends
+  finishes in a loop still adds records, at most `SYNC_MAX_OPS` a request and
+  `SYNC_RATE_PER_MINUTE` requests a minute. Filter specs
   count toward the same limit: a 300,000-entry In Word List of 8-letter words
   costs about 2.7 MB of `search_conditions.entries` (its bytes plus a line
   break an entry), which is the **most one spec can hold**, since the 300,000
@@ -6395,7 +6442,8 @@ rule and shuffle vectors, `lib/local` against `fake-indexeddb`, `lib/sync`'s
 rebase and backoff, and `lib/export`'s formatters against the export fixtures.
 `lib/cascades/storage.ts` uses the server's per-row costs (equal to
 `contract-fixtures/storage.json`), counts a level as its quiz row plus a row
-per question, is `ok`, `almost` from 90% and `over` past the limit, and
+per question, is `ok`, `almost` from 90% and `over` past the limit, says
+finishes are refused past five times the limit and not at it, and
 formats in decimal units; and the sync engine writes every response's
 `storage` into `meta.server`.
 A Vitest over the cascade builder's preview feeds it a stubbed `503` with
@@ -6479,7 +6527,9 @@ again; the count before a removal reading the outbox in a tab that has stopped s
 at the "updated in another tab" state, are not exercised by a test.) A fixture unscoped
 database at each earlier version opens at the current one with its rows and
 pointer intact.
-The rebase tests cover: a rejected `finish` removing the quiz it created in
+The rebase tests cover: a `finish` rejected `storage_limit` leaving its level
+answered and unfinished with its own notice, sent once and never again, and
+applied once the server has room; a rejected `finish` removing the quiz it created in
 the overlay; rejected grades on a trashed cascade disappearing from the overlay
 although no server row changed; an applied `finish` with a different outcome
 kind showing the notice and one differing only in question count staying
@@ -7078,7 +7128,11 @@ they run in parallel and leave nothing behind.
     account already at its limit refused before any search with `needed` 0;
     two simultaneous creations racing for the last space, one winning; a
     finish that takes the account over its limit still applied, with the pull
-    and every sync response showing the new figure; purging a cleared quiz or
+    and every sync response showing the new figure; a finish at five times the
+    limit exactly applied and one past it rejected `storage_limit` with
+    nothing written and its grades kept, a `finish_segment` whose run has a
+    miss rejected the same way and one whose run has none applied, and the
+    level finished once the limit is raised; purging a cleared quiz or
     a trashed cascade, through sync or the purge task, freeing exactly what
     was counted, trashing and restoring changing nothing, and each change
     reaching the pull; the purge task recounting a drifted total; a
@@ -7368,7 +7422,8 @@ through the ordinary endpoints, so there is still no test-only path.
 - With the account's own storage limit (`users.storage_limit_bytes`) set to
   20,000 bytes, create cascades until the builder says the next "won't fit" and
   Create Cascade is disabled; study two passes of one, missing everything, and
-  see the account go over its limit (studying is never refused), the Cascades
+  see the account go over its limit (studying is not refused short of five
+  times the limit), the Cascades
   page say "Over your storage by …" with New cascade disabled; move that
   cascade to the Trash and see it still over; Delete forever and see room
   again, with Create Cascade enabled in the builder.

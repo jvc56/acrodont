@@ -10,9 +10,9 @@ use acrodont::cascade::order::{questions_hash, shuffle, to_i64};
 use super::{Client, TestApp, TestResponse};
 
 /// PLAN.md § The sync cycle: the fixed rejection vocabulary.
-pub const REASONS: [&str; 14] = [
+pub const REASONS: [&str; 15] = [
     "not_found", "trashed", "not_active", "not_deepest", "stale_attempt", "ungraded", "bad_segment",
-    "duplicate_segment", "stale", "not_cleared", "not_trashed", "bad_cursor", "invalid", "error",
+    "duplicate_segment", "stale", "not_cleared", "not_trashed", "bad_cursor", "storage_limit", "invalid", "error",
 ];
 
 /// One device of a user: its own id, sync cursor and device_seq.

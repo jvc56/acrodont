@@ -123,6 +123,20 @@ impl Usage {
     }
 }
 
+/// Studying never fails for storage, up to this many times the account's
+/// limit: past it a finish is refused (PLAN.md § Storage limit). Every finish
+/// adds an attempt row, so without a bound an account that finishes a level
+/// in a loop grows for ever, and nothing else an account does adds rows once
+/// creating is refused at the limit itself.
+pub const FINISH_REFUSED_PAST: i64 = 5;
+
+impl Usage {
+    /// Whether the account is past the point where finishes are refused.
+    pub fn refuses_finishes(&self) -> bool {
+        self.used > self.limit.saturating_mul(FINISH_REFUSED_PAST)
+    }
+}
+
 /// The account's usage now; under the user row's lock, the figure the check uses.
 pub async fn usage(conn: &mut PgConnection, user: Uuid, default_limit: u64) -> Result<Usage, sqlx::Error> {
     let r = sqlx::query!("SELECT storage_bytes, storage_limit_bytes FROM users WHERE id = $1", user)
