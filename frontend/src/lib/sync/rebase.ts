@@ -233,9 +233,12 @@ export async function rebase(
 	return out;
 }
 
-/** Step 1: the acknowledged operations, applied or rejected, leave the outbox. */
-async function dropAcked(tx: RwTx, acked: Acked[]) {
-	if (!acked.length) return;
+/**
+ * Step 1: the acknowledged operations, applied or rejected, leave the outbox.
+ * Returns the `device_seq`s of those that were still in it.
+ */
+async function dropAcked(tx: RwTx, acked: Acked[]): Promise<Set<number>> {
+	if (!acked.length) return new Set();
 	const outbox = tx.objectStore('outbox');
 	// A batch is the outbox's first entries, and device_seq only grows, so
 	// when the range from its first to its last holds exactly the acknowledged
@@ -247,9 +250,10 @@ async function dropAcked(tx: RwTx, acked: Acked[]) {
 	// the transaction that applies its rows.
 	const seqs = new Set(acked.map((a) => a.entry.device_seq));
 	const range = IDBKeyRange.bound(Math.min(...seqs), Math.max(...seqs));
-	const held = await outbox.getAllKeys(range);
-	if (held.length === seqs.size && held.every((k) => seqs.has(k as number))) await outbox.delete(range);
+	const held = (await outbox.getAllKeys(range)) as number[];
+	if (held.length === seqs.size && held.every((k) => seqs.has(k))) await outbox.delete(range);
 	else await Promise.all([...seqs].map((k) => outbox.delete(k)));
+	return new Set(held.filter((k) => seqs.has(k)));
 }
 
 /**
@@ -303,7 +307,7 @@ async function rebaseCascade(db: UserDb, st: PullState, C: string, work: Cascade
 
 async function rebaseCascadeIn(tx: RwTx, st: PullState, C: string, work: CascadeWork, ctx: RebaseCtx, out: RebaseOutcome) {
 	const S = st.seq;
-	await dropAcked(tx, work.acked);
+	const queued = await dropAcked(tx, work.acked);
 	// What is still pending here is counted, and read in full only by the paths
 	// that need every entry: on the fast path the work stays proportional to
 	// the acknowledged batch, whatever an offline session left queued behind it.
@@ -318,11 +322,18 @@ async function rebaseCascadeIn(tx: RwTx, st: PullState, C: string, work: Cascade
 	// Whether step 4 ran, and the quiz it held operations back for, if any.
 	let replayed = false;
 	let awaited: string | null = null;
-	const settled: Settled[] = work.acked.map((a) => ({
-		entry: a.entry,
-		status: a.result.status,
-		reason: a.result.reason
-	}));
+	// A rejection of an operation that had already left the outbox while the
+	// request was out is not settled a second time: a replay on this device
+	// refused it meanwhile (`replayHeld`, made by the tab the player is in, or
+	// another tab's rebase of the same answer where every tab syncs), and its
+	// notice has been given.
+	const settled: Settled[] = work.acked
+		.filter((a) => a.result.status !== 'rejected' || queued.has(a.entry.device_seq))
+		.map((a) => ({
+			entry: a.entry,
+			status: a.result.status,
+			reason: a.result.reason
+		}));
 
 	// Tombstones for this cascade.
 	for (const t of st.tombstones.filter((t) => t.cascade_id === C)) {

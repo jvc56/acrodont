@@ -17,6 +17,7 @@ import { DownloadManager, type DownloadApi } from './downloads';
 import { electLeader, listenForChanges, REFUSED_RETRY_MS, STREAM_REOPEN_MS, SyncEngine, transportFor, type EngineHooks, type SyncStatus } from './engine';
 import type { Notice } from './notices';
 import type { Reply, SyncRequest, SyncResponse } from './protocol';
+import { newOutcome, replayHeld } from './rebase';
 import { FakeServer, type NewCascade } from './testing/fake-server';
 
 const USER = '11111111-1111-4111-8111-111111111111';
@@ -1536,6 +1537,40 @@ describe('operations held for a level the server built from another set', () => 
 		expect((await a.db.get('quizzes', l2))!.correct_count).toBe(2);
 		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
 	});
+
+	// The player's tab makes the replay itself when it opens the level
+	// (runtime.svelte.ts, `ensureCascade`), whatever the leading tab's engine is
+	// doing: here its request, carrying some or all of the held operations, is out.
+	for (const sent of [2, 3, 6]) {
+		it(`replayed by the player’s tab while a request carrying ${sent} of them is out: its answer loses nothing and counts nothing twice`, async () => {
+			const { server, a, l2, serverL2 } = await scene();
+			a.notices = [];
+			const { device_id } = await getMeta(a.db, 'device');
+			const { max_quiz_questions } = await getMeta(a.db, 'server');
+			const o = newOutcome();
+			let first = true;
+			a.tamper = async (req, send) => {
+				if (!first) return send(req);
+				first = false;
+				const reply = send({ ...req, ops: req.ops!.slice(0, sent) });
+				await lists(a, server);
+				expect(await replayHeld(a.db, C1, { device_id, max_quiz_questions, now: () => new Date() }, o)).toBe(true);
+				return reply;
+			};
+			await a.sync();
+			a.tamper = null;
+			await a.sync();
+			expect(await a.db.count('outbox')).toBe(0);
+			expect(await getMeta(a.db, 'held')).toEqual({});
+			expect(await a.db.count('overlay_quiz_questions')).toBe(0);
+			expect(serverL2().grades.size).toBe(2);
+			expect((await a.db.get('quizzes', l2))!.correct_count).toBe(2);
+			expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
+			expect((await a.quiz(Q1))!.correct_count).toBe(2);
+			const said = [...o.notices.map((n) => n.text), ...texts(a)];
+			expect(said).toEqual([AGAIN]);
+		});
+	}
 
 	it('sent before the list is fetched, the server judges them the same way and nothing else is lost', async () => {
 		const { a, l2, serverL2 } = await scene();

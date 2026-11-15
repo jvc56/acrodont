@@ -11,7 +11,7 @@ import { userDbName } from '$lib/local/accounts';
 import { USER_DB_VERSION } from '$lib/local/db';
 import { closeUserDb, countUnsent, userDb } from '$lib/local/open';
 import { getMeta } from '$lib/local/meta';
-import { ensureCascade, keepNoticesFor, refreshPending, sendPending, startSync, stopSync, syncAndWait, syncNow, syncState, tabMaySync, unsentCount } from './runtime.svelte';
+import { ensureCascade, keepNoticesFor, refreshPending, sendPending, startSync, stopSync, SYNC_WAIT_MS, syncAndWait, syncNow, syncState, tabMaySync, unsentCount } from './runtime.svelte';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -364,7 +364,7 @@ describe('a sync asked for and waited for', () => {
 		expect(asked.length).toBe(before);
 	});
 
-	it('a level opened while operations are held for it waits for the sync that applies them', async () => {
+	it('a level opened while operations are held for it has them applied before it is read, with no sync asked for', async () => {
 		serverAnswers();
 		session.userId = A;
 		const db = await userDb(A, 'alice');
@@ -377,8 +377,41 @@ describe('a sync asked for and waited for', () => {
 		// A replay held this cascade's operations back for a quiz whose rows are here now.
 		await db.put('meta', { [CASCADE]: 'q' }, 'held');
 		await ensureCascade(db, CASCADE);
-		expect(asked.length).toBe(before + 1);
 		expect(await getMeta(db, 'held')).toEqual({});
+		expect(asked.length).toBe(before);
+	});
+
+	it('a level opened while the leading tab is in the middle of a sync does not wait for it: the held operations are applied from the database', async () => {
+		// The connection takes the sync and never answers: a backlog being sent, or a stalled network.
+		session.userId = A;
+		const db = await userDb(A, 'alice');
+		startSync(A);
+		await vi.waitFor(() => expect(asked).toEqual(['/api/sync']));
+		await db.put('meta', { [CASCADE]: 'q' }, 'held');
+		const started = Date.now();
+		await ensureCascade(db, CASCADE);
+		expect(await getMeta(db, 'held')).toEqual({});
+		expect(Date.now() - started).toBeLessThan(SYNC_WAIT_MS / 2);
+		expect(asked).toEqual(['/api/sync']);
+	});
+
+	it('in a tab that does not lead, a level opened while operations are held for it has them applied there, and the leader is not asked', async () => {
+		session.userId = A;
+		const db = await userDb(A, 'alice');
+		let askedOfLeader = 0;
+		const leader = leaderElsewhere(A, async () => {
+			askedOfLeader += 1;
+			return false;
+		});
+		try {
+			startSync(A);
+			await db.put('meta', { [CASCADE]: 'q' }, 'held');
+			await ensureCascade(db, CASCADE);
+			expect(await getMeta(db, 'held')).toEqual({});
+			expect(askedOfLeader).toBe(0);
+		} finally {
+			leader.close();
+		}
 	});
 
 	it('gives up after its wait when the sync does not end, and says what is still unsent', async () => {

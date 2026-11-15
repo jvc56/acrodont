@@ -3729,10 +3729,19 @@ rows the next pull discards, and re-pulling from the old cursor converges:
      cascade before it sends anything (`replayHeld`): the overlay is cleared
      and every waiting operation of the cascade applied in order, with the
      same result as the server's rules give, a refused one leaving the outbox
-     with its notice. The download manager tells the engine as rows land; a
-     player that waited for the level's rows asks for a sync and waits for it
-     (`syncAndWait`) before it reads the level, so the level is not shown, and
-     answered, without the held answers; and every sync cycle begins by
+     with its notice. The download manager tells the engine as rows land;
+     and **a player that waited for the level's rows makes the replay
+     itself**, in its own tab and before it reads the level (`ensureCascade`),
+     so the level is not shown, and answered, without the held answers. It
+     does not ask the leading tab for a sync and wait: the replay is one
+     transaction on the database every tab shares and needs nothing of the
+     server, while the leading tab's engine may be minutes into sending a
+     backlog (exactly the device that holds operations), or in a cycle that
+     ends with no connection and starts no other. The leading tab's request
+     may be out with some of the held operations at that moment; the server
+     judges them as the replay did, and **a rejection of an operation that
+     has already left the outbox is not settled again**, so its notice is
+     given once. Every sync cycle begins by
      looking in `meta`, so a reload, a crash or a new leading tab while
      operations are held finds them from the database alone.
    - **Until one of the two happens** (no connection, a list that cannot be
@@ -6879,7 +6888,7 @@ instead, where the grade reached neither the overlay nor the outbox: the player
 stays on that card with the storage message in place of the grade, Show / Next
 advances nothing, and the grade is written once a cascade is removed and the
 retry succeeds; the download manager reading a missing
-distribution's tiles from the `distributions` store; a `finish` rejected `ungraded` after a `not_found` grade being dropped and leaving the missing question to grade; an acknowledged offline `finish` leaving its new level playable in the one request that acknowledged it, with no index list asked for, and a same-count, different-set promotion refused by `new_quiz_questions_hash`, its list marked to be fetched, with the notice; **operations held for a level the server built from another set**, queued behind the batch whose finish made it: all of them still in the outbox and out of the overlay after that batch, the held cascade recorded in `meta`, and the came-out-differently notice counting no answer; once the list is fetched, replayed with no connection, the answers to questions the server's level holds kept and the one it lacks dropped with the level's finish and one notice; sent before the list is fetched, judged by the server to the same end; a batch that acknowledges two of them leaving the rest held in order; a new engine on the same database, as after a reload, replaying them from `meta`; a list that cannot be fetched asking nothing of the server and leaving them held, a setting changed meanwhile going behind them and applied after them; a stopped engine replaying nothing; a change of a level's options, made for a level this device has not downloaded, being replayed and not held; and the level answered and finished again before the replay, the held finish applied first and the second refused with its answers counted (in the runtime's tests, a level opened while operations are held for it waiting for the sync that releases them); a `finish` the device computed as
+distribution's tiles from the `distributions` store; a `finish` rejected `ungraded` after a `not_found` grade being dropped and leaving the missing question to grade; an acknowledged offline `finish` leaving its new level playable in the one request that acknowledged it, with no index list asked for, and a same-count, different-set promotion refused by `new_quiz_questions_hash`, its list marked to be fetched, with the notice; **operations held for a level the server built from another set**, queued behind the batch whose finish made it: all of them still in the outbox and out of the overlay after that batch, the held cascade recorded in `meta`, and the came-out-differently notice counting no answer; once the list is fetched, replayed with no connection, the answers to questions the server's level holds kept and the one it lacks dropped with the level's finish and one notice; sent before the list is fetched, judged by the server to the same end; a batch that acknowledges two of them leaving the rest held in order; a new engine on the same database, as after a reload, replaying them from `meta`; a list that cannot be fetched asking nothing of the server and leaving them held, a setting changed meanwhile going behind them and applied after them; a stopped engine replaying nothing; a change of a level's options, made for a level this device has not downloaded, being replayed and not held; and the level answered and finished again before the replay, the held finish applied first and the second refused with its answers counted; the replay made by the player's tab while the leading tab's request carrying two, three or all six of them is out, the answer then losing nothing, leaving nothing in the overlay and giving the notice once (in the runtime's tests, a level opened while operations are held for it having them applied before it is read with no sync asked for, in the leading tab, in the leading tab while its sync is out and never answered, and in a tab that does not lead, which asks the leader nothing); a `finish` the device computed as
 `cleared` that the server applied as `descended` leaving the finished quiz
 rebuilt from the server's seed with no grades, the reverse leaving the base's
 graded rows untouched with no fetch, and a `finish_segment` computed as

@@ -12,6 +12,7 @@ import { countUnsent, onUpdatedElsewhere, userDb } from '$lib/local/open';
 import { DownloadManager, httpApiFor, openPlayers } from './downloads';
 import { electLeader, listenForChanges, startTriggers, SyncEngine, transportFor, type EngineHooks, type SyncStatus } from './engine';
 import type { Notice } from './notices';
+import { newOutcome, replayHeld } from './rebase';
 
 class SyncState {
 	status = $state<SyncStatus>('idle');
@@ -79,8 +80,40 @@ export async function ensureCascade(db: UserDb, cascadeId: string, progress?: (f
 	// Operations held back for a level whose rows have just come (rebase.ts,
 	// `replay`) are applied before the player reads the level, so it is not
 	// shown, and answered, without them.
-	if ((await getMeta(db, 'held'))[cascadeId]) await syncAndWait();
+	await applyHeld(db, cascadeId);
 	downloadInBackground();
+}
+
+/**
+ * The replay of a cascade's held operations (`replayHeld`), made here and now,
+ * in whichever tab the player is. It is one transaction on the database every
+ * tab shares and needs nothing of the server, so it is not left to the leading
+ * tab's next sync: that tab may be minutes into sending a backlog, or in a
+ * cycle that ends with no connection and starts no other, and the level would
+ * be shown without the held answers meanwhile. The engine's own release at
+ * its next cycle then finds nothing held. A replay that fails (no room) leaves
+ * them held, to be sent and judged by the server, and the level opens.
+ */
+async function applyHeld(db: UserDb, cascadeId: string) {
+	if (!(await getMeta(db, 'held'))[cascadeId]) return;
+	const o = newOutcome();
+	try {
+		const { device_id } = await getMeta(db, 'device');
+		const { max_quiz_questions } = await getMeta(db, 'server');
+		await replayHeld(db, cascadeId, { device_id, max_quiz_questions, now: () => new Date() }, o);
+	} catch {
+		// Still held.
+	}
+	if (o.notices.length) {
+		syncState.notices = [...syncState.notices, ...o.notices];
+		post({ kind: 'notices', notices: o.notices });
+	}
+	if (o.changed.size) {
+		const ids = [...o.changed];
+		syncState.changed = { ids, tick: syncState.changed.tick + 1 };
+		post({ kind: 'changed', ids });
+	}
+	await refreshPending().catch(() => undefined);
 }
 
 /**
