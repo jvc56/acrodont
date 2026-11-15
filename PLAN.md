@@ -1528,9 +1528,9 @@ Details:
 - **Typed mode.** The input bar is at the bottom of the page, and the page
   shrinks to the space above the on-screen keyboard (`interactive-widget=resizes-content`),
   so the bar sits just above the keyboard. The keyboard covers the zones, so while
-  it is open the bar also holds a row of three buttons: Previous, Show / Next,
-  Toggle. The bar is there only until the answer is shown, so its Toggle, like
-  every Toggle before the reveal, does nothing.
+  it is open the bar also holds a row of two buttons: Previous and Show / Next.
+  It has no Toggle: the bar is there only until the answer is shown, and Toggle
+  does nothing before the reveal.
 - **Customization.** Columns or rows is the one choice; only mouse and
   keyboard controls can be rebound.
 
@@ -7794,7 +7794,8 @@ through the ordinary endpoints, so there is still no test-only path.
     are held back, and middle click still goes back with the input focused.
 - **Touch zones** (mobile viewport emulation, portrait and landscape): each
   zone fires its action, a drag in the Show / Next zone scrolls a long answer
-  without advancing, and a quick double tap advances only once.
+  without advancing, and a quick double tap advances only once. In typed mode,
+  with the input focused, the bar holds Previous and Show / Next and no Toggle.
 - Set a leave value cascade's decimals to 3 in its Settings and see a leave
   answer rendered to three places.
 - **A cascade's settings** (`settings.spec.ts`): with two cascades, see no

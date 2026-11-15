@@ -103,6 +103,15 @@ for (const orientation of ['portrait', 'landscape'] as const) {
 		await page.waitForTimeout(150);
 		await page.getByRole('button', { name: /Previous/ }).tap();
 		await at(page, 2);
+
+		// Typed mode: while the input has the focus the bar holds Previous and Show / Next
+		// above the keyboard, and no Toggle, which does nothing before the reveal.
+		await page.waitForTimeout(150);
+		await show.tap();
+		await at(page, 3);
+		await playerSetting(page, 'Answer mode', 'typed');
+		await page.getByLabel('Type an answer').focus();
+		await expect(page.locator('[data-typed-actions] button')).toHaveText(['Previous', 'Show / Next']);
 		await ctx.close();
 	});
 }

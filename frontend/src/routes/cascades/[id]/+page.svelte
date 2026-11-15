@@ -749,11 +749,11 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		{@const typed = v.card.typed}
 		<div class="shrink-0 border-t bg-background px-4 py-3">
 			{#if mobile && typedFocused}
-				<!-- The on-screen keyboard covers the zones: three buttons sit above it. -->
-				<div class="mb-2 flex justify-around">
+				<!-- The on-screen keyboard covers the zones: two buttons sit above it. There is no
+				     Toggle: the bar is gone once the answer is shown, and before that there is no grade. -->
+				<div class="mb-2 flex justify-around" data-typed-actions>
 					<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('previous')}>Previous</Button>
 					<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('show_next')}>Show / Next</Button>
-					<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('toggle_grade')}>Toggle</Button>
 				</div>
 			{/if}
 			<div class="mx-auto max-w-sm space-y-1">
