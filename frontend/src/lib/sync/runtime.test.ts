@@ -10,7 +10,7 @@ import { session } from '$lib/auth/session.svelte';
 import { userDbName } from '$lib/local/accounts';
 import { USER_DB_VERSION } from '$lib/local/db';
 import { closeUserDb, countUnsent, userDb } from '$lib/local/open';
-import { keepNoticesFor, refreshPending, startSync, stopSync, syncNow, syncState } from './runtime.svelte';
+import { keepNoticesFor, refreshPending, sendPending, startSync, stopSync, syncAndWait, syncNow, syncState } from './runtime.svelte';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -270,5 +270,123 @@ describe('another tab removes the account’s data at its logout', () => {
 		startSync(A);
 		await vi.waitFor(() => expect(asked).toEqual(['/api/sync', '/api/sync']));
 		expect(syncState.leader).toBe(true);
+	});
+});
+
+describe('a sync asked for and waited for', () => {
+	const CASCADE = 'c1000000-0000-4000-8000-000000000000';
+	const unsent = { device_seq: 1, cascade_id: CASCADE, op: { id: 'op-1', device_seq: 1, type: 'move_cursor', quiz_id: 'q' } } as never;
+
+	/** A server that applies whatever it is sent. */
+	function serverAnswers() {
+		let seq = 0;
+		vi.stubGlobal('fetch', (url: string, init: { body?: string }) => {
+			asked.push(url);
+			const ops = (JSON.parse(init.body ?? '{}') as { ops?: { id: string }[] }).ops ?? [];
+			const body = { sync_seq: String(++seq), results: ops.map((o) => ({ op_id: o.id, status: 'applied' })) };
+			return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+		});
+	}
+
+	/** Another tab of the account that leads already, on the account's channel. */
+	function leaderElsewhere(userId: string, answer?: (id: string) => Promise<boolean>) {
+		void locks.request(`acrodont-sync-${userId}`, {}, () => new Promise<void>(() => undefined));
+		const channel = new BroadcastChannel(`acrodont-sync-${userId}`);
+		channel.onmessage = (ev) => {
+			const m = ev.data as { kind: string; id: string };
+			if (m.kind === 'sync' && answer) void answer(m.id).then((ok) => channel.postMessage({ kind: 'synced', id: m.id, ok }));
+		};
+		return channel;
+	}
+
+	it('in the tab that leads, waits for its own sync: what was unsent of the cascade is sent', async () => {
+		serverAnswers();
+		session.userId = A;
+		const db = await userDb(A, 'alice');
+		startSync(A);
+		await vi.waitFor(() => expect(asked.length).toBe(1));
+		await vi.waitFor(() => expect(syncState.status).toBe('idle'));
+		await db.put('outbox', unsent);
+		expect(await sendPending(db, CASCADE)).toBe(true);
+		expect(await db.count('outbox')).toBe(0);
+		expect(syncState.pending).toBe(0);
+		// Nothing unsent of the cascade: nothing is asked and nothing waited for.
+		const before = asked.length;
+		expect(await sendPending(db, CASCADE)).toBe(true);
+		expect(asked.length).toBe(before);
+	});
+
+	it('gives up after its wait when the sync does not end, and says what is still unsent', async () => {
+		session.userId = A;
+		const db = await userDb(A, 'alice');
+		await db.put('outbox', unsent);
+		startSync(A);
+		await vi.waitFor(() => expect(asked).toEqual(['/api/sync']));
+		expect(await syncAndWait(30)).toBe(false);
+		expect(await sendPending(db, CASCADE, 30)).toBe(false);
+		expect(await db.count('outbox')).toBe(1);
+	});
+
+	it('in a tab that does not lead, asks the leader and waits for its answer', async () => {
+		session.userId = A;
+		const db = await userDb(A, 'alice');
+		await db.put('outbox', unsent);
+		const leader = leaderElsewhere(A, async () => {
+			// The leader's sync sends this tab's operations too: they are in the database both read.
+			await db.delete('outbox', 1);
+			return true;
+		});
+		try {
+			startSync(A);
+			await tick();
+			expect(syncState.leader).toBe(false);
+			expect(await sendPending(db, CASCADE)).toBe(true);
+			expect(asked).toEqual([]);
+			expect(syncState.pending).toBe(0);
+		} finally {
+			leader.close();
+		}
+	});
+
+	it('in a tab that does not lead, gives up when the leader’s sync fails or no tab answers', async () => {
+		session.userId = A;
+		const db = await userDb(A, 'alice');
+		await db.put('outbox', unsent);
+		let answers = true;
+		const leader = leaderElsewhere(A, async () => (answers ? false : new Promise<boolean>(() => undefined)));
+		try {
+			startSync(A);
+			await tick();
+			expect(await syncAndWait()).toBe(false);
+			answers = false;
+			expect(await sendPending(db, CASCADE, 30)).toBe(false);
+			expect(await db.count('outbox')).toBe(1);
+		} finally {
+			leader.close();
+		}
+	});
+
+	it('the tab that leads answers another tab’s request when its sync has ended', async () => {
+		serverAnswers();
+		session.userId = A;
+		const db = await userDb(A, 'alice');
+		startSync(A);
+		await vi.waitFor(() => expect(syncState.status).toBe('idle'));
+		await vi.waitFor(() => expect(asked.length).toBe(1));
+		const other = new BroadcastChannel(`acrodont-sync-${A}`);
+		try {
+			const answer = new Promise<unknown>((r) => {
+				other.onmessage = (ev) => {
+					if ((ev.data as { kind: string }).kind === 'synced') r(ev.data);
+				};
+			});
+			// The other tab wrote an operation, and asks.
+			await db.put('outbox', unsent);
+			other.postMessage({ kind: 'sync', id: 'ask-1' });
+			expect(await answer).toEqual({ kind: 'synced', id: 'ask-1', ok: true });
+			expect(await db.count('outbox')).toBe(0);
+		} finally {
+			other.close();
+		}
 	});
 });

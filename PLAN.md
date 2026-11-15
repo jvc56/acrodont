@@ -445,7 +445,11 @@ Moving on from the last question of a run that is not the last run:
   filters, with the same threshold and options, starting at Level 1. It takes
   this cascade's name with the next free number after it. This cascade isn't
   changed. You'll have both, and each counts toward your storage until it is
-  deleted from the Trash." (see [Storage limit](#storage-limit)).
+  deleted from the Trash." (see [Storage limit](#storage-limit)). The server
+  copies the settings it holds, so a setting changed on this device and not
+  yet sent is sent first, with the same wait an export from the server makes
+  (see [Exporting words](#exporting-words)); a sync that does not end within
+  it does not stop the duplicate, which then has the settings the server had.
 - **Exporting** works on anything in the Trash that has not been purged, so a
   cleared quiz can still be downloaded as a word list (see
   [Exporting words](#exporting-words)).
@@ -1650,7 +1654,15 @@ Answers,
 definitions and hooks come from the cascade's answer cards, and definitions and
 hooks are only in the local cards if the cascade's settings asked for them, so an
 export that needs something the device doesn't have falls back to
-the server, in two steps. A page cannot see the status of a navigation, and a
+the server, in two steps. The server makes the file from the rows it holds, so
+the dialog first sends what this device has not sent of the cascade: when the
+outbox holds an operation of it, the dialog asks for a sync and waits for it, at
+most `SYNC_WAIT_MS` (5 seconds), in whichever tab it is (`sendPending`; see
+[Frontend](#frontend)). The export is made either way. When operations of the
+cascade are still unsent after the wait (no connection to the sync endpoint, the
+account logged out, a sync that took longer), the dialog says so beside its
+confirmation: "Your download has started. Answers that haven't synced from this
+device yet are not in the file." A page cannot see the status of a navigation, and a
 navigation that lands on an error body can replace the app, so the dialog first
 `fetch`es `POST /api/cascades/:id/export-token` with the export's choices and
 `X-Acrodont-User`: that request is the one that sees `401`, `404` and `429`, and
@@ -5623,7 +5635,17 @@ Modules:
   backoff, yielding to a page the player needs, card pages split into the
   `questions` and `cards` stores with `keys=1` first, the 14-day policy,
   `ROW_STORAGE_BUDGET`, the automatic keep by size, eviction of answers only, and the
-  quota-error path).
+  quota-error path). `runtime.svelte.ts` runs them for the signed-in account
+  and is what pages call. `syncAndWait` asks for a sync and waits for it, at
+  most `SYNC_WAIT_MS` (5 seconds): the leading tab runs its own engine's, and
+  any other tab asks the leader on the account's `BroadcastChannel` (`sync`,
+  with an id) and waits for the leader's answer when that sync has ended
+  (`synced`, with the id and whether it ended with the server's answer
+  applied). It answers false when the sync failed, when no tab leads, or when
+  the wait ran out, and the caller goes on either way. `sendPending(cascade)`
+  makes that wait only when the outbox holds an operation of the cascade, and
+  says whether everything of the cascade is sent afterwards: an export from
+  the server and Duplicate cascade call it before their request.
 - **`lib/settings/cascade.ts`**: a cascade's [settings](#settings):
   `CASCADE_SETTINGS` (the fields `set_cascade_options` can carry), `appliesTo`
   and `kindOf` (which settings only one kind of cascade has), `reachable` (the
@@ -6656,7 +6678,7 @@ in another tab and not keeping the lock; an account's notices staying while
 the tab only stops and restarts syncing for it, and going when it logs out or
 another account starts syncing in the tab; and a sync or a count asked for
 after a logout that removed the account's data not making its database
-again; the count before a removal reading the outbox in a tab that has stopped syncing, leaving no connection open, making no database that is not there, and answering "not known" for one it cannot read or open in time; and a tab whose database another tab's removal deleted not being told it was updated, and syncing again. (The layout's two lines that call these, at a change of account and
+again; **a sync asked for and waited for** (`syncAndWait`, `sendPending`): in the leading tab, the cascade's unsent operation sent before the answer and nothing asked when nothing of the cascade is unsent; the wait given up, with the operation still counted unsent, when the sync does not end; in a tab that does not lead, the leader asked on the channel and its answer waited for, and the wait given up when the leader's sync failed or no tab answers; and the leading tab answering another tab's request once its sync has ended (the Export dialog's sentence and Duplicate's call are the pages' own, exercised by no test); the count before a removal reading the outbox in a tab that has stopped syncing, leaving no connection open, making no database that is not there, and answering "not known" for one it cannot read or open in time; and a tab whose database another tab's removal deleted not being told it was updated, and syncing again. (The layout's two lines that call these, at a change of account and
 at the "updated in another tab" state, are not exercised by a test.) A fixture unscoped
 database at each earlier version opens at the current one with its rows and
 pointer intact.

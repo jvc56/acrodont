@@ -22,7 +22,7 @@
 	import * as view from '$lib/local/view';
 	import type { RwTx } from '$lib/local/view';
 	import { DownloadManager } from '$lib/sync/downloads';
-	import { downloadManager, ensureCascade, syncState } from '$lib/sync/runtime.svelte';
+	import { downloadManager, ensureCascade, sendPending, syncState } from '$lib/sync/runtime.svelte';
 
 	const id = $derived(page.params.id as string);
 	let db = $state<UserDb | null>(null);
@@ -142,13 +142,18 @@
 	}
 
 	async function server() {
-		if (!cascade) return;
+		if (!db || !cascade) return;
+		// The server makes the file from what it holds: what this device has not
+		// sent of the cascade is sent first, and waited for a few seconds.
+		const sent = await sendPending(db, id);
 		for (;;) {
 			try {
 				const { url } = await api.post<{ url: string }>(`/api/cascades/${id}/export-token`, serverChoices(cascade.quiz_type, choices));
 				// A hidden frame: a non-attachment answer renders invisibly and is discarded.
 				if (frame) frame.src = url;
-				message = 'Your download has started.';
+				message = sent
+					? 'Your download has started.'
+					: 'Your download has started. Answers that haven’t synced from this device yet are not in the file.';
 				return;
 			} catch (e) {
 				if (e instanceof ApiError && e.status === 429) {

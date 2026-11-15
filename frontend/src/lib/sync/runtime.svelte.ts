@@ -6,6 +6,7 @@ import { session } from '$lib/auth/session.svelte';
 import { controls } from '$lib/player/controls.svelte';
 import { display } from '$lib/player/display.svelte';
 import { recordTotals } from '$lib/local/accounts';
+import { hasPending } from '$lib/local/apply';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';
 import { onUpdatedElsewhere, userDb } from '$lib/local/open';
@@ -124,6 +125,9 @@ function reloadDeviceSettings() {
 type Message =
 	| { kind: 'status'; status: SyncStatus }
 	| { kind: 'kick' }
+	/** A tab that does not lead asks for a sync and waits for `synced` with the same id (`syncAndWait`). */
+	| { kind: 'sync'; id: string }
+	| { kind: 'synced'; id: string; ok: boolean }
 	| { kind: 'notices'; notices: Notice[] }
 	| { kind: 'changed'; ids: string[] }
 	/** The leader took shared device settings: an open player in any tab shows them. */
@@ -148,6 +152,11 @@ export function startSync(userId: string): () => void {
 		channel.onmessage = (ev) => {
 			const m = ev.data as Message;
 			if (m.kind === 'kick') engine?.schedule();
+			else if (m.kind === 'sync') {
+				// Only the tab that leads answers; the asker gives up by itself if none does.
+				const id = m.id;
+				if (engine) void syncedBy(engine).then((ok) => post({ kind: 'synced', id, ok }));
+			} else if (m.kind === 'synced') asked.get(m.id)?.(m.ok);
 			else if (m.kind === 'status' && !syncState.leader) {
 				// The leader's sync may have sent this tab's operations too.
 				syncState.status = m.status;
@@ -282,6 +291,57 @@ export async function syncNow() {
 	if (engine) await engine.sync();
 	else post({ kind: 'kick' });
 	await refreshPending();
+}
+
+/** How long a page waits for a sync it asked for before it goes on without it. */
+export const SYNC_WAIT_MS = 5_000;
+
+/** The syncs this tab asked the leader for and still waits on, by id. */
+const asked = new Map<string, (ok: boolean) => void>();
+
+/** One sync of this engine: whether it ended with the server's answer applied and nothing refused. */
+const syncedBy = (e: SyncEngine): Promise<boolean> =>
+	e.sync().then(
+		() => e.status === 'idle',
+		() => false
+	);
+
+/**
+ * A sync now, and the wait for it: this tab's own where it leads, the leader's
+ * elsewhere, asked for on the channel and answered when it ends. True when a
+ * sync that took this call into account ended with the server's answer
+ * applied; false when it did not (no connection, logged out, a newer app
+ * needed), when no tab leads, or when `waitMs` passed first: the caller goes
+ * on either way, and reads the outbox for what is still unsent.
+ */
+export async function syncAndWait(waitMs = SYNC_WAIT_MS): Promise<boolean> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const gaveUp = new Promise<boolean>((r) => (timer = setTimeout(() => r(false), waitMs)));
+	const id = crypto.randomUUID();
+	let done: Promise<boolean>;
+	if (engine) done = syncedBy(engine);
+	else if (channel) {
+		done = new Promise<boolean>((r) => asked.set(id, r));
+		post({ kind: 'sync', id });
+	} else done = Promise.resolve(false);
+	try {
+		return await Promise.race([done, gaveUp]);
+	} finally {
+		clearTimeout(timer);
+		asked.delete(id);
+		await refreshPending().catch(() => undefined);
+	}
+}
+
+/**
+ * Before the server is asked for something it makes from a cascade's rows (an
+ * export, a duplicate): if this device holds changes to the cascade it has not
+ * sent, a sync, waited for. Whether everything of the cascade is sent now.
+ */
+export async function sendPending(db: UserDb, cascadeId: string, waitMs = SYNC_WAIT_MS): Promise<boolean> {
+	if (!(await hasPending(db, cascadeId))) return true;
+	await syncAndWait(waitMs);
+	return !(await hasPending(db, cascadeId));
 }
 
 /** Operations waiting in the outbox: whether any are (the sync status), and how many (the logout warning). */

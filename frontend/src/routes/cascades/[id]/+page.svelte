@@ -47,7 +47,7 @@
 	import type { AnswerMode, AttemptRow, CascadeRow } from '$lib/local/rows';
 	import type { RwTx } from '$lib/local/view';
 	import { PLAYER_LOCK } from '$lib/sync/downloads';
-	import { afterLocalWrite, ensureCascade, fetchAhead, fetchCard, fetchDistribution, playerActs, syncState } from '$lib/sync/runtime.svelte';
+	import { afterLocalWrite, ensureCascade, fetchAhead, fetchCard, fetchDistribution, playerActs, sendPending, syncState } from '$lib/sync/runtime.svelte';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import PanelBottomCloseIcon from '@lucide/svelte/icons/panel-bottom-close';
 	import PanelBottomOpenIcon from '@lucide/svelte/icons/panel-bottom-open';
@@ -582,6 +582,9 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		}
 		starting = { stage: 'server', progress: 0, count: null };
 		try {
+			// The server copies the settings it holds: one changed here and not
+			// yet sent is sent first, and waited for a few seconds.
+			await sendPending(db, id);
 			// Retried with the same ids on a 5xx, a 429 or a dropped connection, as
 			// Create Cascade is (builder/create.ts): the server answers a repeat
 			// with the cascade it already made.
