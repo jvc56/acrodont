@@ -208,8 +208,13 @@ emergencies. In order, it:
 
 A docs-only commit deploys nothing. `infra/` changes plan and apply without
 building. The service rolls: the new task serves before the old one drains,
-so a deploy has no gap. A warning means the last nightly CI run (the Main
-tier and the scale suite) failed.
+so a deploy has no gap. A warning about the scheduled run means the last
+nightly CI run (the Main tier and the scale suite) failed, or is more than
+two days old, or does not exist. An old one means the nightly has stopped:
+GitHub disables a repository's scheduled workflows after 60 days without
+activity, and the last green result would otherwise stand for good. Turn it
+back on with `gh workflow enable ci.yml` and start one run
+(`gh workflow run ci.yml --ref main`). The warning does not stop the deploy.
 
 **Migrations are append-only and additive.** Never edit or remove an applied
 migration. Add a numbered file instead.

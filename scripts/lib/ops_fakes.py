@@ -26,6 +26,7 @@ Switches, from the environment: FAKE_STS_FAIL, FAKE_ACCOUNT, FAKE_PLAN_RC (2),
 FAKE_APPLY_RC (0), FAKE_APPLY_TOUCH_S3 (another deployer uploads prod.tfvars
 during the apply), FAKE_ROLLBACK (the circuit breaker keeps the old task
 definition), FAKE_CI / FAKE_CI_SCHEDULED ("completed success", or "none"),
+FAKE_CI_SCHEDULED_AGE_HOURS (5: how long ago the scheduled run was made),
 FAKE_TASK_EXIT (overrides a one-off task's exit code), FAKE_PSQL_EXIT,
 FAKE_RUN_TASK_FAIL ("error": run-task itself fails, as with an expired
 sign-in; "capacity": it answers with no task and a failure),
@@ -516,7 +517,15 @@ def gh(args):
         out("[]")
         return
     status, conclusion = (spec.split() + [""])[:2]
-    out(json.dumps([{"status": status, "conclusion": conclusion, "url": "https://github.com/x/actions/runs/1"}]))
+    # A run list is asked for the fields it prints: the age is read only by a
+    # caller that asked for createdAt.
+    fields = args[args.index("--json") + 1].split(",") if "--json" in args else []
+    run = {"status": status, "conclusion": conclusion, "url": "https://github.com/x/actions/runs/1"}
+    if "createdAt" in fields:
+        hours = float(os.environ.get("FAKE_CI_SCHEDULED_AGE_HOURS", "5"))
+        made = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+        run["createdAt"] = made.strftime("%Y-%m-%dT%H:%M:%SZ")
+    out(json.dumps([run]))
 
 
 def docker(args):

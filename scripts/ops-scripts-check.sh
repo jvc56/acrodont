@@ -332,6 +332,23 @@ answers y
 FAKE_CI_SCHEDULED="completed failure" run deploy.sh || fail "a red scheduled run refused the deploy"
 said "WARNING: the latest scheduled CI run on main is failure" || fail "a red scheduled run did not warn"
 called "gh run list --workflow ci.yml --branch main --commit $(git -C "$R" rev-parse HEAD) --event push" || fail "CI was not checked on main's push run of the exact commit"
+! said "days old" || fail "a scheduled run made hours ago was called old"
+fresh "$A" "$A" "$B"
+answers y
+FAKE_CI_SCHEDULED_AGE_HOURS=71 run deploy.sh || fail "deploy.sh refused over a scheduled run two days old"
+! said "WARNING: the latest scheduled CI run" || fail "a scheduled run two days old, and green, warned"
+fresh "$A" "$A" "$B"
+answers y
+FAKE_CI_SCHEDULED_AGE_HOURS=73 run deploy.sh || fail "an old scheduled run refused the deploy"
+said "WARNING: the latest scheduled CI run on main is 3 days old" || fail "a green scheduled run three days old did not warn"
+fresh "$A" "$A" "$B"
+answers y
+FAKE_CI_SCHEDULED=none run deploy.sh || fail "a missing scheduled run refused the deploy"
+said "WARNING: no scheduled CI run on main was found" || fail "a missing scheduled run did not warn"
+fresh "$A" "$A" "$B"
+answers y
+FAKE_CI_SCHEDULED="in_progress" run deploy.sh || fail "a scheduled run in progress refused the deploy"
+! said "scheduled CI run" || fail "a scheduled run still going warned"
 echo stray > "$R/backend/src/stray.rs"
 fresh "$A" "$A" "$B"
 if run deploy.sh; then fail "deploy.sh built images from a tree holding an untracked file"; fi
@@ -362,7 +379,7 @@ fresh "$A" "$A"
 answers y
 run deploy.sh --set mail_max_per_second=14 || fail "deploy.sh --set failed"
 { grep -qx 'mail_max_per_second = 14' "$S3_TFVARS" && [[ "$(s3_tag)" == "$B" ]]; } || fail "--set and the image did not ship together"
-pass "deploy.sh refuses red or missing CI (with --skip-ci-check), warns on a red nightly, refuses a dirty tree, off-main HEAD, wrong account, expired login, an undeclared --set (before building)"
+pass "deploy.sh refuses red or missing CI (with --skip-ci-check), warns on a red nightly and on one more than two days old (or missing), refuses a dirty tree, off-main HEAD, wrong account, expired login, an undeclared --set (before building)"
 
 # ---------------------------------------------------------------------------
 # set-setting.sh, and the tfvars upload race

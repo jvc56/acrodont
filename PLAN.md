@@ -6025,7 +6025,10 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
   - It refuses a dirty tree, a commit not on `origin/main`, a commit whose CI
     run on `main` is not green (a branch's run of the same commit is only the
     Push tier, see [Running the tests](#running-the-tests)), and a change to
-    an applied migration.
+    an applied migration. It warns, and goes on, when the last nightly run
+    on `main` failed, is more than two days old or is missing (GitHub stops a
+    schedule after 60 days without activity, and an old green result would
+    otherwise stand).
   - It builds only the images ECR lacks: backend, ops and frontend, tagged with
     the commit.
   - It sets `image_tag` in `prod.tfvars` (kept in the state bucket), then plans

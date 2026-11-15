@@ -7,7 +7,7 @@
 # In order, stopping at the first thing wrong:
 #   1. the checkout: clean, HEAD on origin/main, CI's run on main green on this
 #      exact commit (--skip-ci-check for an emergency); a red scheduled CI run
-#      on main warns;
+#      on main warns, and so does one more than two days old;
 #   2. login, Terraform outputs, prod.tfvars from the state bucket;
 #   3. what is live: the backend image tag of the service's PRIMARY deployment,
 #      which must equal prod.tfvars' image_tag (else ECS rolled back: run
@@ -82,10 +82,25 @@ else
   ops_say "CI green for $tag"
 fi
 # The nightly run covers what per-commit CI does not; red there only warns.
+# So does an old one: GitHub stops a repository's scheduled workflows after
+# sixty days without activity, and the last result then stays green for good.
+# The age is worked out by jq (GNU and BSD `date` parse differently).
 nightly=$(gh run list --workflow ci.yml --branch main --event schedule --limit 1 \
-  --json conclusion,url 2>/dev/null | jq -r '.[0] // empty | "\(.conclusion // "") \(.url)"' 2>/dev/null) || nightly=""
-if [[ -n "$nightly" && "${nightly%% *}" != success && -n "${nightly%% *}" ]]; then
-  ops_say "WARNING: the latest scheduled CI run on main is ${nightly%% *}: ${nightly#* }"
+  --json conclusion,url,createdAt 2>/dev/null | jq -r '
+    if length == 0 then "none"
+    else .[0] | "\(.conclusion // "" | if . == "" then "running" else . end) \(.url) \(try (((now - (.createdAt | fromdateiso8601)) / 86400) | floor) catch "")"
+    end' 2>/dev/null) || nightly=""
+if [[ "$nightly" == none ]]; then
+  ops_say "WARNING: no scheduled CI run on main was found: the nightly (the Main tier and the scale suite) has not checked this code. Is the schedule enabled (gh workflow view ci.yml)?"
+elif [[ -n "$nightly" ]]; then
+  read -r nightly_conclusion nightly_url nightly_age <<<"$nightly"
+  # A run still going has no conclusion yet, and says nothing either way.
+  if [[ "$nightly_conclusion" != success && "$nightly_conclusion" != running ]]; then
+    ops_say "WARNING: the latest scheduled CI run on main is $nightly_conclusion: $nightly_url"
+  fi
+  if [[ "$nightly_age" =~ ^[0-9]+$ ]] && ((nightly_age > 2)); then
+    ops_say "WARNING: the latest scheduled CI run on main is $nightly_age days old: $nightly_url. The nightly has stopped running, so its result says nothing about this code (GitHub disables schedules after 60 days without activity: gh workflow enable ci.yml)."
+  fi
 fi
 
 # 2. The stack.
