@@ -2815,7 +2815,10 @@ its cached `index.html`, so Nginx's `no-cache` never comes into it. The worker
 does **not** call `skipWaiting()` on install either, because taking over a running
 page would remove the old build's lazily loaded chunks from under a card in
 progress. Instead the app watches `registration.waiting`, offers "a new version
-is ready", and when the user accepts it — or presses reload in the `426` state —
+is ready" (read from the registration when `updatefound` arrives and after
+each look for an update, as well as heard from the installing worker's state
+changes: a browser may deliver `updatefound` once the new worker already
+waits, with no installing worker left to listen to), and when the user accepts it — or presses reload in the `426` state —
 posts `SKIP_WAITING` to the waiting worker, which calls `skipWaiting()`. The
 tab that posted it sets a flag first and reloads on `controllerchange` only when
 that flag is set, which is the one reload the user asked for: the event fires in
