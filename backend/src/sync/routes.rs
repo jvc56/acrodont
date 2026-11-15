@@ -11,6 +11,7 @@ use axum::{Json, Router};
 use axum_extra::extract::CookieJar;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
+use sqlx::PgConnection;
 use uuid::Uuid;
 
 use super::ops::{self, Ctx, OpError};
@@ -136,7 +137,7 @@ fn parse_device_settings(v: Option<&Value>, now: DateTime<Utc>) -> ApiResult<Opt
 /// A merge past MAX_SHARED_SETTINGS settings, or that would leave the account
 /// holding more than MAX_SHARED_BYTES of them, changes nothing: every sync
 /// response carries them all, and they are outside the storage limit.
-async fn share_device_settings(state: &AppState, user: Uuid, device: Uuid, shared: &Value) -> ApiResult<()> {
+async fn share_device_settings(state: &AppState, user: Uuid, device: Uuid, shared: &Value) -> Result<(), sqlx::Error> {
     let mut tx = state.db.begin().await?;
     let merged = sqlx::query(
         "WITH kept AS (SELECT device_settings FROM users WHERE id = $1 FOR UPDATE),
@@ -608,15 +609,38 @@ async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, Api
 /// What every response carries about the account: its storage against its
 /// limit (STORAGE_LIMIT_PLAN.md § S1), read after the push so it counts what
 /// the push's finishes and purges just changed, and its shared device settings.
-async fn with_account(state: &AppState, user: Uuid, mut v: Value) -> ApiResult<Value> {
-    let mut conn = state.db.acquire().await?;
-    v["storage"] = crate::storage::usage(&mut conn, user, state.config.max_storage_bytes_per_user).await?.json();
+///
+/// It reads on the caller's connection. A request holds one connection of the
+/// pool at a time and never waits for a second while it has one: with every
+/// connection held by a request waiting for another, none would ever come
+/// free, and each would wait out the pool's timeout.
+async fn with_account(conn: &mut PgConnection, state: &AppState, user: Uuid, mut v: Value) -> Result<Value, sqlx::Error> {
+    v["storage"] = crate::storage::usage(conn, user, state.config.max_storage_bytes_per_user).await?.json();
     let shared: String = sqlx::query_scalar("SELECT device_settings::text FROM users WHERE id = $1")
         .bind(user)
         .fetch_one(&mut *conn)
         .await?;
     v["device_settings"] = serde_json::from_str(&shared).unwrap_or_else(|_| json!({}));
     Ok(v)
+}
+
+/// The pull's first page and the account's part of the response, read on one
+/// connection. A transient failure (the pool has no connection to give, the
+/// connection dropped) answers `503` as the push's does: what the push applied
+/// is recorded, and the device sends the same request again.
+async fn pulled(state: &AppState, user: Uuid, token: Option<&PageToken>, mut v: Value) -> ApiResult<Value> {
+    let read = async {
+        let mut conn = state.db.acquire().await?;
+        if let Some(token) = token {
+            let (changes, next) = pull::page(&mut conn, token).await?;
+            v["changes"] = json!(changes);
+            if let Some(n) = next {
+                v["next_page_token"] = json!(n.encode());
+            }
+        }
+        with_account(&mut conn, state, user, v).await
+    };
+    read.await.map_err(transient)
 }
 
 async fn sync(
@@ -636,24 +660,17 @@ async fn sync(
 
     if let Some(token) = &req.page_token {
         // A page request takes no new sequence; its token fixes the ceiling.
-        let mut conn = state.db.acquire().await?;
-        let (changes, next) = pull::page(&mut conn, token).await?;
-        let mut v = with_account(&state, user.id, json!({ "results": [], "changes": changes, "sync_seq": token.ceil.to_string() })).await?;
-        if let Some(n) = next {
-            v["next_page_token"] = json!(n.encode());
-        }
+        let v = pulled(&state, user.id, Some(token), json!({ "results": [], "sync_seq": token.ceil.to_string() })).await?;
         return Ok(respond(StatusCode::OK, v));
     }
 
     if let Some(shared) = &req.device_settings {
-        share_device_settings(&state, user.id, req.device_id, shared).await?;
+        share_device_settings(&state, user.id, req.device_id, shared).await.map_err(transient)?;
     }
     let (results, seq, floor) = match push(&state, user.id, &req).await? {
         Pushed::AheadOfServer { seq } => {
-            return Ok(respond(
-                StatusCode::OK,
-                with_account(&state, user.id, json!({ "results": [], "sync_seq": seq.to_string(), "resync_required": true })).await?,
-            ));
+            let v = json!({ "results": [], "sync_seq": seq.to_string(), "resync_required": true });
+            return Ok(respond(StatusCode::OK, pulled(&state, user.id, None, v).await?));
         }
         Pushed::Done { results, seq, floor } => (results, seq, floor),
     };
@@ -664,18 +681,11 @@ async fn sync(
         StatusCode::OK
     };
     if req.cursor.is_some_and(|c| c < floor) {
-        return Ok(respond(
-            status,
-            with_account(&state, user.id, json!({ "results": results, "sync_seq": seq.to_string(), "resync_required": true })).await?,
-        ));
+        let v = json!({ "results": results, "sync_seq": seq.to_string(), "resync_required": true });
+        return Ok(respond(status, pulled(&state, user.id, None, v).await?));
     }
     let token = PageToken { u: user.id, cur: req.cursor, ceil: seq, qrf: req.question_rows_for.clone(), table: 0, after: vec![] };
-    let mut conn = state.db.acquire().await?;
-    let (changes, next) = pull::page(&mut conn, &token).await?;
-    let mut v = with_account(&state, user.id, json!({ "results": results, "changes": changes, "sync_seq": seq.to_string() })).await?;
-    if let Some(n) = next {
-        v["next_page_token"] = json!(n.encode());
-    }
+    let v = pulled(&state, user.id, Some(&token), json!({ "results": results, "sync_seq": seq.to_string() })).await?;
     Ok(respond(status, v))
 }
 

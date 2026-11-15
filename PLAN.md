@@ -3486,7 +3486,17 @@ which alarms. Then:
    `meta.server` (as `storage_bytes` and `max_storage_bytes`), so a finish that
    took the account over its limit shows on the Cascades page with the sync
    that applied it. Each pulled cascade row carries its own `storage_bytes`;
-   the device never counts a cascade's figure itself.
+   the device never counts a cascade's figure itself. The page, the storage
+   figure and the shared settings are read **on one database connection**,
+   taken after the push's transaction has committed and given its own back:
+   a request never holds one connection of the pool while it waits for a
+   second, because with every connection held by a request waiting for
+   another, none would ever come free and each would wait out the pool's
+   30 seconds. A transient failure in that read (no connection to be had, a
+   lock or statement timeout, a lost connection) answers `503` with
+   `Retry-After` like one in the push. The push is recorded by then, so the
+   same batch sent again is answered from the server's records (push step 2)
+   with its pull.
 3. If the device's cursor is below the user's `sync_floor_seq` (the highest
    tombstone sequence the purge task has pruned; tombstones are pruned after
    30 days), the server replies `resync_required`; a cursor at or above the
@@ -3795,7 +3805,8 @@ acknowledgement's work proportional to its own batch; the
 [scale test](#scale-tests) asserts the budget. `429`
 backoff applies to sync like any other request, and so does `503`: the device
 resends the same batch after `Retry-After`, and nothing is dropped, because
-nothing was recorded. A `4xx` other than `401`, `426` and `429`, in answer to
+nothing was recorded, or, when it was the pull that failed, because what was
+recorded is answered again from the record. A `4xx` other than `401`, `426` and `429`, in answer to
 the request or to a later page of its pull, is a **refused** sync: nothing is
 applied and nothing dropped, the status reads "Can't sync: reload", and the
 same request is made again no sooner than five minutes later (see
@@ -7271,7 +7282,14 @@ they run in parallel and leave nothing behind.
     violation) leaves the rest of the batch applied and records that operation
     as `rejected` with reason `error`; a forced serialization failure answers
     `503` with `Retry-After` and records nothing, and the same batch sent again
-    is applied in full; and the purge task running against a concurrent sync
+    is applied in full; **a pull that meets a lock timeout after its push
+    committed** answers `503` with `Retry-After` too, and the same batch sent
+    again is answered `applied` from the records with the rows it wrote;
+    **over a pool of one connection** a push with its pull, a request sharing
+    device settings, a later page, both `resync_required` answers and three
+    accounts syncing at once are all answered `200`, which a request that
+    held its connection while it waited for a second could not be; and the
+    purge task running against a concurrent sync
     for the same user completes without a deadlock. The same violation
     injected into **one grade of a run** of grades and cursor moves rejects
     that grade alone as `error`, with the grades and the cursor move on either

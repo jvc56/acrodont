@@ -201,6 +201,89 @@ async fn a_serialization_failure_is_503_and_the_resend_applies(pool: sqlx::PgPoo
     assert!(r.json()["results"].as_array().unwrap().iter().all(|x| x["status"] == "applied"));
 }
 
+/// A pool like the test's own, with its size and its wait for a connection chosen.
+async fn pool_of(pool: &sqlx::PgPool, connections: u32, options: &[(&str, &str)]) -> sqlx::PgPool {
+    let mut connect = (*pool.connect_options()).clone();
+    if !options.is_empty() {
+        connect = connect.options(options.iter().copied());
+    }
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(connections)
+        .acquire_timeout(std::time::Duration::from_secs(3))
+        .connect_with(connect)
+        .await
+        .unwrap()
+}
+
+/// A sync holds one connection of the pool at a time: over a pool of one,
+/// every kind of answer is given. A request that kept its connection while it
+/// waited for a second would wait out the pool's timeout and fail; with every
+/// connection of a larger pool held that way, so would every request.
+#[sqlx::test]
+async fn a_sync_never_waits_for_a_second_connection(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool_of(&pool, 1, &[]).await, &[("SYNC_RATE_PER_MINUTE", "100000")]).await;
+    let s = Setup::new(5);
+    let mut d = setup(&app, &s).await;
+    let user = d.client.user_id.unwrap();
+    // A push with its pull, and shared device settings.
+    let ops = grades(&app, &mut d, s.source_id, 0, "C").await;
+    let r = d.sync(ops).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let cursor = d.cursor.unwrap();
+    let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let r = d
+        .raw_sync(json!({ "device_id": d.id, "app_version": 1, "cursor": cursor, "question_rows_for": [], "ops": [],
+                          "device_settings": { "border_px": { "value": 2, "at": at } } }))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    // A later page of a pull.
+    let token = acrodont::sync::pull::PageToken { u: user, cur: None, ceil: cursor, qrf: vec![], table: 0, after: vec![] };
+    let r = d
+        .raw_sync(json!({ "device_id": d.id, "app_version": 1, "cursor": null, "page_token": token.encode(), "question_rows_for": [] }))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["changes"]["cascades"].as_array().unwrap().len(), 1);
+    // A cursor ahead of the server, and one below the floor.
+    let r = d.raw_sync(json!({ "device_id": d.id, "app_version": 1, "cursor": cursor + 1000, "question_rows_for": [], "ops": [] })).await;
+    assert_eq!((r.status, r.json()["resync_required"].clone()), (StatusCode::OK, json!(true)));
+    sqlx::query("UPDATE users SET sync_floor_seq = sync_seq WHERE id = $1").bind(user).execute(app.db()).await.unwrap();
+    let r = d.raw_sync(json!({ "device_id": d.id, "app_version": 1, "cursor": 1, "question_rows_for": [], "ops": [] })).await;
+    assert_eq!((r.status, r.json()["resync_required"].clone()), (StatusCode::OK, json!(true)));
+    // Several accounts at once: each waits its turn for the one connection.
+    let mut b = Device::new(app.signed_in("bob").await);
+    let mut c = Device::new(app.signed_in("carol").await);
+    d.cursor = None;
+    for _ in 0..5 {
+        let (x, y, z) = tokio::join!(d.sync(vec![]), b.sync(vec![]), c.sync(vec![]));
+        assert_eq!((x.status, y.status, z.status), (StatusCode::OK, StatusCode::OK, StatusCode::OK));
+    }
+}
+
+/// A transient failure in the pull, after the push is committed, is `503`
+/// with `Retry-After` like one in the push: the same batch sent again is
+/// answered from the server's records, with its pull. Here the pull's read of
+/// `quiz_attempts` meets a lock it does not wait out.
+#[sqlx::test]
+async fn a_transient_failure_in_the_pull_is_503_and_the_resend_is_answered(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool_of(&pool, 5, &[("lock_timeout", "300ms")]).await, &[("SYNC_RATE_PER_MINUTE", "100000")]).await;
+    let s = Setup::new(5);
+    let mut d = setup(&app, &s).await;
+    let ops = grades(&app, &mut d, s.source_id, 0, "CM").await;
+    let mut lock = pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE quiz_attempts IN ACCESS EXCLUSIVE MODE").execute(&mut *lock).await.unwrap();
+    let r = d.sync(ops.clone()).await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{:?}", r.json());
+    assert!(r.retry_after().is_some());
+    let recorded: i64 = sqlx::query_scalar("SELECT count(*) FROM sync_operations").fetch_one(app.db()).await.unwrap();
+    assert_eq!(recorded, 2, "the push was committed before the pull");
+    lock.rollback().await.unwrap();
+    let r = d.sync(ops).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.json()["results"].as_array().unwrap().iter().all(|x| x["status"] == "applied"));
+    let graded: usize = r.json()["changes"]["quiz_questions"].as_array().unwrap().iter().map(|g| g["question_idx"].as_array().unwrap().len()).sum();
+    assert_eq!(graded, 2, "and its pull carries what it wrote");
+}
+
 /// "the purge task running against a concurrent sync for the same user
 /// completes without a deadlock".
 #[sqlx::test]
