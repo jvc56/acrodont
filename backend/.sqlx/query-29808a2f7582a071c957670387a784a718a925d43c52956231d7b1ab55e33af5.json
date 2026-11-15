@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT l.id, l.name, d.name AS dist, l.word_count, l.definitions_revision, l.uploaded_at, u.username::text AS \"uploaded_by?\",\n                  EXISTS (SELECT 1 FROM leave_sets s WHERE s.lexicon_id = l.id) AS \"has_leave_set!\",\n                  (SELECT count(*) FROM cascades c WHERE c.lexicon_id = l.id\n                     OR EXISTS (SELECT 1 FROM search_conditions sc\n                                WHERE sc.spec_id = c.spec_id AND sc.other_lexicon_id = l.id)) AS \"cascade_count!\"\n           FROM lexicons l JOIN letter_distributions d ON d.id = l.letter_distribution_id\n           LEFT JOIN users u ON u.id = l.uploaded_by ORDER BY l.name",
+  "query": "SELECT l.id, l.name, d.name AS dist, l.word_count, l.definitions_revision, l.playability_revision, l.uploaded_at, u.username::text AS \"uploaded_by?\",\n                  EXISTS (SELECT 1 FROM leave_sets s WHERE s.lexicon_id = l.id) AS \"has_leave_set!\",\n                  (SELECT count(*) FROM cascades c WHERE c.lexicon_id = l.id\n                     OR EXISTS (SELECT 1 FROM search_conditions sc\n                                WHERE sc.spec_id = c.spec_id AND sc.other_lexicon_id = l.id)) AS \"cascade_count!\"\n           FROM lexicons l JOIN letter_distributions d ON d.id = l.letter_distribution_id\n           LEFT JOIN users u ON u.id = l.uploaded_by ORDER BY l.name",
   "describe": {
     "columns": [
       {
@@ -60,6 +60,17 @@
       },
       {
         "ordinal": 5,
+        "name": "playability_revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "lexicons",
+            "name": "playability_revision"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
         "name": "uploaded_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -70,19 +81,19 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "uploaded_by?",
         "type_info": "Text",
         "origin": "Expression"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "has_leave_set!",
         "type_info": "Bool",
         "origin": "Expression"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "cascade_count!",
         "type_info": "Int8",
         "origin": "Expression"
@@ -98,10 +109,11 @@
       false,
       false,
       false,
+      false,
       null,
       null,
       null
     ]
   },
-  "hash": "eae9715d1a6bcd7bb438487a79af5035899c514a7ca8f0061e11d0a50c27522a"
+  "hash": "29808a2f7582a071c957670387a784a718a925d43c52956231d7b1ab55e33af5"
 }

@@ -28,6 +28,8 @@
 		has_leave_set?: boolean;
 		/** A lexicon's: 1 as uploaded, raised by each replacement of its definitions. */
 		definitions_revision?: number;
+		/** A lexicon's: 1 as uploaded, raised by each replacement of its playabilities. */
+		playability_revision?: number;
 		/** A leave value set's: 1 as uploaded, raised by each replacement of its values. */
 		values_revision?: number;
 		/** Everything the server keeps for it: its rows and their indexes, and its in-memory index. */
@@ -101,13 +103,15 @@
 		label: (i: Item) => string;
 		cols: Col[];
 		blocker: (i: Item) => string | null;
-		/** A second action beside Upload. */
-		also?: { href: string; label: string };
+		/** Further actions beside Upload: what can be replaced in an item already uploaded. */
+		also?: { href: string; label: string }[];
 	}
 
 	const uploaded: Col = { head: 'Uploaded', cell: (i) => `${when(i.uploaded_at)} by ${i.uploaded_by ?? 'a deleted user'}` };
 	const storage: Col = { head: 'Storage', cell: (i) => formatBytes(i.storage_bytes), title: storageTitle };
 	const count = (n: number | undefined) => n?.toLocaleString() ?? '';
+	/** A replaceable part's revision: 1 is the upload itself. */
+	const revision = (n: number | undefined) => ((n ?? 1) === 1 ? 'as uploaded' : `revision ${n}`);
 
 	// The three kinds, each a table on a wide screen and a list of entries on a phone,
 	// so nothing scrolls sideways.
@@ -134,13 +138,17 @@
 						cols: [
 							{ head: 'Distribution', cell: (l) => l.letter_distribution ?? '' },
 							{ head: 'Words', cell: (l) => count(l.word_count) },
-							{ head: 'Definitions', cell: (l) => (l.definitions_revision === 1 ? 'as uploaded' : `revision ${l.definitions_revision}`) },
+							{ head: 'Definitions', cell: (l) => revision(l.definitions_revision) },
+							{ head: 'Playability', cell: (l) => revision(l.playability_revision) },
 							uploaded,
 							{ head: 'Cascades', cell: (l) => count(l.cascade_count) },
 							storage
 						],
 						blocker: lexiconBlocker,
-						also: { href: '/admin/lexicons/definitions', label: 'Replace definitions' }
+						also: [
+							{ href: '/admin/lexicons/definitions', label: 'Replace definitions' },
+							{ href: '/admin/lexicons/playability', label: 'Replace playability' }
+						]
 					},
 					{
 						kind: 'leave-sets',
@@ -151,13 +159,13 @@
 						label: (s) => `the leave values of ${s.lexicon}`,
 						cols: [
 							{ head: 'Leaves', cell: (s) => count(s.leave_count) },
-							{ head: 'Values', cell: (s) => (s.values_revision === 1 ? 'as uploaded' : `revision ${s.values_revision}`) },
+							{ head: 'Values', cell: (s) => revision(s.values_revision) },
 							uploaded,
 							{ head: 'Cascades', cell: (s) => count(s.cascade_count) },
 							storage
 						],
 						blocker: (s) => (s.cascade_count ? 'In use: Leave Value cascades refer to it.' : null),
-						also: { href: '/admin/leave-sets/values', label: 'Replace values' }
+						also: [{ href: '/admin/leave-sets/values', label: 'Replace values' }]
 					}
 				]
 			: []
@@ -192,8 +200,10 @@
 					<Card.Header>
 						<Card.Title>{sec.title}</Card.Title>
 						<Card.Action class="flex flex-wrap justify-end gap-2">
-							{#if sec.also && sec.items.length}
-								<Button href={sec.also.href} variant="outline" size="sm">{sec.also.label}</Button>
+							{#if sec.items.length}
+								{#each sec.also ?? [] as action (action.href)}
+									<Button href={action.href} variant="outline" size="sm">{action.label}</Button>
+								{/each}
 							{/if}
 							<Button href={`/admin/${sec.kind}/new`} variant="outline" size="sm" aria-label={`Upload ${sec.noun}`}>Upload</Button>
 						</Card.Action>

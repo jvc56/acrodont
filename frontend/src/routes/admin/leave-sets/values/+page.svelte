@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Replacing a leave value set's values (PLAN.md § Immutability and deletion →
-	// Replacing definitions and leave values): the leaves stay, their values change.
+	// Replacing definitions, playabilities and leave values): the leaves stay, their values change.
 	import { onMount } from 'svelte';
 	import { Label } from '$lib/components/ui/label';
 	import * as Card from '$lib/components/ui/card';

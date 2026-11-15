@@ -190,10 +190,18 @@ CREATE TABLE lexicons (
     letter_distribution_id  SMALLINT NOT NULL REFERENCES letter_distributions (id),
     word_count              INTEGER NOT NULL CHECK (word_count > 0),
     definitions_revision    INTEGER NOT NULL DEFAULT 1 CHECK (definitions_revision >= 1),
-                                -- raised by each replacement of the lexicon's definitions,
-                                -- the one part of a lexicon that can change (Immutability
-                                -- and deletion); a cascade row carries it, and a device
-                                -- fetches again the answers it holds from an older one
+                                -- raised by each replacement of the lexicon's definitions
+                                -- (Immutability and deletion); a cascade row carries it,
+                                -- and a device fetches again the answers it holds from an
+                                -- older one
+    playability_revision    INTEGER NOT NULL DEFAULT 1 CHECK (playability_revision >= 1),
+                                -- raised by each replacement of the lexicon's
+                                -- playabilities, the other part of a lexicon that can
+                                -- change. No cascade row carries it: playability decides
+                                -- what a search returns, never what a card shows. Either
+                                -- replacement applies only while both revisions are the
+                                -- ones its words were read at, and an instance rebuilds
+                                -- its index when either has moved
     uploaded_by             UUID REFERENCES users (id) ON DELETE SET NULL,
     uploaded_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -204,10 +212,12 @@ CREATE INDEX lexicons_letter_distribution_id ON lexicons (letter_distribution_id
 -- notation, in upload order, compressed with zstd by the server (so Postgres
 -- stores it as it is: STORAGE EXTERNAL). Every instance reads the whole
 -- lexicon into memory and nothing queries a word in SQL; a row per word took
--- five times the space. The words and playabilities never change; the
+-- five times the space. The words and their order never change; the
 -- definitions are replaced whole by a definitions upload, which raises
--- lexicons.definitions_revision. Upload validation checks each word, playability and
--- definition (see File formats); a text that does not parse fails the load.
+-- lexicons.definitions_revision, and the playabilities by a playability
+-- upload, which raises lexicons.playability_revision. Upload validation checks
+-- each word, playability and definition (see File formats); a text that does
+-- not parse fails the load.
 CREATE TABLE lexicon_words (
     lexicon_id  SMALLINT PRIMARY KEY REFERENCES lexicons (id) ON DELETE CASCADE,
     words       BYTEA NOT NULL CHECK (octet_length(words) > 0)

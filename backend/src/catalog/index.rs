@@ -58,6 +58,9 @@ pub struct LexiconIndex {
     /// The `lexicons.definitions_revision` these definitions were read at: 1
     /// as built, set by the loader.
     pub definitions_revision: i32,
+    /// The `lexicons.playability_revision` the playabilities, and so their
+    /// ranks, were read at: 1 as built, set by the loader.
+    pub playability_revision: i32,
     pub distribution: Arc<Distribution>,
     /// Sorted in alphabetical (tile) order; a word's id is its index here.
     pub words: Vec<WordEntry>,
@@ -267,6 +270,7 @@ impl LexiconIndex {
         LexiconIndex {
             id,
             definitions_revision: 1,
+            playability_revision: 1,
             name: name.to_owned(),
             distribution,
             words,
@@ -284,6 +288,11 @@ impl LexiconIndex {
 
     pub fn word_count(&self) -> usize {
         self.words.len()
+    }
+
+    /// The revisions of the stored words this index was built from.
+    pub fn revisions(&self) -> super::store::Revisions {
+        super::store::Revisions { definitions: self.definitions_revision, playability: self.playability_revision }
     }
 
     pub fn find(&self, tiles: &[Tile]) -> Option<&WordEntry> {

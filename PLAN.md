@@ -34,7 +34,9 @@ Word study data comes in three kinds, all uploaded by admins:
   each is written, how many of each are in the bag, their point values, and which
   are vowels. They use MAGPIE's letter distribution format.
 - **Lexicons** (CSW24, NWL23, …) are word lists. Every word has a definition and
-  a playability value. Each lexicon refers to one letter distribution.
+  a playability value. Each lexicon refers to one letter distribution. A
+  lexicon's definitions, and its playability values, can be replaced later;
+  its words cannot.
 - **Leave values** are sets of leave → value pairs. Each set belongs to one
   lexicon and uses that lexicon's letter distribution. A lexicon has at most one
   set of leave values, and may have none. The set's values can be replaced
@@ -434,7 +436,7 @@ Moving on from the last question of a run that is not the last run:
   with nothing graded. The search is run again, so the new cascade holds what
   matches now. It is how a ladder is abandoned for a clean start without
   losing it, and how a cascade's questions are chosen again after the
-  catalog's definitions or leave values were replaced. It is not on the
+  catalog's definitions, playabilities or leave values were replaced. It is not on the
   completion screen, where **Start over** means another pass of the same
   cascade. An account's cascades each have their own name (see
   [Creating a cascade](#creating-a-cascade)), so the new one takes the
@@ -1850,7 +1852,7 @@ line per leave, in any order, and at least one leave.
 The file does not have to list every possible leave; a leave missing from it
 simply cannot be quizzed. The chosen lexicon must not already have leave
 values. To change the values of the leaves it already has, use
-[Replace values](#replacing-definitions-and-leave-values); to change which
+[Replace values](#replacing-definitions-playabilities-and-leave-values); to change which
 leaves it holds, delete the existing set (allowed only while no cascade uses
 it) and upload again.
 
@@ -1881,8 +1883,11 @@ Catalog data is **immutable once uploaded**. There are no edit endpoints; a
 corrected word list is a new lexicon with a new name (`CSW24` → `CSW24-fixed` or
 `CSW27`). Immutability is what lets a cascade store only question keys, lets
 downloaded answers be cached forever, and makes re-running a stored search always
-give the same questions. There are two exceptions, made deliberately:
-[a lexicon's definitions and a leave value set's values can be replaced](#replacing-definitions-and-leave-values).
+give the same questions. There are three exceptions, made deliberately:
+[a lexicon's definitions, its playabilities and a leave value set's values can be replaced](#replacing-definitions-playabilities-and-leave-values),
+and a search that reads a replaced part (a Definition, Part of Speech,
+Playability Order, Limit by Playability Order or Leave Value row) gives what
+matches after the replacement.
 
 An admin can delete an item only when nothing references it. The foreign keys
 enforce this, and the admin page disables the delete button and explains what is
@@ -1905,13 +1910,16 @@ still using the item:
 - **A lexicon's leave values** are in use while any Leave Value cascade refers
   to them.
 
-#### Replacing definitions and leave values
+#### Replacing definitions, playabilities and leave values
 
 Two things an answer shows keep being improved after upload, and each
 improvement is wanted by the cascades already studying it: a word's
 **definition**, and a leave's **value**. Both can be replaced in place, by
-the same mechanism. What a question *is* never changes: a lexicon's words and
-playabilities, and a set's leaves.
+the same mechanism. A word's **playability** is replaced in place too, by its
+own upload: no answer shows it, but it decides which words the two
+playability filters return, and better figures are wanted by every search made
+from then on. What a question *is* never changes: a lexicon's words, and a
+set's leaves.
 
 **Definitions.** An admin uploads, at `/admin/lexicons/definitions`, the
 lexicon's own file with new definitions:
@@ -1920,12 +1928,19 @@ lexicon's own file with new definitions:
   and is validated as one. It must hold exactly the lexicon's words, in any
   order, each with its stored playability; a word the lexicon lacks, a word
   left out and a changed playability are each reported (by line where the file
-  has one) and nothing is stored. A file whose definitions are all the stored
+  has one) and nothing is stored. The line for a changed playability says
+  where playabilities are replaced, **Replace playability**, and the page
+  links to it. A file whose definitions are all the stored
   ones is refused too, as there is nothing to replace. The stored order of the
   words is kept.
 - **The lexicon's `definitions_revision` rises by one**, in the transaction
   that stores the new text. Two replacements at once cannot both apply: the
-  second finds the revision moved and is asked to upload again.
+  second finds a revision moved and is asked to upload again. That holds for
+  a definitions replacement and a playability replacement at once as well:
+  the words are one stored text, each replacement writes the whole of it from
+  the text it read, and so each applies only while **both** revisions,
+  `definitions_revision` and `playability_revision`, are the ones it read.
+  Neither can put back what the other replaced.
 - **Every instance rebuilds the lexicon's index** on `catalog_changed` (see
   [Loading changes into running servers](#loading-changes-into-running-servers)),
   serving the old one until the new one takes its place. Part of Speech and
@@ -1949,6 +1964,50 @@ lexicon's own file with new definitions:
   created with a Definition or Part of Speech filter holds the questions that
   matched when it was created. Duplicate runs the search again and takes
   what matches now.
+
+**Playabilities.** An admin uploads, at `/admin/lexicons/playability`
+(**Replace playability**, beside Replace definitions on `/admin`), the
+lexicon's own file with new playability values. It is the definitions upload
+with the two fields' parts exchanged, and it reaches no device:
+
+- **Only playabilities may differ.** The file is a [lexicon file](#lexicon-file),
+  validated as one, with the same size and time [limits](#upload-limits). It
+  must hold exactly the lexicon's words, in any order, each with its stored
+  definition; a word the lexicon lacks, a word left out and a changed
+  definition are each reported (by line where the file has one) and nothing is
+  stored. The line for a changed definition says where definitions are
+  replaced, and the page links there. A file whose playabilities are all the
+  stored ones is refused, as there is nothing to replace; a playability is
+  the same when it is the same number, bit for bit. The stored order of the
+  words, and their definitions, are kept. So **a file that changes both
+  definitions and playabilities is refused by both pages**: one part is
+  replaced first, from a file that differs from the lexicon in that part
+  alone, and then the other.
+- **The lexicon's `playability_revision` rises by one**, in the transaction
+  that stores the new text, under the same rule as above: it applies only
+  while both revisions are the ones it read.
+- **Every instance rebuilds the lexicon's index** on `catalog_changed`, and at
+  its next reconcile if it missed that, serving the old one until the new one
+  takes its place: an instance's index is rebuilt whenever either revision in
+  the database is newer than the one the index was read at. The per-length
+  playability ranks are computed when an index is built (see
+  [Derived attributes](#derived-attributes)), so Playability Order and Limit
+  by Playability Order rank by the new values from then on, on that instance.
+  For the seconds between the upload and an instance's new index, a search
+  that instance answers ranks by the old values.
+- **Nothing else reads a playability.** The figures `GET /api/lexicons`
+  reports do not change (the highest rank is the size of the largest length,
+  whatever the values); no card, export or summary holds a playability or a
+  rank; and a saved search holds its filters and no result or count. So no
+  cascade row is touched, no account's sequence moves, and no device fetches
+  anything again.
+- **A cascade keeps its questions.** They are stored as keys when it is
+  created and are fixed for its life: a cascade of "the 1,000 most playable
+  sevens" goes on holding the thousand that were the most playable when it was
+  made. **A saved search, and a new cascade,** that uses Playability Order or
+  Limit by Playability Order returns different words from then on, and
+  **Duplicate cascade** runs the search again and so chooses a cascade's
+  questions again, in a new cascade. The upload page says both.
 
 **Leave values.** An admin uploads, at `/admin/leave-sets/values`, the
 lexicon's leave values file with new values. Everything above holds with the
@@ -1978,15 +2037,19 @@ names changed:
   different catalog item: the old set is deleted once no cascade uses it, or
   the lexicon is uploaded again under a new name.
 
-Words, playabilities and the leaves stay immutable: changing any changes what searches
-return, which is what a new lexicon name is for.
+Words and the leaves stay immutable: changing either changes what a question
+is, which is what a new lexicon name is for. Playabilities were immutable
+too, for what they do to searches, until the owner decided that better
+figures should not need a new lexicon and every cascade moved to it.
 
 ### Loading changes into running servers
 
 After an upload or deletion commits, the backend runs
 `NOTIFY catalog_changed`. Every backend instance `LISTEN`s on that channel and
 reconciles its in-memory indexes with the database: it builds indexes for new
-items and drops deleted ones. It also reconciles every 60 seconds in case a
+items, builds again the index of an item whose
+[replaceable part](#replacing-definitions-playabilities-and-leave-values) has a
+newer revision than the one its index was read at, and drops deleted ones. It also reconciles every 60 seconds in case a
 notification is missed. Each instance records what it has loaded in
 `catalog_instance_status` (one row per instance and item, with a heartbeat
 the instance refreshes every 60 seconds), so a new item appears in the
@@ -2440,7 +2503,10 @@ in-memory `LexiconIndex`, computing for every word:
   first, or last, tile is in the lexicon
 - `combinations` (with two blanks), `probability_order`,
   `min_probability_order` and `max_probability_order`
-- `playability_order`, `min_playability_order`, `max_playability_order`
+- `playability_order`, `min_playability_order`, `max_playability_order`,
+  from the playabilities the lexicon holds when the index is built: they are
+  computed again, with everything else, when
+  [its playabilities are replaced](#replacing-definitions-playabilities-and-leave-values)
 - parsed parts of speech from the definition tags
 
 Each leave value set gets a `LeaveSetIndex` with the same tile-based attributes
@@ -2464,7 +2530,10 @@ If that is measured and turns out to be too slow, the fix is to cache the built
 index, not to add columns.
 
 Memory use is on the order of 100 MB per full lexicon including definitions,
-plus about 50 MB per full leave value set. The Fargate task is sized for the
+plus about 50 MB per full leave value set. While an index is built again
+after a replacement (of definitions, playabilities or leave values), the
+instance holds the old index and the new one together, beside the upload
+itself on the instance that took it: that is the task's peak. The Fargate task is sized for the
 catalog offered, and each index's size is logged when it is built and shown in
 `/admin`.
 
@@ -3085,7 +3154,7 @@ brings the server's.
   of what an admin can replace in them (the lexicon's definitions, or a Leave
   Value cascade's leave values), and a cascade whose cards are from an older
   revision than its row names has them fetched again the same way (see
-  [Replacing definitions and leave values](#replacing-definitions-and-leave-values)). Until they
+  [Replacing definitions, playabilities and leave values](#replacing-definitions-playabilities-and-leave-values)). Until they
   arrive the player shows the words without the missing part, with one line
   in the answer area saying definitions are downloading, or need a
   connection. No confirmation is asked for the size; the window is already
@@ -4320,10 +4389,18 @@ CREATE TABLE lexicons (
     letter_distribution_id  SMALLINT NOT NULL REFERENCES letter_distributions (id),
     word_count              INTEGER NOT NULL CHECK (word_count > 0),
     definitions_revision    INTEGER NOT NULL DEFAULT 1 CHECK (definitions_revision >= 1),
-                                -- raised by each replacement of the lexicon's definitions,
-                                -- the one part of a lexicon that can change (Immutability
-                                -- and deletion); a cascade row carries it, and a device
-                                -- fetches again the answers it holds from an older one
+                                -- raised by each replacement of the lexicon's definitions
+                                -- (Immutability and deletion); a cascade row carries it,
+                                -- and a device fetches again the answers it holds from an
+                                -- older one
+    playability_revision    INTEGER NOT NULL DEFAULT 1 CHECK (playability_revision >= 1),
+                                -- raised by each replacement of the lexicon's
+                                -- playabilities, the other part of a lexicon that can
+                                -- change. No cascade row carries it: playability decides
+                                -- what a search returns, never what a card shows. Either
+                                -- replacement applies only while both revisions are the
+                                -- ones its words were read at, and an instance rebuilds
+                                -- its index when either has moved
     uploaded_by             UUID REFERENCES users (id) ON DELETE SET NULL,
     uploaded_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -4334,10 +4411,12 @@ CREATE INDEX lexicons_letter_distribution_id ON lexicons (letter_distribution_id
 -- notation, in upload order, compressed with zstd by the server (so Postgres
 -- stores it as it is: STORAGE EXTERNAL). Every instance reads the whole
 -- lexicon into memory and nothing queries a word in SQL; a row per word took
--- five times the space. The words and playabilities never change; the
+-- five times the space. The words and their order never change; the
 -- definitions are replaced whole by a definitions upload, which raises
--- lexicons.definitions_revision. Upload validation checks each word, playability and
--- definition (see File formats); a text that does not parse fails the load.
+-- lexicons.definitions_revision, and the playabilities by a playability
+-- upload, which raises lexicons.playability_revision. Upload validation checks
+-- each word, playability and definition (see File formats); a text that does
+-- not parse fails the load.
 CREATE TABLE lexicon_words (
     lexicon_id  SMALLINT PRIMARY KEY REFERENCES lexicons (id) ON DELETE CASCADE,
     words       BYTEA NOT NULL CHECK (octet_length(words) > 0)
@@ -5702,10 +5781,11 @@ field is a `400`.
 | `POST` | `/api/admin/letter-distributions` | Multipart `name`, `file`. `201` with the distribution, or `400` with `{ errors: [{ line, message }], total_errors }`. |
 | `DELETE` | `/api/admin/letter-distributions/:id` | `409` with what still uses it |
 | `POST` | `/api/admin/lexicons` | Multipart `name`, `letter_distribution`, `file` |
-| `POST` | `/api/admin/lexicons/:id/definitions` | Multipart `file`: [replaces the lexicon's definitions](#replacing-definitions-and-leave-values). `201` with `{ id, name, word_count, definitions_changed, definitions_revision }`; `400` with the upload error list when anything but definitions differs, or nothing does |
+| `POST` | `/api/admin/lexicons/:id/definitions` | Multipart `file`: [replaces the lexicon's definitions](#replacing-definitions-playabilities-and-leave-values). `201` with `{ id, name, word_count, definitions_changed, definitions_revision }`; `400` with the upload error list when anything but definitions differs (a changed playability's line names Replace playability), or nothing does |
+| `POST` | `/api/admin/lexicons/:id/playability` | Multipart `file`: [replaces the lexicon's playabilities](#replacing-definitions-playabilities-and-leave-values). `201` with `{ id, name, word_count, playabilities_changed, playability_revision }`; `400` with the upload error list when anything but playabilities differs, or nothing does |
 | `DELETE` | `/api/admin/lexicons/:id` | `409` with what still uses it |
 | `POST` | `/api/admin/leave-sets` | Multipart `lexicon`, `file` |
-| `POST` | `/api/admin/leave-sets/:id/values` | Multipart `file`: [replaces the set's values](#replacing-definitions-and-leave-values). `201` with `{ id, lexicon, leave_count, values_changed, values_revision }`; `400` with the upload error list when the leaves differ, or no value does |
+| `POST` | `/api/admin/leave-sets/:id/values` | Multipart `file`: [replaces the set's values](#replacing-definitions-playabilities-and-leave-values). `201` with `{ id, lexicon, leave_count, values_changed, values_revision }`; `400` with the upload error list when the leaves differ, or no value does |
 | `DELETE` | `/api/admin/leave-sets/:id` | `409` with what still uses it |
 
 `GET /health` checks the database connection and that every catalog item present
@@ -5730,6 +5810,7 @@ SvelteKit static SPA. The routes:
 | `/account` | Log out (with **Remove this account's data from this device**), sync status, change password (current and new), sign out everywhere, delete account. Nothing about storage: the Cascades page has the account's. No settings: those are in a cascade's Settings (☰ → Settings in the player) |
 | `/admin` | Catalog overview with delete actions (admins only; others get a not-found page): a card per kind (letter distributions, lexicons, leave values), each with its **Upload** button, its items a table on a wide screen and a list of entries, figures under each name, on a phone, so nothing scrolls sideways |
 | `/admin/letter-distributions/new`, `/admin/lexicons/new`, `/admin/leave-sets/new` | Upload forms with validation error lists |
+| `/admin/lexicons/definitions`, `/admin/lexicons/playability`, `/admin/leave-sets/values` | The same form for [replacing part of an item](#replacing-definitions-playabilities-and-leave-values): the item chosen from a list, and above the form what the file must hold and what a replacement changes and does not. They are reached from `/admin`: **Replace definitions** and **Replace playability** on the Lexicons card, **Replace values** on Leave values; the definitions page and the playability page link to each other. The Lexicons table shows each lexicon's definitions and playability as "as uploaded" or "revision *n*" |
 
 Modules:
 
@@ -6779,6 +6860,15 @@ cascade of 30 levels, built by repeatedly missing one question, and asserts that
 both collapse the middle levels behind a count with Level 1 and the deepest
 level still shown, that **Show more** expands them, and that a 12-level cascade
 collapses nothing.
+Another renders the admin pages that replace part of a lexicon
+(`routes/admin/lexicons/replace.test.ts`): the playability page says that
+existing cascades keep their questions and that saved searches and new
+cascades using the playability filters return different words, uploads the
+chosen file to the chosen lexicon's `/playability` endpoint, and shows how
+many values changed and the revision, or the error list by line; the
+definitions page links to it; and the overview offers Replace playability
+beside Replace definitions and shows each lexicon's playability revision in
+its own column.
 Another covers the In Word List row across a quiz-type change: a list of leaves
 stored in canonical order is flagged and recounted as invalid when the type
 becomes Anagram, a list of 7-tile words is flagged and recounted when it becomes
@@ -7050,7 +7140,30 @@ they run in parallel and leave nothing behind.
     order, gives every cascade on the item a new `updated_seq` and no other,
     and is what cards, searches and the admin overview then show; while the
     instance's index is older than the row's revision, cards that carry the
-    replaced part answer `503` and the others do not.
+    replaced part answer `503` and the others do not. The definitions
+    upload's line for a changed playability names Replace playability.
+  - Replacing a lexicon's playabilities: a word the lexicon lacks, a word left
+    out, a changed definition (its line naming Replace definitions), a line
+    that does not parse and a file with nothing changed are each refused with
+    the upload error list and nothing stored; a replacement raises
+    `playability_revision` and not `definitions_revision`, keeps the words,
+    their definitions and their stored order, and after it Playability Order
+    and Limit by Playability Order return the newly ranked words, a cascade
+    made before holds the question keys it was created with, a cascade made
+    after from the same filters holds the new ones, no cascade's
+    `updated_seq` and no account's sequence has moved, `/api/lexicons`
+    reports the figures of before, and the overview shows the revision; a
+    definitions replacement after it keeps the new playabilities; a
+    non-admin gets `404`, and the upload has the uploads' size and rate
+    limits.
+  - Of two replacements of a lexicon made from one reading of its words (two
+    of its playabilities, two of its definitions, or one of each in either
+    order), the second applies nothing and the stored text is the first's.
+  - A playability replacement reaches every instance: the one that took the
+    upload and one listening on `catalog_changed` rank by the new values, an
+    instance the notification missed ranks by the old ones until its
+    reconcile and by the new ones after it, and a reconcile with nothing new
+    builds nothing.
   - An account's cascade names: a second cascade of a name is a `400` on
     `name`, in the Trash or not, and not for another account; Duplicate
     numbers its copy, replacing a number already there and cutting a name at
@@ -7890,7 +8003,12 @@ through the ordinary endpoints, so there is still no test-only path.
   deliberately broken file rejected with line numbers, build a Leave Value
   cascade from the new set, replace the lexicon's definitions and the set's
   values and see the cascade's answer change on the device with no reload,
-  and see deletion refused while the cascade exists.
+  replace the lexicon's playability values (the definitions page refusing
+  the file by line and pointing to Replace playability, the playability page
+  saying that cascades keep their questions and refusing a file with an old
+  definition) and see the search return the newly most playable word, the
+  cascade made before keep its question and a new one take the new word,
+  and see deletion refused while the cascades exist.
 - In the builder, build the same search twice and see the second suggested a
   numbered name, a name in use refused under the field, and Duplicate's copy
   numbered.

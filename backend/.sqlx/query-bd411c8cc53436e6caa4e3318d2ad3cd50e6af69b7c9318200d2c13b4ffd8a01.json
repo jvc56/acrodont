@@ -1,21 +1,10 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT l.name, l.definitions_revision, w.words AS \"words?\"\n           FROM lexicons l LEFT JOIN lexicon_words w ON w.lexicon_id = l.id WHERE l.id = $1",
+  "query": "SELECT l.definitions_revision, l.playability_revision, w.words\n         FROM lexicons l JOIN lexicon_words w ON w.lexicon_id = l.id WHERE l.id = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "name",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "lexicons",
-            "name": "name"
-          }
-        }
-      },
-      {
-        "ordinal": 1,
         "name": "definitions_revision",
         "type_info": "Int4",
         "origin": {
@@ -26,8 +15,19 @@
         }
       },
       {
+        "ordinal": 1,
+        "name": "playability_revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "lexicons",
+            "name": "playability_revision"
+          }
+        }
+      },
+      {
         "ordinal": 2,
-        "name": "words?",
+        "name": "words",
         "type_info": "Bytea",
         "origin": {
           "Table": {
@@ -45,8 +45,8 @@
     "nullable": [
       false,
       false,
-      true
+      false
     ]
   },
-  "hash": "d83fa391f94b71d3ac5a966ce6307da8257f2df6496dbfee08a2a05cc2a214ac"
+  "hash": "bd411c8cc53436e6caa4e3318d2ad3cd50e6af69b7c9318200d2c13b4ffd8a01"
 }

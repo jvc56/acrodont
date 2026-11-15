@@ -7,10 +7,27 @@ use super::index::RawWord;
 use super::tiles::{Distribution, Tile, TileDef};
 use super::upload::ParsedDistribution;
 
+/// The two revisions of a lexicon's words: `lexicons.definitions_revision`
+/// and `lexicons.playability_revision`. The words are one stored text, so a
+/// text is the one read at a pair of them, and a replacement of either part
+/// applies only while both are still the pair it read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Revisions {
+    pub definitions: i32,
+    pub playability: i32,
+}
+
+impl Revisions {
+    /// Whether an index read at `self` is no older than `other` in either part.
+    pub fn covers(self, other: Revisions) -> bool {
+        self.definitions >= other.definitions && self.playability >= other.playability
+    }
+}
+
 pub struct Items {
     pub distributions: Vec<i16>,
-    /// (lexicon id, distribution id, definitions revision)
-    pub lexicons: Vec<(i16, i16, i32)>,
+    /// (lexicon id, distribution id, its revisions)
+    pub lexicons: Vec<(i16, i16, Revisions)>,
     /// (leave set id, lexicon id, values revision)
     pub leave_sets: Vec<(i32, i16, i32)>,
 }
@@ -19,11 +36,11 @@ pub async fn list_items(db: &PgPool) -> Result<Items, sqlx::Error> {
     let distributions = sqlx::query_scalar!("SELECT id FROM letter_distributions ORDER BY id")
         .fetch_all(db)
         .await?;
-    let lexicons = sqlx::query!("SELECT id, letter_distribution_id, definitions_revision FROM lexicons ORDER BY id")
+    let lexicons = sqlx::query!("SELECT id, letter_distribution_id, definitions_revision, playability_revision FROM lexicons ORDER BY id")
         .fetch_all(db)
         .await?
         .into_iter()
-        .map(|r| (r.id, r.letter_distribution_id, r.definitions_revision))
+        .map(|r| (r.id, r.letter_distribution_id, Revisions { definitions: r.definitions_revision, playability: r.playability_revision }))
         .collect();
     let leave_sets = sqlx::query!("SELECT id, lexicon_id, values_revision FROM leave_sets ORDER BY id")
         .fetch_all(db)
@@ -141,10 +158,10 @@ pub async fn load_lexicon(
     db: &PgPool,
     id: i16,
     dist: &Distribution,
-) -> anyhow::Result<Option<(String, i32, Vec<RawWord>)>> {
-    // One statement, so the words read are the revision's own.
+) -> anyhow::Result<Option<(String, Revisions, Vec<RawWord>)>> {
+    // One statement, so the words read are the revisions' own.
     let Some(row) = sqlx::query!(
-        r#"SELECT l.name, l.definitions_revision, w.words AS "words?"
+        r#"SELECT l.name, l.definitions_revision, l.playability_revision, w.words AS "words?"
            FROM lexicons l LEFT JOIN lexicon_words w ON w.lexicon_id = l.id WHERE l.id = $1"#,
         id
     )
@@ -153,7 +170,7 @@ pub async fn load_lexicon(
     else {
         return Ok(None);
     };
-    let (name, revision) = (row.name, row.definitions_revision);
+    let (name, revision) = (row.name, Revisions { definitions: row.definitions_revision, playability: row.playability_revision });
     let Some(packed) = row.words else {
         return Ok(Some((name, revision, Vec::new())));
     };
@@ -174,34 +191,65 @@ pub async fn load_lexicon(
     Ok(Some((name, revision, words)))
 }
 
-/// A lexicon's stored words and the revision they are, read together.
-pub async fn lexicon_words(db: &PgPool, id: i16) -> Result<Option<(i32, Vec<u8>)>, sqlx::Error> {
+/// A lexicon's stored words and the revisions they are, read together.
+pub async fn lexicon_words(db: &PgPool, id: i16) -> Result<Option<(Revisions, Vec<u8>)>, sqlx::Error> {
     Ok(sqlx::query!(
-        "SELECT l.definitions_revision, w.words FROM lexicons l JOIN lexicon_words w ON w.lexicon_id = l.id WHERE l.id = $1",
+        "SELECT l.definitions_revision, l.playability_revision, w.words
+         FROM lexicons l JOIN lexicon_words w ON w.lexicon_id = l.id WHERE l.id = $1",
         id
     )
     .fetch_optional(db)
     .await?
-    .map(|r| (r.definitions_revision, r.words)))
+    .map(|r| (Revisions { definitions: r.definitions_revision, playability: r.playability_revision }, r.words)))
 }
 
-/// Stores a lexicon's words with new definitions as its next revision, if it
-/// is still at `from_revision`: `None` when another replacement got there
-/// first. Every cascade on the lexicon is given a new `updated_seq` in its
+/// Stores a lexicon's words with new playabilities as its next playability
+/// revision, if the lexicon is still at the revisions `packed` was made from:
+/// `None` when another replacement, of its playabilities or of its
+/// definitions, got there first. Nothing else is written: no cascade row
+/// carries a playability or a rank, so no device is told. Returns the new
+/// revision.
+pub async fn replace_playabilities(
+    tx: &mut PgConnection,
+    id: i16,
+    from: Revisions,
+    packed: &[u8],
+) -> Result<Option<i32>, sqlx::Error> {
+    let Some(revision) = sqlx::query_scalar!(
+        "UPDATE lexicons SET playability_revision = playability_revision + 1
+         WHERE id = $1 AND playability_revision = $2 AND definitions_revision = $3 RETURNING playability_revision",
+        id,
+        from.playability,
+        from.definitions
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Ok(None);
+    };
+    sqlx::query!("UPDATE lexicon_words SET words = $2 WHERE lexicon_id = $1", id, packed).execute(&mut *tx).await?;
+    Ok(Some(revision))
+}
+
+/// Stores a lexicon's words with new definitions as its next definitions
+/// revision, if the lexicon is still at the revisions `packed` was made from:
+/// `None` when another replacement, of its definitions or of its
+/// playabilities, got there first. Every cascade on the lexicon is given a new `updated_seq` in its
 /// account's sequence, so each device's next pull brings the row with the new
 /// revision and the device fetches those cascades' answers again. Returns the
 /// new revision and the accounts whose devices are to be told.
 pub async fn replace_definitions(
     tx: &mut PgConnection,
     id: i16,
-    from_revision: i32,
+    from: Revisions,
     packed: &[u8],
 ) -> Result<Option<(i32, Vec<Uuid>)>, sqlx::Error> {
     let Some(revision) = sqlx::query_scalar!(
         "UPDATE lexicons SET definitions_revision = definitions_revision + 1
-         WHERE id = $1 AND definitions_revision = $2 RETURNING definitions_revision",
+         WHERE id = $1 AND definitions_revision = $2 AND playability_revision = $3 RETURNING definitions_revision",
         id,
-        from_revision
+        from.definitions,
+        from.playability
     )
     .fetch_optional(&mut *tx)
     .await?

@@ -870,10 +870,11 @@ async fn non_admins_get_not_found_on_every_admin_route(pool: sqlx::PgPool) {
     let state = || {
         let db = app.db().clone();
         async move {
-            sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+            sqlx::query_as::<_, (i64, i64, i64, i64, i64, i64)>(
                 "SELECT (SELECT count(*) FROM letter_distributions), (SELECT count(*) FROM lexicons),
                         (SELECT count(*) FROM leave_sets),
                         (SELECT sum(definitions_revision)::bigint FROM lexicons),
+                        (SELECT sum(playability_revision)::bigint FROM lexicons),
                         (SELECT sum(values_revision)::bigint FROM leave_sets)",
             )
             .fetch_one(&db)
@@ -888,6 +889,7 @@ async fn non_admins_get_not_found_on_every_admin_route(pool: sqlx::PgPool) {
         ("POST", "/api/admin/lexicons".to_owned()),
         ("POST", "/api/admin/leave-sets".to_owned()),
         ("POST", format!("/api/admin/lexicons/{lex}/definitions")),
+        ("POST", format!("/api/admin/lexicons/{lex}/playability")),
         ("POST", format!("/api/admin/leave-sets/{leaves}/values")),
         // The leave set first: nothing refers to it, so only the admin check keeps it.
         ("DELETE", format!("/api/admin/leave-sets/{leaves}")),
@@ -1244,6 +1246,11 @@ async fn definitions_are_replaced_whole_and_nothing_else(pool: sqlx::PgPool) {
         let r = a.upload(&path, &[], "new.tsv", changed.as_bytes()).await;
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{what}: {:?}", r.json());
         assert_eq!(error_lines(&r), lines, "{what}: {:?}", r.json());
+        if what == "a playability changed" {
+            // The refusal says where playabilities are replaced.
+            let message = r.json()["errors"][0]["message"].as_str().unwrap().to_owned();
+            assert!(message.contains("\"AA\" has playability 3812 here and 3811 in the lexicon") && message.contains("Replace playability"), "{message}");
+        }
     }
     assert_eq!(a.upload("/api/admin/lexicons/32000/definitions", &[], "new.tsv", file.as_bytes()).await.status, StatusCode::NOT_FOUND);
     let revision = || async {
@@ -1389,4 +1396,288 @@ async fn leave_values_are_replaced_whole_and_no_leaf_added_or_dropped(pool: sqlx
     assert_eq!(a.get(&format!("/api/cascades/{anagram}/cards?from=0&limit=10")).await.status, StatusCode::OK);
     app.reconcile().await;
     assert_eq!(a.get(&format!("/api/cascades/{leaves}/cards?from=0&limit=10")).await.status, StatusCode::OK);
+}
+
+/// A cascade made through the API on EN-FIX from these filter rows, and its question keys.
+async fn cascade_of(c: &mut Client<'_>, name: &str, rows: Value) -> (String, Value) {
+    let r = c
+        .post(
+            "/api/cascades",
+            json!({
+                "id": uuid::Uuid::new_v4(), "source_quiz_id": uuid::Uuid::new_v4(), "device_id": uuid::Uuid::new_v4(),
+                "at": "2026-01-01T00:00:00Z", "name": name, "lexicon": "EN-FIX", "quiz_type": "anagram",
+                "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false,
+                "answer_mode": "flashcard", "filters": { "op": "and", "children": rows },
+            }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let id = r.json()["cascade"]["id"].as_str().unwrap().to_owned();
+    let keys = question_keys(c, &id).await;
+    (id, keys)
+}
+
+async fn question_keys(c: &mut Client<'_>, cascade: &str) -> Value {
+    c.get(&format!("/api/cascades/{cascade}/cards?from=0&limit=1000&keys=1")).await.json()["keys"].clone()
+}
+
+/// What a search of EN-FIX's anagrams returns for these filter rows, sorted.
+async fn found(c: &mut Client<'_>, rows: &Value) -> Vec<String> {
+    let r = c
+        .post("/api/search/preview", json!({ "lexicon": "EN-FIX", "quiz_type": "anagram", "filters": { "op": "and", "children": rows } }))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let mut sample: Vec<String> = r.json()["sample"].as_array().unwrap().iter().map(|k| k.as_str().unwrap().to_owned()).collect();
+    assert_eq!(r.json()["count"].as_u64(), Some(sample.len() as u64));
+    sample.sort();
+    sample
+}
+
+/// PLAN.md § Replacing definitions, playabilities and leave values → Playabilities.
+#[sqlx::test]
+async fn playabilities_are_replaced_whole_and_nothing_else(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("ADMIN_UPLOAD_RATE_PER_MINUTE", "100")]).await;
+    let mut a = app.seed_fixture_catalog("root").await;
+    let lexicon: i16 = sqlx::query_scalar("SELECT id FROM lexicons WHERE name = 'EN-FIX'").fetch_one(app.db()).await.unwrap();
+    let path = format!("/api/admin/lexicons/{lexicon}/playability");
+    let file = std::fs::read_to_string(fixture_path("EN-FIX.tsv")).unwrap();
+    // The most playable two (QI at 542388), and the two most playable twos (QI, then TO at 8900).
+    let two = json!({ "type": "length", "negated": false, "min": 2, "max": 2 });
+    let top = json!([two, { "type": "playability_order", "negated": false, "min": 1, "max": 1, "lax": false }]);
+    let top_two = json!([two, { "type": "limit_by_playability_order", "negated": false, "min": 1, "max": 2, "lax": false }]);
+    assert_eq!(found(&mut a, &top).await, ["IQ"]);
+    assert_eq!(found(&mut a, &top_two).await, ["IQ", "OT"]);
+    let (most, most_keys) = cascade_of(&mut a, "The most playable two", top.clone()).await;
+    let (pair, pair_keys) = cascade_of(&mut a, "The two most playable twos", top_two.clone()).await;
+    assert_eq!((&most_keys, &pair_keys), (&json!(["IQ"]), &json!(["IQ", "OT"])));
+    let definition = api_cascade(&mut a, "definition", "Twos by definition").await;
+    let figures = a.get("/api/lexicons").await.json();
+    let sent = || async {
+        sqlx::query_as::<_, (i64, i64)>(
+            "SELECT (SELECT sync_seq FROM users WHERE username = 'root'), (SELECT sum(updated_seq)::bigint FROM cascades)",
+        )
+        .fetch_one(app.db())
+        .await
+        .unwrap()
+    };
+    let sent_before = sent().await;
+    let revisions = || async {
+        sqlx::query_as::<_, (i32, i32)>("SELECT definitions_revision, playability_revision FROM lexicons WHERE id = $1")
+            .bind(lexicon)
+            .fetch_one(app.db())
+            .await
+            .unwrap()
+    };
+
+    // Only playabilities may differ: every other difference is refused, by line where the file has one.
+    for (what, changed, lines) in [
+        ("a word the lexicon lacks", format!("{file}ZZZZZZZ\t1\tnot a word [n]\n"), vec![json!(file.lines().count() + 1)]),
+        ("a word left out", file.replacen("AA\t3811\ta rough, cindery lava [n -S]\n", "", 1), vec![Value::Null]),
+        ("a definition changed", file.replacen("AA\t3811\ta rough", "AA\t3811\trough", 1), vec![json!(2)]),
+        ("a definition and its playability changed", file.replacen("AA\t3811\ta rough", "AA\t3812\trough", 1), vec![json!(2)]),
+        ("a file that does not parse", file.replacen("AA\t3811\t", "AA\tmany\t", 1), vec![json!(2)]),
+        ("a line of two fields", file.replacen("AA\t3811\t", "AA\t3811 ", 1), vec![json!(2)]),
+        ("nothing changed", file.clone(), vec![Value::Null]),
+    ] {
+        let r = a.upload(&path, &[], "new.tsv", changed.as_bytes()).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{what}: {:?}", r.json());
+        assert_eq!(error_lines(&r), lines, "{what}: {:?}", r.json());
+        if what.starts_with("a definition") {
+            // The refusal says where definitions are replaced.
+            let message = r.json()["errors"][0]["message"].as_str().unwrap().to_owned();
+            assert!(message.contains("\"AA\"") && message.contains("Replace definitions"), "{message}");
+        }
+    }
+    assert_eq!(a.upload("/api/admin/lexicons/32000/playability", &[], "new.tsv", file.as_bytes()).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(a.upload(&path, &[], "", b"").await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(revisions().await, (1, 1));
+
+    // The words in another order, ZA made the most playable two.
+    let mut lines: Vec<&str> = file.lines().collect();
+    lines.reverse();
+    let raised = lines.join("\n").replacen("ZA\t3200\t", "ZA\t600000.5\t", 1) + "\n";
+    let r = a.upload(&path, &[], "new.tsv", raised.as_bytes()).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!(r.json()["playabilities_changed"], 1);
+    assert_eq!(r.json()["playability_revision"], 2);
+    assert_eq!((r.json()["name"].as_str(), r.json()["word_count"].as_i64()), (Some("EN-FIX"), Some(154)));
+    assert_eq!(revisions().await, (1, 2), "the definitions' revision is their own");
+    // The same file again holds nothing new.
+    let r = a.upload(&path, &[], "new.tsv", raised.as_bytes()).await;
+    assert_eq!((r.status, error_lines(&r)), (StatusCode::BAD_REQUEST, vec![Value::Null]), "{:?}", r.json());
+    app.reconcile().await;
+
+    // Both playability filters read the new ranks from then on.
+    assert_eq!(found(&mut a, &top).await, ["AZ"]);
+    assert_eq!(found(&mut a, &top_two).await, ["AZ", "IQ"]);
+    // A cascade keeps the questions it was created with, and nothing is sent to any device:
+    // no cascade row and no account sequence moved, and cards that carry definitions are served.
+    assert_eq!(question_keys(&mut a, &most).await, most_keys);
+    assert_eq!(question_keys(&mut a, &pair).await, pair_keys);
+    assert_eq!(sent().await, sent_before);
+    assert_eq!(a.get(&format!("/api/cascades/{definition}/cards?from=0&limit=10")).await.status, StatusCode::OK);
+    // A new cascade from the same filters takes what matches now.
+    let (_, now_keys) = cascade_of(&mut a, "The most playable two, again", top.clone()).await;
+    assert_eq!(now_keys, json!(["AZ"]));
+    // The words, their definitions and their stored order are as uploaded; one playability is new.
+    let packed: Vec<u8> = sqlx::query_scalar("SELECT words FROM lexicon_words WHERE lexicon_id = $1").bind(lexicon).fetch_one(app.db()).await.unwrap();
+    let stored = acrodont::catalog::store::unpack_words(&packed).unwrap();
+    let original: Vec<(String, f64, String)> = file
+        .lines()
+        .map(|l| {
+            let mut f = l.split('\t');
+            let (w, p, d) = (f.next().unwrap(), f.next().unwrap(), f.next().unwrap());
+            (w.to_owned(), if w == "ZA" { 600000.5 } else { p.parse().unwrap() }, d.to_owned())
+        })
+        .collect();
+    assert_eq!(stored, original);
+    // The overview shows the revision, and the figures /api/lexicons reports are those of before:
+    // the highest rank is the size of the largest length, which no playability changes.
+    let c = a.get("/api/admin/catalog").await.json();
+    let en = c["lexicons"].as_array().unwrap().iter().find(|l| l["name"] == "EN-FIX").unwrap();
+    assert_eq!((en["playability_revision"].as_i64(), en["definitions_revision"].as_i64()), (Some(2), Some(1)));
+    assert_eq!(a.get("/api/lexicons").await.json(), figures);
+
+    // The definitions can still be replaced after it, from a file holding the new playabilities.
+    let r = a
+        .upload(&format!("/api/admin/lexicons/{lexicon}/definitions"), &[], "new.tsv", raised.replacen("a pizza [n -S]", "a pizza [n ZAS]", 1).as_bytes())
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!(revisions().await, (2, 2));
+    app.reconcile().await;
+    assert_eq!(found(&mut a, &top).await, ["AZ"], "the playabilities outlive a definitions replacement");
+
+    // Admins only.
+    let mut user = app.signed_in("someone").await;
+    assert_eq!(user.upload(&path, &[], "new.tsv", file.as_bytes()).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(revisions().await, (2, 2));
+}
+
+/// A lexicon's words are one stored text, read by a replacement before it
+/// compares and compresses: of two replacements made from one reading, of
+/// the same part or of the other, the second applies nothing, or its text
+/// would put back what the first replaced.
+#[sqlx::test]
+async fn replacements_made_from_one_reading_cannot_both_apply(pool: sqlx::PgPool) {
+    use acrodont::catalog::store::{self, Revisions};
+    let app = TestApp::new(pool).await;
+    app.seed_fixture_catalog("root").await;
+    let lexicon: i16 = sqlx::query_scalar("SELECT id FROM lexicons WHERE name = 'EN-FIX'").fetch_one(app.db()).await.unwrap();
+    let read = || async { store::lexicon_words(app.db(), lexicon).await.unwrap().unwrap() };
+    // The stored words with one playability, or one definition, changed.
+    let with = |packed: &[u8], playability: Option<f64>, definition: Option<&str>| {
+        let mut words = store::unpack_words(packed).unwrap();
+        let za = words.iter_mut().find(|w| w.0 == "ZA").unwrap();
+        if let Some(p) = playability {
+            za.1 = p;
+        }
+        if let Some(d) = definition {
+            za.2 = d.to_owned();
+        }
+        store::pack_words(words.iter().map(|w| (w.0.as_str(), w.1, w.2.as_str()))).unwrap()
+    };
+    let za = || async {
+        let (at, packed) = read().await;
+        let w = store::unpack_words(&packed).unwrap().into_iter().find(|w| w.0 == "ZA").unwrap();
+        (at, w.1, w.2)
+    };
+    let db = app.db();
+    let playabilities = |from: Revisions, packed: Vec<u8>| async move {
+        let mut tx = db.begin().await.unwrap();
+        let r = store::replace_playabilities(&mut tx, lexicon, from, &packed).await.unwrap();
+        tx.commit().await.unwrap();
+        r
+    };
+    let definitions = |from: Revisions, packed: Vec<u8>| async move {
+        let mut tx = db.begin().await.unwrap();
+        let r = store::replace_definitions(&mut tx, lexicon, from, &packed).await.unwrap().map(|r| r.0);
+        tx.commit().await.unwrap();
+        r
+    };
+    let at = |definitions, playability| Revisions { definitions, playability };
+
+    // Two playability replacements from one reading.
+    let (first, packed) = read().await;
+    assert_eq!(first, at(1, 1));
+    assert_eq!(playabilities(first, with(&packed, Some(5000.0), None)).await, Some(2));
+    assert_eq!(playabilities(first, with(&packed, Some(6000.0), None)).await, None);
+    assert_eq!(za().await, (at(1, 2), 5000.0, "a pizza [n -S]".to_owned()));
+
+    // A definitions replacement made from a reading a playability replacement has since outdated:
+    // its text holds the playability of before.
+    assert_eq!(definitions(first, with(&packed, None, Some("pizza [n ZAS]"))).await, None);
+    assert_eq!(za().await, (at(1, 2), 5000.0, "a pizza [n -S]".to_owned()));
+
+    // And a playability replacement made from a reading a definitions replacement has outdated.
+    let (second, packed) = read().await;
+    assert_eq!(definitions(second, with(&packed, None, Some("pizza [n ZAS]"))).await, Some(2));
+    assert_eq!(playabilities(second, with(&packed, Some(7000.0), None)).await, None);
+    assert_eq!(za().await, (at(2, 2), 5000.0, "pizza [n ZAS]".to_owned()));
+    // Two definitions replacements from one reading, as before.
+    assert_eq!(definitions(second, with(&packed, None, Some("a pie"))).await, None);
+
+    // From the reading of now, each applies.
+    let (third, packed) = read().await;
+    assert_eq!(playabilities(third, with(&packed, Some(7000.0), None)).await, Some(3));
+    let (fourth, packed) = read().await;
+    assert_eq!(definitions(fourth, with(&packed, None, Some("a pie"))).await, Some(3));
+    assert_eq!(za().await, (at(3, 3), 7000.0, "a pie".to_owned()));
+}
+
+/// A word's rank by playability among the words of its length, on this instance.
+fn playability_rank(app: &TestApp, word: &str) -> (i32, u32) {
+    let snap = app.state.catalog.snapshot();
+    let lex = snap.lexicon_by_name("EN-FIX").unwrap();
+    let w = lex.words.iter().find(|w| lex.distribution.to_magpie(&w.tiles) == word).unwrap();
+    (lex.playability_revision, w.playability_order)
+}
+
+/// Every instance rebuilds the lexicon's index when its playabilities are
+/// replaced: on `catalog_changed`, and at the reconcile for an instance the
+/// notification missed, which ranks by the old values until then.
+#[sqlx::test]
+async fn a_playability_replacement_reaches_every_instance(pool: sqlx::PgPool) {
+    let one = TestApp::new(pool.clone()).await;
+    let two = TestApp::new(pool.clone()).await;
+    let mut a = one.seed_fixture_catalog("root").await;
+    // A third instance whose LISTEN never runs: only reconcile reaches it.
+    let three = TestApp::new_unready(pool).await;
+    acrodont::catalog::reconcile(&three.state).await.unwrap();
+    three.state.catalog_ready.store(true, std::sync::atomic::Ordering::Release);
+    eventually("instance two to load EN-FIX by NOTIFY", || async { two.state.catalog.snapshot().lexicon_by_name("EN-FIX").is_some() }).await;
+    // ZA is the fifteenth most playable two of twenty-six.
+    for app in [&one, &two, &three] {
+        assert_eq!(playability_rank(app, "ZA"), (1, 15));
+    }
+
+    let lexicon: i16 = sqlx::query_scalar("SELECT id FROM lexicons WHERE name = 'EN-FIX'").fetch_one(one.db()).await.unwrap();
+    let file = std::fs::read_to_string(fixture_path("EN-FIX.tsv")).unwrap().replacen("ZA\t3200\t", "ZA\t600000\t", 1);
+    let r = a.upload(&format!("/api/admin/lexicons/{lexicon}/playability"), &[], "new.tsv", file.as_bytes()).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+
+    eventually("the instance that took the upload, and the one listening, to rank ZA first", || async {
+        playability_rank(&one, "ZA") == (2, 1) && playability_rank(&two, "ZA") == (2, 1)
+    })
+    .await;
+    assert_eq!(playability_rank(&three, "ZA"), (1, 15), "the old index serves until the new one is built");
+    acrodont::catalog::reconcile(&three.state).await.unwrap();
+    assert_eq!(playability_rank(&three, "ZA"), (2, 1));
+    // A reconcile with nothing new builds nothing: the index is the one it holds.
+    let held = three.state.catalog.snapshot().lexicon_by_name("EN-FIX").unwrap().clone();
+    acrodont::catalog::reconcile(&three.state).await.unwrap();
+    assert!(std::sync::Arc::ptr_eq(&held, three.state.catalog.snapshot().lexicon_by_name("EN-FIX").unwrap()));
+}
+
+/// The playability upload is one of the admin uploads: their size limit and their rate limit are its own.
+#[sqlx::test]
+async fn the_playability_upload_has_the_uploads_limits(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("ADMIN_UPLOAD_MAX_BYTES", "1000"), ("ADMIN_UPLOAD_RATE_PER_MINUTE", "1")]).await;
+    let mut a = admin(&app).await;
+    // No lexicon 1 exists: a body read past the limit would be answered 404.
+    let big = "AA\t1\ta word\n".repeat(200);
+    let r = a.upload("/api/admin/lexicons/1/playability", &[], "x.tsv", big.as_bytes()).await;
+    assert!(r.status == StatusCode::BAD_REQUEST || r.status == StatusCode::PAYLOAD_TOO_LARGE, "{}", r.status);
+    let r = a.upload("/api/admin/lexicons/1/playability", &[], "x.tsv", b"AA\t1\ta word\n").await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(r.retry_after().is_some());
 }

@@ -230,7 +230,8 @@ async fn drop_status(state: &AppState, kind: ItemKind, id: i32) -> anyhow::Resul
     Ok(())
 }
 
-/// Builds indexes for new items and drops deleted ones.
+/// Builds indexes for new items and for items whose replaceable part has a
+/// newer revision than the index held, and drops deleted ones.
 pub async fn reconcile(state: &AppState) -> anyhow::Result<()> {
     let _guard = state.catalog.reconcile_lock.lock().await;
     let items = store::list_items(&state.db).await?;
@@ -276,9 +277,10 @@ pub async fn reconcile(state: &AppState) -> anyhow::Result<()> {
         write_status(state, ItemKind::LetterDistribution, i32::from(id)).await?;
     }
     for &(id, dist_id, revision) in &items.lexicons {
-        // Built once, and again when its definitions have been replaced: the
-        // index in use serves until the new one takes its place.
-        if state.catalog.snapshot().lexicons.get(&id).is_some_and(|l| l.definitions_revision >= revision) {
+        // Built once, and again when its definitions or its playabilities
+        // have been replaced: the index in use serves until the new one takes
+        // its place, so for that while the instance holds both.
+        if state.catalog.snapshot().lexicons.get(&id).is_some_and(|l| l.revisions().covers(revision)) {
             continue;
         }
         let Some(dist) = state
@@ -295,7 +297,8 @@ pub async fn reconcile(state: &AppState) -> anyhow::Result<()> {
         };
         let index = tokio::task::spawn_blocking(move || {
             let mut index = LexiconIndex::build(id, &name, dist, raw);
-            index.definitions_revision = read_at;
+            index.definitions_revision = read_at.definitions;
+            index.playability_revision = read_at.playability;
             index
         })
         .await?;
