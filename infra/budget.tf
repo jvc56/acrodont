@@ -54,14 +54,16 @@ resource "aws_ce_anomaly_monitor" "acrodont" {
   # Every key the API answers with, in the form of the provider's own
   # example. The provider compares this JSON with what it reads back, and a
   # change replaces the monitor: with the null keys left out, every plan
-  # could show one, and "no changes" would never be reached.
+  # could show one, and "no changes" would never be reached. The tag's key
+  # is read back as "user:Project" (a user-defined cost allocation tag), so
+  # it is written that way: as "Project", every plan replaced the monitor.
   monitor_specification = var.cost_scope == "tag" ? jsonencode({
     And            = null
     CostCategories = null
     Dimensions     = null
     Not            = null
     Or             = null
-    Tags           = { Key = "Project", MatchOptions = null, Values = ["acrodont"] }
+    Tags           = { Key = "user:Project", MatchOptions = null, Values = ["acrodont"] }
   }) : null
 }
 
