@@ -155,8 +155,6 @@ export interface DownloadOptions {
 	/** ROW_STORAGE_BUDGET and the answer soft limit; tests shrink them. */
 	rowBudget?: number;
 	answerLimit?: number;
-	/** The device's totals, kept on the account's `accounts` row. */
-	onTotals?: (t: { rows: number; keys: number; answer_bytes: number }) => void;
 }
 
 const isQuota = (e: unknown) => e instanceof DOMException && e.name === 'QuotaExceededError';
@@ -313,7 +311,6 @@ export class DownloadManager {
 		await each((id) => this.keys(id));
 		await each((id) => this.cards(id));
 		await this.evict();
-		await this.totals();
 	}
 
 	/** Everything one cascade needs, now: a first open, a restore (§ Downloads). */
@@ -822,14 +819,6 @@ export class DownloadManager {
 			await tx.done;
 			evicted = true;
 		}
-	}
-
-	private async totals() {
-		const sizes = await getMeta(this.db, 'sizes');
-		const rows = (await this.db.count('quiz_questions')) * ROW_BYTES;
-		const keys = Object.values(sizes).reduce((n, s) => n + s.key_bytes, 0);
-		const answer_bytes = Object.values(sizes).reduce((n, s) => n + s.answer_bytes, 0);
-		this.opts.onTotals?.({ rows, keys, answer_bytes });
 	}
 
 	// -------------------------------------------------------------------------

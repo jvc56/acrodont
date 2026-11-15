@@ -93,7 +93,7 @@ describe('logging out', () => {
 		expect(await signedIn()).toBeNull();
 		expect(await userDbExists(A)).toBe(false);
 		// The row is kept, emptied, for the logout still queued.
-		expect(await getAccount(A)).toMatchObject({ logout_pending: true, emptied: true, rows: 0 });
+		expect(await getAccount(A)).toMatchObject({ logout_pending: true, emptied: true, last_signed_in_at: null });
 
 		answer(new Response(null, { status: 204 }));
 		await done;

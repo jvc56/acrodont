@@ -5,7 +5,6 @@
 import { session } from '$lib/auth/session.svelte';
 import { controls } from '$lib/player/controls.svelte';
 import { display } from '$lib/player/display.svelte';
-import { recordTotals } from '$lib/local/accounts';
 import { hasPending } from '$lib/local/apply';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';
@@ -256,9 +255,6 @@ export function startSync(userId: string): () => void {
 					syncState.progress += 1;
 					// Rows have landed: operations held back for them are applied now.
 					void e.releaseHeld().catch(() => undefined);
-				},
-				onTotals: (t) => {
-					void recordTotals(userId, { rows: t.rows, keys: t.keys, answer_bytes: t.answer_bytes });
 				}
 			});
 			stopTriggers = startTriggers(e);

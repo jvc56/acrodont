@@ -7,11 +7,9 @@ import {
 	getAccount,
 	recordLogin,
 	recordLogout,
-	recordTotals,
 	removeAccountData,
 	retryQueuedLogout,
 	signedIn,
-	storageLine,
 	userDbName
 } from './accounts';
 
@@ -45,7 +43,8 @@ describe('unscoped database', () => {
 	it('two accounts signing in leave two rows and one pointer', async () => {
 		await recordLogin('a', 'alice');
 		await recordLogin('b', 'bob');
-		expect((await storageLine()).map((r) => r.user_id).sort()).toEqual(['a', 'b']);
+		expect(await getAccount('a')).toMatchObject({ username: 'alice', emptied: false });
+		expect(await getAccount('b')).toMatchObject({ username: 'bob', emptied: false });
 		expect(await signedIn()).toBe('b');
 	});
 
@@ -53,8 +52,7 @@ describe('unscoped database', () => {
 		await recordLogin('a', 'alice');
 		await recordLogout('a');
 		expect(await signedIn()).toBeNull();
-		expect((await getAccount('a'))?.logout_pending).toBe(true);
-		expect(await storageLine()).toHaveLength(1);
+		expect(await getAccount('a')).toMatchObject({ logout_pending: true, emptied: false });
 	});
 
 	it('removing data with no pending logout deletes its row and database, the other survives', async () => {
@@ -76,25 +74,12 @@ describe('unscoped database', () => {
 		expect(await signedIn()).toBeNull();
 	});
 
-	it("storage figures for another account come from its row, with no open on its database", async () => {
-		await recordLogin('a', 'alice');
-		await recordTotals('a', { rows: 10, keys: 20, answer_bytes: 30 });
-		await recordLogin('b', 'bob');
-		const open = vi.spyOn(globalThis.indexedDB, 'open');
-		const line = await storageLine();
-		const opened = open.mock.calls.map((c) => c[0]);
-		expect(opened.every((n) => n === 'acrodont')).toBe(true);
-		expect(line.find((r) => r.user_id === 'a')).toMatchObject({ rows: 10, keys: 20, answer_bytes: 30 });
-		open.mockRestore();
-	});
-
-	it('the queued logout survives data removal as a bare row, absent from the storage line', async () => {
+	it('the queued logout survives data removal as a bare row', async () => {
 		await recordLogin('a', 'alice');
 		await recordLogout('a');
 		await removeAccountData('a');
 		const row = await getAccount('a');
-		expect(row).toMatchObject({ user_id: 'a', username: 'alice', logout_pending: true, emptied: true });
-		expect(await storageLine()).toHaveLength(0);
+		expect(row).toEqual({ user_id: 'a', username: 'alice', last_signed_in_at: null, logout_pending: true, emptied: true });
 		const sent = await retryQueuedLogout(async () => ({ status: 204 }));
 		expect(sent).toBe(true);
 		expect(await getAccount('a')).toBeUndefined();

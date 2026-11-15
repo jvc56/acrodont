@@ -2909,9 +2909,9 @@ has kept its data, so the app is installable and asks to keep that data:
 never mix, plus one **unscoped** database holding two things: an `accounts`
 table with one row per account that has data here, and a single `signed_in`
 pointer naming the account signed in now. A row carries that account's id and
-username, when it last signed in, **its rows, keys and answer bytes** as its own
-drop pass and eviction last measured them, and a flag set while a
-`POST /api/auth/logout` for it is still unacknowledged. The pointer is what lets a
+username, when it last signed in, and a flag set while a
+`POST /api/auth/logout` for it is still unacknowledged. It carries no sizes:
+no page lists the accounts with data here, so nothing would read them. The pointer is what lets a
 reload with no connection open the right data: the user id is needed to find the
 per-user database, so it cannot live inside it, and `GET /api/auth/me` needs a
 connection. Login inserts or updates that account's row, sets the pointer and
@@ -4061,7 +4061,7 @@ of divergence (see [Monitoring](#deployment-and-operations)).
   connection that accepts that request and never answers cannot leave the
   account's database on a shared machine, and the request itself is given up
   after 15 seconds and left queued. It then empties that account's
-  `accounts` row — its totals and its last-signed-in time — and deletes the row
+  `accounts` row of its last-signed-in time, and deletes the row
   itself **unless the row still holds an unacknowledged logout**, in which case
   a row carrying that account's id, its username and the flag alone survives
   until the request goes through and is deleted when the flag clears. Because `ROW_STORAGE_BUDGET` and
@@ -6766,10 +6766,10 @@ pointer and no row, a startup with no pointer opening no per-user database,
 removing an account's data with **no** pending logout deleting its row and its
 database while the other account's survive, and the whole path running with
 `indexedDB.databases()` deleted from the global, since Safari and Firefox lack
-it. They also assert that `storageLine`'s figures (a function no page calls today) for an account that is not signed in come from its `accounts` row with **no `open` on its database**, and
+it. They also
 cover the queued logout end to end: removing the data of an account that
 **does** hold an unacknowledged logout leaving a row carrying its id, username
-and flag alone, absent from `storageLine`, and deleted once the request goes
+and flag alone, and deleted once the request goes
 through; the flag clearing on a `2xx`, on a `401` and on a `403` — the class is
 any `4xx` but `429`, and a `403` is what a browser that cleared only its CSRF
 cookie would meet — while a `429`, a `503` and a network error each leave it

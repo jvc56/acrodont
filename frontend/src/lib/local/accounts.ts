@@ -18,10 +18,6 @@ export interface AccountRow {
 	username: string;
 	/** ISO time of the last sign-in here; null on an emptied row. */
 	last_signed_in_at: string | null;
-	/** Its rows, keys and answer bytes as its own drop pass and eviction last measured them. */
-	rows: number;
-	keys: number;
-	answer_bytes: number;
 	/** Set while a POST /api/auth/logout for it is still unacknowledged. */
 	logout_pending: boolean;
 	/** Its data was removed; the row survives only to carry `logout_pending`. */
@@ -91,14 +87,10 @@ export async function recordLogin(userId: string, username: string, now = new Da
 				else await accounts.put({ ...row, logout_pending: false });
 			}
 		}
-		const existing = await accounts.get(userId);
 		await accounts.put({
 			user_id: userId,
 			username,
 			last_signed_in_at: now.toISOString(),
-			rows: existing && !existing.emptied ? existing.rows : 0,
-			keys: existing && !existing.emptied ? existing.keys : 0,
-			answer_bytes: existing && !existing.emptied ? existing.answer_bytes : 0,
 			logout_pending: false,
 			emptied: false
 		});
@@ -149,17 +141,6 @@ export async function recordLogout(userId: string) {
 	broadcast(null);
 }
 
-/** The totals the drop pass and eviction last measured, kept on the row. */
-export async function recordTotals(
-	userId: string,
-	totals: { rows: number; keys: number; answer_bytes: number }
-) {
-	await withDb(async (db) => {
-		const row = await db.get('accounts', userId);
-		if (row && !row.emptied) await db.put('accounts', { ...row, ...totals });
-	});
-}
-
 /**
  * Remove this account's data from this device: delete its per-user database
  * and empty its row, which is deleted too unless it still holds an
@@ -178,9 +159,6 @@ export async function removeAccountData(userId: string) {
 				user_id: row.user_id,
 				username: row.username,
 				last_signed_in_at: null,
-				rows: 0,
-				keys: 0,
-				answer_bytes: 0,
 				logout_pending: true,
 				emptied: true
 			});
@@ -195,11 +173,6 @@ export async function removeAccountData(userId: string) {
 		await tx.done;
 	});
 	if (clearedPointer) broadcast(null);
-}
-
-/** Every account with data here, from its row alone. */
-export async function storageLine(): Promise<AccountRow[]> {
-	return withDb(async (db) => (await db.getAll('accounts')).filter((r) => !r.emptied));
 }
 
 export type LogoutOutcome = { status: number } | { networkError: true };
