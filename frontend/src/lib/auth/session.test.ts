@@ -6,8 +6,8 @@ import { IDBFactory } from 'fake-indexeddb';
 import { openDB } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAccount, recordLogin, signedIn, userDbName } from '$lib/local/accounts';
-import { userDb } from '$lib/local/open';
-import { initSession, logout, LOGOUT_TIMEOUT_MS, sendQueuedLogout, session } from './session.svelte';
+import { closeUserDb, userDb } from '$lib/local/open';
+import { initSession, logout, LOGOUT_TIMEOUT_MS, sendQueuedLogout, session, signedOutByReset } from './session.svelte';
 
 const A = '11111111-1111-4111-8111-111111111111';
 
@@ -30,6 +30,44 @@ beforeEach(() => {
 afterEach(() => {
 	vi.unstubAllGlobals();
 	vi.useRealTimers();
+});
+
+describe('a password reset set while signed in', () => {
+	it('is a logout on this device: no account is signed in after a reload, and its unsent work is kept', async () => {
+		const asked: string[] = [];
+		vi.stubGlobal('fetch', (url: string) => {
+			asked.push(url);
+			return Promise.resolve(new Response(null, { status: 204 }));
+		});
+		await recordLogin(A, 'alice');
+		const db = await userDb(A, 'alice');
+		await db.put('outbox', { device_seq: 1, op: { type: 'move_cursor' } } as never);
+		session.userId = A;
+		session.username = 'alice';
+
+		await signedOutByReset();
+		expect(session.userId).toBeNull();
+		// What a reload reads: nobody is signed in here, so it shows the log-in
+		// page, not the account with an expired session.
+		expect(await signedIn()).toBeNull();
+		// The account's data is still on the device, with what it had not sent.
+		expect(await getAccount(A)).toMatchObject({ user_id: A, logout_pending: false });
+		const again = await userDb(A, 'alice');
+		expect(await again.count('outbox')).toBe(1);
+		closeUserDb();
+		expect(asked).toEqual(['/api/auth/logout']);
+	});
+
+	it('does nothing in a tab with no account signed in', async () => {
+		const asked: string[] = [];
+		vi.stubGlobal('fetch', (url: string) => {
+			asked.push(url);
+			return Promise.resolve(new Response(null, { status: 204 }));
+		});
+		session.userId = null;
+		await signedOutByReset();
+		expect(asked).toEqual([]);
+	});
 });
 
 describe('logging out', () => {

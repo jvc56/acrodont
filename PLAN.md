@@ -5303,9 +5303,15 @@ The flows are the conventional ones, built directly on Axum:
     new hash and increments `session_generation`. That signs out every
     session, an attacker's included: a reset is what someone does who
     suspects another person has access. The `204` clears the caller's session
-    and CSRF cookies as well, and the page forgets any session it holds and
-    goes to `/login` with no message: signing in with the new password is the
-    confirmation.
+    and CSRF cookies as well, and the page goes to `/login` with no message:
+    signing in with the new password is the confirmation. If an account was
+    signed in in that tab, the device records **a logout** for it
+    (`signedOutByReset`, which is the Account page's Log out without removing
+    data): the signed-in pointer is cleared, so a reload shows the log-in page
+    and not that account with an expired session and "Log in to sync"; the
+    account's other tabs read "signed out in another tab"; and its data stays
+    on the device with whatever it had not sent, which syncs at its next login
+    here (see [Authentication while offline](#authentication-while-offline)).
 - **Change password** is on `/account`: the current password and the new one
   (`POST /api/account/password`). Nothing is typed but the two passwords and
   no mail is sent: the session says whose account it is. A wrong current
@@ -5668,7 +5674,7 @@ SvelteKit static SPA. The routes:
 | `/` | No page of its own. It goes to the Cascades page, the landing page, when logged in, where logging in lands too, and to the log-in page (with Create an account) when logged out. A deleted account ends on the log-in page. With no lexicon yet, the empty Cascades page says so (and, to an admin, where to upload one). Every logged-in page but the player shows the site header (`AppHeader`): Acrodont (home, the Cascades page); for admins only, a Main nav holding just Admin; then the sync status and the account link. New cascade and the Trash are on the Cascades page, not in the header |
 | `/register`, `/register/check-email`, `/confirm-email`, `/login` | Auth |
 | `/reset-password` | "Reset your password": an address, then "If that address has a confirmed account, a reset link is on its way, with the account's username. The link expires in 30 minutes." |
-| `/reset-password/confirm` | "Choose a new password" (every device will be signed out), one field and **Set new password**. On success it forgets any session this tab holds and goes to `/login` with no message. A `429` says "Too many tries, with this link or from this address. Try again in N minutes, or ask for a new link."; a `503` says the server is busy checking passwords; a spent or expired link says to ask for a new one; a link with no token says so, with a link to ask for a new one, and shows no form |
+| `/reset-password/confirm` | "Choose a new password" (every device will be signed out), one field and **Set new password**. On success it logs out, on this device, any account this tab was signed in as (its data and unsent changes stay) and goes to `/login` with no message. A `429` says "Too many tries, with this link or from this address. Try again in N minutes, or ask for a new link."; a `503` says the server is busy checking passwords; a spent or expired link says to ask for a new one; a link with no token says so, with a link to ask for a new one, and shows no form |
 | `/` | Cascades page, the landing page (an old link to `/cascades` redirects here): the account's [storage](#storage-limit) against its limit with a meter, New cascade, then one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done, 31.58%)`), its size, its download status and Move to Trash; the rest is in the player's Settings. Below the cascades, the [Trash](#trash) (`#trash`) |
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, name, preview with what the cascade will use against the account's storage), with no settings: a note says a new cascade's settings are changed in its Settings once it is created |
 | `/cascades/:id` | Player for the cascade's deepest level, whose Settings dialog holds the ladder and every [setting](#settings), the cascade's and this device's |
@@ -6753,7 +6759,7 @@ while the logout request is still unanswered, the emptied row kept for that
 request and deleted when it is answered; the request being given up as no
 connection after its timeout; and a session check (`/api/auth/me`) answered
 after such a logout setting nothing of the account in the tab and not making
-its database again. The sync runtime's tests (`runtime.test.ts`, with a
+its database again; and a password reset set in a signed-in tab being a logout on the device, with no account signed in afterwards, the account's row and database kept and its unsent operation still in the outbox, and nothing done in a tab with no account. The sync runtime's tests (`runtime.test.ts`, with a
 stand-in for Web Locks) cover: a leading tab whose database a newer version
 is opened over stopping, giving the lock to the tab waiting for it, not left
 saying "Syncing…" for the request it had out, its queued operation still in

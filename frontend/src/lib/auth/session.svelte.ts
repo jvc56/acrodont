@@ -195,6 +195,19 @@ export async function logout(opts: { removeData?: boolean } = {}) {
 	await retryQueuedLogout(sendQueuedLogout);
 }
 
+/**
+ * After a new password was set from a reset link in this browser: the server
+ * has ended every session of that account and cleared this browser's cookies,
+ * so whatever account this tab was signed in as is signed out. On this device
+ * that is a logout like any other: the signed-in pointer is cleared, so a
+ * reload shows the log-in page and not an account with an expired session,
+ * the other tabs hear it, and the account's data stays with whatever it had
+ * not sent, to be sent at its next login here.
+ */
+export async function signedOutByReset() {
+	if (session.userId) await logout();
+}
+
 /** After DELETE /api/account succeeded: the session is already void. */
 export function forgetSession() {
 	logins++;

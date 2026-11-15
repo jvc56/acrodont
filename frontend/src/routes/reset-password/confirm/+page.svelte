@@ -3,8 +3,9 @@
 	// Password reset), as birdtest does: the link is checked first, then the
 	// password, by registration's rule. A link buys five tries an hour, weak
 	// passwords included. Success signs out every session, this browser's
-	// too, and goes to the log-in page with no message: signing in with the
-	// new password is the confirmation.
+	// too (recorded on this device as a logout, its unsent work kept), and
+	// goes to the log-in page with no message: signing in with the new
+	// password is the confirmation.
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button';
@@ -14,7 +15,7 @@
 	import { ApiError, type FieldError } from '$lib/api';
 	import { authApi } from '$lib/auth/client';
 	import { describe } from '$lib/auth/errors';
-	import { forgetSession, session } from '$lib/auth/session.svelte';
+	import { signedOutByReset } from '$lib/auth/session.svelte';
 
 	const token = $derived(page.url.searchParams.get('token') ?? '');
 	let password = $state('');
@@ -33,7 +34,7 @@
 		try {
 			await authApi.confirmReset(token, password);
 			// A reset signs out every session, this tab's included.
-			if (session.userId) forgetSession();
+			await signedOutByReset();
 			await goto('/login');
 		} catch (err) {
 			if (err instanceof ApiError && err.fieldErrors.length) errors = err.fieldErrors;
