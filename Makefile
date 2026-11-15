@@ -26,7 +26,7 @@ export CARGO_BUILD_JOBS ?= 2
 .PHONY: infra-validate ops-check test test-quick test-unit test-unit-backend test-unit-frontend \
         test-integration test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-ops-image test-scale test-parity \
         frontend-deps e2e-deps e2e-binary e2e-pass-full e2e-pass-ttl e2e-pass-purge e2e-pass-answers \
-        e2e-pass-budget $(addprefix e2e-up-,full ttl purge answers budget) $(addprefix e2e-down-,full ttl purge answers budget) \
+        e2e-pass-budget e2e-pass-webkit $(addprefix e2e-up-,full ttl purge answers budget) $(addprefix e2e-down-,full ttl purge answers budget) \
         sqlx-db sqlx-prepare
 
 test: test-unit test-integration test-e2e
@@ -92,6 +92,9 @@ test-integration:
 ##                               own stack: every stack up first, the @env
 ##                               passes side by side, update.spec alone, then
 ##                               the stacks down. CI's Main tier adds it
+##                               With E2E_WEBKIT=1 (CI's Main tier sets it)
+##                               the shell, tabs and update journeys then run
+##                               again in WebKit, on the update journey's stack
 ##   make test-e2e               both: the whole suite
 ##   make test-e2e SPEC=typed    one spec file (or any Playwright file filter)
 ##                               on the suite's stack; not the @env journeys
@@ -100,8 +103,13 @@ E2E_WORKERS ?= 4
 export E2E_WORKERS
 test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-ops-image e2e-binary: export ACRODONT_BACKEND_TARGET ?= backend-prebuilt
 
+# WebKit is off unless asked for: its build needs system libraries
+# (`npx playwright install --with-deps webkit`, which asks for root), and
+# Playwright has none for an Ubuntu older than 22.04.
+E2E_WEBKIT ?= 0
 e2e-deps: frontend-deps
 	cd e2e && { [ -d node_modules ] || npm ci; } && npx playwright install chromium >/dev/null
+	if [ "$(E2E_WEBKIT)" = 1 ]; then npx playwright install webkit >/dev/null; fi
 
 e2e-binary:
 	if [ "$$ACRODONT_BACKEND_TARGET" = backend-prebuilt ]; then
@@ -137,6 +145,9 @@ test-e2e-main: e2e-deps e2e-binary
 	  E2E_STACK_READY=1 E2E_KEEP_STACK=1 $(MAKE) --no-print-directory -k -j4 --output-sync=target \
 	    e2e-pass-ttl e2e-pass-purge e2e-pass-answers e2e-pass-budget || status=$$?
 	  E2E_STACK_READY=1 E2E_KEEP_STACK=1 $(MAKE) --no-print-directory e2e-pass-full || status=$$?
+	  if [ "$(E2E_WEBKIT)" = 1 ]; then
+	    E2E_STACK_READY=1 E2E_KEEP_STACK=1 $(MAKE) --no-print-directory e2e-pass-webkit || status=$$?
+	  fi
 	fi
 	$(MAKE) --no-print-directory -k $(addprefix e2e-down-,$(E2E_MAIN)) || status=$$?
 	exit $$status
@@ -176,6 +187,15 @@ e2e-pass-full:
 	$(call e2e_run,full) --project serial --no-deps --grep @full --output test-results/full
 e2e-pass-ttl e2e-pass-purge e2e-pass-answers e2e-pass-budget: e2e-pass-%:
 	$(call e2e_run,$*) --project parallel --grep @$* --output test-results/$*
+# The shell and tabs journeys side by side, then the update journey alone (it
+# restarts the stack), in WebKit, on the update journey's stack. The second
+# runs even when the first fails, so every failure shows.
+e2e-pass-webkit:
+	status=0
+	$(call e2e_run,full) --project webkit --grep-invert @full --workers 2 --output test-results/webkit || status=$$?
+	cd ..
+	$(call e2e_run,full) --project webkit --grep @full --workers 1 --output test-results/webkit-update || status=$$?
+	exit $$status
 # A pass's stack alone, up and seeded and answering a browser, and left up:
 # the global setup, with a journey that does nothing.
 $(addprefix e2e-up-,$(E2E_MAIN)): e2e-up-%:

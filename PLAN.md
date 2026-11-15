@@ -7529,7 +7529,22 @@ alone (it restarts its stack), and takes the stacks down at the end: Docker
 starting or stopping a stack changes the host's network interfaces, and
 Chromium then drops the page loads under way in every browser on the machine
 (`net::ERR_NETWORK_CHANGED`), so a stack must not start or stop beside a
-running journey. The backend image of every suite stack is the release binary built on
+running journey.
+
+The journeys run in Chromium. Three of them, the shell, tabs and update
+journeys (`shell.spec.ts`, `tabs.spec.ts`, `update.spec.ts`), run a second
+time in Playwright's WebKit (project `webkit`), the nearest thing to Safari
+that runs on Linux, because the service worker, several tabs on one IndexedDB
+and the Web Locks that syncing stands on differ most there. That pass runs
+after the update journey, on its stack, when `E2E_WEBKIT=1`, which CI's Main
+tier sets; it is off by default on a developer's machine, where WebKit's
+system libraries may not be installed. Playwright's WebKit is not Safari: it
+says nothing of iOS, of Safari's clearing of a site's data after seven days
+unused, or of an installed app. One expectation is wider there: the header's
+"data kept" state may read unknown, since that build may have no
+`navigator.storage.persist()`.
+
+The backend image of every suite stack is the release binary built on
 the host and copied into a thin image (`backend-prebuilt` in
 `docker/backend.Dockerfile`), not compiled again inside Docker.
 
@@ -7975,7 +7990,7 @@ where PQ-019 runs a case at a tenth.
 | `make test-integration` | Every integration test binary's tests in one pool (`cargo nextest run`, 16 at a time) against a throwaway Postgres it starts itself |
 | `make test-e2e-core` | Every end-to-end journey on one stack, four side by side, then the `@serial` ones; not the update journey or the `@env` passes |
 | `make test-e2e SPEC=<file>` | One spec file (any Playwright file filter) on the suite's stack |
-| `make test-e2e-main` | The update journey and the `@env` passes, each on a stack of its own: every stack up first, the `@env` passes side by side, the update journey alone, then the stacks down |
+| `make test-e2e-main` | The update journey and the `@env` passes, each on a stack of its own: every stack up first, the `@env` passes side by side, the update journey alone, then the stacks down. With `E2E_WEBKIT=1`, the shell, tabs and update journeys then run again in WebKit before the stacks go down |
 | `make test-e2e` | `test-e2e-core`, then `test-e2e-main`: the whole end-to-end suite |
 | `make test-e2e-seeding` | Seeding under a two-a-minute upload limit |
 | `make test-ops-image` | The ops image builds, `backup.py` dumps a seeded stack, and `drill.py` restores the dump inside the image |
@@ -8000,7 +8015,7 @@ CI (`.github/workflows/ci.yml`) runs three tiers, each a superset of the last:
 | Tier | When | What |
 |---|---|---|
 | **Push** | Every push, every branch | Clippy, the unit tests (a backend and a frontend job), `make test-integration`, `make test-e2e-core`, `make infra-validate`, `make ops-check`, `make contract-check` (the generators in `contract-fixtures/tools/` still write the checked-in fixtures). About 5 minutes |
-| **Main** | A push to `main`, and a manual run on any branch | The Push tier, plus `make test-e2e-main`, `make test-e2e-seeding` and `make test-ops-image` (the last also on a push that changes `scripts/` or `docker/`) |
+| **Main** | A push to `main`, and a manual run on any branch | The Push tier, plus `make test-e2e-main` with `E2E_WEBKIT=1` (the shell, tabs and update journeys in WebKit too), `make test-e2e-seeding` and `make test-ops-image` (the last also on a push that changes `scripts/` or `docker/`) |
 | **Nightly** | 04:30 UTC on `main` | The Main tier, plus `make test-scale` (which a manual run on any branch runs too). A failure opens (or comments on) one issue |
 
 The seeding check also runs on a push that changes `scripts/`. A branch can be

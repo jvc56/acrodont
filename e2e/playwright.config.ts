@@ -9,8 +9,15 @@ import { defineConfig, devices } from '@playwright/test';
 // (the catalog, the backend's process, the stack itself), so they run after
 // the rest, one at a time. If a side-by-side journey fails, Playwright skips
 // them ("did not run").
+//
+// Project `webkit` is the shell, tabs and update journeys again in Playwright's
+// WebKit, the nearest thing to Safari that runs on Linux: the service worker,
+// several tabs on one IndexedDB and the Web Locks the sync stands on differ
+// most there. It runs only when asked for by name (the Makefile's
+// e2e-pass-webkit, CI's Main tier); every other pass names its own project.
 const port = Number(process.env.E2E_PORT ?? 5180);
 const chrome = { ...devices['Desktop Chrome'] };
+const safari = { ...devices['Desktop Safari'] };
 
 export default defineConfig({
 	testDir: './tests',
@@ -27,6 +34,7 @@ export default defineConfig({
 	},
 	projects: [
 		{ name: 'parallel', grepInvert: /@serial/, fullyParallel: true, use: chrome },
-		{ name: 'serial', grep: /@serial/, dependencies: ['parallel'], workers: 1, use: chrome }
+		{ name: 'serial', grep: /@serial/, dependencies: ['parallel'], workers: 1, use: chrome },
+		{ name: 'webkit', testMatch: /(shell|tabs|update)\.spec\.ts$/, fullyParallel: true, use: safari }
 	]
 });

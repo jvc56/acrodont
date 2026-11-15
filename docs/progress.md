@@ -579,7 +579,9 @@ TEST_TIME_PLAN.md, as decided (T1–T5 yes, T3 = C1, T6 no):
   limits. `builder`, `pages` and `player` register their own users. `@limits`
   is gone: `storage.spec.ts` sets the account's `users.storage_limit_bytes`
   with SQL on the main stack. update.spec (`@full`) and the four `@env` passes
-  run side by side on stacks of their own (`make test-e2e-main`).
+  run side by side on stacks of their own (`make test-e2e-main`). With
+  `E2E_WEBKIT=1` (CI's Main tier) the shell, tabs and update journeys run
+  again in WebKit (project `webkit`) on the update journey's stack.
 - **Images:** `backend-prebuilt` (ubuntu:24.04) copies in the release binary
   built on the host (`make e2e-binary`); compose picks it through
   `ACRODONT_BACKEND_TARGET`; production's `backend` target is unchanged.

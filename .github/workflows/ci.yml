@@ -7,7 +7,8 @@
 #            scripts. About 5 minutes.
 #   Main     a push to main, and a manual run on any branch: the Push tier,
 #            plus make test-e2e-main (update.spec and the @env passes, each on
-#            its own stack, side by side), the seeding check and the ops image
+#            its own stack, side by side, then the shell, tabs and update
+#            journeys again in WebKit), the seeding check and the ops image
 #            check (make test-ops-image: the image builds, and the restore
 #            drill passes in it on a dump of a seeded stack).
 #   Nightly  04:30 UTC on main: the Main tier, plus make test-scale. A failure
@@ -167,10 +168,12 @@ jobs:
           cache-dependency-path: |
             frontend/package-lock.json
             e2e/package-lock.json
-      - name: Chromium and its system libraries for Playwright
-        run: cd e2e && npm ci && npx playwright install --with-deps chromium
-      - name: make test-e2e-main (update.spec and the @env passes, each on its own stack, all up before any journey)
+      - name: Chromium, WebKit and their system libraries for Playwright
+        run: cd e2e && npm ci && npx playwright install --with-deps chromium webkit
+      - name: make test-e2e-main (update.spec and the @env passes, each on its own stack, all up before any journey; then shell, tabs and update in WebKit)
         run: make test-e2e-main
+        env:
+          E2E_WEBKIT: "1"
       - name: Stacks down, volumes and all
         if: always()
         run: |

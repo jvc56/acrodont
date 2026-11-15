@@ -64,7 +64,7 @@ test('the service worker serves the shell offline', async ({ page, context }) =>
 // PLAN.md § On the device → Installing the app: the manifest and its icons, the
 // header's offline status, the browser's install offer, a closed tab reopened
 // with no connection, and the iPhone's one-time tip.
-test('installing: the manifest, the offline status, Install, and a tab reopened offline', async ({ page, context, browser, baseURL }) => {
+test('installing: the manifest, the offline status, Install, and a tab reopened offline', async ({ page, context, browser, baseURL, browserName }) => {
 	test.setTimeout(120_000);
 	const manifest = await page.request.get('/manifest.webmanifest');
 	expect(manifest.headers()['content-type']).toContain('application/manifest+json');
@@ -80,7 +80,10 @@ test('installing: the manifest, the offline status, Install, and a tab reopened 
 	// Ready offline, and the browser asked to keep the data, whatever it answered.
 	const status = page.locator('[data-offline]');
 	await expect(status).toHaveAttribute('data-offline', 'ready');
-	await expect(status).toHaveAttribute('data-kept', /^(true|false)$/);
+	// Playwright's WebKit may have no navigator.storage.persist(), or refuse it in the
+	// throwaway profile a test runs in: the status then reads "unknown", as it would in
+	// any browser that cannot say, and that is not what this journey is about.
+	await expect(status).toHaveAttribute('data-kept', browserName === 'webkit' ? /^(true|false|unknown)$/ : /^(true|false)$/);
 	await status.hover();
 	await expect(page.getByRole('tooltip')).toContainText('Acrodont opens on this device with no connection.');
 	await page.mouse.move(0, 400);
