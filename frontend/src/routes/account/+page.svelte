@@ -14,7 +14,8 @@
 	import { removeAccountData } from '$lib/local/accounts';
 	import { closeUserDb, countUnsent } from '$lib/local/open';
 	import SettingRow from '$lib/components/SettingRow.svelte';
-	import { syncNow, syncState } from '$lib/sync/runtime.svelte';
+	import { syncNow, syncState, tabMaySync, unsentCount } from '$lib/sync/runtime.svelte';
+	import { updates } from '$lib/sw/client.svelte';
 
 	// A signed-in change of password (PLAN.md § Accounts): the current one, then the new.
 	let currentPw = $state('');
@@ -31,6 +32,26 @@
 	let deleteError = $state<string | null>(null);
 
 	let removeData = $state(false);
+
+	// "N changes haven't synced yet". A tab that has stopped syncing (signed out
+	// or updated in another tab) cannot send what it holds and no longer counts
+	// it: there the count comes from the account's own database (`unsentCount`),
+	// read again whenever this tab's sync state changes or the box is ticked.
+	const stopped = $derived(!tabMaySync(session, updates.updatedElsewhere));
+	let unsent = $state<number | null>(null);
+	$effect(() => {
+		void syncState.pending;
+		void syncState.status;
+		void stopped;
+		void removeData;
+		const id = session.userId;
+		if (!id) return;
+		let current = true;
+		void unsentCount(id).then((n) => {
+			if (current) unsent = n;
+		});
+		return () => (current = false);
+	});
 
 	function fieldErrorsOr(e: unknown, set: (f: FieldError[]) => void): string | null {
 		if (e instanceof ApiError && e.fieldErrors.length) {
@@ -140,14 +161,14 @@
 			<!-- Only changes that cannot sync now matter at logout. Online, a change
 			     syncs within a second, and the header's sync status shows that: a
 			     line here would come and go with every setting changed. -->
-			{#if (syncState.pending ?? 0) > 0 && (syncState.status === 'offline' || syncState.status === 'refused' || syncState.status === 'needs_login' || session.needsLogin)}
+			{#if (unsent ?? 0) > 0 && (stopped || syncState.status === 'offline' || syncState.status === 'refused' || syncState.status === 'needs_login' || session.needsLogin)}
 				<p class="text-sm" role="status">
-					{syncState.pending === 1 ? '1 change hasn’t' : `${syncState.pending} changes haven’t`} synced yet. {syncState.pending === 1 ? 'It' : 'They'}
+					{unsent === 1 ? '1 change hasn’t' : `${unsent} changes haven’t`} synced yet. {unsent === 1 ? 'It' : 'They'}
 					will sync the next time you log in on this device.
 				</p>
 				{#if removeData}
 					<p class="text-sm text-destructive">
-						Removing this account’s data discards {syncState.pending === 1 ? 'that change' : `those ${syncState.pending} changes`}.
+						Removing this account’s data discards {unsent === 1 ? 'that change' : `those ${unsent} changes`}.
 					</p>
 				{/if}
 			{/if}

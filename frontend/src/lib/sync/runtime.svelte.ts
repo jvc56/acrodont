@@ -9,7 +9,7 @@ import { recordTotals } from '$lib/local/accounts';
 import { hasPending } from '$lib/local/apply';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';
-import { onUpdatedElsewhere, userDb } from '$lib/local/open';
+import { countUnsent, onUpdatedElsewhere, userDb } from '$lib/local/open';
 import { DownloadManager, httpApiFor, openPlayers } from './downloads';
 import { electLeader, listenForChanges, startTriggers, SyncEngine, transportFor, type EngineHooks, type SyncStatus } from './engine';
 import type { Notice } from './notices';
@@ -376,6 +376,20 @@ export async function refreshPending() {
 	const pending = await db.count('outbox');
 	// Counted for the account this tab was syncing when it asked.
 	if (currentUser === user) syncState.pending = pending;
+}
+
+/**
+ * How many of the account's changes are unsent, for the Account page's "N
+ * changes haven't synced yet". A tab that syncs for the account keeps the
+ * count as it goes (`refreshPending`). One that has stopped (signed out or
+ * updated in another tab) no longer counts, and what it last counted stays
+ * in `syncState.pending` while it is studied in and other tabs sync: there
+ * the count is read from the account's own database, as the count before a
+ * removal is. Null when it is not known.
+ */
+export async function unsentCount(userId: string): Promise<number | null> {
+	if (currentUser === userId) return syncState.pending;
+	return countUnsent(userId);
 }
 
 /**

@@ -11,7 +11,7 @@ import { userDbName } from '$lib/local/accounts';
 import { USER_DB_VERSION } from '$lib/local/db';
 import { closeUserDb, countUnsent, userDb } from '$lib/local/open';
 import { getMeta } from '$lib/local/meta';
-import { ensureCascade, keepNoticesFor, refreshPending, sendPending, startSync, stopSync, syncAndWait, syncNow, syncState, tabMaySync } from './runtime.svelte';
+import { ensureCascade, keepNoticesFor, refreshPending, sendPending, startSync, stopSync, syncAndWait, syncNow, syncState, tabMaySync, unsentCount } from './runtime.svelte';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -255,11 +255,24 @@ describe('the unsent changes counted before an account’s data is removed', () 
 		await db.put('outbox', { device_seq: 2, op: { type: 'move_cursor' } } as never);
 
 		expect(await countUnsent(A)).toBe(2);
+		// The Account page's line reads the same count there, not the one the tab last made while it synced.
+		expect(syncState.pending).toBe(0);
+		expect(await unsentCount(A)).toBe(2);
 
 		// The count's connection is closed: the removal that follows waits for nothing.
 		closeUserDb();
 		await tick();
 		expect(await removeUserDb(A)).toEqual({ blocked: false });
+	});
+
+	it('are the tab’s own running count while it syncs for the account', async () => {
+		session.userId = A;
+		const db = await userDb(A, 'alice');
+		startSync(A);
+		await vi.waitFor(() => expect(syncState.pending).toBe(0));
+		await db.put('outbox', { device_seq: 1, op: { type: 'move_cursor' } } as never);
+		await refreshPending();
+		expect(await unsentCount(A)).toBe(1);
 	});
 
 	it('are none for a database that is not on the device, which the count does not make', async () => {

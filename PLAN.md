@@ -1170,7 +1170,14 @@ as the term of the data model and the API.
   player takes no keys.
 - **The logout warning** ("2 changes haven't synced yet. They will sync the
   next time you log in on this device.") shows on the Account page only when
-  changes cannot sync now (offline, or the session needs a login). Online,
+  changes cannot sync now: offline, the session needs a login, the server
+  refuses the sync ("Can't sync: reload"), or **this tab has stopped
+  syncing** (signed out or updated in another tab). In a tab that has
+  stopped, the count is read from the account's own database (`unsentCount`,
+  which there is `countUnsent`), as the count before a removal is: such a tab
+  no longer counts as it goes, and the figure it last made while it synced
+  says nothing of what was studied in it since or of what another tab has
+  sent. Online,
   every change syncs within a second and the sync status in the header shows
   it; a line that came and went with each setting changed would only shift
   the page. Removing the account's data is the exception: Log out with that
@@ -6785,7 +6792,7 @@ in another tab and not keeping the lock; an account's notices staying while
 the tab only stops and restarts syncing for it, and going when it logs out or
 another account starts syncing in the tab; and a sync or a count asked for
 after a logout that removed the account's data not making its database
-again; **`tabMaySync`** being false once another tab activated a newer build, with the database left as it was, as it is once the database was taken or the account signed out elsewhere, and a tab stopped for it giving the lock to the waiting tab, sending nothing more, and leaving what it writes afterwards in the outbox that tab reads; **a sync asked for and waited for** (`syncAndWait`, `sendPending`): in the leading tab, the cascade's unsent operation sent before the answer and nothing asked when nothing of the cascade is unsent; the wait given up, with the operation still counted unsent, when the sync does not end; in a tab that does not lead, the leader asked on the channel and its answer waited for, and the wait given up when the leader's sync failed or no tab answers; and the leading tab answering another tab's request once its sync has ended (the Export dialog's sentence and Duplicate's call are the pages' own, exercised by no test); the count before a removal reading the outbox in a tab that has stopped syncing, leaving no connection open, making no database that is not there, and answering "not known" for one it cannot read or open in time; and a tab whose database another tab's removal deleted not being told it was updated, and syncing again. (The layout's two lines that call these, at a change of account and
+again; **`tabMaySync`** being false once another tab activated a newer build, with the database left as it was, as it is once the database was taken or the account signed out elsewhere, and a tab stopped for it giving the lock to the waiting tab, sending nothing more, and leaving what it writes afterwards in the outbox that tab reads; **a sync asked for and waited for** (`syncAndWait`, `sendPending`): in the leading tab, the cascade's unsent operation sent before the answer and nothing asked when nothing of the cascade is unsent; the wait given up, with the operation still counted unsent, when the sync does not end; in a tab that does not lead, the leader asked on the channel and its answer waited for, and the wait given up when the leader's sync failed or no tab answers; and the leading tab answering another tab's request once its sync has ended (the Export dialog's sentence and Duplicate's call are the pages' own, exercised by no test); the count before a removal, and the Account page's line (`unsentCount`), reading the outbox in a tab that has stopped syncing, where the tab's own last count is stale (the line's count being the tab's running one while it syncs), leaving no connection open, making no database that is not there, and answering "not known" for one it cannot read or open in time; and a tab whose database another tab's removal deleted not being told it was updated, and syncing again. (The layout's two lines that call these, at a change of account and
 at the "updated in another tab" state, are not exercised by a unit test; the update journey walks the second.) `applyOrRefuse` answering null, with nothing queued, for a Restore of a cascade that is not in the Trash, a Delete forever of a level being studied and a second Move to Trash, where `applyLocally` throws, and throwing what is not the rules' refusal (the line each page then shows is the page's own, exercised by no test). A fixture unscoped
 database at each earlier version opens at the current one with its rows and
 pointer intact.
