@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, username::text AS \"username!\", password_hash,\n                is_admin, session_generation, storage_bytes, storage_limit_bytes\n         FROM users WHERE username = $1",
+  "query": "SELECT id, username::text AS \"username!\", password_hash,\n                is_admin, session_generation, storage_bytes, storage_limit_bytes\n         FROM users WHERE username = $1::citext",
   "describe": {
     "columns": [
       {
@@ -96,5 +96,5 @@
       true
     ]
   },
-  "hash": "6ed4e1d7099092590fdc2a0aed11b233fa60a4657ec0e4e9742248e6de5e9eff"
+  "hash": "9474ad7bf0675953e09a20684d7d418d1b051ee2f248a817b1c137bc063e2825"
 }

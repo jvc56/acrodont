@@ -84,6 +84,10 @@ fn queue_mail(state: &AppState, email: Email) {
     });
 }
 
+/// Usernames and addresses are `CITEXT`: one differing only in case is the
+/// same one. A text parameter compared with such a column is compared as
+/// text, case and all, unless the query casts it: every lookup here writes
+/// `$n::citext`.
 fn is_valid_username(u: &str) -> bool {
     (3..=32).contains(&u.len()) && u.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
@@ -416,7 +420,7 @@ async fn verified_user(state: &AppState, username: &str, password: String) -> Ap
         LoginUser,
         "SELECT id, username::text AS \"username!\", password_hash,
                 is_admin, session_generation, storage_bytes, storage_limit_bytes
-         FROM users WHERE username = $1",
+         FROM users WHERE username = $1::citext",
         username,
     )
     .fetch_optional(&state.db)
@@ -550,7 +554,7 @@ async fn dev_login(
     let user = sqlx::query!(
         "SELECT id, username::text AS \"username!\", is_admin, session_generation,
                 storage_bytes, storage_limit_bytes
-         FROM users WHERE username = $1",
+         FROM users WHERE username = $1::citext",
         body.username.trim() as &str,
     )
     .fetch_optional(&state.db)
@@ -619,7 +623,7 @@ async fn reset_password(
 async fn send_reset(state: &AppState, ip: IpAddr, email: &str) -> anyhow::Result<()> {
     let user = sqlx::query!(
         "SELECT id, username::text AS \"username!\", email::text AS \"email!\" FROM users
-         WHERE email = $1",
+         WHERE email = $1::citext",
         email as &str,
     )
     .fetch_optional(&state.db)

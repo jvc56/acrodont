@@ -1111,6 +1111,31 @@ async fn login_failure_limits(pool: sqlx::PgPool) {
     assert_eq!(app.state.argon2_verifies.load(Ordering::Relaxed), before);
 }
 
+/// A username and an address are the same whatever their case: at login,
+/// at a reset request and at registration.
+#[sqlx::test]
+async fn usernames_and_addresses_match_whatever_their_case(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("DEV_LOGIN", "true")]).await;
+    app.signed_in("Vera").await;
+    let mut c = app.client_from("192.0.2.50");
+    let r = c.post("/api/auth/login", json!({"username": "VERA", "password": PASSWORD})).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["username"], "Vera", "as it was registered");
+    let r = c.post("/api/dev/login", json!({ "username": "vERA" })).await;
+    assert_eq!(r.status, StatusCode::OK);
+    c.post("/api/auth/reset-password", json!({ "email": "VERA@Example.COM" })).await;
+    let mails = app.mail_to("vera@example.com", 2).await;
+    assert!(matches!(mails.last().unwrap().kind, MailKind::PasswordReset { .. }), "{:?}", mails.last());
+    // Registering the name or the address in another case: taken, and a notice.
+    let r = c.post("/api/auth/register", reg("vera", "someone@example.com")).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.json()["errors"][0]["field"], "username");
+    let r = c.post("/api/auth/register", reg("other_name", "VERA@example.com")).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    let mails = app.mail_to("vera@example.com", 3).await;
+    assert_eq!(mails.last().unwrap().kind, MailKind::AccountExists);
+}
+
 /// A right password is limited too, per username: twenty logins a minute,
 /// right or wrong, and the twenty-first costs no verify. Another username,
 /// from the same address, is not held up: a room logging in together is twenty
@@ -1126,7 +1151,7 @@ async fn logins_for_one_username_are_limited_whatever_the_password(pool: sqlx::P
         assert_eq!(r.status, StatusCode::OK, "login {i}");
     }
     let before = app.state.argon2_verifies.load(Ordering::Relaxed);
-    let r = app.client_from("192.0.2.99").post("/api/auth/login", login("vera")).await;
+    let r = app.client_from("192.0.2.99").post("/api/auth/login", login("VERA")).await;
     assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
     assert!(r.retry_after().is_some());
     assert_eq!(app.state.argon2_verifies.load(Ordering::Relaxed), before);

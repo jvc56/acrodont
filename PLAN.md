@@ -5073,7 +5073,9 @@ The flows are the conventional ones, built directly on Axum:
   it is that registration's password the answer is `403 email_unconfirmed`,
   which the page shows as "Confirm your email address first: follow the link
   we sent you. If it never came, register again." Any other password is `401`.
-- **Login**: by **username** and password, never by email, so the `403` for a
+- **Login**: by **username** and password, never by email (a username, like
+  an address, is the same whatever its case: `Vera` logs in as `vera`, and
+  every lookup compares as `CITEXT`), so the `403` for a
   registration not yet confirmed, which only its own password gets, reveals nothing that the public username does not. Rate
   limited on **failed** attempts, per IP and per username
   (`LOGIN_FAILURES_PER_IP_PER_MINUTE` and
@@ -7062,7 +7064,10 @@ they run in parallel and leave nothing behind.
     cannot be walked around with a fresh IP each time; and a registration past the cap is answered
     the same, kept nowhere and not sent, and the next one after the window is
     kept and sent; the purge task deletes registrations whose code has expired
-    and leaves the valid ones. An
+    and leaves the valid ones. A username in another case logs in, and dev-logs
+    in, as the account; a reset asked for the address in another case is
+    sent; and registering the name or the address in another case is "taken"
+    and the notice. An
     address with a character outside ASCII is a field error at register,
     creating and sending nothing, and a reset asked for one is answered `202`.
   - A 300,000-question `finish` and reset complete within budget, and the reset

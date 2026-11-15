@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, username::text AS \"username!\", email::text AS \"email!\" FROM users\n         WHERE email = $1",
+  "query": "SELECT id, username::text AS \"username!\", email::text AS \"email!\" FROM users\n         WHERE email = $1::citext",
   "describe": {
     "columns": [
       {
@@ -43,5 +43,5 @@
       null
     ]
   },
-  "hash": "e8505c295e32bceac6f4338b4042c84754a8293d44510fbe7e139885b25e4f19"
+  "hash": "2f487dde602ce7a8e4f4f71a5e2d1398b10e1de7993dd4c7e9bf16e61f30a105"
 }
