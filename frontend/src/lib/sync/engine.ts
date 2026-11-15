@@ -13,7 +13,7 @@ import type { Notice } from './notices';
 import { questionRowsFor } from './policy';
 import { BATCH_OPS, type Reply, type SyncRequest, type SyncResponse, type Transport } from './protocol';
 import { clearStaging, newPull, writePage, type PullState } from './pull';
-import { newOutcome, rebase, type Acked, type RebaseOutcome } from './rebase';
+import { heldReady, newOutcome, rebase, replayHeld, type Acked, type RebaseCtx, type RebaseOutcome } from './rebase';
 
 export type SyncStatus =
 	| 'idle'
@@ -153,6 +153,38 @@ export class SyncEngine {
 		return this.running;
 	}
 
+	/**
+	 * Called when question rows have landed (the download manager's, in this tab
+	 * or another): if operations were held back for a quiz whose rows are now
+	 * here, a sync, whose first step applies them (`release`).
+	 */
+	async releaseHeld(): Promise<void> {
+		if (this.stopped || !(await heldReady(this.db))) return;
+		await this.sync();
+	}
+
+	/**
+	 * The operations an earlier replay held back (rebase.ts, `replay`), applied
+	 * to the overlay once the rows they waited for are here, before anything is
+	 * sent. No room for it is not an error of the sync: they stay held, are sent
+	 * as they are, and the server judges them.
+	 */
+	private async release(rctx: RebaseCtx) {
+		const held = Object.keys(await getMeta(this.db, 'held'));
+		if (!held.length) return;
+		const o = newOutcome();
+		try {
+			for (const id of held.sort()) await replayHeld(this.db, id, rctx, o);
+		} catch (e) {
+			if (!isQuota(e)) {
+				this.emit(o);
+				throw e;
+			}
+		}
+		this.emit(o);
+		if (o.changed.size && !this.stopped) await this.hooks.onSynced?.(o);
+	}
+
 	private async send(req: SyncRequest): Promise<Reply | null> {
 		for (;;) {
 			// Stopped since the request was put together (the reads before it take
@@ -186,6 +218,8 @@ export class SyncEngine {
 		else this.setStatus('syncing');
 		const { device_id } = await getMeta(this.db, 'device');
 		const server = await getMeta(this.db, 'server');
+		const rctx: RebaseCtx = { device_id, max_quiz_questions: server.max_quiz_questions, now: this.now };
+		await this.release(rctx);
 		let cursor = sync.cursor;
 		// Device settings shared here and not yet sent go with the first request.
 		let shares: SharedSettings | null = await pendingShares(this.db);
@@ -243,7 +277,6 @@ export class SyncEngine {
 				continue;
 			}
 			const acked = ackedOf(batch, body);
-			const rctx = { device_id, max_quiz_questions: server.max_quiz_questions, now: this.now };
 			// A 426 applied its operations and carries their pull like a 200: both
 			// are taken, so what was just pushed stays on the device as the server
 			// has it.

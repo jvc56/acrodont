@@ -22,6 +22,12 @@ export interface MetaValues {
 	opens: Record<string, string>;
 	budget_dropped: string[];
 	/**
+	 * Cascades whose last replay held operations back (PLAN.md § Applying a pull
+	 * on the device, step 4): each with the quiz whose question rows the replay
+	 * was waiting for. The operations are in the outbox and not in the overlay.
+	 */
+	held: Record<string, string>;
+	/**
 	 * Device settings used for all of the account's devices (lib/settings/device):
 	 * when this device last took each shared value, and the values it shared and
 	 * has not yet sent.
@@ -79,6 +85,7 @@ export const META_DEFAULTS: { [K in MetaKey]: () => MetaValues[K] } = {
 	server: () => ({ trash_retention_days: 30, max_quiz_questions: 300_000 }),
 	opens: () => ({}),
 	budget_dropped: () => [],
+	held: () => ({}),
 	shared_device: () => ({ applied: {}, pending: {} }),
 	sizes: () => ({}),
 	bindings: () => DEFAULT_BINDINGS.map((b) => ({ ...b })),

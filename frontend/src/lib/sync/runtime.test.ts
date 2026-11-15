@@ -10,7 +10,8 @@ import { session } from '$lib/auth/session.svelte';
 import { userDbName } from '$lib/local/accounts';
 import { USER_DB_VERSION } from '$lib/local/db';
 import { closeUserDb, countUnsent, userDb } from '$lib/local/open';
-import { keepNoticesFor, refreshPending, sendPending, startSync, stopSync, syncAndWait, syncNow, syncState } from './runtime.svelte';
+import { getMeta } from '$lib/local/meta';
+import { ensureCascade, keepNoticesFor, refreshPending, sendPending, startSync, stopSync, syncAndWait, syncNow, syncState } from './runtime.svelte';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -316,6 +317,23 @@ describe('a sync asked for and waited for', () => {
 		expect(asked.length).toBe(before);
 	});
 
+	it('a level opened while operations are held for it waits for the sync that applies them', async () => {
+		serverAnswers();
+		session.userId = A;
+		const db = await userDb(A, 'alice');
+		startSync(A);
+		await vi.waitFor(() => expect(asked.length).toBe(1));
+		await vi.waitFor(() => expect(syncState.status).toBe('idle'));
+		const before = asked.length;
+		await ensureCascade(db, CASCADE);
+		expect(asked.length).toBe(before);
+		// A replay held this cascade's operations back for a quiz whose rows are here now.
+		await db.put('meta', { [CASCADE]: 'q' }, 'held');
+		await ensureCascade(db, CASCADE);
+		expect(asked.length).toBe(before + 1);
+		expect(await getMeta(db, 'held')).toEqual({});
+	});
+
 	it('gives up after its wait when the sync does not end, and says what is still unsent', async () => {
 		session.userId = A;
 		const db = await userDb(A, 'alice');
@@ -371,8 +389,8 @@ describe('a sync asked for and waited for', () => {
 		session.userId = A;
 		const db = await userDb(A, 'alice');
 		startSync(A);
-		await vi.waitFor(() => expect(syncState.status).toBe('idle'));
 		await vi.waitFor(() => expect(asked.length).toBe(1));
+		await vi.waitFor(() => expect(syncState.status).toBe('idle'));
 		const other = new BroadcastChannel(`acrodont-sync-${A}`);
 		try {
 			const answer = new Promise<unknown>((r) => {

@@ -315,6 +315,9 @@ async function rebaseCascadeIn(tx: RwTx, st: PullState, C: string, work: Cascade
 		!st.foreign.has(C) &&
 		work.acked.every((a) => a.result.status === 'applied' && !CREATING.has(a.entry.op.type));
 	let gone = false;
+	// Whether step 4 ran, and the quiz it held operations back for, if any.
+	let replayed = false;
+	let awaited: string | null = null;
 	const settled: Settled[] = work.acked.map((a) => ({
 		entry: a.entry,
 		status: a.result.status,
@@ -453,20 +456,8 @@ async function rebaseCascadeIn(tx: RwTx, st: PullState, C: string, work: Cascade
 		}
 		await clearOverlay(tx, C);
 		// Step 4: replay the outbox, in device_seq order, with the same rules.
-		const device = await readMeta(tx, 'device');
-		for (const e of await remaining()) {
-			try {
-				await applyOp(tx, e.op, {
-					device_id: device.device_id,
-					now: ctx.now().toISOString(),
-					max_quiz_questions: ctx.max_quiz_questions
-				});
-			} catch (err) {
-				if (!(err instanceof Rejected)) throw err;
-				await tx.objectStore('outbox').delete(e.device_seq);
-				settled.push({ entry: e, status: 'rejected', reason: err.reason });
-			}
-		}
+		awaited = await replay(tx, await remaining(), ctx, settled);
+		replayed = true;
 	}
 
 	// Staging rows of this cascade are done with: question and attempt rows as
@@ -477,21 +468,139 @@ async function rebaseCascadeIn(tx: RwTx, st: PullState, C: string, work: Cascade
 	await deleteListed(tx.objectStore('staging_quizzes'), C);
 	await tx.objectStore('staging_cascades').delete(C);
 
-	const quizIds = new Set((await tx.objectStore('quizzes').index('cascade_id').getAllKeys(C)) as string[]);
+	// On the fast path nothing was replayed: what an earlier replay held back is
+	// still held while any operation of the cascade waits.
+	await setHeld(tx, C, gone ? null : replayed ? awaited : pendingHere ? undefined : null);
+	const say = await noticeContext(tx, C, gone);
+	await tx.done;
+	out.notices.push(...noticesFor(C, settled, say));
+}
+
+/** What the notices ask of the base once a cascade's rows are settled. */
+async function noticeContext(tx: RwTx, C: string, gone: boolean) {
 	const serverQuizzes = new Map<string, QuizRow>();
 	for (const q of await tx.objectStore('quizzes').index('cascade_id').getAll(C)) serverQuizzes.set(q.id, q);
-	await tx.done;
+	return {
+		cascadeGone: gone,
+		quizExists: (id: string) => serverQuizzes.has(id),
+		passedRun: (e: OutboxEntry) => {
+			const q = serverQuizzes.get(e.op.quiz_id as string);
+			return !!q && q.attempt === (e.op.attempt as number) && q.cursor >= (e.op.segment_end as number);
+		}
+	};
+}
 
-	out.notices.push(
-		...noticesFor(C, settled, {
-			cascadeGone: gone,
-			quizExists: (id) => quizIds.has(id),
-			passedRun: (e) => {
-				const q = serverQuizzes.get(e.op.quiz_id as string);
-				return !!q && q.attempt === (e.op.attempt as number) && q.cursor >= (e.op.segment_end as number);
-			}
-		})
-	);
+// ---------------------------------------------------------------------------
+// The replay, and the operations it holds back
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a quiz is on the server, active, and its question rows are not all
+ * on this device: a level the server built from another set than the one this
+ * device computed (it was not promoted), until its index list is fetched. An
+ * operation on it cannot be judged here: which of its answers are to questions
+ * the server's level holds is not known. The row at the last position is the
+ * whole set's witness, as in `settleQuiz`.
+ */
+async function awaitsList(tx: RwTx, quizId: string): Promise<boolean> {
+	const q = await tx.objectStore('quizzes').get(quizId);
+	if (!q || q.status !== 'active' || q.question_count === 0) return false;
+	return (await tx.objectStore('quiz_questions').index('quiz_position').getKey([quizId, q.question_count - 1])) === undefined;
+}
+
+/**
+ * Step 4: one cascade's pending operations applied to the overlay again, in
+ * `device_seq` order, with the same rules. One the rules refuse leaves the
+ * outbox and is `settled` as rejected.
+ *
+ * The first operation that names a quiz whose rows are still to come
+ * (`awaitsList`) is held back, and so is every operation of the cascade after
+ * it, whatever it names: each stays in the outbox, untouched and out of the
+ * overlay, and is neither applied nor refused here. Held from that point on
+ * and not one by one, the operations are applied later in the order they were
+ * made, which is the only order the rules were checked in. They are sent to
+ * the server in their turn like any other, and the server judges them; if the
+ * quiz's rows arrive first, `replayHeld` applies them here. Returns the quiz
+ * waited for, or null when nothing was held.
+ */
+async function replay(tx: RwTx, entries: OutboxEntry[], ctx: RebaseCtx, settled: Settled[]): Promise<string | null> {
+	const device = await readMeta(tx, 'device');
+	const waits = new Map<string, boolean>();
+	for (const e of entries) {
+		const quiz = e.op.quiz_id as string | undefined;
+		if (quiz) {
+			if (!waits.has(quiz)) waits.set(quiz, await awaitsList(tx, quiz));
+			if (waits.get(quiz)) return quiz;
+		}
+		try {
+			await applyOp(tx, e.op, {
+				device_id: device.device_id,
+				now: ctx.now().toISOString(),
+				max_quiz_questions: ctx.max_quiz_questions
+			});
+		} catch (err) {
+			if (!(err instanceof Rejected)) throw err;
+			await tx.objectStore('outbox').delete(e.device_seq);
+			settled.push({ entry: e, status: 'rejected', reason: err.reason });
+		}
+	}
+	return null;
+}
+
+/** Records the quiz a cascade's operations are held for; null clears it, undefined leaves it. */
+async function setHeld(tx: RwTx, C: string, quiz: string | null | undefined) {
+	if (quiz === undefined) return;
+	const held = await readMeta(tx, 'held');
+	if ((held[C] ?? null) === quiz) return;
+	if (quiz) held[C] = quiz;
+	else delete held[C];
+	await writeMeta(tx, 'held', held);
+}
+
+/** Whether the rows a cascade's held operations waited for are here now (or their quiz is no longer one to wait for). */
+export async function heldReady(db: UserDb): Promise<boolean> {
+	const tx = db.transaction(['meta', 'quizzes', 'quiz_questions']) as unknown as RwTx;
+	for (const quiz of Object.values(await readMeta(tx, 'held'))) if (!(await awaitsList(tx, quiz))) return true;
+	return false;
+}
+
+/**
+ * The replay made again for a cascade whose operations an earlier one held
+ * back, once the rows they waited for are on the device: with no pull, the
+ * overlay is cleared and every pending operation of the cascade applied in
+ * order, as step 4 does. An answer to a question the server's level holds is
+ * kept; one to a question it lacks is refused `not_found`, leaves the outbox
+ * and is counted in the notice, as the server would refuse it. Nothing is done
+ * while the rows are still missing. Returns whether the replay was made.
+ */
+export async function replayHeld(db: UserDb, C: string, ctx: RebaseCtx, out: RebaseOutcome): Promise<boolean> {
+	const tx = db.transaction(REBASE_STORES, 'readwrite') as unknown as RwTx;
+	tx.done.catch(() => undefined);
+	try {
+		const quiz = (await readMeta(tx, 'held'))[C];
+		const entries = quiz ? await tx.objectStore('outbox').index('cascade_id').getAll(C) : [];
+		if (!quiz || (entries.length > 0 && (await awaitsList(tx, quiz)))) {
+			await tx.done;
+			return false;
+		}
+		const settled: Settled[] = [];
+		await clearOverlay(tx, C);
+		await setHeld(tx, C, await replay(tx, entries, ctx, settled));
+		const say = await noticeContext(tx, C, !(await tx.objectStore('cascades').getKey(C)));
+		await tx.done;
+		out.notices.push(...noticesFor(C, settled, say));
+		out.changed.add(C);
+		return true;
+	} catch (e) {
+		// As in `rebaseCascade`: the transaction's own error, and nothing half done.
+		const cause = tx.error ?? e;
+		try {
+			tx.abort();
+		} catch {
+			// Already aborted.
+		}
+		throw cause;
+	}
 }
 
 /** Above this many pulled grades for one quiz, its rows are read in one request. */

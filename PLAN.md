@@ -2906,7 +2906,7 @@ stores are:
 
 | Store | Contents |
 |---|---|
-| `meta` | user id, username, `device_id` (a UUID made once per device **and user**: it lives in this user-scoped store, so each account on a device syncs as its own device, and its `device_seq` counts from 1 for that account), sync cursor, last sync time, the trash retention period and `max_quiz_questions` as `/api/auth/me` last reported them, the account's [storage](#storage-limit) (`storage_bytes` and `max_storage_bytes`) as `/api/auth/me` or the latest sync response reported it, when this device last opened each cascade (see [Downloads](#on-the-device) for what counts as an open), and the ids the [budget](#on-the-device) pass dropped while they were still inside the window, which are treated as outside it until the user opens them; and this device's own settings: the display settings (`display`) and the [controls](#controls) (`bindings`), which stay on this device unless the user shares one with all their devices, and `shared_device`, the shared values waiting for a sync and when each shared value was last taken (see [This device, or all of them](#this-device-or-all-of-them)). The distribution tiles live in their own store below, not here |
+| `meta` | user id, username, `device_id` (a UUID made once per device **and user**: it lives in this user-scoped store, so each account on a device syncs as its own device, and its `device_seq` counts from 1 for that account), sync cursor, last sync time, the trash retention period and `max_quiz_questions` as `/api/auth/me` last reported them, the account's [storage](#storage-limit) (`storage_bytes` and `max_storage_bytes`) as `/api/auth/me` or the latest sync response reported it, when this device last opened each cascade (see [Downloads](#on-the-device) for what counts as an open), and the ids the [budget](#on-the-device) pass dropped while they were still inside the window, which are treated as outside it until the user opens them; `held`, the cascades whose last replay held operations back, each with the quiz whose rows they wait for (see [The sync cycle](#the-sync-cycle), step 4); and this device's own settings: the display settings (`display`) and the [controls](#controls) (`bindings`), which stay on this device unless the user shares one with all their devices, and `shared_device`, the shared values waiting for a sync and when each shared value was last taken (see [This device, or all of them](#this-device-or-all-of-them)). The distribution tiles live in their own store below, not here |
 | `distributions` | the tiles (letter, blank letter, value, vowel) of every distribution the user's cascades use, keyed by name. A pulled cascade row carries its `lexicon` and `letter_distribution` names, and the download manager fetches a distribution the store lacks from `GET /api/letter-distributions/:name` before any cascade on it shows **Available offline**; typed mode on a cascade whose distribution is missing shows "needs a connection" like a missing card, since it cannot split typed text into tiles |
 | `cascades`, `quizzes`, `quiz_questions`, `quiz_attempts` | the **base**: the server's rows as of the last pull, written only by the sync engine. A base question row also holds its `position`, which the device computes from the quiz's seed in a worker when it builds or rebuilds the quiz, once per attempt; the player keeps the inverse map in memory for the quiz being played. A base quiz row also carries a `pending` flag, set by the staging move and the drop pass on an **active** quiz when its question rows are yet to be fetched and its counters show any grade (an unplayed quiz needs only its index list; a cleared quiz is never flagged, since its rows are fetched only for a restore or an export), and cleared only by the full fetch sequence |
 | `overlay_cascades`, `overlay_quizzes`, `overlay_quiz_questions`, `overlay_quiz_attempts` | the **overlay**: only the rows the outbox has changed or created, keyed like the base. The player's view of any row is the overlay's version if there is one, else the base's. It holds a few hundred rows in normal use, never a second copy of a cascade, except for a level created by a `finish` that is still in the outbox, which lives there until the finish is acknowledged, and except during a long offline session, when it holds one row per pending grade until the outbox drains |
@@ -3640,8 +3640,8 @@ rows the next pull discards, and re-pulling from the old cursor converges:
    the rows are the right questions in another order, and they are placed by
    the pulled row's seed. When the
    hashes differ, the rows are dropped, the index list fetched, and the
-   outcome-mismatch notice shown, since grades on the missing questions were
-   not kept. When the server's outcome carries no new quiz at all (a
+   outcome-mismatch notice shown. The operations still waiting on that level
+   are not judged without its list: step 4 holds them. When the server's outcome carries no new quiz at all (a
    `finish_segment` the device computed as `drilled` that the server applied as
    `continued`, or a `finish` the server answered `cleared` with no misses,
    `completed` or `reshuffled`), the device's rows are dropped
@@ -3660,6 +3660,59 @@ rows the next pull discards, and re-pulling from the old cursor converges:
    operations to replay are read inside it, so the player never observes an
    empty overlay, and an `applyLocally` from another tab during the rebase
    waits for it and then lands on the rebuilt overlay.
+
+   **Held operations.** The replay cannot judge an operation on a quiz the
+   server holds as active while the device does not hold all of its question
+   rows: a level the server built from another set than the device computed
+   (two devices, one of them offline; step 3 did not promote it), until its
+   index list has been fetched. Which of the device's answers are to
+   questions the server's level holds is not known yet, and refusing them
+   `not_found` would drop answers the server would keep. So the first
+   operation of the cascade that names such a quiz is **held**, and so is
+   every operation of the cascade after it, whatever it names: held from that
+   point on, and not one by one, they are applied later in the order they were
+   made, the only order the rules were checked in (a `finish` of the level
+   above, replayed while the held level's own finish was not, would be refused
+   `not_deepest`). A held operation stays in the outbox, untouched: it is not
+   in the overlay, it is not refused, and it makes no notice. The cascade and
+   the quiz waited for are recorded in `meta` (`held`), in the same
+   transaction. From there:
+   - **It is sent in its turn like any other operation**, and the server
+     judges it with the rules: an answer to a question its level holds is
+     applied, one to a question it lacks is rejected `not_found` and counted in
+     the usual notice, and the level's own finish applies or is refused
+     `ungraded` ("Level N has answers the server did not get. Finish it
+     again.") according to what the server's level then holds. So a device
+     that drains its outbox without ever fetching the list loses nothing the
+     server would have kept.
+   - **When the list arrives first** (the download manager's materialisation,
+     in any tab), the leading tab's engine makes the replay again for that
+     cascade before it sends anything (`replayHeld`): the overlay is cleared
+     and every waiting operation of the cascade applied in order, with the
+     same result as the server's rules give, a refused one leaving the outbox
+     with its notice. The download manager tells the engine as rows land; a
+     player that waited for the level's rows asks for a sync and waits for it
+     (`syncAndWait`) before it reads the level, so the level is not shown, and
+     answered, without the held answers; and every sync cycle begins by
+     looking in `meta`, so a reload, a crash or a new leading tab while
+     operations are held finds them from the database alone.
+   - **Until one of the two happens** (no connection, a list that cannot be
+     fetched, an account that must log in) they wait: the outbox count the
+     sync status and the Account page show includes them, since they are
+     unsent; the level reads as not yet downloaded; and the cascade is as the
+     server has it, without what the held operations did. An operation made
+     meanwhile, in any tab, is appended behind them and applied after them.
+     If the level is answered and finished again in the moment between its
+     list arriving and the replay, the held finish is applied first and the
+     second is refused `stale_attempt` or `not_active` with its answers
+     counted, under the sentence "Level N was finished on another device.",
+     which names a device that was this one.
+   - A later full replay of the cascade judges afresh, and releases them if
+     the rows are there; the fast path below replays nothing, so they stay
+     held across it while any operation of the cascade waits. An engine
+     stopped by a change of account replays nothing: they wait in that
+     account's database. No room for the replay leaves them held, to be sent
+     and judged by the server.
 
    **The fast path.** For a cascade where every acknowledged operation was
    applied, none of them created, reset or restored a quiz, and **every pulled
@@ -3782,7 +3835,7 @@ offline**. Using one device on a plane never conflicts. The rules:
 | Quiz options changed on one device while the quiz was finished on another | Rejected if the quiz is no longer active, with no notice, since an option on a finished quiz has nothing left to apply to; the rebase drops the overlay row. Otherwise the change applies to the reset quiz. |
 | Quiz or cascade options changed on two devices | **The later operation wins whole**: this covers every one of a cascade's [settings](#settings) (the threshold, answer mode, definitions, hooks, reveal grade and leave rounding as well as the quiz options), and a widening or a copy, which are ordinary `set_cascade_options`. Unless the device had seen the row's current options (`seen_seq`), an operation whose `at` is older than the row's last change is rejected as `stale`, even when it carries a different field, and the rebase reverts that field on the losing device. One timestamp per row is enough for this, and the loser simply sets the option again. |
 | A quiz created while the cascade's options were different | Nothing happens to it. Options are copied at creation and never revisited. |
-| A `finish` applied with a different outcome than the device computed | Another device's grade changed the score, or an options change on the finished quiz changed its progression, so the server cleared where the device descended, or the reverse, or built the new quiz from a different set of misses. The result's `new_quiz_questions_hash` is what tells the device whether the server's new quiz holds the same questions as its own. The new quiz has the same id and seed on both sides, so the device's grades on it stand wherever the question exists in the server's copy; a grade for a question the server's copy lacks is rejected as `not found`. When the two sides disagree about the finished quiz itself (one cleared it, the other reset it), the device's rows for it are not promoted; the quiz is rebuilt from the pulled row like any quiz whose seed differs from the base's, or, when the server cleared it, the base's rows and positions stay as they are, as for any cleared quiz. The device rebases the cascade and, when the outcome kind (cleared, replaced, descended, completed, reshuffled) or the level structure differs from what it showed, tells the user: "Level 2 came out differently on the server because of changes made on another device." When only the new quiz's question count differs, nothing is said. **This path never opens the completion screen**, even when the server's outcome is `completed`: that screen reports `peak_depth` and `attempts_since_completion`, which the server's own `Completed` has already reset to 1 and 0, and the result carries neither, so the device has no honest numbers to show — the pulled row's would read "after 1 level and 0 attempts". The notice stands, and the Complete badge appears from the pulled cascade row like any other. The screen is shown only for a `Completed` this device computed and the server confirmed, where the device's own rule run reported both numbers before resetting them. Rejected grades, if any, are counted in the usual "weren't kept" notice, separately. |
+| A `finish` applied with a different outcome than the device computed | Another device's grade changed the score, or an options change on the finished quiz changed its progression, so the server cleared where the device descended, or the reverse, or built the new quiz from a different set of misses. The result's `new_quiz_questions_hash` is what tells the device whether the server's new quiz holds the same questions as its own. The new quiz has the same id and seed on both sides, so the device's grades on it stand wherever the question exists in the server's copy; a grade for a question the server's copy lacks is rejected as `not found`. Grades on the new quiz still waiting in the outbox when the finish is acknowledged are not dropped for want of its list: the replay holds them until the list is fetched or the server has judged them ([step 4](#the-sync-cycle)). When the two sides disagree about the finished quiz itself (one cleared it, the other reset it), the device's rows for it are not promoted; the quiz is rebuilt from the pulled row like any quiz whose seed differs from the base's, or, when the server cleared it, the base's rows and positions stay as they are, as for any cleared quiz. The device rebases the cascade and, when the outcome kind (cleared, replaced, descended, completed, reshuffled) or the level structure differs from what it showed, tells the user: "Level 2 came out differently on the server because of changes made on another device." When only the new quiz's question count differs, nothing is said. **This path never opens the completion screen**, even when the server's outcome is `completed`: that screen reports `peak_depth` and `attempts_since_completion`, which the server's own `Completed` has already reset to 1 and 0, and the result carries neither, so the device has no honest numbers to show — the pulled row's would read "after 1 level and 0 attempts". The notice stands, and the Complete badge appears from the pulled cascade row like any other. The screen is shown only for a `Completed` this device computed and the server confirmed, where the device's own rule run reported both numbers before resetting them. Rejected grades, if any, are counted in the usual "weren't kept" notice, separately. |
 | A quiz's segment size changed on one device while another device passed a boundary | The `finish_segment` is rejected if its segment end is no longer a multiple of the size the server has. The drill quiz it created locally and the grades on it are dropped, with the usual notice. |
 | The cascade's options changed on one device while another, offline with the old options, finished a quiz or restored one | The server builds the new or restored quiz from the options it has, so the device's local copy of that quiz may carry different options. The rebase replaces it with the server's row, and any `finish_segment` the device sent against a segment size the server's copy does not have is rejected and dropped. |
 | The cursor moved on two devices in the same attempt | A device that had seen the other's cursor (`seen_seq`) wins; otherwise the later `cursor_moved_at`. A device's own moves always apply in order. If the winning cursor is already past a boundary the loser then tries to pass, the loser's `finish_segment` is rejected and its drill quiz dropped, with the usual notice. |
@@ -6743,7 +6796,7 @@ instead, where the grade reached neither the overlay nor the outbox: the player
 stays on that card with the storage message in place of the grade, Show / Next
 advances nothing, and the grade is written once a cascade is removed and the
 retry succeeds; the download manager reading a missing
-distribution's tiles from the `distributions` store; a `finish` rejected `ungraded` after a `not_found` grade being dropped and leaving the missing question to grade; an acknowledged offline `finish` leaving its new level playable in the one request that acknowledged it, with no index list asked for, and a same-count, different-set promotion refused by `new_quiz_questions_hash`, its list marked to be fetched, with the notice; a `finish` the device computed as
+distribution's tiles from the `distributions` store; a `finish` rejected `ungraded` after a `not_found` grade being dropped and leaving the missing question to grade; an acknowledged offline `finish` leaving its new level playable in the one request that acknowledged it, with no index list asked for, and a same-count, different-set promotion refused by `new_quiz_questions_hash`, its list marked to be fetched, with the notice; **operations held for a level the server built from another set**, queued behind the batch whose finish made it: all of them still in the outbox and out of the overlay after that batch, the held cascade recorded in `meta`, and the came-out-differently notice counting no answer; once the list is fetched, replayed with no connection, the answers to questions the server's level holds kept and the one it lacks dropped with the level's finish and one notice; sent before the list is fetched, judged by the server to the same end; a batch that acknowledges two of them leaving the rest held in order; a new engine on the same database, as after a reload, replaying them from `meta`; a list that cannot be fetched asking nothing of the server and leaving them held, a setting changed meanwhile going behind them and applied after them; a stopped engine replaying nothing; and the level answered and finished again before the replay, the held finish applied first and the second refused with its answers counted (in the runtime's tests, a level opened while operations are held for it waiting for the sync that releases them); a `finish` the device computed as
 `cleared` that the server applied as `descended` leaving the finished quiz
 rebuilt from the server's seed with no grades, the reverse leaving the base's
 graded rows untouched with no fetch, and a `finish_segment` computed as

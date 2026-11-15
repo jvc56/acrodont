@@ -77,6 +77,10 @@ export async function ensureCascade(db: UserDb, cascadeId: string, progress?: (f
 			}
 		});
 	await dm.ensureLevel(cascadeId, progress);
+	// Operations held back for a level whose rows have just come (rebase.ts,
+	// `replay`) are applied before the player reads the level, so it is not
+	// shown, and answered, without them.
+	if ((await getMeta(db, 'held'))[cascadeId]) await syncAndWait();
 	downloadInBackground();
 }
 
@@ -232,7 +236,11 @@ export function startSync(userId: string): () => void {
 				sync: () => e.sync(),
 				openElsewhere: openPlayers,
 				openHere: () => syncState.openCascade,
-				onProgress: () => (syncState.progress += 1),
+				onProgress: () => {
+					syncState.progress += 1;
+					// Rows have landed: operations held back for them are applied now.
+					void e.releaseHeld().catch(() => undefined);
+				},
 				onTotals: (t) => {
 					void recordTotals(userId, { rows: t.rows, keys: t.keys, answer_bytes: t.answer_bytes });
 				}

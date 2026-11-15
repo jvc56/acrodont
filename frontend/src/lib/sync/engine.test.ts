@@ -13,6 +13,7 @@ import { storeCreated, type Created } from '$lib/local/created';
 import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
 import { bindUser, USER_HEADER } from '$lib/api';
+import { DownloadManager, type DownloadApi } from './downloads';
 import { electLeader, listenForChanges, STREAM_REOPEN_MS, SyncEngine, transportFor, type EngineHooks, type SyncStatus } from './engine';
 import type { Notice } from './notices';
 import type { Reply, SyncRequest, SyncResponse } from './protocol';
@@ -31,6 +32,8 @@ class Dev {
 	/** Stands between the engine and the server: may rewrite the request or the reply. */
 	tamper: ((req: SyncRequest, send: (r: SyncRequest) => Reply) => Reply | Promise<Reply>) | null = null;
 	online = true;
+	/** A new engine on the same database, as after a reload or in the tab that leads next. */
+	start!: () => void;
 
 	/** `through` stands between the engine and the device's database; `hooks` are the engine's. */
 	static async make(server: FakeServer, through: (db: UserDb) => UserDb = (db) => db, hooks: EngineHooks = {}): Promise<Dev> {
@@ -38,19 +41,22 @@ class Dev {
 		globalThis.indexedDB = new IDBFactory();
 		d.db = await openUserDb(USER);
 		await initMeta(d.db, USER, 'alice');
-		d.engine = new SyncEngine(
-			through(d.db),
-			{ onNotices: (n) => d.notices.push(...n), onStatus: (s) => d.statuses.push(s), ...hooks },
-			{
-				transport: async (req) => {
-					if (!d.online) throw new TypeError('offline');
-					d.requests.push(req);
-					const send = (r: SyncRequest) => server.sync(JSON.parse(JSON.stringify(r)));
-					return d.tamper ? await d.tamper(req, send) : send(req);
-				},
-				wait: async () => undefined
-			}
-		);
+		d.start = () => {
+			d.engine = new SyncEngine(
+				through(d.db),
+				{ onNotices: (n) => d.notices.push(...n), onStatus: (s) => d.statuses.push(s), ...hooks },
+				{
+					transport: async (req) => {
+						if (!d.online) throw new TypeError('offline');
+						d.requests.push(req);
+						const send = (r: SyncRequest) => server.sync(JSON.parse(JSON.stringify(r)));
+						return d.tamper ? await d.tamper(req, send) : send(req);
+					},
+					wait: async () => undefined
+				}
+			);
+		};
+		d.start();
 		return d;
 	}
 
@@ -1279,6 +1285,218 @@ async function two(through?: (db: UserDb) => UserDb, hooks?: EngineHooks) {
 	await a.open(C2);
 	return { server, a };
 }
+
+describe('operations held for a level the server built from another set', () => {
+	/**
+	 * A, offline, misses the last three of Level 1, finishes it (F1 makes its
+	 * Level 2 of those three), answers all of Level 2, finishes that (F2, which
+	 * clears it) and answers two cards of Level 1's next attempt. Another device
+	 * has meanwhile answered Level 1 otherwise (`theirs`: position → grade), so
+	 * the server's Level 2 is another set. A's first request carries only the
+	 * five answers and F1: the six operations after them wait behind it.
+	 */
+	async function scene(theirs: Record<number, string> = { 0: 'missed', 2: 'correct' }, hooks: EngineHooks = {}) {
+		const server = new FakeServer();
+		server.create({ id: C1, source_id: Q1, count: 5 });
+		const a = await Dev.make(server, undefined, hooks);
+		await a.open(C1);
+		await a.sync();
+		const byPos = (await a.rows(Q1)).sort((x, y) => x.position! - y.position!);
+		const q1 = (await a.quiz(Q1))!;
+		await a.play(Q1, 'CCMMM');
+		const l2 = (await a.finish(Q1, '7')).newId;
+		await a.play(l2, 'CCC');
+		await a.finish(l2, '8');
+		await a.play(Q1, 'CC');
+		remote(
+			server,
+			Object.entries(theirs).map(([pos, grade]) => ({
+				type: 'grade',
+				quiz_id: Q1,
+				attempt: q1.attempt,
+				attempt_seed: q1.shuffle_seed,
+				question_idx: byPos[Number(pos)].question_idx,
+				grade
+			}))
+		);
+		a.tamper = (req, send) => send({ ...req, ops: req.ops!.slice(0, 6) });
+		await a.sync();
+		a.tamper = null;
+		const serverL2 = () => server.cascades.get(C1)!.sim.quizzes.get(l2)!;
+		return { server, a, l2, byPos, serverL2 };
+	}
+
+	/** The download manager's fetch of the cascade's index lists, as a first open makes it. */
+	function lists(a: Dev, server: FakeServer, fail = false) {
+		const no = async (): Promise<never> => {
+			throw new Error('not asked for here');
+		};
+		const api: DownloadApi = {
+			questions: async (_c, quiz, from, limit) => {
+				if (fail) throw new TypeError('offline');
+				return server.questions(quiz, from, limit)!;
+			},
+			grades: async (_c, quiz, from, limit) => server.grades(quiz, from, limit)!,
+			keys: no,
+			cards: no,
+			distribution: async (name) => ({ name, tiles: [] })
+		};
+		return new DownloadManager(a.db, { api, wait: async () => undefined }).ensureLevel(C1);
+	}
+
+	const types = async (a: Dev) => (await a.outbox()).map((e) => e.op.type);
+	const DIFFERENT = 'Level 1 came out differently on the server because of changes made on another device.';
+	const AGAIN = 'Level 2 has answers the server did not get. Finish it again. 1 answer from this device wasn’t kept.';
+
+	it('they stay in the outbox, counted as unsent, out of the overlay and with no answer dropped, until the level’s list is here', async () => {
+		const { a, l2 } = await scene();
+		expect(await types(a)).toEqual(['grade', 'grade', 'grade', 'finish', 'grade', 'grade']);
+		expect(await a.db.count('outbox')).toBe(6);
+		expect(await getMeta(a.db, 'held')).toEqual({ [C1]: l2 });
+		// The notice counts nothing as lost: nothing was.
+		expect(texts(a).filter((t) => t.startsWith('Level 1 came out'))).toEqual([DIFFERENT]);
+		expect(texts(a).some((t) => t.startsWith('Level 2'))).toBe(false);
+		// The level is the server's, its rows still to come; nothing of the six shows.
+		expect((await a.quiz(l2))!.status).toBe('active');
+		expect(await a.rows(l2)).toEqual([]);
+		expect(await a.db.count('overlay_quiz_questions')).toBe(0);
+		expect((await a.quiz(Q1))!.correct_count).toBe(0);
+	});
+
+	it('once the list is fetched they are replayed: answers to questions the server’s level holds are kept, the one it lacks is dropped with the notice', async () => {
+		const { server, a, l2, byPos, serverL2 } = await scene();
+		a.notices = [];
+		await lists(a, server);
+		// The replay is the device's own: made with no connection.
+		a.online = false;
+		await a.engine.releaseHeld();
+		expect(await getMeta(a.db, 'held')).toEqual({});
+		// Two answers on Level 2 and the two on Level 1 wait to be sent; the answer
+		// to the question the server's level lacks went, and Level 2's finish with
+		// it (one of the server's three has no answer).
+		expect(await types(a)).toEqual(['grade', 'grade', 'grade', 'grade']);
+		expect(texts(a)).toEqual([AGAIN]);
+		const kept = (await a.rows(l2)).filter((r) => r.grade !== null).map((r) => r.question_idx);
+		expect(kept.sort((x, y) => x - y)).toEqual([byPos[3], byPos[4]].map((r) => r.question_idx).sort((x, y) => x - y));
+		const shown = (await a.quiz(l2))!;
+		expect([shown.status, shown.question_count, shown.correct_count]).toEqual(['active', 3, 2]);
+		expect((await a.quiz(Q1))!.correct_count).toBe(2);
+		a.online = true;
+		await a.sync();
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(texts(a)).toEqual([AGAIN]);
+		expect(serverL2().grades.size).toBe(2);
+		expect((await a.db.get('quizzes', l2))!.correct_count).toBe(2);
+		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
+	});
+
+	it('sent before the list is fetched, the server judges them the same way and nothing else is lost', async () => {
+		const { a, l2, serverL2 } = await scene();
+		a.notices = [];
+		await a.sync();
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(await getMeta(a.db, 'held')).toEqual({});
+		expect(texts(a)).toEqual([AGAIN]);
+		expect(serverL2().grades.size).toBe(2);
+		expect((await a.db.get('quizzes', l2))!.correct_count).toBe(2);
+		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
+	});
+
+	it('held across a batch boundary: a batch that acknowledges some of them leaves the rest held, in order', async () => {
+		const { a, l2, serverL2 } = await scene();
+		a.notices = [];
+		// The next request carries only the first two held answers.
+		a.tamper = (req, send) => send({ ...req, ops: req.ops!.slice(0, 2) });
+		await a.sync();
+		expect(await types(a)).toEqual(['grade', 'finish', 'grade', 'grade']);
+		expect(await getMeta(a.db, 'held')).toEqual({ [C1]: l2 });
+		expect(await a.db.count('overlay_quiz_questions')).toBe(0);
+		a.tamper = null;
+		await a.sync();
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(await getMeta(a.db, 'held')).toEqual({});
+		expect(serverL2().grades.size).toBe(2);
+		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
+		expect(texts(a).join(' ')).toContain('1 answer from this device wasn’t kept.');
+		expect(texts(a).join(' ')).not.toContain('2 answers');
+	});
+
+	it('a reload while they are held loses nothing: the next engine on the database replays them from what the database says', async () => {
+		const { server, a, l2 } = await scene();
+		a.notices = [];
+		// The tab is closed with the six held, and opened again.
+		a.engine.stop();
+		a.start();
+		await lists(a, server);
+		a.online = false;
+		await a.sync();
+		expect(await types(a)).toEqual(['grade', 'grade', 'grade', 'grade']);
+		expect((await a.quiz(l2))!.correct_count).toBe(2);
+		expect(texts(a)).toEqual([AGAIN]);
+	});
+
+	it('a list that cannot be fetched, or no connection, leaves them held; a change made meanwhile goes behind them', async () => {
+		const { server, a, l2, serverL2 } = await scene();
+		a.notices = [];
+		const sent = a.requests.length;
+		await expect(lists(a, server, true)).rejects.toThrow();
+		await a.engine.releaseHeld();
+		// Nothing to replay, so nothing is asked of the server either.
+		expect(a.requests.length).toBe(sent);
+		a.online = false;
+		await a.sync();
+		expect(await a.db.count('outbox')).toBe(6);
+		expect(await getMeta(a.db, 'held')).toEqual({ [C1]: l2 });
+		// The user, or another tab, changes a setting of the cascade meanwhile.
+		await a.apply({ type: 'set_cascade_options', cascade_id: C1, clear_threshold: 80 });
+		expect(await types(a)).toEqual(['grade', 'grade', 'grade', 'finish', 'grade', 'grade', 'set_cascade_options']);
+		a.online = true;
+		await lists(a, server);
+		a.online = false;
+		await a.engine.releaseHeld();
+		expect(await types(a)).toEqual(['grade', 'grade', 'grade', 'grade', 'set_cascade_options']);
+		expect((await a.quiz(l2))!.correct_count).toBe(2);
+		expect((await view.cascade(a.db.transaction(APPLY_STORES) as unknown as RwTx, C1))!.clear_threshold).toBe(80);
+		a.online = true;
+		await a.sync();
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(serverL2().grades.size).toBe(2);
+		expect(texts(a)).toEqual([AGAIN]);
+	});
+
+	it('an engine stopped by a change of account replays nothing; they wait in that account’s database', async () => {
+		const { server, a, l2 } = await scene();
+		await lists(a, server);
+		a.engine.stop();
+		await a.engine.releaseHeld();
+		await a.sync();
+		expect(await a.db.count('outbox')).toBe(6);
+		expect(await getMeta(a.db, 'held')).toEqual({ [C1]: l2 });
+		expect(await a.db.count('overlay_quiz_questions')).toBe(0);
+	});
+
+	it('a level finished again while its first finish was held: the held finish is applied first, and the second is refused with its answers counted', async () => {
+		// The other device got the third card right: the server's Level 2 is the
+		// last two questions, a part of the three this device answered.
+		const { server, a, l2, serverL2 } = await scene({ 2: 'correct' });
+		expect(await getMeta(a.db, 'held')).toEqual({ [C1]: l2 });
+		a.notices = [];
+		await lists(a, server);
+		// Before the replay is made, the level is shown unanswered, and is answered and finished again.
+		expect((await a.rows(l2)).map((r) => r.grade)).toEqual([null, null]);
+		await a.play(l2, 'CC');
+		await a.finish(l2, '9');
+		await a.sync();
+		expect(await a.db.count('outbox')).toBe(0);
+		// The server holds the level finished once, by the first finish, with both answers.
+		expect(serverL2().state.active).toBe(false);
+		expect(serverL2().grades.size).toBe(2);
+		expect((await a.db.get('quizzes', l2))!.status).toBe('cleared');
+		expect((await a.db.get('quizzes', Q1))!.correct_count).toBe(2);
+		// Its two answers given twice, and the answer to the question the server's level lacks.
+		expect(texts(a)).toEqual(['Level 2 was finished on another device. 3 answers from this device weren’t kept.']);
+	});
+});
 
 describe('a pull that cannot be applied', () => {
 	it('a tab closed between two cascades’ transactions keeps the second cascade’s acknowledged finish, and the next sync loses nothing', async () => {
