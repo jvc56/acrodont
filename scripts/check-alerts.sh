@@ -7,6 +7,8 @@
 #   1. the alarm topic has a confirmed subscription (not PendingConfirmation);
 #   2. acrodont-no-dump-36h is forced to ALARM and back to OK: an ALARM mail
 #      should arrive (it returns to its real state at its next evaluation);
+#      acrodont-no-drill-7d, which is what reports a drill that stopped
+#      running, must exist with the topic as its action;
 #   3. the EventBridge rules acrodont-deploy-failed, acrodont-backup-failed and
 #      acrodont-drill-failed match a sample failure (a non-zero exit, and a
 #      task that never started) and not a sample success (aws events
@@ -55,6 +57,17 @@ else
   aws cloudwatch set-alarm-state --alarm-name "$alarm" --state-value OK --state-reason "$reason"
   ops_say "$alarm set to ALARM and back to OK: an ALARM mail should arrive"
 fi
+
+# The alarm for a drill that is never started. Nothing else reports that, so
+# its absence (or one that mails no one) would be silent.
+drill_alarm=acrodont-no-drill-7d
+drill_actions=$(aws cloudwatch describe-alarms --alarm-names "$drill_alarm" \
+  --query 'MetricAlarms[0].[ActionsEnabled, length(AlarmActions)]' --output text) || drill_actions=""
+case $drill_actions in
+  "" | None*) fail "no alarm $drill_alarm: a restore drill that stops running would raise nothing" ;;
+  True*[1-9]*) ops_say "$drill_alarm exists and has an action" ;;
+  *) fail "$drill_alarm has no action, or its actions are off: it would mail no one" ;;
+esac
 
 # 3. The EventBridge patterns, against events shaped like ECS's own.
 ecs_arn="arn:aws:ecs:$OPS_REGION:$OPS_ACCOUNT"

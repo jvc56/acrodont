@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The monthly restore drill (PLAN.md § Backups → The drill; BIRDTEST_LESSONS_PLAN.md BAK-1).
+"""The twice-weekly restore drill (PLAN.md § Backups → The drill; BIRDTEST_LESSONS_PLAN.md BAK-1).
 
 Runs as the scheduled `acrodont-drill` task on the ops image. It restores the
 newest nightly dump into a Postgres it starts inside its own task, never on the
@@ -16,7 +16,8 @@ pushed its autoscaling up for good), then checks what a restore must deliver:
      equal to sync_seq and above 2^32, which is what forces devices to resync.
 
 It reports Acrodont/Backups DrillSucceeded and DrillSeconds, and exits
-non-zero on any failure, which the acrodont-drill-failed rule mails. The part a
+non-zero on any failure, which the acrodont-drill-failed rule mails; seven days
+with no DrillSucceeded of 1 raise acrodont-no-drill-7d. The part a
 machine cannot do (a second browser profile resyncing after the bump) stays in
 the quarterly manual drill in docs/runbook.md.
 

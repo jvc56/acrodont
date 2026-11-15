@@ -6187,6 +6187,9 @@ Acrodont never stores as files, only as rows, and those rows are in the dump.
 - No successful dump in **36 hours**.
 - A dump more than 30% smaller than the previous finished one, which catches
   a run that succeeded with much of the data missing.
+- No restore drill that passed in **seven days**, a drill that never ran
+  counting as a miss. This is what reports a drill that has stopped being
+  started; seven days is the longest a CloudWatch alarm can look back.
 - A backup or drill task that exits non-zero or never starts (no image to
   pull, no secret to read), within minutes (an EventBridge rule on the task's
   exit code and its stop code: a task that never started has no exit code).
@@ -6231,7 +6234,9 @@ The runbook has the full procedure; the parts specific to Acrodont are:
 
 ### The drill
 
-**Monthly, automatically.** The `acrodont-drill` task (`scripts/drill.py`)
+**Twice a week, automatically** (Sundays and Wednesdays, so that the
+seven-day alarm on a missing drill has days of margin, which drills a week
+apart would not give it). The `acrodont-drill` task (`scripts/drill.py`)
 restores the newest finished nightly dump into a Postgres started inside its own task,
 never on the production instance. Birdtest's drill once ran against production
 and could fill its storage. It restores as the app role into a database that
@@ -6242,7 +6247,8 @@ make fails here first. It then checks:
 - there are users, and every cascade has its questions;
 - the sequence bump leaves every user's floor at `sync_seq`, above 2^32.
 
-It reports `DrillSucceeded` and `DrillSeconds`; a failure mails at once.
+It reports `DrillSucceeded` and `DrillSeconds`; a failure mails at once, and
+seven days without a drill that passed alarm (see [Alarms](#alarms)).
 
 **Quarterly, by hand**, the part a machine cannot do. Restore the latest dump
 locally with `./scripts/dev.py --restore DUMP` (scrubbed, sequences bumped).

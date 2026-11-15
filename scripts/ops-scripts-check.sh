@@ -735,7 +735,13 @@ if FAKE_RULE_EXIT_CODE_ONLY=acrodont-drill-failed run check-alerts.sh; then fail
 said "acrodont-drill-failed: a drill task that never started -> False, expected True" || fail "the blind rule is not reported"
 fresh "$B"
 if FAKE_RDS_SUB_STATUS=creating run check-alerts.sh; then fail "an inactive RDS subscription passed"; fi
-pass "check-alerts.sh: subscription confirmed, alarm forced ALARM then OK, patterns positive and negative (a task that never started included), RDS subscription"
+fresh "$B"
+if FAKE_DRILL_ALARM=missing run check-alerts.sh; then fail "a stack with no missing-drill alarm passed"; fi
+said "no alarm acrodont-no-drill-7d" || fail "the missing drill alarm is not reported"
+fresh "$B"
+if FAKE_DRILL_ALARM=silent run check-alerts.sh; then fail "a missing-drill alarm with no action passed"; fi
+said "acrodont-no-drill-7d has no action" || fail "the drill alarm with no action is not reported"
+pass "check-alerts.sh: subscription confirmed, alarm forced ALARM then OK, the missing-drill alarm present with an action, patterns positive and negative (a task that never started included), RDS subscription"
 
 fresh "$B"
 run prod-shell.sh || fail "prod-shell.sh failed"

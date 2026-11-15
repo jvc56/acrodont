@@ -1,6 +1,6 @@
 # Backups (PLAN.md § Backups). RDS point-in-time recovery is in rds.tf; this
 # is the nightly dump (scripts/backup.py) into an encrypted, versioned,
-# object-locked bucket in a second region, and the monthly restore drill
+# object-locked bucket in a second region, and the twice-weekly restore drill
 # (scripts/drill.py), which restores the newest dump into a Postgres inside its
 # own task, never touching production. Both run on the ops image.
 # Daily dumps are kept 90 days, monthly dumps a year.
@@ -282,8 +282,13 @@ locals {
   schedules = {
     # Nightly dump; RDS's own backup window is 07:00.
     backup = { expression = "cron(15 3 * * ? *)", task = aws_ecs_task_definition.backup }
-    # Monthly drill, on the 1st, after that night's dump.
-    drill = { expression = "cron(0 5 1 * ? *)", task = aws_ecs_task_definition.drill }
+    # The drill, Sundays and Wednesdays, after that night's dump. Twice a
+    # week and not once: the acrodont-no-drill-7d alarm (alarms.tf) looks
+    # back seven days, the longest a CloudWatch alarm can, and drills a week
+    # apart would leave it no margin (one that took a minute longer than the
+    # last would alarm). Three or four days apart, it fires only after two
+    # drills in a row did not pass.
+    drill = { expression = "cron(0 5 ? * SUN,WED *)", task = aws_ecs_task_definition.drill }
   }
 }
 
@@ -315,7 +320,8 @@ resource "aws_scheduler_schedule" "tasks" {
 }
 
 # A backup or drill task that exits non-zero, or never starts, mails within
-# minutes, rather than leaving it to the 36-hour staleness alarm (BAK-2). A
+# minutes, rather than leaving it to the 36-hour staleness alarm (BAK-2) or
+# the seven-day one for the drill. A
 # task that cannot pull its image or read its secret stops with no exit code
 # at all, which "anything-but 0" does not match: hence the second branch.
 resource "aws_cloudwatch_event_rule" "task_failed" {

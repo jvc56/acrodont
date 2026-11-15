@@ -180,6 +180,29 @@ resource "aws_cloudwatch_metric_alarm" "backup_missing" {
   ok_actions          = [aws_sns_topic.alarms.arn]
 }
 
+# No successful drill in seven days: seven one-day periods with no success,
+# missing data counting as a miss. scripts/drill.py reports DrillSucceeded, 1
+# or 0, so a drill that fails and one that is never started (a schedule that
+# cannot call RunTask, a task that reports nothing) both count. Seven days is
+# the longest an alarm may look back (period times evaluation periods), which
+# is why the drill runs twice a week (backups.tf). Before the first drill
+# there is no data, so this alarm is in ALARM from the first apply until then.
+resource "aws_cloudwatch_metric_alarm" "drill_missing" {
+  alarm_name          = "acrodont-no-drill-7d"
+  alarm_description   = "No successful restore drill in seven days (PLAN.md § Backups)."
+  namespace           = "Acrodont/Backups"
+  metric_name         = "DrillSucceeded"
+  statistic           = "Sum"
+  period              = 86400
+  evaluation_periods  = 7
+  datapoints_to_alarm = 7
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+}
+
 # A dump more than 30% smaller than the previous one: scripts/backup.py
 # reports DumpSizeRatio, this dump's bytes over the previous dump's.
 resource "aws_cloudwatch_metric_alarm" "backup_shrank" {

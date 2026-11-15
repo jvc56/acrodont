@@ -31,7 +31,8 @@ FAKE_TASK_EXIT (overrides a one-off task's exit code), FAKE_PSQL_EXIT,
 FAKE_RUN_TASK_FAIL ("error": run-task itself fails, as with an expired
 sign-in; "capacity": it answers with no task and a failure),
 FAKE_TG_FAIL_ROUNDS (target-in-service waits that time out first),
-FAKE_CURL_FAIL, FAKE_SNS_PENDING, FAKE_RDS_SUB_STATUS (active),
+FAKE_CURL_FAIL, FAKE_SNS_PENDING,
+FAKE_DRILL_ALARM ("missing": no acrodont-no-drill-7d; "silent": it has no action), FAKE_RDS_SUB_STATUS (active),
 FAKE_RULE_BROKEN (a rule whose pattern matches every ECS event),
 FAKE_SETTLE_POLLS (describe-services calls that still show two deployments),
 FAKE_UPDATE_SERVICE_FAIL, FAKE_RESTART_ROLLBACK (a restart's deployment is
@@ -379,6 +380,9 @@ def sns(op, pos, opt, q):
 def cloudwatch(op, pos, opt, q):
     if op == "describe-alarms":
         name = opt["--alarm-names"]
+        if name == "acrodont-no-drill-7d":
+            out({"missing": "None", "silent": "True\t0"}.get(os.environ.get("FAKE_DRILL_ALARM"), "True\t1"))
+            return
         out(read(path("alarm", name), "ALARM") if name == "acrodont-no-dump-36h" else "None")
     elif op == "set-alarm-state":
         write(path("alarm", opt["--alarm-name"]), opt["--state-value"])

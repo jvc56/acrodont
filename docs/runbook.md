@@ -341,6 +341,7 @@ All alarms go to the `acrodont-alarms` SNS topic and on to `alarm_email`.
 | `acrodont-db-cpu-high` | Database over 80% CPU for 15 minutes | Raise `db_instance_class`; the change applies at once with a short restart, during which the API answers errors and the task stays up (its health checks allow five minutes) |
 | `acrodont-db-events` (RDS events) | Low storage, failure, or allocation near the autoscaling ceiling | Raise `db_allocated_storage` |
 | `acrodont-no-dump-36h` | No successful dump in 36 hours | The last `backup` log stream; the `acrodont-backup-failed` mail says why |
+| `acrodont-no-drill-7d` | No restore drill has passed in seven days: two in a row failed, or the drill is not being started at all | The newest `drill/` log stream. None in the last four days: the schedule `acrodont-drill` (EventBridge Scheduler: is it enabled, and what do its target's errors say?). Then run the drill by hand (The drill, below). It is in ALARM from the first apply until the first drill passes |
 | `acrodont-dump-shrank` | A finished dump at least 30% smaller than the last finished one | Check the database size first |
 | `acrodont-backup-failed`, `acrodont-drill-failed` | The task exited non-zero, or never started (no image, no secret) | Its log stream, named in the mail; for one that never started, the reason in the mail |
 | `acrodont-deploy-failed` | ECS rolled a release back | `scripts/rollback.sh` (above) |
@@ -469,7 +470,7 @@ The backup role can write dumps but read only the daily dump it copies to
 
 ## The drill
 
-**Monthly, automatically.** On the 1st at 05:00 UTC, the `acrodont-drill` task
+**Twice a week, automatically.** On Sundays and Wednesdays at 05:00 UTC, the `acrodont-drill` task
 (`scripts/drill.py`) restores the newest finished nightly dump into a Postgres
 started inside its own task, never on production, as the app role into a
 database that role owns, the way step 1 of Restoring does. It then checks:
@@ -479,7 +480,24 @@ database that role owns, the way step 1 of Restoring does. It then checks:
 - the sequence bump forces a resync.
 
 It reports `DrillSucceeded` and `DrillSeconds`. A failure mails
-`acrodont-drill-failed`.
+`acrodont-drill-failed`. A drill that is never started fails nothing and
+mails nothing, so `acrodont-no-drill-7d` alarms when seven days pass with no
+drill that passed. Seven days is the longest a CloudWatch alarm can look
+back, which is why the drill runs twice a week and not once: drills a week
+apart would leave that alarm no margin. Each run is a few minutes of a small
+Fargate task and one download of the dump from the second region: cents a
+month.
+
+To run one by hand:
+
+```bash
+export AWS_PAGER=""
+subnets=$(terraform -chdir=infra output -json task_subnets | jq -r 'join(",")')
+sg=$(terraform -chdir=infra output -raw task_security_group)
+aws ecs run-task --cluster acrodont --task-definition acrodont-drill --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$sg],assignPublicIp=ENABLED}" \
+  --query 'tasks[0].taskArn' --output text
+```
 
 **Quarterly, by hand**, the part a machine cannot do:
 

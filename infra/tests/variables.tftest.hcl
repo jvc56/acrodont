@@ -101,6 +101,24 @@ run "defaults_plan" {
     error_message = "a mail template holds <...> that is not a key of its input_paths: EventBridge reads it as a placeholder"
   }
   assert {
+    condition     = aws_scheduler_schedule.tasks["drill"].schedule_expression == "cron(0 5 ? * SUN,WED *)"
+    error_message = "the drill runs twice a week: further apart than that, the seven-day alarm on a missing drill has no margin"
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.drill_missing.namespace == "Acrodont/Backups" &&
+      aws_cloudwatch_metric_alarm.drill_missing.metric_name == "DrillSucceeded" &&
+      aws_cloudwatch_metric_alarm.drill_missing.statistic == "Sum" &&
+      aws_cloudwatch_metric_alarm.drill_missing.comparison_operator == "LessThanThreshold" &&
+      aws_cloudwatch_metric_alarm.drill_missing.threshold == 1 &&
+      aws_cloudwatch_metric_alarm.drill_missing.period * aws_cloudwatch_metric_alarm.drill_missing.evaluation_periods == 604800 &&
+      aws_cloudwatch_metric_alarm.drill_missing.datapoints_to_alarm == aws_cloudwatch_metric_alarm.drill_missing.evaluation_periods &&
+      aws_cloudwatch_metric_alarm.drill_missing.treat_missing_data == "breaching" &&
+      length(aws_cloudwatch_metric_alarm.drill_missing.alarm_actions) == 1
+    )
+    error_message = "seven days with no DrillSucceeded of 1 must alarm, a drill that never ran counting as a miss (seven days is the most CloudWatch allows)"
+  }
+  assert {
     condition     = anytrue([for r in aws_s3_bucket_lifecycle_configuration.backups.rule : length(r.abort_incomplete_multipart_upload) == 1])
     error_message = "the backups bucket must abort unfinished multipart uploads"
   }

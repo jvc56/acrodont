@@ -197,7 +197,7 @@ test-e2e-seeding: e2e-binary
 ## boto3; backup.py, inside the image with the image's own pg_dump, dumps a
 ## seeded stack that holds a cascade, over the stack's network; and drill.py
 ## restores that dump inside the image, as root with its own Postgres, the way
-## the monthly drill task does. Otherwise the image's first build is the first
+## the scheduled drill task does. Otherwise the image's first build is the first
 ## release's, and the backup's and the drill's first runs are in production.
 ## The S3 paths do not run here: scripts/backup-check.py (make ops-check) runs
 ## them against a stand-in. CI runs this on main, nightly, and when scripts/,

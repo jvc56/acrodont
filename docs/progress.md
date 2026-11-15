@@ -496,7 +496,8 @@ accounts, 20 cascades and 130,000 questions per quiz.
   - SSM parameters are referenced by ARN only. There are SES suppression and
     reputation alarms, a mail-failed alarm, a budget and an anomaly
     subscription.
-  - The drill task runs monthly, there are backup and drill failure rules, and
+  - The drill task runs twice a week (seven days without one that passed
+    alarm), there are backup and drill failure rules, and
     the backups bucket requires TLS. The ECR lifecycle keeps 40 images.
   - `alarm_email` is required, and Terraform 1.11 or later is required.
   - The variable validations are tested offline by `infra/tests/` (17 cases).
@@ -605,7 +606,7 @@ the authoritative sequence; in short:
    before it is granted.
 7. The first admin (`scripts/confirm-user.sh --admin`) and the catalog upload
    at /admin, checking index sizes against `task_memory` (2 GiB).
-8. The first quarterly manual drill, recorded in the runbook (the monthly
+8. The first quarterly manual drill, recorded in the runbook (the twice-weekly
    automated drill runs itself).
 
 ## Open PQs

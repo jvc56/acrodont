@@ -64,7 +64,7 @@ deploy, backup and ops tooling. It was not done; it is the owner's call.
 | SEC-3 | Done | 17 offline `terraform test` cases |
 | SEC-4 | Done | ALB drops invalid headers, the backups bucket requires TLS, actions pinned by SHA, base images by digest |
 | OPS-1–3 | Done | The ops scripts over `scripts/lib/ops.sh`, 24 harness cases; docs/runbook.md rewritten around the two-phase first apply |
-| BAK-1 | Done | `scripts/drill.py`, monthly, on the ops image |
+| BAK-1 | Done | `scripts/drill.py`, twice a week, on the ops image; `acrodont-no-drill-7d` alarms on seven days without one that passed |
 | BAK-2 | Done | Failure rules; the backup role reads only `daily/` (to copy monthly dumps); SIGTERM handled |
 | CI-1 | Mostly | Parallel jobs and clippy. **Not done:** caching the e2e job's Docker builds across runs (needs a CI experiment) and nextest partitions (the integration job runs in about 7 minutes as is) |
 | CI-2 | Done | `make infra-validate` runs fmt, validate and `terraform test` |
