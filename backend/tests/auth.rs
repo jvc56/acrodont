@@ -21,9 +21,9 @@ fn reg(username: &str, email: &str) -> serde_json::Value {
 
 async fn expire_codes(app: &TestApp, email: &str) {
     sqlx::query(
-        "UPDATE email_confirmations SET expires_at = now() - interval '1 second',
+        "UPDATE pending_registrations SET expires_at = now() - interval '1 second',
                 created_at = now() - interval '25 hours'
-         WHERE user_id = (SELECT id FROM users WHERE email = $1)",
+         WHERE email = $1::citext",
     )
     .bind(email)
     .execute(app.db())
@@ -35,8 +35,10 @@ async fn expire_codes(app: &TestApp, email: &str) {
 // Register (PLAN.md § Authentication → Register)
 // ---------------------------------------------------------------------------
 
+/// A registration makes no account: it keeps its username and password hash
+/// with its code, and the account is made when the code is confirmed.
 #[sqlx::test]
-async fn register_creates_the_user(pool: sqlx::PgPool) {
+async fn a_registration_is_kept_with_its_code_and_becomes_the_account_when_confirmed(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
     let mut c = app.client();
     let r = c
@@ -46,23 +48,54 @@ async fn register_creates_the_user(pool: sqlx::PgPool) {
     assert!(r.set_cookies().is_empty());
     let code = app.latest_code("alice@example.com").await;
     assert_eq!(code.len(), 43, "32 random bytes, base64url");
-
-    // No sync sequence is taken yet: there are no account-level rows to stamp.
-    let sync_seq: i64 = sqlx::query_scalar("SELECT sync_seq FROM users WHERE username = 'alice'")
-        .fetch_one(app.db())
-        .await
-        .unwrap();
-    assert_eq!(sync_seq, 0);
-    // Only the SHA-256 of the code is stored, with a 24-hour expiry.
-    let (hash_len, hours): (i32, f64) = sqlx::query_as(
-        "SELECT octet_length(code_hash), extract(epoch FROM expires_at - created_at)::float8 / 3600
-         FROM email_confirmations",
+    // The mail names the username its link makes the account with.
+    assert!(app.mail_to("alice@example.com", 1).await[0].body.contains("the username alice"));
+    assert_eq!(users(&app).await, 0, "no account before the address is confirmed");
+    // Only the SHA-256 of the code is stored, with a 24-hour expiry, beside
+    // the registration's own username and an Argon2 hash of its password.
+    let (name, hash, hash_len, hours): (String, String, i32, f64) = sqlx::query_as(
+        "SELECT username::text, password_hash, octet_length(code_hash),
+                extract(epoch FROM expires_at - created_at)::float8 / 3600
+         FROM pending_registrations",
     )
     .fetch_one(app.db())
     .await
     .unwrap();
+    assert_eq!(name, "alice");
+    assert!(hash.starts_with("$argon2id$"), "{hash}");
     assert_eq!(hash_len, 32);
     assert!((hours - 24.0).abs() < 0.01);
+
+    let r = c.post("/api/auth/confirm-email", json!({ "code": code })).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(pending(&app).await, 0);
+    // No sync sequence is taken yet: there are no account-level rows to stamp.
+    let (sync_seq, stored): (i64, String) =
+        sqlx::query_as("SELECT sync_seq, password_hash FROM users WHERE username = 'alice'")
+            .fetch_one(app.db())
+            .await
+            .unwrap();
+    assert_eq!(sync_seq, 0);
+    assert_eq!(stored, hash, "the registration's own hash");
+}
+
+async fn users(app: &TestApp) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM users").fetch_one(app.db()).await.unwrap()
+}
+
+async fn pending(app: &TestApp) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM pending_registrations").fetch_one(app.db()).await.unwrap()
+}
+
+fn reg_with(username: &str, email: &str, password: &str) -> serde_json::Value {
+    json!({ "username": username, "email": email, "password": password })
+}
+
+async fn login_status(app: &TestApp, ip: &str, username: &str, password: &str) -> StatusCode {
+    app.client_from(ip)
+        .post("/api/auth/login", json!({ "username": username, "password": password }))
+        .await
+        .status
 }
 
 #[sqlx::test]
@@ -164,87 +197,133 @@ async fn an_email_in_use_gets_the_same_response_and_a_notice(pool: sqlx::PgPool)
     assert_eq!(n, 1);
 }
 
-/// PLAN.md § Integration tests: "Re-registering an unconfirmed email re-sends
-/// a code while the old one is valid and replaces the account once it has
-/// expired, and its username is taken while the code is valid and free after".
-#[sqlx::test]
-async fn re_registering_an_unconfirmed_email(pool: sqlx::PgPool) {
-    let app = TestApp::new(pool).await;
-    let mut c = app.client();
-    c.post("/api/auth/register", reg("bob", "bob@example.com"))
-        .await;
-    let first = app.latest_code("bob@example.com").await;
-    let old_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = 'bob'")
-        .fetch_one(app.db())
-        .await
-        .unwrap();
+const OTHER_PASSWORD: &str = "walrus-tide-bingo-lantern";
 
-    // While the code is valid: the username is taken...
+/// PLAN.md § Integration tests: registering again for an address not yet
+/// confirmed is the resend, and the code that is followed decides the
+/// account's username and password.
+#[sqlx::test]
+async fn registering_again_is_the_resend_and_the_code_followed_decides(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("AUTH_RATE_PER_IP_PER_MINUTE", "1000")]).await;
+    let mut c = app.client();
+    c.post("/api/auth/register", reg("bob", "bob@example.com")).await;
+    let first = app.latest_code("bob@example.com").await;
+
+    // While the code is valid the username is taken, for another address...
     let mut other = app.client_from("198.51.100.9");
-    let r = other
-        .post("/api/auth/register", reg("bob", "other@example.com"))
-        .await;
+    let r = other.post("/api/auth/register", reg("BOB", "other@example.com")).await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
     assert_eq!(r.json()["errors"][0]["field"], "username");
-    // ...and the same address gets a fresh code, both valid.
-    let r = other
-        .post("/api/auth/register", reg("robert", "bob@example.com"))
-        .await;
+    assert!(app.settled_mail_to("other@example.com").await.is_empty());
+    // ...and not for its own: the same registration again is a second mail.
+    let r = c.post("/api/auth/register", reg("bob", "Bob@Example.com")).await;
     assert_eq!(r.status, StatusCode::ACCEPTED);
-    let mails = app.mail_to("bob@example.com", 2).await;
-    assert_eq!(mails.len(), 2);
-    let second = app.latest_code("bob@example.com").await;
-    assert_ne!(first, second);
-    let same_id: uuid::Uuid =
-        sqlx::query_scalar("SELECT id FROM users WHERE email = 'bob@example.com'")
-            .fetch_one(app.db())
-            .await
-            .unwrap();
-    assert_eq!(same_id, old_id);
-    let r = c
-        .post("/api/auth/confirm-email", json!({ "code": first }))
-        .await;
-    assert_eq!(
-        r.status,
-        StatusCode::NO_CONTENT,
-        "the first code still confirms"
-    );
+    assert_eq!(app.mail_to("bob@example.com", 2).await.len(), 2);
+    // Another username and password for the address: a third, with its own.
+    let r = other.post("/api/auth/register", reg_with("robert", "bob@example.com", OTHER_PASSWORD)).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    assert_eq!(app.mail_to("bob@example.com", 3).await.len(), 3);
+    let third = app.latest_code("bob@example.com").await;
+    assert_ne!(first, third);
+    assert_eq!((users(&app).await, pending(&app).await), (0, 3));
+    // Each waits with its own password: the page can say "confirm first".
+    assert_eq!(login_status(&app, "192.0.2.1", "bob", PASSWORD).await, StatusCode::FORBIDDEN);
+    assert_eq!(login_status(&app, "192.0.2.1", "robert", OTHER_PASSWORD).await, StatusCode::FORBIDDEN);
+    assert_eq!(login_status(&app, "192.0.2.1", "robert", PASSWORD).await, StatusCode::UNAUTHORIZED);
 
-    // Once expired: the address is replaced by a fresh account.
+    // The last link is followed: the account is that registration's.
+    let r = c.post("/api/auth/confirm-email", json!({ "code": third })).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT, "{:?}", r.json());
+    let row: (String, String) = sqlx::query_as("SELECT username::text, email::text FROM users").fetch_one(app.db()).await.unwrap();
+    assert_eq!(row, ("robert".to_owned(), "bob@example.com".to_owned()));
+    assert_eq!(login_status(&app, "192.0.2.2", "robert", OTHER_PASSWORD).await, StatusCode::OK);
+    assert_eq!(login_status(&app, "192.0.2.2", "bob", PASSWORD).await, StatusCode::UNAUTHORIZED);
+    // The address's other links went with it, and this one is spent.
+    for code in [&first, &third] {
+        let r = c.post("/api/auth/confirm-email", json!({ "code": code })).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST);
+        assert_eq!(r.json()["error"], "invalid_code");
+    }
+    assert_eq!((users(&app).await, pending(&app).await), (1, 0));
+    // And "bob" is free again.
+    let r = other.post("/api/auth/register", reg("bob", "other@example.com")).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+
+    // The first link of two, followed: the first registration's username and password.
     let mut c2 = app.client_from("198.51.100.10");
-    c2.post("/api/auth/register", reg("carol", "carol@example.com"))
-        .await;
-    let carol_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = 'carol'")
-        .fetch_one(app.db())
-        .await
-        .unwrap();
-    expire_codes(&app, "carol@example.com").await;
-    let r = c2
-        .post("/api/auth/register", reg("caroline", "carol@example.com"))
-        .await;
-    assert_eq!(r.status, StatusCode::ACCEPTED);
-    let row: (uuid::Uuid, String) =
-        sqlx::query_as("SELECT id, username::text FROM users WHERE email = 'carol@example.com'")
-            .fetch_one(app.db())
-            .await
-            .unwrap();
-    assert_ne!(row.0, carol_id);
-    assert_eq!(row.1, "caroline");
+    c2.post("/api/auth/register", reg("carol", "carol@example.com")).await;
+    let first = app.latest_code("carol@example.com").await;
+    c2.post("/api/auth/register", reg_with("caroline", "carol@example.com", OTHER_PASSWORD)).await;
+    app.mail_to("carol@example.com", 2).await;
+    assert_eq!(c2.post("/api/auth/confirm-email", json!({ "code": first })).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(login_status(&app, "192.0.2.3", "carol", PASSWORD).await, StatusCode::OK);
+    assert_eq!(login_status(&app, "192.0.2.3", "caroline", OTHER_PASSWORD).await, StatusCode::UNAUTHORIZED);
 
-    // And an expired holder's username is free.
+    // Once its code has expired a registration holds nothing: its username is
+    // free for another address, its link is refused, and its own address
+    // registers afresh.
     let mut c3 = app.client_from("198.51.100.11");
-    c3.post("/api/auth/register", reg("dave", "dave@example.com"))
-        .await;
+    c3.post("/api/auth/register", reg("dave", "dave@example.com")).await;
+    let stale = app.latest_code("dave@example.com").await;
     expire_codes(&app, "dave@example.com").await;
-    let r = c3
-        .post("/api/auth/register", reg("dave", "dave2@example.com"))
-        .await;
+    assert_eq!(login_status(&app, "192.0.2.4", "dave", PASSWORD).await, StatusCode::UNAUTHORIZED);
+    let r = c3.post("/api/auth/register", reg("dave", "dave2@example.com")).await;
     assert_eq!(r.status, StatusCode::ACCEPTED);
-    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM users WHERE email = 'dave@example.com'")
-        .fetch_one(app.db())
-        .await
-        .unwrap();
-    assert_eq!(n, 0, "the old row is deleted");
+    assert_eq!(c3.post("/api/auth/confirm-email", json!({ "code": stale })).await.status, StatusCode::BAD_REQUEST);
+    let r = c3.post("/api/auth/register", reg("david", "dave@example.com")).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    app.mail_to("dave@example.com", 2).await;
+    let code = app.latest_code("dave@example.com").await;
+    assert_eq!(c3.post("/api/auth/confirm-email", json!({ "code": code })).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(login_status(&app, "192.0.2.4", "david", PASSWORD).await, StatusCode::OK);
+}
+
+/// A stranger who registers someone's address before its owner does sets
+/// nothing the owner's own registration does not replace: the owner follows
+/// the link from their own registration and has their own username and
+/// password, and the stranger's password opens nothing.
+#[sqlx::test]
+async fn a_stranger_registering_the_address_first_does_not_set_the_password(pool: sqlx::PgPool) {
+    let app = TestApp::new(pool).await;
+    let mut stranger = app.client_from("198.51.100.66");
+    let r = stranger.post("/api/auth/register", reg_with("ivy", "ivy@example.com", OTHER_PASSWORD)).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    let theirs = app.latest_code("ivy@example.com").await;
+    // The owner registers the same username and address, with a password of their own.
+    let mut owner = app.client();
+    let r = owner.post("/api/auth/register", reg("ivy", "ivy@example.com")).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    app.mail_to("ivy@example.com", 2).await;
+    let own = app.latest_code("ivy@example.com").await;
+    assert_ne!(own, theirs);
+    assert_eq!(owner.post("/api/auth/confirm-email", json!({ "code": own })).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(login_status(&app, "192.0.2.5", "ivy", PASSWORD).await, StatusCode::OK);
+    assert_eq!(login_status(&app, "192.0.2.5", "ivy", OTHER_PASSWORD).await, StatusCode::UNAUTHORIZED);
+    // The stranger's link, were it ever followed, does nothing now.
+    assert_eq!(stranger.post("/api/auth/confirm-email", json!({ "code": theirs })).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(login_status(&app, "192.0.2.5", "ivy", OTHER_PASSWORD).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(login_status(&app, "192.0.2.6", "ivy", PASSWORD).await, StatusCode::OK);
+}
+
+/// Two links of one address followed at the same moment make one account.
+#[sqlx::test]
+async fn two_links_followed_together_make_one_account(pool: sqlx::PgPool) {
+    let app = TestApp::new(pool).await;
+    let mut c = app.client();
+    c.post("/api/auth/register", reg("june", "june@example.com")).await;
+    let first = app.latest_code("june@example.com").await;
+    c.post("/api/auth/register", reg_with("juno", "june@example.com", OTHER_PASSWORD)).await;
+    app.mail_to("june@example.com", 2).await;
+    let second = app.latest_code("june@example.com").await;
+    let (mut a, mut b) = (app.client_from("192.0.2.7"), app.client_from("192.0.2.8"));
+    let (ra, rb) = tokio::join!(
+        a.post("/api/auth/confirm-email", json!({ "code": first })),
+        b.post("/api/auth/confirm-email", json!({ "code": second })),
+    );
+    let mut statuses = [ra.status, rb.status];
+    statuses.sort();
+    assert_eq!(statuses, [StatusCode::NO_CONTENT, StatusCode::BAD_REQUEST]);
+    assert_eq!((users(&app).await, pending(&app).await), (1, 0));
 }
 
 /// PLAN.md § Integration tests: the email caps — three per address per IP in
@@ -299,97 +378,34 @@ async fn email_caps(pool: sqlx::PgPool) {
     assert_eq!(app.settled_mail_to("erin@example.com").await.len(), 20);
 }
 
-/// "a replacement made under the cap still replaces the account and sends its
-/// code with the next registration after the window".
+/// A registration whose mail the address's cap would hold back is answered
+/// like any other and neither kept nor sent; after the window the next one
+/// is, and its link makes the account.
 #[sqlx::test]
-async fn a_replacement_under_the_cap(pool: sqlx::PgPool) {
+async fn a_registration_past_the_mail_cap_keeps_nothing(pool: sqlx::PgPool) {
     let app = TestApp::with(pool, &[("AUTH_RATE_PER_IP_PER_MINUTE", "1000")]).await;
     let mut c = app.client();
     for name in ["fay", "fay2", "fay3"] {
-        // Each expires before the next, so each registration replaces the last.
-        c.post("/api/auth/register", reg(name, "fay@example.com"))
-            .await;
-        app.mail_to("fay@example.com", 1).await;
-        expire_codes(&app, "fay@example.com").await;
+        let r = c.post("/api/auth/register", reg(name, "fay@example.com")).await;
+        assert_eq!(r.status, StatusCode::ACCEPTED);
     }
     assert_eq!(app.mail_to("fay@example.com", 3).await.len(), 3);
-    let r = c
-        .post("/api/auth/register", reg("fay4", "fay@example.com"))
-        .await;
+    assert_eq!(pending(&app).await, 3);
+    let r = c.post("/api/auth/register", reg("fay4", "fay@example.com")).await;
     assert_eq!(r.status, StatusCode::ACCEPTED);
-    let name: String =
-        sqlx::query_scalar("SELECT username::text FROM users WHERE email = 'fay@example.com'")
-            .fetch_one(app.db())
-            .await
-            .unwrap();
-    assert_eq!(name, "fay4", "replaced although capped");
-    assert_eq!(
-        app.settled_mail_to("fay@example.com").await.len(),
-        3,
-        "code not sent"
-    );
-    // After the window, the next registration sends a code for that account.
+    assert_eq!(r.json(), json!({}));
+    assert_eq!(app.settled_mail_to("fay@example.com").await.len(), 3, "code not sent");
+    assert_eq!(pending(&app).await, 3, "and no registration kept that nothing can confirm");
+    // After the window, the next registration is kept and sent.
     app.state
         .clock
         .advance(chrono::Duration::hours(24) + chrono::Duration::seconds(1));
-    let r = c
-        .post("/api/auth/register", reg("fay5", "fay@example.com"))
-        .await;
+    let r = c.post("/api/auth/register", reg("fay5", "fay@example.com")).await;
     assert_eq!(r.status, StatusCode::ACCEPTED);
-    let mails = app.mail_to("fay@example.com", 4).await;
-    assert_eq!(mails.len(), 4);
+    assert_eq!(app.mail_to("fay@example.com", 4).await.len(), 4);
     let code = app.latest_code("fay@example.com").await;
-    assert_eq!(
-        c.post("/api/auth/confirm-email", json!({ "code": code }))
-            .await
-            .status,
-        StatusCode::NO_CONTENT
-    );
-    let r = c
-        .post(
-            "/api/auth/login",
-            json!({"username": "fay4", "password": PASSWORD}),
-        )
-        .await;
-    assert_eq!(r.status, StatusCode::OK);
-}
-
-/// "The password is hashed on every path ... so the response takes the same
-/// time whichever branch runs."
-#[sqlx::test]
-async fn registration_branches_take_the_same_time(pool: sqlx::PgPool) {
-    let app = TestApp::with(pool, &[("AUTH_RATE_PER_IP_PER_MINUTE", "1000")]).await;
-    app.signed_in("gil").await;
-    let mut new_times = Vec::new();
-    let mut used_times = Vec::new();
-    for i in 0..6 {
-        let mut c = app.client_from(&format!("192.0.2.{i}"));
-        let t = Instant::now();
-        let r = c
-            .post(
-                "/api/auth/register",
-                reg(&format!("newbie{i}"), &format!("n{i}@example.com")),
-            )
-            .await;
-        new_times.push(t.elapsed().as_secs_f64());
-        assert_eq!(r.status, StatusCode::ACCEPTED);
-        let t = Instant::now();
-        let r = c
-            .post(
-                "/api/auth/register",
-                reg(&format!("copycat{i}"), "gil@example.com"),
-            )
-            .await;
-        used_times.push(t.elapsed().as_secs_f64());
-        assert_eq!(r.status, StatusCode::ACCEPTED);
-    }
-    let median = |v: &mut Vec<f64>| {
-        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        v[v.len() / 2]
-    };
-    let (a, b) = (median(&mut new_times), median(&mut used_times));
-    let ratio = a.max(b) / a.min(b);
-    assert!(ratio < 1.6, "new {a:.4}s vs in-use {b:.4}s");
+    assert_eq!(c.post("/api/auth/confirm-email", json!({ "code": code })).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(login_status(&app, "192.0.2.9", "fay5", PASSWORD).await, StatusCode::OK);
 }
 
 // ---------------------------------------------------------------------------
@@ -785,7 +801,7 @@ async fn delete_account_cascades_and_clears_cookies(pool: sqlx::PgPool) {
     );
     for table in [
         "users",
-        "email_confirmations",
+        "pending_registrations",
     ] {
         let n: i64 =
             sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM {table}")))
@@ -1299,11 +1315,11 @@ async fn auth_endpoints_share_one_per_ip_bucket(pool: sqlx::PgPool) {
 }
 
 // ---------------------------------------------------------------------------
-// Purge task: stale unconfirmed accounts
+// Purge task: expired registrations
 // ---------------------------------------------------------------------------
 
 #[sqlx::test]
-async fn purge_deletes_stale_unconfirmed_accounts(pool: sqlx::PgPool) {
+async fn purge_deletes_expired_registrations(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
     let mut c = app.client();
     c.post("/api/auth/register", reg("vic", "vic@example.com"))
@@ -1311,27 +1327,15 @@ async fn purge_deletes_stale_unconfirmed_accounts(pool: sqlx::PgPool) {
     c.post("/api/auth/register", reg("wes", "wes@example.com"))
         .await;
     app.signed_in("xan").await;
-    // vic's code expired 8 days ago, wes's 6 days ago.
-    sqlx::query(
-        "UPDATE email_confirmations c SET expires_at = now() - interval '8 days'
-         FROM users u WHERE u.id = c.user_id AND u.username = 'vic'",
-    )
-    .execute(app.db())
-    .await
-    .unwrap();
-    sqlx::query(
-        "UPDATE email_confirmations c SET expires_at = now() - interval '6 days'
-         FROM users u WHERE u.id = c.user_id AND u.username = 'wes'",
-    )
-    .execute(app.db())
-    .await
-    .unwrap();
+    // vic's code expired a second ago; wes's has a day to run.
+    expire_codes(&app, "vic@example.com").await;
     assert!(acrodont::purge::run_once(&app.state).await.unwrap());
-    let names: Vec<String> = sqlx::query_scalar("SELECT username::text FROM users ORDER BY 1")
+    let names: Vec<String> = sqlx::query_scalar("SELECT username::text FROM pending_registrations ORDER BY 1")
         .fetch_all(app.db())
         .await
         .unwrap();
-    assert_eq!(names, ["wes", "xan"]);
+    assert_eq!(names, ["wes"]);
+    assert_eq!(users(&app).await, 1, "accounts are left alone");
 }
 
 #[allow(dead_code)]
@@ -1341,8 +1345,8 @@ fn _unused(_: Client) {}
 /// a test reaches MAX_ACCOUNTS quickly.
 async fn fill_accounts(app: &TestApp, n: i64) {
     sqlx::query(
-        "INSERT INTO users (username, email, password_hash, email_confirmed_at)
-         SELECT 'filler' || g, 'filler' || g || '@example.com', 'x', now()
+        "INSERT INTO users (username, email, password_hash)
+         SELECT 'filler' || g, 'filler' || g || '@example.com', 'x'
          FROM generate_series(1, $1) g",
     )
     .bind(n)
@@ -1351,8 +1355,15 @@ async fn fill_accounts(app: &TestApp, n: i64) {
     .unwrap();
 }
 
+/// The places taken: accounts, and addresses with a registration still valid.
 async fn account_count(app: &TestApp) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM users").fetch_one(app.db()).await.unwrap()
+    sqlx::query_scalar(
+        "SELECT (SELECT count(*) FROM users)
+              + (SELECT count(DISTINCT email) FROM pending_registrations WHERE expires_at > now())",
+    )
+    .fetch_one(app.db())
+    .await
+    .unwrap()
 }
 
 /// MAX_ACCOUNTS: once the site holds that many accounts, every registration
@@ -1407,16 +1418,20 @@ async fn a_dev_login_stack_does_not_close_registration(pool: sqlx::PgPool) {
     assert_eq!(r.status, StatusCode::ACCEPTED);
 }
 
-/// Unconfirmed accounts whose codes have all expired give their place back:
-/// they are deleted before the count, as they are for their username.
+/// A registration whose code has expired gives its place back, as it gives
+/// back its username; and an address holds one place however many
+/// registrations it has waiting.
 #[sqlx::test]
-async fn an_expired_unconfirmed_account_does_not_hold_a_place(pool: sqlx::PgPool) {
+async fn an_expired_registration_does_not_hold_a_place(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
-    fill_accounts(&app, MAX_ACCOUNTS - 1).await;
+    fill_accounts(&app, MAX_ACCOUNTS - 2).await;
     let mut c = app.client();
+    // One address, registered twice: one place.
     assert_eq!(c.post("/api/auth/register", reg("stale", "stale@example.com")).await.status, StatusCode::ACCEPTED);
+    assert_eq!(c.post("/api/auth/register", reg("staler", "stale@example.com")).await.status, StatusCode::ACCEPTED);
+    assert_eq!(c.post("/api/auth/register", reg("last", "last@example.com")).await.status, StatusCode::ACCEPTED);
     assert_eq!(c.post("/api/auth/register", reg("fresh", "fresh@example.com")).await.status, StatusCode::FORBIDDEN);
-    sqlx::query("UPDATE email_confirmations SET expires_at = now() - interval '1 second'").execute(app.db()).await.unwrap();
+    sqlx::query("UPDATE pending_registrations SET expires_at = now() - interval '1 second'").execute(app.db()).await.unwrap();
     assert_eq!(c.post("/api/auth/register", reg("fresh", "fresh@example.com")).await.status, StatusCode::ACCEPTED);
 }
 
@@ -1461,7 +1476,7 @@ async fn dev_login_signs_in_a_confirmed_account(pool: sqlx::PgPool) {
     assert_eq!(c.post("/api/dev/login", json!({ "username": "nobody" })).await.status, StatusCode::NOT_FOUND);
     let mut other = app.client();
     other.post("/api/auth/register", reg("pending", "pending@example.com")).await;
+    // A registration not yet confirmed is no account.
     let r = other.post("/api/dev/login", json!({ "username": "pending" })).await;
-    assert_eq!(r.status, StatusCode::FORBIDDEN);
-    assert_eq!(r.json()["error"], "email_unconfirmed");
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
 }

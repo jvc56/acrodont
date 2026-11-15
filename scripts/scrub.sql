@@ -21,7 +21,7 @@ UPDATE users
    SET email = 'user-' || id || '@acrodont.invalid',
        password_hash = '$argon2id$v=19$m=19456,t=2,p=1$SXwQPhaGhngrdmsQrPUR8w$X2hmEeToIazw6+GFF7qYpMecAJAxxUP+EGtEwM5XHo0',
        session_generation = session_generation + 1;
-DELETE FROM email_confirmations;
+DELETE FROM pending_registrations;
 DELETE FROM password_reset_tokens;
 DELETE FROM export_tokens_spent;
 COMMIT;

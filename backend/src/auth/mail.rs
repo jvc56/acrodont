@@ -19,7 +19,7 @@ pub const PER_ADDRESS: usize = 20;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MailKind {
-    /// A new registration's confirmation code.
+    /// A registration's confirmation code.
     Confirmation { code: String },
     /// Sent instead of a code when the address already has a confirmed account.
     AccountExists,
@@ -305,7 +305,9 @@ impl EmailCaps {
     }
 }
 
-pub fn confirmation_email(public_url: &str, to: &str, code: &str) -> Email {
+/// The username too: an address may have several registrations waiting, each
+/// with its own username and password, and the link activates its own.
+pub fn confirmation_email(public_url: &str, to: &str, username: &str, code: &str) -> Email {
     let link = format!(
         "{}/confirm-email?code={}",
         public_url.trim_end_matches('/'),
@@ -315,7 +317,9 @@ pub fn confirmation_email(public_url: &str, to: &str, code: &str) -> Email {
         to: to.into(),
         subject: "Confirm your Acrodont account".into(),
         body: format!(
-            "Welcome to Acrodont.\n\nConfirm your email address within 24 hours:\n{link}\n"
+            "Welcome to Acrodont.\n\nConfirm your email address within 24 hours:\n{link}\n\n\
+             This link makes the account with the username {username} and the password chosen with it. \
+             If you did not register, you can ignore this email.\n"
         ),
         kind: MailKind::Confirmation { code: code.into() },
     }
@@ -362,7 +366,7 @@ mod tests {
     use super::*;
 
     fn confirmation(to: &str) -> Email {
-        confirmation_email("http://x", to, "code")
+        confirmation_email("http://x", to, "reader", "code")
     }
 
     #[tokio::test(start_paused = true)]

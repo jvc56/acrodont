@@ -31,7 +31,7 @@
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 401) error = 'Wrong username or password.';
 			else if (err instanceof ApiError && err.status === 403)
-				error = 'Confirm your email address first: follow the link we sent you.';
+				error = 'Confirm your email address first: follow the link we sent you. If it never came, register again.';
 			else error = describe(err);
 		} finally {
 			busy = false;

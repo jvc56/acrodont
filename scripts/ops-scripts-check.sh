@@ -520,16 +520,27 @@ for name in "${hostile[@]}"; do
   for frag in "DROP TABLE" 'a$$b' "q'uo" 'back\' ":'v'" "Zoë" "名前" "line;"; do
     [[ "$name" != *"$frag"* || "$stripped" != *"$frag"* ]] || fail "a piece of the username reached the SQL: $frag"
   done
-  [[ "$(grep -oE 'email[a-z_]*' <<<"$sql" | sort -u)" == email_confirmed_at ]] || fail "the SQL touches a personal column"
+  # The address and the password hash are copied inside the database, by the
+  # one INSERT, and joined on by the one DELETE; what psql prints (and so what
+  # CloudWatch keeps) is the last statement's username and is_admin alone.
+  [[ "$(grep -c 'RETURNING' <<<"$sql")" == 1 ]] && grep -qx 'RETURNING username, is_admin;' <<<"$sql" \
+    || fail "the SQL returns something other than username and is_admin"
+  [[ "$(grep -E '^SELECT' <<<"$stripped")" == "SELECT username, email, password_hash FROM pending_registrations" ]] \
+    || fail "the SQL selects something to print"
+  rest=${sql#*DELETE FROM pending_registrations}
+  rest=${rest#*;}
+  ! grep -qE 'email|password' <<<"$rest" || fail "the SQL touches a personal column after the copy"
 done
 plain=$("$R/scripts/confirm-user.sh" --print-sql alice)
-! grep -q is_admin <<<"${plain%%RETURNING*}" || fail "is_admin set without --admin"
+! grep -q "is_admin = true" <<<"$plain" || fail "is_admin set without --admin"
+[[ "$(grep -E '^SELECT' <<<"$plain" | sed -n 2p)" == "SELECT username, is_admin FROM users" ]] || fail "without --admin, something other than username and is_admin is printed"
+grep -q "expires_at > now()" <<<"$plain" || fail "an expired registration could be confirmed"
 fresh "$B"
 run confirm-user.sh --admin "${hostile[0]}" || fail "confirm-user.sh failed"
 cmp -s <("$R/scripts/confirm-user.sh" --admin --print-sql "${hostile[0]}") "$FAKE_DIR/psql/1.stdin" \
   || fail "the SQL psql read is not the SQL printed"
 grep -q "is_admin = true" "$FAKE_DIR/psql/1.stdin" || fail "--admin did not reach the SQL"
-pass "confirm-user.sh: hostile usernames reach the SQL only as hex; no email column; the same SQL reaches psql"
+pass "confirm-user.sh: hostile usernames reach the SQL only as hex; no address or hash printed; the same SQL reaches psql"
 
 # ---------------------------------------------------------------------------
 # rotate-db-password.sh and init-db-roles.sh

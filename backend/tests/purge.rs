@@ -351,7 +351,7 @@ async fn one_failing_account_does_not_stop_the_purge(pool: sqlx::PgPool) {
     // Something for a later step to do: an abandoned registration.
     let mut c = app.client();
     c.post("/api/auth/register", json!({"username": "stale", "email": "stale@example.com", "password": common::PASSWORD})).await;
-    sqlx::query("UPDATE email_confirmations SET expires_at = now() - interval '8 days' WHERE user_id = (SELECT id FROM users WHERE username = 'stale')")
+    sqlx::query("UPDATE pending_registrations SET expires_at = now() - interval '1 second' WHERE username = 'stale'")
         .execute(app.db())
         .await
         .unwrap();
@@ -360,7 +360,7 @@ async fn one_failing_account_does_not_stop_the_purge(pool: sqlx::PgPool) {
     assert!(run.unwrap_err().to_string().contains("purge_trash"));
     assert_eq!(cleared_left(&app, a).await, 3, "the failing account's transaction rolled back whole");
     assert_eq!(cleared_left(&app, b).await, 0, "the next account was purged");
-    let stale: i64 = sqlx::query_scalar("SELECT count(*) FROM users WHERE username = 'stale'").fetch_one(app.db()).await.unwrap();
+    let stale: i64 = sqlx::query_scalar("SELECT count(*) FROM pending_registrations WHERE username = 'stale'").fetch_one(app.db()).await.unwrap();
     assert_eq!(stale, 0, "the later steps ran");
     // The lock was given back: the next run is not turned away.
     assert!(acrodont::purge::run_once(&app.state).await.is_err());

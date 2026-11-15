@@ -72,12 +72,9 @@ fn sha256(s: &str) -> Vec<u8> {
     Sha256::digest(s.as_bytes()).to_vec()
 }
 
-/// Queues an email after the response, if the address's caps allow it.
-fn queue_mail(state: &AppState, ip: IpAddr, email: Email) {
-    if !state.email_caps.try_reserve(&email.to, ip) {
-        tracing::info!(kind = ?std::mem::discriminant(&email.kind), "email cap reached; not sent");
-        return;
-    }
+/// Sends an email after the response. The caller has taken the address's
+/// slot (`EmailCaps::try_reserve`).
+fn queue_mail(state: &AppState, email: Email) {
     let mailer = state.mailer.clone();
     tokio::spawn(async move {
         let to = mail::address_tag(&email.to);
@@ -132,7 +129,8 @@ pub struct RegisterBody {
     password: String,
 }
 
-/// The advisory lock registrations take in turn (an arbitrary constant).
+/// The advisory lock registrations and confirmations take in turn (an
+/// arbitrary constant).
 const REGISTER_LOCK: i64 = 0x5746_5245_4749_5354;
 
 /// Registration closes once this many accounts hold a place (PLAN.md §
@@ -142,11 +140,30 @@ const REGISTER_LOCK: i64 = 0x5746_5245_4749_5354;
 /// spec on a stack that is kept between runs.
 pub const MAX_ACCOUNTS: i64 = 750;
 
-/// The same answer for a new account and an address already in use.
+/// The same answer for a new registration and an address already in use.
 fn registered() -> Response {
     (StatusCode::ACCEPTED, Json(json!({}))).into_response()
 }
 
+fn username_taken_error() -> ApiError {
+    ApiError::Fields(vec![FieldError::new("username", "That username is taken.")])
+}
+
+async fn register_lock(tx: &mut sqlx::PgConnection) -> Result<(), sqlx::Error> {
+    sqlx::query_scalar!(r#"SELECT 1 AS "one!" FROM pg_advisory_xact_lock($1)"#, REGISTER_LOCK)
+        .fetch_one(tx)
+        .await?;
+    Ok(())
+}
+
+/// A registration makes no account: it keeps the request's username and
+/// password hash with a confirmation code of its own
+/// (`pending_registrations`), and the account is made from that row when its
+/// code is confirmed. So registering again for an address not yet confirmed
+/// is how a lost mail is sent again, with whatever username and password the
+/// new request gives; and whoever registered an address first, its owner or a
+/// stranger, the account gets the username and password of the registration
+/// whose link is followed.
 async fn register(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
@@ -164,14 +181,19 @@ async fn register(
             "Use 3–32 letters, digits or underscores.",
         ));
     }
-    if let Some(message) = email_error(&email) {
-        errors.push(FieldError::new("email", message));
-    }
+    let email_ok = match email_error(&email) {
+        Some(message) => {
+            errors.push(FieldError::new("email", message));
+            false
+        }
+        None => true,
+    };
     errors.extend(password::check_strength("password", &body.password, &username, &email).await?);
     // A taken username is a field error, checked before anything that sends
-    // email. One held by an unconfirmed account is taken while that account's
-    // latest code is valid.
-    if username_ok && username_taken(&state, &username).await? {
+    // email. An address that is no address is no one's own: it reaches no
+    // query (it may hold a NUL, which Postgres takes in no text).
+    let own = if email_ok { email.as_str() } else { "" };
+    if username_ok && username_taken(&state.db, &username, own).await? {
         errors.push(FieldError::new("username", "That username is taken."));
     }
     if !errors.is_empty() {
@@ -182,35 +204,19 @@ async fn register(
     let hash = password::hash(body.password).await?;
 
     let mut tx = state.db.begin().await?;
-    // An unconfirmed account whose codes have all expired no longer holds its
-    // username or address: it is deleted and its dependents go by cascade.
-    sqlx::query!(
-        "DELETE FROM users u
-         WHERE (u.username = $1 OR u.email = $2)
-           AND u.email_confirmed_at IS NULL
-           AND NOT EXISTS (SELECT 1 FROM email_confirmations c
-                           WHERE c.user_id = u.id AND c.expires_at > now())",
-        &username as &str,
-        &email as &str,
-    )
-    .execute(&mut *tx)
-    .await?;
-
-    // MAX_ACCOUNTS. Registrations take turns under a transaction lock, so two
-    // at the limit cannot both pass it. Checked for every registration, before
-    // looking the address up, so a closed site says the same to everyone and
-    // reveals nothing about which addresses have accounts.
-    sqlx::query_scalar!(r#"SELECT 1 AS "one!" FROM pg_advisory_xact_lock($1)"#, REGISTER_LOCK)
-        .fetch_one(&mut *tx)
-        .await?;
-    // Accounts that hold a place: confirmed, or with a code still valid, as
-    // for a username. An abandoned registration frees its place when its
-    // codes expire, without waiting for the purge task.
+    // MAX_ACCOUNTS. Registrations and confirmations take turns under a
+    // transaction lock, so two at the limit cannot both pass it, and two
+    // addresses cannot both come to hold one username. Checked for every
+    // registration, before looking the address up, so a closed site says the
+    // same to everyone and reveals nothing about which addresses have accounts.
+    register_lock(&mut tx).await?;
+    // What holds a place: an account, and an address with a registration
+    // whose code is still valid, once however many registrations it has. An
+    // abandoned registration frees its place when its code expires, without
+    // waiting for the purge task.
     let accounts = sqlx::query_scalar!(
-        r#"SELECT count(*) AS "n!" FROM users u
-           WHERE u.email_confirmed_at IS NOT NULL
-              OR EXISTS (SELECT 1 FROM email_confirmations c
-                         WHERE c.user_id = u.id AND c.expires_at > now())"#
+        r#"SELECT (SELECT count(*) FROM users)
+                + (SELECT count(DISTINCT email) FROM pending_registrations WHERE expires_at > now()) AS "n!""#
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -218,100 +224,65 @@ async fn register(
         return Err(ApiError::Forbidden("registration_closed"));
     }
 
-    let existing = sqlx::query!(
-        "SELECT id, email::text AS \"email!\", email_confirmed_at FROM users
-         WHERE email = $1 FOR UPDATE",
+    let existing = sqlx::query_scalar!(
+        r#"SELECT email::text AS "email!" FROM users WHERE email = $1::citext"#,
         &email as &str,
     )
     .fetch_optional(&mut *tx)
     .await?;
 
+    // Again, now that no other registration can come between the check and
+    // the row.
+    if existing.is_none() && username_taken(&mut *tx, &username, &email).await? {
+        return Err(username_taken_error());
+    }
+    // The address's mail caps, before anything is kept: a registration whose
+    // mail would not be sent has a code no one can ever follow, so it is
+    // answered like any other and neither stored nor sent.
+    if !state.email_caps.try_reserve(&email, ip) {
+        tracing::info!("email cap reached; registration not kept, nothing sent");
+        return Ok(registered());
+    }
     let mail = match existing {
-        Some(u) if u.email_confirmed_at.is_some() => {
-            mail::account_exists_email(&state.config.public_url, &u.email)
-        }
-        Some(u) => {
-            // Never confirmed and a code still valid: a fresh code to the same
-            // address, both valid until they expire.
-            let code = session::random_token();
-            insert_confirmation(&mut tx, u.id, &code).await?;
-            mail::confirmation_email(&state.config.public_url, &u.email, &code)
-        }
+        Some(address) => mail::account_exists_email(&state.config.public_url, &address),
         None => {
-            let user_id = match create_user(&mut tx, &username, &email, &hash).await {
-                Ok(id) => id,
-                Err(e) if is_unique_violation(&e, "users_username_key") => {
-                    return Err(ApiError::Fields(vec![FieldError::new(
-                        "username",
-                        "That username is taken.",
-                    )]));
-                }
-                Err(e) if is_unique_violation(&e, "users_email_key") => {
-                    // Lost a race with another registration of the address.
-                    return Ok(registered());
-                }
-                Err(e) => return Err(e.into()),
-            };
             let code = session::random_token();
-            insert_confirmation(&mut tx, user_id, &code).await?;
-            mail::confirmation_email(&state.config.public_url, &email, &code)
+            sqlx::query!(
+                "INSERT INTO pending_registrations (username, email, password_hash, code_hash, expires_at)
+                 VALUES ($1::citext, $2::citext, $3, $4, now() + interval '24 hours')",
+                &username as &str,
+                &email as &str,
+                hash,
+                sha256(&code),
+            )
+            .execute(&mut *tx)
+            .await?;
+            mail::confirmation_email(&state.config.public_url, &email, &username, &code)
         }
     };
     tx.commit().await?;
-    queue_mail(&state, ip, mail);
+    queue_mail(&state, mail);
     Ok(registered())
 }
 
-async fn username_taken(state: &AppState, username: &str) -> ApiResult<bool> {
-    let taken = sqlx::query_scalar!(
-        "SELECT EXISTS (
-            SELECT 1 FROM users u
-            WHERE u.username = $1
-              AND (u.email_confirmed_at IS NOT NULL
-                   OR EXISTS (SELECT 1 FROM email_confirmations c
-                              WHERE c.user_id = u.id AND c.expires_at > now()))
-         ) AS \"taken!\"",
-        username as &str,
-    )
-    .fetch_one(&state.db)
-    .await?;
-    Ok(taken)
-}
-
-fn is_unique_violation(e: &sqlx::Error, constraint: &str) -> bool {
-    matches!(e, sqlx::Error::Database(d) if d.constraint() == Some(constraint))
-}
-
-async fn insert_confirmation(
-    tx: &mut sqlx::PgConnection,
-    user_id: Uuid,
-    code: &str,
-) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        "INSERT INTO email_confirmations (user_id, code_hash, expires_at)
-         VALUES ($1, $2, now() + interval '24 hours')",
-        user_id,
-        sha256(code),
-    )
-    .execute(tx)
-    .await?;
-    Ok(())
-}
-
-/// The user row.
-async fn create_user(
-    tx: &mut sqlx::PgConnection,
+/// Whether `username` is another's: an account's, or a registration's whose
+/// code is still valid and which is for another address than `email`. An
+/// address's own registrations do not hold a username against it, so someone
+/// registering again (the mail was lost) keeps the name they chose.
+async fn username_taken<'e>(
+    db: impl sqlx::PgExecutor<'e>,
     username: &str,
     email: &str,
-    hash: &str,
-) -> Result<Uuid, sqlx::Error> {
+) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar!(
-        "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
-        username as &str,
-        email as &str,
-        hash,
+        r#"SELECT EXISTS (SELECT 1 FROM users WHERE username = $1::citext)
+               OR EXISTS (SELECT 1 FROM pending_registrations
+                          WHERE username = $1::citext AND email <> $2::citext AND expires_at > now())
+               AS "taken!""#,
+        username,
+        email,
     )
-    .fetch_one(tx)
+    .fetch_one(db)
     .await
 }
 
@@ -324,30 +295,46 @@ pub struct ConfirmBody {
     code: String,
 }
 
+/// Makes the account from the registration the code belongs to: that
+/// registration's username and password, whichever others the address has.
+/// Those go with it, so no other link for the address works afterwards, and
+/// a second use of this one finds nothing.
 async fn confirm_email(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
     ApiJson(body): ApiJson<ConfirmBody>,
 ) -> ApiResult<StatusCode> {
     state.limits.auth_ip.check(&ip)?;
+    let invalid = || ApiError::bad_request("invalid_code");
     let mut tx = state.db.begin().await?;
-    let used = sqlx::query_scalar!(
-        "UPDATE email_confirmations SET used_at = now()
-         WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
-         RETURNING user_id",
+    register_lock(&mut tx).await?;
+    let pending = sqlx::query!(
+        r#"DELETE FROM pending_registrations
+           WHERE code_hash = $1 AND expires_at > now()
+           RETURNING username::text AS "username!", email::text AS "email!", password_hash"#,
         sha256(body.code.trim()),
     )
     .fetch_optional(&mut *tx)
-    .await?;
-    let Some(user_id) = used else {
-        return Err(ApiError::bad_request("invalid_code"));
-    };
-    sqlx::query!(
-        "UPDATE users SET email_confirmed_at = coalesce(email_confirmed_at, now()) WHERE id = $1",
-        user_id
+    .await?
+    .ok_or_else(invalid)?;
+    // While its code is valid a registration's username and address are no
+    // one else's (`register` sees to it under the same lock), so a conflict
+    // here is an account made by hand in SQL: the code is refused and stays.
+    let made = sqlx::query_scalar!(
+        "INSERT INTO users (username, email, password_hash) VALUES ($1::citext, $2::citext, $3)
+         ON CONFLICT DO NOTHING RETURNING id",
+        pending.username,
+        pending.email,
+        pending.password_hash,
     )
-    .execute(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await?;
+    if made.is_none() {
+        return Err(invalid());
+    }
+    sqlx::query!("DELETE FROM pending_registrations WHERE email = $1::citext", pending.email)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -404,33 +391,70 @@ struct LoginUser {
     id: Uuid,
     username: String,
     password_hash: String,
-    email_confirmed_at: Option<chrono::DateTime<chrono::Utc>>,
     is_admin: bool,
     session_generation: i32,
     storage_bytes: i64,
     storage_limit_bytes: Option<i64>,
 }
 
-/// The account `username` names when `password` is its password. An unknown
-/// username costs the same verify as a wrong password.
-async fn verified_user(state: &AppState, username: &str, password: String) -> ApiResult<Option<LoginUser>> {
+/// What a login's username and password named.
+enum Verified {
+    Account(LoginUser),
+    /// No account, but the password of the username's latest registration
+    /// still waiting for its address to be confirmed.
+    Unconfirmed,
+    Wrong,
+}
+
+/// The account `username` names when `password` is its password. Every
+/// branch costs one verify: an account's hash, else the hash of the
+/// username's latest registration whose code is still valid (so the page can
+/// say the address is not confirmed yet, to someone who knows the password
+/// and to no one else), else a dummy's.
+async fn verified_user(state: &AppState, username: &str, password: String) -> ApiResult<Verified> {
     let row = sqlx::query_as!(
         LoginUser,
-        "SELECT id, username::text AS \"username!\", password_hash, email_confirmed_at,
+        "SELECT id, username::text AS \"username!\", password_hash,
                 is_admin, session_generation, storage_bytes, storage_limit_bytes
          FROM users WHERE username = $1",
         username,
     )
     .fetch_optional(&state.db)
     .await?;
+    let pending = match row {
+        Some(_) => None,
+        None => {
+            sqlx::query_scalar!(
+                "SELECT password_hash FROM pending_registrations
+                 WHERE username = $1::citext AND expires_at > now()
+                 ORDER BY created_at DESC, id LIMIT 1",
+                username,
+            )
+            .fetch_optional(&state.db)
+            .await?
+        }
+    };
     state
         .argon2_verifies
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    Ok(match row {
-        Some(r) => password::verify(password, r.password_hash.clone()).await?.then_some(r),
-        None => {
+    Ok(match (row, pending) {
+        (Some(r), _) => {
+            if password::verify(password, r.password_hash.clone()).await? {
+                Verified::Account(r)
+            } else {
+                Verified::Wrong
+            }
+        }
+        (None, Some(hash)) => {
+            if password::verify(password, hash).await? {
+                Verified::Unconfirmed
+            } else {
+                Verified::Wrong
+            }
+        }
+        (None, None) => {
             password::verify(password, dummy_hash().to_owned()).await?;
-            None
+            Verified::Wrong
         }
     })
 }
@@ -470,19 +494,18 @@ async fn login(
     // Only a failed verify keeps its failure tokens: not a login that
     // succeeds, and not one that was never judged (a `503` for a hashing
     // turn, an error). The login token is kept by every verify that ran.
-    if !matches!(outcome, Ok(None)) {
+    if !matches!(outcome, Ok(Verified::Wrong)) {
         state.limits.login_fail_ip.refund(&ip);
         state.limits.login_fail_username.refund(&username_key);
     }
     if outcome.is_err() {
         state.limits.login_username.refund(&username_key);
     }
-    let Some(user) = outcome? else {
-        return Err(ApiError::Unauthorized);
+    let user = match outcome? {
+        Verified::Account(user) => user,
+        Verified::Unconfirmed => return Err(ApiError::Forbidden("email_unconfirmed")),
+        Verified::Wrong => return Err(ApiError::Unauthorized),
     };
-    if user.email_confirmed_at.is_none() {
-        return Err(ApiError::Forbidden("email_unconfirmed"));
-    }
     let cookies = SessionCookies::issue(&state, user.id, user.session_generation, None);
     Ok((
         cookies,
@@ -516,7 +539,7 @@ pub struct DevLoginBody {
     username: String,
 }
 
-/// `./scripts/dev.py --login-as USER`: a session for an existing, confirmed
+/// `./scripts/dev.py --login-as USER`: a session for an existing
 /// account without its password, answered exactly as `/api/auth/login` is, so
 /// the SPA's `/dev-login` page adopts it the way a login would. Registered
 /// only when `DEV_LOGIN=true`, which a TLS deployment refuses to start with.
@@ -525,7 +548,7 @@ async fn dev_login(
     ApiJson(body): ApiJson<DevLoginBody>,
 ) -> ApiResult<Response> {
     let user = sqlx::query!(
-        "SELECT id, username::text AS \"username!\", email_confirmed_at, is_admin, session_generation,
+        "SELECT id, username::text AS \"username!\", is_admin, session_generation,
                 storage_bytes, storage_limit_bytes
          FROM users WHERE username = $1",
         body.username.trim() as &str,
@@ -533,9 +556,6 @@ async fn dev_login(
     .fetch_optional(&state.db)
     .await?
     .ok_or(ApiError::NotFound)?;
-    if user.email_confirmed_at.is_none() {
-        return Err(ApiError::Forbidden("email_unconfirmed"));
-    }
     let cookies = SessionCookies::issue(&state, user.id, user.session_generation, None);
     let storage = (user.storage_bytes, user.storage_limit_bytes);
     Ok((cookies, Json(me_body(&state, user.id, user.username, user.is_admin, storage))).into_response())
@@ -599,7 +619,7 @@ async fn reset_password(
 async fn send_reset(state: &AppState, ip: IpAddr, email: &str) -> anyhow::Result<()> {
     let user = sqlx::query!(
         "SELECT id, username::text AS \"username!\", email::text AS \"email!\" FROM users
-         WHERE email = $1 AND email_confirmed_at IS NOT NULL",
+         WHERE email = $1",
         email as &str,
     )
     .fetch_optional(&state.db)

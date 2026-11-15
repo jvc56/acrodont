@@ -4088,7 +4088,6 @@ CREATE TABLE users (
     email               CITEXT NOT NULL UNIQUE
                             CHECK (length(email) BETWEEN 3 AND 254),
     password_hash       TEXT NOT NULL,                  -- Argon2 PHC string
-    email_confirmed_at  TIMESTAMPTZ,
     is_admin            BOOLEAN NOT NULL DEFAULT false, -- set only via SQL
     session_generation  INTEGER NOT NULL DEFAULT 0,     -- bumped to revoke all sessions
     sync_seq            BIGINT NOT NULL DEFAULT 0,      -- last sync sequence value issued
@@ -4104,18 +4103,29 @@ CREATE TABLE users (
                             -- device settings shared with all of the account's
                             -- devices: setting name -> {value, at} (Settings)
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+                            -- when the address was confirmed: a row is made by
+                            -- the confirmation, never before it
     CHECK (sync_floor_seq <= sync_seq)
 );
 
-CREATE TABLE email_confirmations (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    code_hash   BYTEA NOT NULL UNIQUE CHECK (octet_length(code_hash) = 32), -- SHA-256
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at  TIMESTAMPTZ NOT NULL,               -- created_at + 24 hours
-    used_at     TIMESTAMPTZ
+-- A registration whose address is not confirmed yet: no users row exists for
+-- it. Each registration keeps its own username and password hash with its own
+-- code, and confirming a code makes the account from that row's and deletes
+-- the address's other rows. Registering again for the address is another
+-- row, with whatever username and password that request gave (Authentication).
+CREATE TABLE pending_registrations (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username      CITEXT NOT NULL CHECK (username ~ '^[A-Za-z0-9_]{3,32}$'),
+                      -- not unique: an address's rows may share one. While a
+                      -- row's code is valid, no other address may register it
+    email         CITEXT NOT NULL CHECK (length(email) BETWEEN 3 AND 254),
+    password_hash TEXT NOT NULL,                    -- Argon2 PHC string
+    code_hash     BYTEA NOT NULL UNIQUE CHECK (octet_length(code_hash) = 32), -- SHA-256
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at    TIMESTAMPTZ NOT NULL              -- created_at + 24 hours
 );
-CREATE INDEX email_confirmations_user_id ON email_confirmations (user_id);
+CREATE INDEX pending_registrations_email ON pending_registrations (email);
+CREATE INDEX pending_registrations_username ON pending_registrations (username);
 
 CREATE TABLE password_reset_tokens (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -4942,9 +4952,9 @@ it:
 - **prunes** `sync_operations` and `sync_tombstones` older than
   `SYNC_RETENTION_DAYS`, raising each affected user's `sync_floor_seq` to the
   highest tombstone sequence it removed
-- **deletes** accounts that were never confirmed and whose last confirmation
-  code expired more than 7 days ago, so an abandoned registration does not hold
-  an email address forever
+- **deletes** registrations (`pending_registrations`) whose confirmation code
+  has expired: from that moment one holds neither its username nor a place
+  and nothing can confirm it, so only a password hash would be kept
 - **prunes** `export_tokens_spent` rows past their `expires_at`
 - **prunes** `catalog_instance_status` rows whose heartbeat is older than
   3 minutes, left by instances that have stopped
@@ -4987,13 +4997,33 @@ The flows are the conventional ones, built directly on Axum:
   and that check runs before anything below, so a `400` never also sends an
   email. An email already in use gets the same response as a successful
   registration.
+  **A registration makes no account.** It is kept in `pending_registrations`
+  with its own username, its own password hash and its own confirmation code,
+  and the account is made, from that row, when its code is confirmed. An
+  address may have several registrations waiting, each with its own username,
+  password and code; **the link that is followed decides** which username and
+  password the account has, and the address's other registrations are deleted
+  with it, so no other link for the address works afterwards. Two things
+  follow. **Registering again is the resend**: someone whose confirmation
+  mail never came registers again, with the same username and password or
+  others, and gets a new mail; an address's own registrations never hold a
+  username against it. And **a stranger who registers someone's address
+  first sets nothing**: the owner registers, follows the link in the mail
+  their own registration sent, and has the username and password they chose;
+  the stranger's registration is deleted, its password never having opened
+  anything. The confirmation mail names the username its link makes the
+  account with, so someone holding two mails can tell them apart. ("The last
+  registration wins" would not do: a stranger registering the address after
+  its owner would then set the password the owner's link activates.)
   **Registration closes at `MAX_ACCOUNTS`, 750 accounts.** The number is a
   constant in the backend (`backend/src/auth/routes.rs`), deliberately not a
-  setting: raising it is a release. It counts accounts that hold a place:
-  confirmed, or with a confirmation code still valid. The count and the check
+  setting: raising it is a release. It counts what holds a place: an
+  account, and an address with a registration whose code is still valid
+  (once, however many registrations it has waiting). The count and the check
   run inside the registration's transaction, after it takes a
-  transaction-scoped advisory lock that every registration takes in turn, so
-  concurrent registrations cannot pass the limit together. At the limit every
+  transaction-scoped advisory lock that every registration and every
+  confirmation takes in turn, so concurrent registrations cannot pass the
+  limit together, and two addresses cannot come to hold one username. At the limit every
   registration gets `403 registration_closed` and sends nothing, a new address
   and a known one alike; the check runs before the address is looked up, so a
   closed site reveals nothing about which addresses have accounts. The
@@ -5003,34 +5033,48 @@ The flows are the conventional ones, built directly on Axum:
   kept between runs.
   The password is hashed on every path, whether or not the hash is stored, so
   the response takes the same time whichever branch runs.
-  If that email belongs to a **confirmed** account, its owner is emailed a
-  notice instead. If it belongs to an account that was **never confirmed**: while
-  its code is still valid, a fresh code is sent to the same address and both
-  stay valid until they expire, so a stranger who knows the address cannot keep
-  the real registrant from confirming; once the code has expired, the old
-  account row is deleted (its dependents go by cascade) and the new
-  registration creates a fresh one through the ordinary path, with a new id,
-  username and password, and a fresh code is sent. A username held by an
-  unconfirmed account is taken while that account's latest code is valid and
-  free once it has expired, in which case the old row is deleted as above. So an expired code never
-  strands an address, and either way the form cannot be used to find out which
+  If that email belongs to an account, its owner is emailed a notice instead
+  and nothing is kept. Otherwise the registration is kept and its code sent,
+  whether or not the address has others waiting: every code stays valid until
+  it expires or one of the address's codes is confirmed. **A username is
+  taken** when an account has it, or when a registration whose code is still
+  valid has it **for another address**; it is free again the moment that code
+  expires, with nothing to delete first. The check runs twice: before the
+  hash, as the field error above, and again under the registration lock just
+  before the row is written. So an expired code never
+  strands an address or a username, and either way the form cannot be used to find out which
   emails have accounts. The password is hashed with Argon2. A confirmation code
   (32 random bytes) is emailed, and only its SHA-256 is stored, with a 24-hour
   expiry. At most three confirmation, notice or reset emails are sent to one
   address in 24 hours per requesting IP, and twenty per address in all; further
   requests get the same response and send nothing, and the per-IP scope means
   a stranger cannot use the cap to block the address's owner. A
-  registration that replaces an expired unconfirmed account still replaces it
-  when the cap has been reached; its code goes out with the next registration
-  after the window. Registration inserts only the user row: it takes no sync
-  sequence, so a new account's `sync_seq` starts at 0, the column default, and
-  its first pull carries nothing until it has a cascade.
-- **Confirm email** (`/confirm-email?code=…`): the page submits the code; on
+  registration whose mail the cap would hold back is answered the same and
+  **not kept**: a code no mail carries can never be followed. The
+  `/register/check-email` page says "We sent a confirmation link to …. Follow
+  it within 24 hours to finish creating your account. If it doesn't arrive,
+  register again: the link you follow sets the username and password."
+- **Confirm email** (`/confirm-email?code=…`): the page submits the code.
+  Under the registration lock the server deletes the registration the code
+  belongs to (its SHA-256, not expired), inserts the `users` row with that
+  registration's username, address and password hash, and deletes the
+  address's other registrations, in one transaction; a code that is unknown,
+  expired, already used, or whose address was confirmed by another of its
+  links is `400 invalid_code`, and two links of one address followed at the
+  same moment make one account. The insert is the user row alone: it takes no
+  sync sequence, so a new account's `sync_seq` starts at 0, the column
+  default, and its first pull carries nothing until it has a cascade. On
   success the user is sent to `/login`, which says "Your email address is
-  confirmed. Log in to start." Login is refused with `403` until the
-  email is confirmed.
-- **Login**: by **username** and password, never by email, so the `403` for an
-  unconfirmed account reveals nothing that the public username does not. Rate
+  confirmed. Log in to start."; a refused code reads "This confirmation link
+  has expired or was already used. Register again to get a new one." Login is
+  refused with `403` until the email is confirmed: with no account for the
+  username, the password is verified against the username's **latest
+  registration still waiting** (one verify, as every login costs), and when
+  it is that registration's password the answer is `403 email_unconfirmed`,
+  which the page shows as "Confirm your email address first: follow the link
+  we sent you. If it never came, register again." Any other password is `401`.
+- **Login**: by **username** and password, never by email, so the `403` for a
+  registration not yet confirmed, which only its own password gets, reveals nothing that the public username does not. Rate
   limited on **failed** attempts, per IP and per username
   (`LOGIN_FAILURES_PER_IP_PER_MINUTE` and
   `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE`, 10 each): a request takes a token
@@ -5290,8 +5334,8 @@ enough for a filter tree holding a 300,000-entry In Word List; Axum's default of
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/auth/register` | Create an account; sends the confirmation email |
-| `POST` | `/api/auth/confirm-email` | Confirm with the emailed code |
+| `POST` | `/api/auth/register` | Keep a registration (username, address, password hash) with a confirmation code of its own, and send the code; no account yet. `202 {}` whether or not the address has an account |
+| `POST` | `/api/auth/confirm-email` | `{ code }`: make the account from the registration the code belongs to. `204`, or `400 invalid_code` |
 | `POST` | `/api/auth/login` | Start a session. `429` once the caller's address or the username has no failure token left; `503` with `Retry-After: 10` when no Argon2 turn comes within 10 seconds (see [Authentication](#authentication)) |
 | `POST` | `/api/auth/logout` | Clear the session cookie **and the CSRF cookie**, so no token outlives the session it was issued with; login re-sets both. The token is stateless, so a copy of it stays valid until its TTL; a user who suspects a copy uses **Sign out everywhere**. This is the one endpoint that needs **neither a session nor a CSRF token** *when no session cookie arrives with it*: there is then nothing to clear and nothing to forge, and it answers `2xx`, so a device offline past both cookies' TTL is not left retrying forever. With a session cookie it is CSRF-checked like any other write, which is the ordinary state of the [queued logout](#authentication-while-offline). It is **exempt from the account-binding `X-Acrodont-User` check**: the queued logout is sent while no account is signed in, so it could never satisfy it, and a `401` would clear its flag with the cookie still alive. The queued logout runs when no account is **signed in**, not when no cookie is held, and the `httpOnly` session cookie it exists to clear is still in the browser, so the app sends the double-submit token with it. Either way the answer is a `2xx`, never a `401`-or-`403` guess |
 | `POST` | `/api/auth/reset-password` | Body `{ email }` → `202 {}` whether or not the address has an account; the lookup and the reset email (with the account's username) follow the response. `429` past `RESET_RATE_PER_HOUR` per caller or per address named, alike for every address (see [Authentication](#authentication)) |
@@ -5729,7 +5773,7 @@ startup rather than falling back to a default.
 | `RESET_RATE_PER_HOUR` | `5` | Password resets an hour, each key its own bucket: asking for a link per caller (`ip:`) and per address named (`em:`, lower-cased), setting a password per link (`tok:`), whoever sends it, and typing the password behind a session per account (`pw:`: Change password, Sign out everywhere, Delete account). On top of `AUTH_RATE_PER_IP_PER_MINUTE` and the email caps |
 | `CATALOG_RECONCILE_SECONDS` | `60` | Fallback reload interval if a notification is missed |
 | `TRUSTED_PROXY_HOPS` | `0` | `1` behind the ALB or compose Nginx |
-| `DEV_LOGIN` | `false` | `true` only on a local stack: adds `POST /api/dev/login {username}`, a session for a confirmed account without its password, answered as `/api/auth/login` is, for `./scripts/dev.py --login-as`. Startup **refuses** it together with `SECURE_COOKIES=true`, so a TLS deployment cannot start with it on; without it the route does not exist (404) |
+| `DEV_LOGIN` | `false` | `true` only on a local stack: adds `POST /api/dev/login {username}`, a session for an account without its password, answered as `/api/auth/login` is, for `./scripts/dev.py --login-as`. Startup **refuses** it together with `SECURE_COOKIES=true`, so a TLS deployment cannot start with it on; without it the route does not exist (404) |
 
 Client-side limits (14-day download window, 500 MB answer storage soft limit,
 the 2 GB `ROW_STORAGE_BUDGET` for rows and question keys, the 50,000-row
@@ -6008,7 +6052,8 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
     reload; and offline the new worker cannot even be fetched, so the state
     persists until the device is online and the handshake runs.
 - **Granting admin** in production is `scripts/confirm-user.sh --admin USER`,
-  one SQL statement run from the ops task. It is documented in the runbook.
+  one batch of SQL run from the ops task (it also makes the account from the
+  username's registration, when its address was never confirmed). It is documented in the runbook.
 - **Catalog uploads** happen in the browser at `/admin`. Every running instance
   picks up changes through `LISTEN/NOTIFY`, with no restart or redeploy.
 - **Backups** have their own section: see [Backups](#backups).
@@ -6998,17 +7043,26 @@ they run in parallel and leave nothing behind.
     `503` with `Retry-After` and records nothing, and the same batch sent again
     is applied in full; and the purge task running against a concurrent sync
     for the same user completes without a deadlock.
-  - Re-registering an unconfirmed email re-sends a code while the old one is
-    valid and replaces the account once it has expired, and its username is
-    taken while the code is valid and free after; a fourth confirmation,
+  - A registration makes no `users` row: it is kept with its own username,
+    password hash and code, and confirming makes the account with them.
+    Registering again for an address not yet confirmed sends another code,
+    with the same username (never "taken" for its own address) or another
+    username and password; each logs in `403` with its own password while it
+    waits; the code followed decides the account's username and password,
+    first or last; the address's other codes and a second use are then
+    `400`; a stranger's earlier registration of the address leaves the owner
+    with the owner's own password; two of an address's codes confirmed at once
+    make one account; a username is taken for another address while the code
+    is valid and free after, and an expired code is refused; a fourth confirmation,
     notice or reset email to one address from one IP within 24 hours (with
     `RESET_RATE_PER_HOUR` raised, so the reset limits do not answer first) is not sent
     while the response stays the same and a request from another IP still
     sends, while the **twenty-first** to that address within 24 hours is not sent
     from any IP, however many addresses the requests come from, so the per-IP cap
-    cannot be walked around with a fresh IP each time; and a replacement made under the cap still
-    replaces the account and sends its code with the next registration after
-    the window; the purge task deletes stale unconfirmed accounts. An
+    cannot be walked around with a fresh IP each time; and a registration past the cap is answered
+    the same, kept nowhere and not sent, and the next one after the window is
+    kept and sent; the purge task deletes registrations whose code has expired
+    and leaves the valid ones. An
     address with a character outside ASCII is a field error at register,
     creating and sending nothing, and a reset asked for one is answered `202`.
   - A 300,000-question `finish` and reset complete within budget, and the reset

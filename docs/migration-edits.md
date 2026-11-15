@@ -148,3 +148,25 @@ first deploy freezes the file.
 - `cascades` gains `UNIQUE (user_id, name)`: an account's cascades each have
   their own name, the Trash included (PLAN.md § Creating a cascade). Start
   over, which used to copy the name, numbers it instead.
+
+## 2026-11-14: a registration keeps its own username and password with its code
+
+The adversarial review's R1-07: a second registration for an unconfirmed
+address kept the first one's username and password, and a lost confirmation
+mail could not be sent again. Nothing is deployed, so the edit is in place,
+before the first deploy freezes the file.
+
+- `email_confirmations` is gone. `pending_registrations` takes its place: one
+  row per registration, with its `username`, `email`, `password_hash`,
+  `code_hash` (unique), `created_at` and `expires_at`, indexed by `email` and
+  by `username`. Neither is unique there: an address may have several
+  registrations waiting, and they may share a username.
+- `users.email_confirmed_at` is gone. A `users` row is made when a
+  registration's code is confirmed and never before, from that registration's
+  username, address and hash, so every account is confirmed and `created_at`
+  is when.
+
+`scripts/confirm-user.sh` now makes the account from the username's latest
+registration, and `scripts/scrub.sql` empties the new table.
+
+A database made by the earlier file no longer matches: `./scripts/dev.py --reset`.

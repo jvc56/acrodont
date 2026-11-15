@@ -18,7 +18,7 @@ this page parses.
 | `scripts/set-setting.sh KEY=VALUE` | Changes a Terraform setting through the same plan gate |
 | `scripts/prod-sql.sh "SQL"` | Runs one batch of SQL from an ops task inside the VPC |
 | `scripts/prod-shell.sh` | Opens a shell in an ops task: psql, pg_restore, restore.py |
-| `scripts/confirm-user.sh [--admin] USER` | Confirms an account by hand, and can grant admin |
+| `scripts/confirm-user.sh [--admin] USER` | Confirms a registration by hand (within 24 hours of registering), and can grant admin |
 | `scripts/init-db-roles.sh` | First-time database roles and SSM secrets |
 | `scripts/rotate-db-password.sh` | Rotates the app or backup password, or the signing key |
 | `scripts/cutover-db.sh DATABASE` | Points the site and the nightly backup at a restored database |
@@ -155,7 +155,9 @@ DNS and the GitHub repository.
 
 13. **The first admin and the first catalog.** Register through the site, then
     confirm and promote yourself (the mail may not arrive while SES is in the
-    sandbox):
+    sandbox). A registration is not an account until it is confirmed, and it
+    is deleted 24 hours after registering: run this within the day, or
+    register again first.
 
     ```bash
     scripts/confirm-user.sh --admin YOUR_NAME
@@ -272,7 +274,10 @@ RDS keeps and rotates in Secrets Manager. A shell task stops itself after 4
 hours, and leaving the shell does not stop it. ECS Exec sessions are not
 logged.
 
-Granting admin, or confirming an account while SES is in the sandbox:
+Granting admin, or confirming a registration while SES is in the sandbox
+(it makes the account from the username's latest registration, which must be
+less than 24 hours old; it fails, changing nothing, when the username is
+neither an account nor a registration still waiting):
 
 ```bash
 scripts/confirm-user.sh --admin USERNAME

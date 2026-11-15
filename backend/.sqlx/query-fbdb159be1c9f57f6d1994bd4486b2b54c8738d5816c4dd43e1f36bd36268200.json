@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (SELECT count(*) FROM users)\n                + (SELECT count(DISTINCT email) FROM pending_registrations WHERE expires_at > now()) AS \"n!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fbdb159be1c9f57f6d1994bd4486b2b54c8738d5816c4dd43e1f36bd36268200"
+}

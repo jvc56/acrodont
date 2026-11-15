@@ -56,7 +56,7 @@ async fn run_locked(state: &AppState) -> anyhow::Result<()> {
     };
     step("purge_trash", purge_trash(state).await);
     step("prune_sync_records", prune_sync_records(state).await);
-    step("delete_stale_unconfirmed", delete_stale_unconfirmed(state).await.map(drop));
+    step("delete_expired_registrations", delete_expired_registrations(state).await.map(drop));
     step("prune_export_tokens", prune_export_tokens(state).await.map(drop));
     step("prune_catalog_status", prune_catalog_status(state).await.map(drop));
     step("recount_storage", recount_storage(state).await.map(drop));
@@ -219,18 +219,13 @@ async fn prune_user_tombstones(state: &AppState, user: Uuid, days: i32) -> anyho
     Ok(())
 }
 
-/// Accounts never confirmed whose last confirmation code expired more than
-/// 7 days ago, so an abandoned registration does not hold an address forever.
-pub async fn delete_stale_unconfirmed(state: &AppState) -> anyhow::Result<u64> {
-    let r = sqlx::query!(
-        "DELETE FROM users u
-         WHERE u.email_confirmed_at IS NULL
-           AND NOT EXISTS (SELECT 1 FROM email_confirmations c
-                           WHERE c.user_id = u.id
-                             AND c.expires_at > now() - interval '7 days')"
-    )
-    .execute(&state.db)
-    .await?;
+/// Registrations whose code has expired. One holds nothing from then on,
+/// neither its username nor a place, and nothing can confirm it: only its
+/// password hash is left, which is no reason to keep it.
+pub async fn delete_expired_registrations(state: &AppState) -> anyhow::Result<u64> {
+    let r = sqlx::query!("DELETE FROM pending_registrations WHERE expires_at <= now()")
+        .execute(&state.db)
+        .await?;
     Ok(r.rows_affected())
 }
 
