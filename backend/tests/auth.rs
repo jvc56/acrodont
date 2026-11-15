@@ -1433,6 +1433,93 @@ async fn concurrent_registrations_cannot_pass_max_accounts(pool: sqlx::PgPool) {
     assert_eq!(account_count(&app).await, MAX_ACCOUNTS);
 }
 
+/// REGISTRATIONS_PER_IP_PER_DAY: one client address keeps so many
+/// registrations a day, whatever addresses it names, a known one included; a
+/// request refused for its fields spends none; the next is `429`, keeps
+/// nothing and sends nothing; another client address is not held up.
+#[sqlx::test]
+async fn registrations_are_limited_per_client_address(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("REGISTRATIONS_PER_IP_PER_DAY", "3")]).await;
+    app.signed_in("known").await; // the first, from 203.0.113.1
+    let mut c = app.client();
+    let r = c.post("/api/auth/register", json!({"username": "a!", "email": "nope", "password": "password"})).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(c.post("/api/auth/register", reg("one", "one@example.com")).await.status, StatusCode::ACCEPTED);
+    assert_eq!(c.post("/api/auth/register", reg("two", "known@example.com")).await.status, StatusCode::ACCEPTED);
+    for (u, e) in [("three", "three@example.com"), ("again", "known@example.com")] {
+        let r = c.post("/api/auth/register", reg(u, e)).await;
+        assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS, "{u}");
+        // A third of a day to the next one.
+        assert!(r.retry_after().is_some_and(|s| s > 3_600), "{:?}", r.retry_after());
+    }
+    assert!(app.settled_mail_to("three@example.com").await.is_empty());
+    assert_eq!(pending(&app).await, 1, "one@ alone is waiting");
+    let mut elsewhere = app.client_from("198.51.100.30");
+    assert_eq!(elsewhere.post("/api/auth/register", reg("three", "three@example.com")).await.status, StatusCode::ACCEPTED);
+}
+
+/// MAX_UNCONFIRMED_PLACES: of the addresses with a registration waiting only
+/// so many hold a place, so registrations no one confirms cannot close the
+/// site; and the ceiling is held again at confirmation, where a code refused
+/// for it stays valid for when a place is free.
+#[sqlx::test]
+async fn unconfirmed_registrations_hold_only_so_many_places(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("MAX_UNCONFIRMED_PLACES", "2")]).await;
+    fill_accounts(&app, MAX_ACCOUNTS - 3).await;
+    // Five wait: two of them are counted, and the site stays open at one short.
+    let mut codes = Vec::new();
+    for i in 0..5 {
+        let email = format!("wait{i}@example.com");
+        let r = app.client_from(&format!("198.51.100.{i}")).post("/api/auth/register", reg(&format!("wait{i}"), &email)).await;
+        assert_eq!(r.status, StatusCode::ACCEPTED, "registration {i}");
+        codes.push(app.latest_code(&email).await);
+    }
+    assert_eq!(account_count(&app).await, MAX_ACCOUNTS + 2, "more are waiting than there are places");
+    // Three places: three of the five become accounts, the fourth is told the site is full.
+    let mut c = app.client();
+    for code in &codes[..3] {
+        assert_eq!(c.post("/api/auth/confirm-email", json!({ "code": code })).await.status, StatusCode::NO_CONTENT);
+    }
+    let r = c.post("/api/auth/confirm-email", json!({ "code": codes[3] })).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.json()["error"], "registration_closed");
+    assert_eq!(users(&app).await, MAX_ACCOUNTS);
+    let r = c.post("/api/auth/register", reg("late", "late@example.com")).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    // Its code was not spent: with a place free, it makes the account.
+    sqlx::query("DELETE FROM users WHERE username = 'filler1'").execute(app.db()).await.unwrap();
+    assert_eq!(c.post("/api/auth/confirm-email", json!({ "code": codes[3] })).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(login_status(&app, "192.0.2.60", "wait3", PASSWORD).await, StatusCode::OK);
+}
+
+/// MAIL_MAX_PER_HOUR: past it a registration is answered the same, kept
+/// nowhere and not sent, and a reset is not sent; an hour on, mail goes again.
+#[sqlx::test]
+async fn mail_is_capped_by_the_hour_over_every_address(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("MAIL_MAX_PER_HOUR", "3")]).await;
+    app.signed_in("owner").await; // one mail
+    for i in 0..2 {
+        let email = format!("cap{i}@example.com");
+        let r = app.client_from(&format!("198.51.100.{i}")).post("/api/auth/register", reg(&format!("cap{i}"), &email)).await;
+        assert_eq!(r.status, StatusCode::ACCEPTED);
+        assert_eq!(app.mail_to(&email, 1).await.len(), 1);
+    }
+    let waiting = pending(&app).await;
+    let mut c = app.client_from("198.51.100.9");
+    let r = c.post("/api/auth/register", reg("capped", "capped@example.com")).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    assert_eq!(r.json(), json!({}));
+    let r = c.post("/api/auth/reset-password", json!({ "email": "owner@example.com" })).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    assert!(app.settled_mail_to("capped@example.com").await.is_empty());
+    assert_eq!(app.mail_to("owner@example.com", 1).await.len(), 1, "the confirmation alone");
+    assert_eq!(pending(&app).await, waiting, "no registration kept that no mail carries");
+    app.state.clock.advance(chrono::Duration::hours(1) + chrono::Duration::seconds(1));
+    let r = c.post("/api/auth/register", reg("capped", "capped@example.com")).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    assert_eq!(app.mail_to("capped@example.com", 1).await.len(), 1);
+}
+
 /// A local stack (DEV_LOGIN on) does not close: the end-to-end journeys
 /// register an account per spec on a stack kept between runs.
 #[sqlx::test]

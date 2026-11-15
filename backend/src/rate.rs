@@ -40,6 +40,18 @@ impl<K: Hash + Eq + Clone> Keyed<K> {
         }
     }
 
+    /// A bucket of `n`, refilled at `n` a day.
+    pub fn per_day(n: u32) -> Self {
+        let n = NonZeroU32::new(n).expect("rates are validated as >= 1");
+        let quota = Quota::with_period(Duration::from_secs(86_400) / n.get())
+            .expect("a day divided by a u32 is not zero")
+            .allow_burst(n);
+        Keyed {
+            limiter: RateLimiter::keyed(quota),
+            clock: DefaultClock::default(),
+        }
+    }
+
     pub fn check(&self, key: &K) -> Result<(), ApiError> {
         self.limiter
             .check_key(key)
@@ -137,6 +149,10 @@ impl<K: Hash + Eq + Clone> FailureBuckets<K> {
 /// Every bucket, each with its named refill rate from Configuration.
 pub struct Limiters {
     pub auth_ip: Keyed<IpAddr>,
+    /// Registrations that passed validation, `REGISTRATIONS_PER_IP_PER_DAY`
+    /// per client address: each keeps a row and mails whatever address it
+    /// names.
+    pub register_ip: Keyed<IpAddr>,
     /// Password resets, `RESET_RATE_PER_HOUR` (5) an hour per key: `ip:` the
     /// caller and `em:` the address named, for asking; `tok:` the link, for
     /// setting; `pw:` the account, for each password typed behind a session
@@ -163,6 +179,7 @@ impl Limiters {
     pub fn new(c: &Config) -> Self {
         Limiters {
             auth_ip: Keyed::per_minute(c.auth_rate_per_ip_per_minute),
+            register_ip: Keyed::per_day(c.registrations_per_ip_per_day),
             reset: Keyed::per_hour(c.reset_rate_per_hour),
             catalog_ip: Keyed::per_minute(c.catalog_rate_per_minute),
             login_fail_ip: FailureBuckets::per_minute(c.login_failures_per_ip_per_minute),
@@ -184,6 +201,7 @@ impl Limiters {
     /// for every key it has ever seen.
     pub fn prune(&self) {
         self.auth_ip.prune();
+        self.register_ip.prune();
         self.reset.prune();
         self.catalog_ip.prune();
         self.login_fail_ip.prune();
@@ -257,6 +275,18 @@ mod tests {
         assert_eq!(ceil_secs(Duration::from_millis(1)), 1);
         assert_eq!(ceil_secs(Duration::from_millis(500)), 1);
         assert_eq!(ceil_secs(Duration::from_millis(1001)), 2);
+    }
+
+    #[test]
+    fn a_daily_limit_is_a_burst_and_asks_for_the_wait_to_the_next_token() {
+        let k = Keyed::<u8>::per_day(10);
+        for i in 0..10 {
+            assert!(k.check(&1).is_ok(), "request {i}");
+        }
+        // A tenth of a day to the next token.
+        let Err(ApiError::TooManyRequests { retry_after_secs }) = k.check(&1) else { panic!("an eleventh passed") };
+        assert!((8_630..=8_640).contains(&retry_after_secs), "{retry_after_secs}");
+        assert!(k.check(&2).is_ok());
     }
 
     #[test]

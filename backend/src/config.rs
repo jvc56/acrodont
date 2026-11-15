@@ -34,6 +34,13 @@ pub struct Config {
     pub mail_from: String,
     pub mail_outbox_dir: Option<String>,
     pub mail_max_per_second: u32,
+    /// Confirmation, notice and reset mails in an hour, to every address together.
+    pub mail_max_per_hour: u32,
+    /// Registrations a day from one client address.
+    pub registrations_per_ip_per_day: u32,
+    /// How many addresses with a registration not yet confirmed count toward
+    /// `MAX_ACCOUNTS`.
+    pub max_unconfirmed_places: u32,
     pub public_url: String,
     pub max_quiz_questions: u32,
     /// An account's server storage in bytes (STORAGE_LIMIT_PLAN.md § S2);
@@ -137,6 +144,9 @@ impl Config {
             mail_from: r.string("MAIL_FROM", "no-reply@acrodont.local"),
             mail_outbox_dir,
             mail_max_per_second: r.parse_rate("MAIL_MAX_PER_SECOND", 1)?,
+            mail_max_per_hour: r.parse_rate("MAIL_MAX_PER_HOUR", 200)?,
+            registrations_per_ip_per_day: r.parse_rate("REGISTRATIONS_PER_IP_PER_DAY", 10)?,
+            max_unconfirmed_places: r.parse("MAX_UNCONFIRMED_PLACES", 50)?,
             public_url: r.string("PUBLIC_URL", "http://localhost:5173"),
             max_quiz_questions,
             max_storage_bytes_per_user,
@@ -259,6 +269,7 @@ mod tests {
         assert_eq!(c.search_concurrency, 2);
         assert_eq!(c.api_max_body_bytes, 16_777_216);
         assert_eq!(c.mail_backend, MailBackend::Console);
+        assert_eq!((c.registrations_per_ip_per_day, c.max_unconfirmed_places, c.mail_max_per_hour), (10, 50, 200));
         assert_eq!(c.bind_addr.to_string(), "0.0.0.0:8080");
     }
 
@@ -273,6 +284,9 @@ mod tests {
             ("MAX_STORAGE_BYTES_PER_USER", "100 MB"),
             ("EXPORT_CONCURRENCY", "0"),
             ("MAIL_MAX_PER_SECOND", "0"),
+            ("MAIL_MAX_PER_HOUR", "0"),
+            ("REGISTRATIONS_PER_IP_PER_DAY", "0"),
+            ("MAX_UNCONFIRMED_PLACES", "-1"),
             ("DEV_LOGIN", "yes"),
             ("SESSION_SIGNING_KEY", "abcd"),
         ] {

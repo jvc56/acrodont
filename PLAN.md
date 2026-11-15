@@ -5023,7 +5023,16 @@ The flows are the conventional ones, built directly on Axum:
   run inside the registration's transaction, after it takes a
   transaction-scoped advisory lock that every registration and every
   confirmation takes in turn, so concurrent registrations cannot pass the
-  limit together, and two addresses cannot come to hold one username. At the limit every
+  limit together, and two addresses cannot come to hold one username.
+  **Of the addresses waiting, at most `MAX_UNCONFIRMED_PLACES` (50) are
+  counted**, so registrations no one will confirm cannot close the site: one
+  client could otherwise take every place for a day, and again the next. More
+  may then be waiting than there are places, so **the ceiling is held again
+  when a code is confirmed**: with `MAX_ACCOUNTS` accounts already, the
+  confirmation is refused `403 registration_closed`, its code unspent, and the
+  page says "Acrodont isn't taking new accounts right now. Your link works
+  until it expires: try it again later." It takes more than fifty people
+  waiting at once, at the ceiling, for anyone to see that. At the limit every
   registration gets `403 registration_closed` and sends nothing, a new address
   and a known one alike; the check runs before the address is looked up, so a
   closed site reveals nothing about which addresses have accounts. The
@@ -5031,6 +5040,15 @@ The flows are the conventional ones, built directly on Axum:
   with `DEV_LOGIN` on, which only a local one can have, does not apply the
   limit, since the end-to-end journeys register an account per spec on a stack
   kept between runs.
+  **One client address keeps `REGISTRATIONS_PER_IP_PER_DAY` (10)
+  registrations a day**: a bucket of ten, refilled at ten a day, taken once a
+  request has passed its field checks and before its password is hashed,
+  whatever then becomes of it, for a known address and a new one alike. Past
+  it the answer is `429` with `Retry-After`, which the page reads as "Too
+  many attempts. Try again in 3 hours." Each registration mails whatever
+  address it names, and the per-minute rate alone let one client mail 43,200
+  strangers a day. A household or a club registering together from one
+  address is ten people a day.
   The password is hashed on every path, whether or not the hash is stored, so
   the response takes the same time whichever branch runs.
   If that email belongs to an account, its owner is emailed a notice instead
@@ -5048,8 +5066,15 @@ The flows are the conventional ones, built directly on Axum:
   expiry. At most three confirmation, notice or reset emails are sent to one
   address in 24 hours per requesting IP, and twenty per address in all; further
   requests get the same response and send nothing, and the per-IP scope means
-  a stranger cannot use the cap to block the address's owner. A
-  registration whose mail the cap would hold back is answered the same and
+  a stranger cannot use the cap to block the address's owner. **And at
+  most `MAIL_MAX_PER_HOUR` (200) to every address together in any hour**,
+  whatever the kind: the SES account and its reputation are shared with
+  birdtest, and bounces from a script's invented addresses would pause
+  sending for both sites. A mail held back for it is logged with
+  `alarm = "mail_capped"` (at most once a minute), which raises the
+  `acrodont-mail-capped` alarm as `mail_failed` raises its own; a mail one
+  cap holds back takes no slot of another. A
+  registration whose mail a cap would hold back is answered the same and
   **not kept**: a code no mail carries can never be followed. The
   `/register/check-email` page says "We sent a confirmation link to …. Follow
   it within 24 hours to finish creating your account. If it doesn't arrive,
@@ -5771,6 +5796,9 @@ startup rather than falling back to a default.
 | `LOGIN_FAILURES_PER_IP_PER_MINUTE` | `10` | Failed logins per IP; a successful login spends nothing, so a room logging in together is not locked out |
 | `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE` | `10` | Failed logins per username, taken before any Argon2 verify and given back unless it fails |
 | `LOGINS_PER_USERNAME_PER_MINUTE` | `20` | Logins per username whose password was checked, right or wrong: each costs an Argon2 verify. Taken before the verify and given back only when the request was never judged |
+| `REGISTRATIONS_PER_IP_PER_DAY` | `10` | Per IP: registrations that passed their field checks, a bucket of this many refilled at this many a day. `429` with `Retry-After` past it. Local stacks raise it (`docker/backend.defaults.env`): every browser there comes from one address |
+| `MAX_UNCONFIRMED_PLACES` | `50` | How many addresses with a registration not yet confirmed count toward `MAX_ACCOUNTS`; the ceiling is held again at confirmation |
+| `MAIL_MAX_PER_HOUR` | `200` | Confirmation, notice and reset mails in any hour, to every address together, per instance. Past it nothing is sent, a registration is not kept, and `alarm = "mail_capped"` is logged. Local stacks raise it |
 | `AUTH_RATE_PER_IP_PER_MINUTE` | `30` | Per IP; register, confirm-email, reset-password and its confirm. Not `GET /api/auth/me`, which needs a session, and not logout |
 | `RESET_RATE_PER_HOUR` | `5` | Password resets an hour, each key its own bucket: asking for a link per caller (`ip:`) and per address named (`em:`, lower-cased), setting a password per link (`tok:`), whoever sends it, and typing the password behind a session per account (`pw:`: Change password, Sign out everywhere, Delete account). On top of `AUTH_RATE_PER_IP_PER_MINUTE` and the email caps |
 | `CATALOG_RECONCILE_SECONDS` | `60` | Fallback reload interval if a notification is missed |
@@ -5967,8 +5995,9 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
     dumps cover anything older. An RDS event subscription reports low storage,
     failure and allocation near the autoscaling ceiling.
   - SES domain identity, MAIL FROM subdomain, account-level suppression of
-    bounces and complaints, and alarms on the bounce and complaint rates and on
-    any failed send.
+    bounces and complaints, and alarms on the bounce and complaint rates, on
+    any failed send, and on the hourly mail cap being reached
+    (`acrodont-mail-capped`).
   - SSM parameters, referenced **by ARN only**: declared as resources, their
     decrypted values would sit in Terraform's state. `scripts/init-db-roles.sh`
     creates them.
@@ -6483,6 +6512,11 @@ Pure functions and in-memory structures, no database and no network.
 - **Configuration**: `MAX_QUIZ_QUESTIONS` defaults to 300,000 and 300,001
   fails startup; `MAX_STORAGE_BYTES_PER_USER` defaults to 10,000,000 and `0`
   or a non-number fails startup.
+- **Mail and registration caps** (`auth/mail.rs`, `rate.rs`): the hourly mail
+  cap counts every address together over the hour just past, and a mail it
+  holds back takes no slot of its address's own caps; a daily limit is a
+  burst of its size and then asks for the wait to the next token, a tenth of
+  a day at ten a day.
 
 **Frontend** (`npm run check`, then Vitest): `lib/cascade` against the shared
 rule and shuffle vectors, `lib/local` against `fake-indexeddb`, `lib/sync`'s
@@ -7064,7 +7098,16 @@ they run in parallel and leave nothing behind.
     cannot be walked around with a fresh IP each time; and a registration past the cap is answered
     the same, kept nowhere and not sent, and the next one after the window is
     kept and sent; the purge task deletes registrations whose code has expired
-    and leaves the valid ones. A username in another case logs in, and dev-logs
+    and leaves the valid ones. With `REGISTRATIONS_PER_IP_PER_DAY` lowered to
+    3, a client address's fourth registration is `429` for a new address and
+    a known one alike, keeping and sending nothing, a request refused for its
+    fields having spent none, and another client address still registers; with
+    `MAX_UNCONFIRMED_PLACES` at 2 and three places left, five registrations
+    are all accepted, three of their codes make accounts, the fourth is
+    refused `403 registration_closed` with its code unspent and makes its
+    account once a place is free; with `MAIL_MAX_PER_HOUR` at 3, a fourth
+    mail in the hour is not sent, a registration past it is kept nowhere and
+    a reset past it sends nothing, and mail goes again an hour on. A username in another case logs in, and dev-logs
     in, as the account; a reset asked for the address in another case is
     sent; and registering the name or the address in another case is "taken"
     and the notice. An
@@ -7254,7 +7297,10 @@ for the purge journey (`@purge`), and `MAIL_BACKEND=file` so the confirmation
 code can be read out of the stack's mail outbox (or `console`, out of the
 backend's logs — which is also how a developer confirms an account locally).
 Every suite stack also raises the per-IP auth and catalog limits
-(`AUTH_RATE_PER_IP_PER_MINUTE`, `CATALOG_RATE_PER_MINUTE`), because every
+(`AUTH_RATE_PER_IP_PER_MINUTE`, `CATALOG_RATE_PER_MINUTE`), and every local
+stack the registrations a day per address and the mails an hour
+(`REGISTRATIONS_PER_IP_PER_DAY`, `MAIL_MAX_PER_HOUR`, in
+`docker/backend.defaults.env`), because every
 browser of every Playwright worker comes from `127.0.0.1`; no journey asserts
 those limits, and the integration tests do. A state that only data can make,
 such as one account's own storage limit (`users.storage_limit_bytes`, for

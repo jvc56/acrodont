@@ -203,6 +203,12 @@ async fn register(
     if !errors.is_empty() {
         return Err(ApiError::Fields(errors));
     }
+    // A registration that could be kept: one of this address's ten a day
+    // (`REGISTRATIONS_PER_IP_PER_DAY`), taken before the hash and whatever
+    // becomes of it, a known address and a new one alike. Without it one
+    // client fills the unconfirmed places and mails strangers at the
+    // per-minute rate for as long as it likes.
+    state.limits.register_ip.check(&ip)?;
 
     // Hashed on every path, stored or not, so every branch takes the same time.
     let hash = password::hash(body.password).await?;
@@ -215,12 +221,17 @@ async fn register(
     // same to everyone and reveals nothing about which addresses have accounts.
     register_lock(&mut tx).await?;
     // What holds a place: an account, and an address with a registration
-    // whose code is still valid, once however many registrations it has. An
-    // abandoned registration frees its place when its code expires, without
-    // waiting for the purge task.
+    // whose code is still valid, once however many registrations it has; but
+    // of those addresses no more than `MAX_UNCONFIRMED_PLACES`, so that
+    // registrations no one will confirm cannot close the site (the ceiling
+    // itself is held again when a code is confirmed). An abandoned
+    // registration frees its place when its code expires, without waiting
+    // for the purge task.
     let accounts = sqlx::query_scalar!(
         r#"SELECT (SELECT count(*) FROM users)
-                + (SELECT count(DISTINCT email) FROM pending_registrations WHERE expires_at > now()) AS "n!""#
+                + least((SELECT count(DISTINCT email) FROM pending_registrations WHERE expires_at > now()), $1)
+                AS "n!""#,
+        i64::from(state.config.max_unconfirmed_places),
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -321,6 +332,14 @@ async fn confirm_email(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(invalid)?;
+    // MAX_ACCOUNTS, held here too: only some of the registrations waiting
+    // were counted when they were made, so more may be waiting than there
+    // are places. One refused keeps its code, which works once a place is
+    // free and it has not expired.
+    let accounts = sqlx::query_scalar!(r#"SELECT count(*) AS "n!" FROM users"#).fetch_one(&mut *tx).await?;
+    if accounts >= MAX_ACCOUNTS && !state.config.dev_login {
+        return Err(ApiError::Forbidden("registration_closed"));
+    }
     // While its code is valid a registration's username and address are no
     // one else's (`register` sees to it under the same lock), so a conflict
     // here is an account made by hand in SQL: the code is refused and stays.

@@ -47,7 +47,7 @@ impl AppState {
             db,
             keys: Arc::new(Keys::new(config.session_signing_key)),
             limits: Arc::new(Limiters::new(&config)),
-            email_caps: Arc::new(EmailCaps::new(clock.clone())),
+            email_caps: Arc::new(EmailCaps::new(clock.clone(), config.mail_max_per_hour)),
             clock,
             mailer,
             catalog: Arc::new(Catalog::default()),

@@ -56,6 +56,15 @@ run "defaults_plan" {
     error_message = "a running service has its down alarm and its application 5xx alarm"
   }
   assert {
+    condition = (
+      aws_cloudwatch_log_metric_filter.mail_capped.pattern == "{ $.fields.alarm = \"mail_capped\" }" &&
+      aws_cloudwatch_metric_alarm.mail_capped.metric_name == one(aws_cloudwatch_log_metric_filter.mail_capped.metric_transformation).name &&
+      aws_cloudwatch_metric_alarm.mail_capped.threshold == 1 &&
+      length(aws_cloudwatch_metric_alarm.mail_capped.alarm_actions) == 1
+    )
+    error_message = "the hourly mail cap being reached raises an alarm from the backend's alarm = \"mail_capped\" log line"
+  }
+  assert {
     condition     = length(aws_lb_listener_rule.www) == 0
     error_message = "www is answered only when redirect_www asks for it"
   }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT (SELECT count(*) FROM users)\n                + (SELECT count(DISTINCT email) FROM pending_registrations WHERE expires_at > now()) AS \"n!\"",
+  "query": "SELECT count(*) AS \"n!\" FROM users",
   "describe": {
     "columns": [
       {
@@ -17,5 +17,5 @@
       null
     ]
   },
-  "hash": "fbdb159be1c9f57f6d1994bd4486b2b54c8738d5816c4dd43e1f36bd36268200"
+  "hash": "d197ab7a7adb0e8ed612f1cc589030419a5f8707ce87f0bafca1aefdd71459b3"
 }

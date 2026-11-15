@@ -233,7 +233,8 @@ scripts/set-setting.sh task_cpu=1024 task_memory=4096
 task's memory, not shared, so with two tasks a caller gets each limit twice:
 the login limit becomes twenty failures a minute per username instead of ten
 (and forty logins a minute per username instead of twenty),
-and the same goes for the per-address, search, sync, export and mail limits,
+and the same goes for the per-address, search, sync, export and mail limits
+(the hourly mail cap and the registrations a day per address among them),
 for the event streams an account may hold open (16 a task) and for the Argon2
 turns. Terraform refuses more than two tasks. Run two only
 when one cannot carry the load, and go back to one afterwards. (A deploy's
@@ -317,6 +318,7 @@ All alarms go to the `acrodont-alarms` SNS topic and on to `alarm_email`.
 | `acrodont-sync-error-rejection` | A sync operation rejected as `error`: a database error the rules did not expect | Find `sync operation failed with a database error` in the logs |
 | `acrodont-ses-bounce-rate`, `-complaint-rate` | Nearing the rate at which SES pauses sending | Who is registering with bad addresses? Bounced addresses are suppressed automatically |
 | `acrodont-mail-failed` | An account mail failed to send | The log line has SES's reason |
+| `acrodont-mail-capped` | More than `MAIL_MAX_PER_HOUR` (200) account mails were asked for in an hour, and the rest are not being sent: registrations past it are not kept, resets past it send nothing | Who is registering? The Nginx lines for `POST /api/auth/register` in the log group, by client address. A script: it is held to 10 registrations a day per address and the cap is doing its work. Real people: the cap is a backend setting (`MAIL_MAX_PER_HOUR`) |
 | Budget, cost anomaly | Spending above 85% of `monthly_budget_usd`, or an anomaly of `anomaly_threshold_usd` or more | Cost Explorer, by service |
 
 The `acrodont-sync` dashboard graphs sync rejections by type and reason. Some

@@ -69,3 +69,36 @@ resource "aws_cloudwatch_metric_alarm" "mail_failed" {
   treat_missing_data  = "notBreaching"
   alarm_actions       = [aws_sns_topic.alarms.arn]
 }
+
+# The backend sends at most MAIL_MAX_PER_HOUR account mails an hour (200 by
+# default), to every address together: registrations each name a new address,
+# so no per-address cap sees a script that mails strangers, and the SES
+# account's reputation is shared with birdtest. A mail held back for it is
+# logged with alarm = "mail_capped" (backend/src/auth/mail.rs), at most once a
+# minute. Either someone is abusing registration or the site has outgrown
+# the cap.
+resource "aws_cloudwatch_log_metric_filter" "mail_capped" {
+  name           = "acrodont-mail-capped"
+  log_group_name = aws_cloudwatch_log_group.app.name
+  pattern        = "{ $.fields.alarm = \"mail_capped\" }"
+  metric_transformation {
+    name          = "MailCapped"
+    namespace     = "Acrodont/Mail"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "mail_capped" {
+  alarm_name          = "acrodont-mail-capped"
+  alarm_description   = "The hourly cap on account mail was reached and mail is being held back; the backend's log says how many an hour"
+  namespace           = "Acrodont/Mail"
+  metric_name         = "MailCapped"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+}
