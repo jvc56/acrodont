@@ -3345,7 +3345,18 @@ which alarms. Then:
    sequence: `UPDATE users SET sync_seq = sync_seq + 1 RETURNING sync_seq`. The
    lock also means two syncs for the same user never run concurrently. Every row
    this request changes is stamped with that value.
-2. Operations are applied in `device_seq` order, one savepoint each. An
+2. Operations are applied in `device_seq` order, each inside a savepoint: one
+   of its own, except that **a run of grades and cursor moves shares one**.
+   Each of those makes every check before its first write, so a rejected one
+   has written nothing and needs no rollback, and a savepoint apiece made 500
+   subtransactions of a full batch, which cost more than the statements inside
+   them. For the same economy **a run's grades write their cascade's row
+   once**: all a grade changes there is the activity time and the sequence, so
+   the row is written with the latest of the run's times before the next
+   operation of another kind, or at the end of the batch, and every operation
+   finds the row as each grade's own write would have left it. Results, their
+   order, and what other devices pull are the same as with a savepoint and a
+   cascade write for every grade. An
    operation whose `id` has already been recorded **for this user** returns its
    recorded result without being applied again, the same result in every field,
    so a `finish` whose first response was lost is acknowledged on its second
@@ -3385,7 +3396,12 @@ which alarms. Then:
    operation is applied then. Any **other** database error, such as a
    constraint violation from a rules bug, records that one operation as
    `rejected` with reason `error`, logs the operation in full, and the batch
-   continues. `error` should never occur, so monitoring alarms on any.
+   continues. `error` should never occur, so monitoring alarms on any. When
+   the error is in a grade or a cursor move, whose savepoint is shared, or in
+   the write of a run's cascade row, the batch is first undone as a whole and
+   applied again the plain way (a savepoint for every operation, every grade
+   writing its cascade's row itself), so the outcome is the same: that
+   operation alone is rejected, and the rest are applied once.
 
 **Pull.**
 1. The server returns every row belonging to the user with `updated_seq` greater
@@ -7119,7 +7135,19 @@ they run in parallel and leave nothing behind.
     as `rejected` with reason `error`; a forced serialization failure answers
     `503` with `Retry-After` and records nothing, and the same batch sent again
     is applied in full; and the purge task running against a concurrent sync
-    for the same user completes without a deadlock.
+    for the same user completes without a deadlock. The same violation
+    injected into **one grade of a run** of grades and cursor moves rejects
+    that grade alone as `error`, with the grades and the cursor move on either
+    side of it applied and counted once; and injected into every write of the
+    cascade's row, it rejects each grade as `error`, applies the cursor move
+    and answers `200`.
+  - A batch of grades over three chunks with a cursor move, a regrade and a
+    rejected grade among them writes the cascade's row **once** (a trigger
+    counts), under **one** savepoint (the chunks' rows carry one transaction
+    id), and leaves the cascade's and the quiz's activity time at the latest
+    grade's, both stamped with the request's sequence, the counters right,
+    and all of it in another device's next pull. A trash between two grades
+    finds the row already written by the grades before it.
   - A registration makes no `users` row: it is kept with its own username,
     password hash and code, and confirming makes the account with them.
     Registering again for an address not yet confirmed sends another code,

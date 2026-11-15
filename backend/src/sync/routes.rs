@@ -314,6 +314,162 @@ async fn record(
     Ok(())
 }
 
+/// A batch's results in request order, and the operations to record with theirs.
+struct Batch<'a> {
+    results: Vec<OpResult>,
+    recorded: Vec<(&'a IncomingOp, OpResult)>,
+}
+
+enum BatchError {
+    Api(ApiError),
+    /// A database error that is not transient, met while grades and cursor
+    /// moves shared a savepoint: the batch is undone and applied again with
+    /// one savepoint an operation, which rejects that operation alone.
+    Redo,
+}
+
+fn transient(e: sqlx::Error) -> ApiError {
+    if is_transient(&e) {
+        ApiError::Unavailable { retry_after_secs: 1 }
+    } else {
+        ApiError::Internal(e.into())
+    }
+}
+
+/// Applies a request's operations in order, each to its own result.
+///
+/// **`ctx.each`** is the plain way: every operation inside a savepoint of its
+/// own, so one that fails with a database error is rolled back and rejected
+/// as `error` while the rest go on, and every grade writing its cascade's row.
+///
+/// **Otherwise** (the way every batch is tried first) the same results come
+/// from less work, which is what a backlog of 300,000 grades is measured in:
+///
+/// - **Grades and cursor moves share a savepoint** from the first of a run of
+///   them to the next operation of another kind. Each makes all of its checks
+///   before its first write, so one that is rejected has written nothing and
+///   needs no rollback. A savepoint an operation made 500 subtransactions of
+///   a full batch, and they cost more than the statements inside them.
+/// - **A grade's cascade row is written once** for the run
+///   (`ops::touch_cascades`), before any operation that is neither a grade
+///   nor a cursor move and at the end.
+///
+/// What that cannot give is the rejection of one grade whose statements fail
+/// in the database, since the savepoint is no longer its own. So any such
+/// error here (in a grade, a cursor move, or the cascade rows' write) returns
+/// `Redo`: the caller rolls back to where the batch began and calls this
+/// again with `ctx.each`, and the outcome is the plain way's by construction.
+/// Such an error "should never occur" (it raises an alarm), so the second
+/// pass is rare. Every other operation has its own savepoint either way.
+async fn apply_batch<'a>(
+    tx: &mut sqlx::PgConnection,
+    ctx: &Ctx,
+    req: &'a Request,
+    sync_seq: i64,
+    mark: i64,
+    mut prior: HashMap<Uuid, OpResult>,
+    mut used: HashSet<i64>,
+) -> Result<Batch<'a>, BatchError> {
+    let api = |e: sqlx::Error| BatchError::Api(transient(e));
+    // A failure of the cascade rows' write: transient as everywhere, else redone.
+    let touch_failed = |e: sqlx::Error| if is_transient(&e) { BatchError::Api(transient(e)) } else { BatchError::Redo };
+    let mut results = Vec::with_capacity(req.ops.len());
+    // Written together after the loop, one statement for the batch.
+    let mut recorded: Vec<(&IncomingOp, OpResult)> = Vec::with_capacity(req.ops.len());
+    // The cascades of the grades applied so far whose rows are not written
+    // yet, each with the latest of those grades' times.
+    let mut touched: Vec<(Uuid, DateTime<Utc>)> = Vec::new();
+    // Whether a savepoint shared by grades and cursor moves is open.
+    let mut run_open = false;
+    for op in &req.ops {
+        // A repeated operation returns its recorded result, unchanged.
+        if let Some(p) = prior.get(&op.id) {
+            results.push(p.clone());
+            continue;
+        }
+        if op.device_seq < 1 {
+            results.push(OpResult::rejected(op.id, Reason::Invalid));
+            continue;
+        }
+        // Below the device's mark with no record: acknowledged before, never applied again.
+        if op.device_seq < mark {
+            results.push(OpResult::applied(op.id));
+            continue;
+        }
+        let reused = used.contains(&op.device_seq);
+        if reused || !OP_TYPES.contains(&op.op_type.as_str()) {
+            results.push(OpResult::rejected(op.id, Reason::Invalid));
+            continue;
+        }
+        let result = if op.seen_seq < 0 || op.seen_seq > sync_seq {
+            OpResult::rejected(op.id, Reason::Invalid)
+        } else {
+            let shares = !ctx.each && matches!(op.op_type.as_str(), "grade" | "move_cursor");
+            if !shares {
+                if run_open {
+                    sqlx::query("RELEASE SAVEPOINT op").execute(&mut *tx).await.map_err(api)?;
+                    run_open = false;
+                }
+                // Anything but a grade or a cursor move may read or write a
+                // cascade's row: it finds the rows as the grades before it left them.
+                ops::touch_cascades(&mut *tx, ctx, &mut touched).await.map_err(touch_failed)?;
+            }
+            if !run_open {
+                sqlx::query("SAVEPOINT op").execute(&mut *tx).await.map_err(api)?;
+                run_open = shares;
+            }
+            match ops::apply(&mut *tx, ctx, op).await {
+                Ok(fx) => {
+                    if !shares {
+                        sqlx::query("RELEASE SAVEPOINT op").execute(&mut *tx).await.map_err(api)?;
+                    }
+                    if let Some((cascade, at)) = fx.touch {
+                        match touched.iter_mut().find(|(id, _)| *id == cascade) {
+                            Some((_, latest)) => *latest = (*latest).max(at),
+                            None => touched.push((cascade, at)),
+                        }
+                    }
+                    OpResult {
+                        op_id: op.id,
+                        status: "applied",
+                        reason: None,
+                        outcome: fx.outcome,
+                        new_quiz_question_count: fx.new_quiz_question_count,
+                        new_quiz_questions_hash: fx.new_quiz_questions_hash.map(|h| h.to_string()),
+                    }
+                }
+                Err(OpError::Rejected(reason)) => {
+                    // A grade or a cursor move is rejected before it writes
+                    // (ops::grade, ops::move_cursor): nothing to roll back.
+                    if !shares {
+                        sqlx::query("ROLLBACK TO SAVEPOINT op").execute(&mut *tx).await.map_err(api)?;
+                    }
+                    OpResult::rejected(op.id, reason)
+                }
+                Err(OpError::Db(e)) if is_transient(&e) => return Err(BatchError::Api(ApiError::Unavailable { retry_after_secs: 1 })),
+                Err(OpError::Db(e)) if shares => {
+                    tracing::warn!(error = %e, "a grade or cursor move failed in the database: the batch is applied again, one savepoint an operation");
+                    return Err(BatchError::Redo);
+                }
+                Err(OpError::Db(e)) => {
+                    sqlx::query("ROLLBACK TO SAVEPOINT op").execute(&mut *tx).await.map_err(api)?;
+                    tracing::error!(error = %e, op = %op.body, "sync operation failed with a database error");
+                    OpResult::rejected(op.id, Reason::Error)
+                }
+            }
+        };
+        recorded.push((op, result.clone()));
+        prior.insert(op.id, result.clone());
+        used.insert(op.device_seq);
+        results.push(result);
+    }
+    if run_open {
+        sqlx::query("RELEASE SAVEPOINT op").execute(&mut *tx).await.map_err(api)?;
+    }
+    ops::touch_cascades(&mut *tx, ctx, &mut touched).await.map_err(touch_failed)?;
+    Ok(Batch { results, recorded })
+}
+
 enum Pushed {
     Done { results: Vec<OpResult>, seq: i64, floor: i64 },
     /// A cursor above the user's sync_seq: nothing applied.
@@ -321,13 +477,6 @@ enum Pushed {
 }
 
 async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, ApiError> {
-    let transient = |e: sqlx::Error| {
-        if is_transient(&e) {
-            ApiError::Unavailable { retry_after_secs: 1 }
-        } else {
-            ApiError::Internal(e.into())
-        }
-    };
     let mut tx = state.db.begin().await.map_err(transient)?;
     // The user row lock: two syncs for one user never run concurrently, and
     // the purge task takes the same lock first.
@@ -357,6 +506,7 @@ async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, Api
     let ctx = Ctx { user, device: req.device_id, seq, cap: state.config.max_quiz_questions,
         storage_limit: state.config.max_storage_bytes_per_user,
         now,
+        each: false,
     };
     // The batch's recorded operations and used device_seqs, read once rather
     // than twice per operation; each operation recorded below joins them, so
@@ -370,7 +520,7 @@ async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, Api
     .fetch_all(&mut *tx)
     .await
     .map_err(transient)?;
-    let mut prior: HashMap<Uuid, OpResult> = rows
+    let prior: HashMap<Uuid, OpResult> = rows
         .into_iter()
         .map(|(id, owner, status, reason, outcome, count, hash)| {
             let r = if owner != user { OpResult::rejected(id, Reason::NotFound) } else { recorded(id, &status, reason, outcome, count, hash) };
@@ -378,7 +528,7 @@ async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, Api
         })
         .collect();
     let seqs: Vec<i64> = req.ops.iter().map(|o| o.device_seq).collect();
-    let mut used: HashSet<i64> = sqlx::query_scalar::<_, i64>(
+    let used: HashSet<i64> = sqlx::query_scalar::<_, i64>(
         "SELECT device_seq FROM sync_operations WHERE user_id = $1 AND device_id = $2 AND device_seq = ANY($3)",
     )
     .bind(user)
@@ -389,62 +539,27 @@ async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, Api
     .map_err(transient)?
     .into_iter()
     .collect();
-    let mut results = Vec::with_capacity(req.ops.len());
-    // Written together after the loop, one statement for the batch.
-    let mut recorded_here: Vec<(&IncomingOp, OpResult)> = Vec::with_capacity(req.ops.len());
-    for op in &req.ops {
-        // A repeated operation returns its recorded result, unchanged.
-        if let Some(p) = prior.get(&op.id) {
-            results.push(p.clone());
-            continue;
-        }
-        if op.device_seq < 1 {
-            results.push(OpResult::rejected(op.id, Reason::Invalid));
-            continue;
-        }
-        // Below the device's mark with no record: acknowledged before, never applied again.
-        if op.device_seq < mark {
-            results.push(OpResult::applied(op.id));
-            continue;
-        }
-        let reused = used.contains(&op.device_seq);
-        if reused || !OP_TYPES.contains(&op.op_type.as_str()) {
-            results.push(OpResult::rejected(op.id, Reason::Invalid));
-            continue;
-        }
-        let result = if op.seen_seq < 0 || op.seen_seq > u.sync_seq {
-            OpResult::rejected(op.id, Reason::Invalid)
-        } else {
-            sqlx::query("SAVEPOINT op").execute(&mut *tx).await.map_err(transient)?;
-            match ops::apply(&mut tx, &ctx, op).await {
-                Ok(fx) => {
-                    sqlx::query("RELEASE SAVEPOINT op").execute(&mut *tx).await.map_err(transient)?;
-                    OpResult {
-                        op_id: op.id,
-                        status: "applied",
-                        reason: None,
-                        outcome: fx.outcome,
-                        new_quiz_question_count: fx.new_quiz_question_count,
-                        new_quiz_questions_hash: fx.new_quiz_questions_hash.map(|h| h.to_string()),
-                    }
-                }
-                Err(OpError::Rejected(reason)) => {
-                    sqlx::query("ROLLBACK TO SAVEPOINT op").execute(&mut *tx).await.map_err(transient)?;
-                    OpResult::rejected(op.id, reason)
-                }
-                Err(OpError::Db(e)) if is_transient(&e) => return Err(ApiError::Unavailable { retry_after_secs: 1 }),
-                Err(OpError::Db(e)) => {
-                    sqlx::query("ROLLBACK TO SAVEPOINT op").execute(&mut *tx).await.map_err(transient)?;
-                    tracing::error!(error = %e, op = %op.body, "sync operation failed with a database error");
-                    OpResult::rejected(op.id, Reason::Error)
-                }
-            }
-        };
-        recorded_here.push((op, result.clone()));
-        prior.insert(op.id, result.clone());
-        used.insert(op.device_seq);
-        results.push(result);
+    // The operations. A database error in the first way of applying them
+    // undoes all of it and applies them the second way: see `apply_batch`.
+    // A request with no operations (a pull) has nothing to undo.
+    if !req.ops.is_empty() {
+        sqlx::query("SAVEPOINT batch").execute(&mut *tx).await.map_err(transient)?;
     }
+    let batch = match apply_batch(&mut tx, &ctx, req, u.sync_seq, mark, prior.clone(), used.clone()).await {
+        Ok(batch) => batch,
+        Err(BatchError::Api(e)) => return Err(e),
+        Err(BatchError::Redo) => {
+            sqlx::query("ROLLBACK TO SAVEPOINT batch").execute(&mut *tx).await.map_err(transient)?;
+            let each = Ctx { each: true, ..ctx };
+            match apply_batch(&mut tx, &each, req, u.sync_seq, mark, prior, used).await {
+                Ok(batch) => batch,
+                Err(BatchError::Api(e)) => return Err(e),
+                // One savepoint an operation never asks to be redone.
+                Err(BatchError::Redo) => return Err(ApiError::Internal(anyhow::anyhow!("a sync batch asked to be redone twice"))),
+            }
+        }
+    };
+    let Batch { results, recorded: recorded_here } = batch;
     record(&mut tx, user, req.device_id, &recorded_here).await.map_err(transient)?;
     // The account's other devices hear of it once this commits (sync::notify).
     if recorded_here.iter().any(|(_, r)| r.status == "applied") {

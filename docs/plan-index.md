@@ -8,7 +8,7 @@ are not headings).
 
 | Heading | Lines |
 |---|---|
-| # Acrodont — Project Plan | 1–7882 |
+| # Acrodont — Project Plan | 1–7910 |
 |   ## Overview | 3–72 |
 |   ## Glossary | 73–91 |
 |   ## Cascade Rules | 92–625 |
@@ -64,48 +64,48 @@ are not headings).
 |     ### Deterministic shuffles | 2604–2641 |
 |     ### Rule implementation | 2642–2698 |
 |     ### Working at 300,000 questions | 2699–2743 |
-|   ## Offline and Sync | 2744–3959 |
+|   ## Offline and Sync | 2744–3975 |
 |     ### Principles | 2746–2757 |
 |     ### What needs a connection | 2758–2769 |
 |     ### On the device | 2770–3220 |
 |     ### Operations | 3221–3329 |
-|     ### The sync cycle | 3330–3732 |
-|       #### Telling the other devices | 3690–3732 |
-|     ### Conflicts | 3733–3821 |
-|     ### Authentication while offline | 3822–3959 |
-|   ## Schema | 3960–4973 |
-|     ### Purge task | 4915–4973 |
-|   ## Authentication | 4974–5343 |
-|   ## API | 5344–5567 |
-|     ### Auth and account | 5371–5391 |
-|     ### Catalog and search | 5392–5456 |
-|     ### Cascades and sync | 5457–5548 |
-|     ### Admin | 5549–5567 |
-|   ## Frontend | 5568–5767 |
-|   ## Configuration | 5768–5826 |
-|   ## Development | 5827–5957 |
-|     ### One command | 5829–5912 |
-|     ### How it is put together | 5913–5933 |
-|     ### Day to day | 5934–5957 |
-|   ## Deployment and Operations | 5958–6168 |
-|   ## Backups | 6169–6281 |
-|     ### What is backed up | 6175–6198 |
-|     ### Alarms | 6199–6214 |
-|     ### Restoring | 6215–6248 |
-|     ### The drill | 6249–6273 |
-|     ### Locally | 6274–6281 |
-|   ## Testing | 6282–7847 |
-|     ### The fixture catalog | 6298–6314 |
-|     ### Contract fixtures | 6315–6421 |
-|     ### Unit tests | 6422–6825 |
-|     ### Integration tests | 6826–7311 |
-|     ### End-to-end tests | 7312–7662 |
-|       #### What the tests reuse | 7319–7389 |
-|       #### The journeys | 7390–7662 |
-|     ### Scale tests | 7663–7778 |
-|     ### Zyzzyva parity | 7779–7798 |
-|     ### Running the tests | 7799–7847 |
-|   ## Delivery Phases | 7848–7882 |
+|     ### The sync cycle | 3330–3748 |
+|       #### Telling the other devices | 3706–3748 |
+|     ### Conflicts | 3749–3837 |
+|     ### Authentication while offline | 3838–3975 |
+|   ## Schema | 3976–4989 |
+|     ### Purge task | 4931–4989 |
+|   ## Authentication | 4990–5359 |
+|   ## API | 5360–5583 |
+|     ### Auth and account | 5387–5407 |
+|     ### Catalog and search | 5408–5472 |
+|     ### Cascades and sync | 5473–5564 |
+|     ### Admin | 5565–5583 |
+|   ## Frontend | 5584–5783 |
+|   ## Configuration | 5784–5842 |
+|   ## Development | 5843–5973 |
+|     ### One command | 5845–5928 |
+|     ### How it is put together | 5929–5949 |
+|     ### Day to day | 5950–5973 |
+|   ## Deployment and Operations | 5974–6184 |
+|   ## Backups | 6185–6297 |
+|     ### What is backed up | 6191–6214 |
+|     ### Alarms | 6215–6230 |
+|     ### Restoring | 6231–6264 |
+|     ### The drill | 6265–6289 |
+|     ### Locally | 6290–6297 |
+|   ## Testing | 6298–7875 |
+|     ### The fixture catalog | 6314–6330 |
+|     ### Contract fixtures | 6331–6437 |
+|     ### Unit tests | 6438–6841 |
+|     ### Integration tests | 6842–7339 |
+|     ### End-to-end tests | 7340–7690 |
+|       #### What the tests reuse | 7347–7417 |
+|       #### The journeys | 7418–7690 |
+|     ### Scale tests | 7691–7806 |
+|     ### Zyzzyva parity | 7807–7826 |
+|     ### Running the tests | 7827–7875 |
+|   ## Delivery Phases | 7876–7910 |
 
 Notable anchors inside long sections:
 

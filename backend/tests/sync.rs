@@ -51,6 +51,121 @@ async fn a_repeated_operation_is_applied_once_with_the_same_result(pool: sqlx::P
 /// A finish whose seed and resulting hash are both above 2^63: stored as
 /// negative BIGINTs, answered, pulled and repeated as unsigned decimal text;
 /// the seed recognised as a later grade's attempt_seed.
+/// A batch's grades and cursor moves leave exactly what each left when it
+/// was applied alone, from less work: the cascade's row is written once for
+/// them (it used to be once a grade), and they share one savepoint (it used
+/// to be one each, a subtransaction apiece).
+#[sqlx::test]
+async fn a_batch_of_grades_writes_its_cascade_row_once_and_leaves_what_each_grade_left(pool: sqlx::PgPool) {
+    use chrono::Timelike;
+    let app = app(pool).await;
+    let mut d = device(&app, "alice").await;
+    let s = cascade(&app, &mut d, Setup::new(600)).await; // three chunks of questions
+    sqlx::raw_sql(
+        "CREATE TABLE wf_cascade_writes (n int);
+         CREATE FUNCTION wf_count() RETURNS trigger AS $$
+         BEGIN INSERT INTO wf_cascade_writes VALUES (1); RETURN NEW; END $$ LANGUAGE plpgsql;
+         CREATE TRIGGER wf_count AFTER UPDATE ON cascades FOR EACH ROW EXECUTE FUNCTION wf_count();",
+    )
+    .execute(app.db())
+    .await
+    .unwrap();
+    // A second device, up to date before the batch.
+    let mut other = d.sibling(&app);
+    other.qrf = d.qrf.clone();
+    other.sync_all(vec![]).await;
+    let q = quiz_now(&app, s.source_id).await;
+    // Device times ahead of the row's own (and inside the five minutes a
+    // device's clock may lead by), out of order: the latest is the third's.
+    let base = Utc::now().with_nanosecond(0).unwrap();
+    let grade = |d: &mut Device<'_>, idx: u32, g: &str, secs: i64| {
+        let fields = json!({ "quiz_id": s.source_id, "attempt": q.attempt, "attempt_seed": q.seed, "question_idx": idx, "grade": g });
+        d.op_at("grade", fields, base + Duration::seconds(secs))
+    };
+    let ops = vec![
+        grade(&mut d, 0, "correct", 60),
+        grade(&mut d, 300, "missed", 70),
+        d.op("move_cursor", json!({ "quiz_id": s.source_id, "attempt": q.attempt, "attempt_seed": q.seed, "position": 2 })),
+        grade(&mut d, 599, "correct", 180),
+        grade(&mut d, 0, "missed", 120), // the first question regraded
+        // Rejected, in the middle of the run: another attempt's.
+        d.op("grade", json!({ "quiz_id": s.source_id, "attempt": q.attempt + 1, "attempt_seed": q.seed, "question_idx": 7, "grade": "correct" })),
+        grade(&mut d, 301, "correct", 90),
+    ];
+    let r = d.sync(ops).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let statuses: Vec<Value> = (0..7).map(|i| result(&r, i)["status"].clone()).collect();
+    assert_eq!(statuses, ["applied", "applied", "applied", "applied", "applied", "rejected", "applied"].map(Value::from));
+    assert_eq!(result(&r, 5)["reason"], "stale_attempt");
+    let seq: i64 = r.json()["sync_seq"].as_str().unwrap().parse().unwrap();
+
+    let writes: i64 = sqlx::query_scalar("SELECT count(*) FROM wf_cascade_writes").fetch_one(app.db()).await.unwrap();
+    assert_eq!(writes, 1, "the cascade's row is written once for the batch's grades");
+    let (activity, cascade_seq): (chrono::DateTime<Utc>, i64) =
+        sqlx::query_as("SELECT last_activity_at, updated_seq FROM cascades WHERE id = $1").bind(s.cascade_id).fetch_one(app.db()).await.unwrap();
+    assert_eq!((activity, cascade_seq), (base + Duration::seconds(180), seq), "the latest of the grades' times, and the request's sequence");
+    let (correct, missed, cursor, quiz_activity, quiz_seq): (i32, i32, i32, chrono::DateTime<Utc>, i64) =
+        sqlx::query_as("SELECT correct_count, missed_count, cursor, last_activity_at, updated_seq FROM quizzes WHERE id = $1")
+            .bind(s.source_id)
+            .fetch_one(app.db())
+            .await
+            .unwrap();
+    assert_eq!((correct, missed, cursor, quiz_activity, quiz_seq), (2, 2, 2, base + Duration::seconds(180), seq));
+    // One subtransaction wrote all three chunks: rows written under separate
+    // savepoints carry separate transaction ids.
+    let writers: i64 = sqlx::query_scalar("SELECT count(DISTINCT xmin::text) FROM quiz_cards WHERE quiz_id = $1 AND cards IS NOT NULL")
+        .bind(s.source_id)
+        .fetch_one(app.db())
+        .await
+        .unwrap();
+    assert_eq!(writers, 1, "the batch's grades share one savepoint");
+
+    // The other device's next pull has the cascade, the quiz and the four
+    // graded questions: all three were stamped with this request's sequence.
+    let (_, pages) = other.sync_all(vec![]).await;
+    assert!(rows(&pages, "cascades").iter().any(|c| c["id"] == json!(s.cascade_id)), "the cascade is pulled");
+    assert!(rows(&pages, "quizzes").iter().any(|c| c["id"] == json!(s.source_id)), "the quiz is pulled");
+    let graded: usize = rows(&pages, "quiz_questions").iter().map(|g| g["question_idx"].as_array().unwrap().len()).sum();
+    assert_eq!(graded, 4);
+}
+
+/// An operation that is neither a grade nor a cursor move finds the cascade's
+/// row as the grades before it left it: here a trash, which stamps the row
+/// itself, between two runs of grades (the second run rejected, in the Trash).
+#[sqlx::test]
+async fn the_cascade_row_is_written_before_an_operation_of_another_kind(pool: sqlx::PgPool) {
+    use chrono::Timelike;
+    let app = app(pool).await;
+    let mut d = device(&app, "alice").await;
+    let s = cascade(&app, &mut d, Setup::new(4)).await;
+    sqlx::raw_sql(
+        "CREATE TABLE wf_cascade_writes (at timestamptz, trashed boolean);
+         CREATE FUNCTION wf_count() RETURNS trigger AS $$
+         BEGIN INSERT INTO wf_cascade_writes VALUES (NEW.last_activity_at, NEW.trashed_at IS NOT NULL); RETURN NEW; END $$ LANGUAGE plpgsql;
+         CREATE TRIGGER wf_count AFTER UPDATE ON cascades FOR EACH ROW EXECUTE FUNCTION wf_count();",
+    )
+    .execute(app.db())
+    .await
+    .unwrap();
+    let q = quiz_now(&app, s.source_id).await;
+    let base = Utc::now().with_nanosecond(0).unwrap();
+    let grade = |d: &mut Device<'_>, idx: u32, secs: i64| {
+        let fields = json!({ "quiz_id": s.source_id, "attempt": q.attempt, "attempt_seed": q.seed, "question_idx": idx, "grade": "correct" });
+        d.op_at("grade", fields, base + Duration::seconds(secs))
+    };
+    let ops = vec![grade(&mut d, 0, 100), grade(&mut d, 1, 90), d.op("trash_cascade", json!({ "cascade_id": s.cascade_id })), grade(&mut d, 2, 200)];
+    let r = d.sync(ops).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let statuses: Vec<Value> = (0..4).map(|i| result(&r, i)["status"].clone()).collect();
+    assert_eq!(statuses, ["applied", "applied", "applied", "rejected"].map(Value::from), "{:?}", r.json()["results"]);
+    // The grades' write, then the trash's own; the rejected grade writes nothing.
+    let writes: Vec<(chrono::DateTime<Utc>, bool)> =
+        sqlx::query_as("SELECT at, trashed FROM wf_cascade_writes ORDER BY ctid").fetch_all(app.db()).await.unwrap();
+    assert_eq!(writes.len(), 2, "{writes:?}");
+    assert_eq!(writes[0], (base + Duration::seconds(100), false), "the trash found the row as the two grades left it");
+    assert!(writes[1].1);
+}
+
 #[sqlx::test]
 async fn sixty_four_bit_values_travel_as_unsigned_text(pool: sqlx::PgPool) {
     let app = app(pool).await;
