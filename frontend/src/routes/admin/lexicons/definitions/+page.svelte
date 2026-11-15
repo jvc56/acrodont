@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Replacing a lexicon's definitions (PLAN.md § Immutability and deletion →
-	// Replacing definitions and leave values): the one part of an uploaded lexicon that can change.
+	// Replacing definitions, playabilities and leave values): what every answer on the lexicon shows.
+	// Its playabilities are replaced on their own page, which this one points to.
 	import { onMount } from 'svelte';
 	import { Label } from '$lib/components/ui/label';
 	import * as Card from '$lib/components/ui/card';
@@ -27,6 +28,8 @@
 				order; only definitions may differ. Every cascade on the lexicon then shows the new
 				definitions, on each device once it has synced. A cascade keeps the questions it was
 				created with, even where a Definition or Part of Speech filter would now match differently.
+				To change playabilities, use
+				<a class="underline" href="/admin/lexicons/playability">Replace playability</a>.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>
