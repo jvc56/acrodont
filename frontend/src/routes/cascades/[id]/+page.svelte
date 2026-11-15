@@ -1206,12 +1206,10 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 						{/if}
 						{#if cascadeError}<p class="text-sm text-destructive" role="alert">{cascadeError}</p>{/if}
 						<div class="flex flex-wrap gap-2 pt-2">
-							<Button
-								variant="outline"
-								disabled={atLimit}
-								title={atLimit ? 'Duplicate cascade: your storage is full' : 'A new cascade from the same filters and settings, at Level 1'}
-								onclick={duplicate}>Duplicate cascade</Button
-							>
+							<!-- The title is on a wrapper: a disabled button takes no pointer events, so its own would never show. -->
+							<span class="inline-flex" title={atLimit ? 'Duplicate cascade: your storage is full' : 'A new cascade from the same filters and settings, at Level 1'}>
+								<Button variant="outline" disabled={atLimit} onclick={duplicate}>Duplicate cascade</Button>
+							</span>
 							<Button variant="outline" class="hover:text-destructive" onclick={moveToTrash}>Move to Trash</Button>
 						</div>
 					</section>
@@ -1231,7 +1229,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
 		<div class="max-w-sm space-y-4 rounded-lg bg-background p-6 text-center" role="dialog" aria-label="Cascade complete">
 			<h2 class="text-xl font-semibold">Cascade complete</h2>
-			<p>After {v.completion.levels} levels and {v.completion.attempts} {v.completion.attempts === 1 ? 'pass' : 'passes'}.</p>
+			<p>After {v.completion.levels} {v.completion.levels === 1 ? 'level' : 'levels'} and {v.completion.attempts} {v.completion.attempts === 1 ? 'pass' : 'passes'}.</p>
 			<div class="flex flex-col gap-2">
 				<Button onclick={startOver}>Start over</Button>
 				<Button variant="outline" onclick={moveToTrash}>Move to Trash</Button>

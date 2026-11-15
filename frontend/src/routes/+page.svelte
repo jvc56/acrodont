@@ -193,7 +193,8 @@
 		</div>
 		<div class="flex items-center gap-4">
 			{#if used >= limit}
-				<Button disabled title="Your storage is full: make room first">New cascade</Button>
+				<!-- The title is on a wrapper: a disabled button takes no pointer events. -->
+				<span class="inline-flex" title="Your storage is full: make room first"><Button disabled>New cascade</Button></span>
 			{:else}
 				<Button href="/cascades/new">New cascade</Button>
 			{/if}

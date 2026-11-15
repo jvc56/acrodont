@@ -63,15 +63,20 @@ test('segments and progression', async ({ page }) => {
 		.poll(bar)
 		.toEqual(['Level 1 of 1', 'Pass 1', '6 / 18 (27.78%)', '3 ✓ 2 ✗ (60.00%)', 'Segment 2 of 4', 'Pass 1', '1 / 5 (0.00%)', '0 ✓ 0 ✗']);
 	// On a phone the two names take a line each and the figures stay in columns under them.
+	// The resize swaps the desktop layout for the phone's, which renders the status bar
+	// again: measured mid-swap, a row is detached and has no box, so the check is retried.
 	await page.setViewportSize({ width: 360, height: 740 });
-	const [levelName, levelPass, segmentName, segmentPass] = await Promise.all(
-		['[data-status-row="level"]', '[data-status-row="level"] + p', '[data-status-row="segment"]', '[data-status-row="segment"] + p'].map(async (s) => (await rows.locator(s).boundingBox())!)
-	);
-	expect(levelPass.y).toBeGreaterThan(levelName.y + levelName.height / 2);
-	expect(segmentName.y).toBeGreaterThan(levelPass.y + levelPass.height / 2);
-	expect(segmentPass.y).toBeGreaterThan(segmentName.y + segmentName.height / 2);
-	expect(segmentPass.x).toBe(levelPass.x);
-	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+	await expect(async () => {
+		const [levelName, levelPass, segmentName, segmentPass] = await Promise.all(
+			['[data-status-row="level"]', '[data-status-row="level"] + p', '[data-status-row="segment"]', '[data-status-row="segment"] + p'].map((s) => rows.locator(s).boundingBox({ timeout: 1_000 }))
+		);
+		if (!levelName || !levelPass || !segmentName || !segmentPass) throw new Error('a status row has no box yet');
+		expect(levelPass.y).toBeGreaterThan(levelName.y + levelName.height / 2);
+		expect(segmentName.y).toBeGreaterThan(levelPass.y + levelPass.height / 2);
+		expect(segmentPass.y).toBeGreaterThan(segmentName.y + segmentName.height / 2);
+		expect(segmentPass.x).toBe(levelPass.x);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+	}).toPass({ timeout: 10_000 });
 	await page.setViewportSize({ width: 1280, height: 720 });
 	// Previous refuses to go back into segment 1.
 	await press(page, 'Backspace');
