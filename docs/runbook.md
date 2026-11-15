@@ -170,7 +170,17 @@ DNS and the GitHub repository.
     distributions, then lexicons, then leave values. They are stored only as
     rows. Later corrections need no new lexicon: **Replace definitions** and
     **Replace values** on `/admin` take the same file with new definitions,
-    or new leave values, and every cascade then shows them. Then compare the in-memory index sizes `/admin` shows (hover a
+    or new leave values, and every cascade then shows them. **Replace
+    playability** takes the lexicon's file with new playability values:
+    Playability Order and Limit by Playability Order then rank by them in
+    every search, saved searches included, while a cascade that exists keeps
+    the questions it was made with (Duplicate cascade picks them again). A
+    lexicon file that changes both definitions and playabilities is refused
+    by both pages: upload one that differs from the lexicon in the
+    playabilities alone to Replace playability first, then the full file to
+    Replace definitions. Each replacement builds the lexicon's index again on
+    every task while the old one still serves, so it peaks at two indexes in
+    memory, as a definitions replacement does. Then compare the in-memory index sizes `/admin` shows (hover a
     lexicon's or leave value set's Storage) with `task_memory` (2 GiB by
     default). The `acrodont-backend-memory-high` alarm watches this from now
     on.
