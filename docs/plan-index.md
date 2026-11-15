@@ -8,7 +8,7 @@ are not headings).
 
 | Heading | Lines |
 |---|---|
-| # Acrodont — Project Plan | 1–8105 |
+| # Acrodont — Project Plan | 1–8117 |
 |   ## Overview | 3–72 |
 |   ## Glossary | 73–91 |
 |   ## Cascade Rules | 92–629 |
@@ -94,18 +94,18 @@ are not headings).
 |     ### Restoring | 6401–6434 |
 |     ### The drill | 6435–6459 |
 |     ### Locally | 6460–6467 |
-|   ## Testing | 6468–8070 |
+|   ## Testing | 6468–8082 |
 |     ### The fixture catalog | 6484–6500 |
 |     ### Contract fixtures | 6501–6607 |
 |     ### Unit tests | 6608–7010 |
 |     ### Integration tests | 7011–7515 |
-|     ### End-to-end tests | 7516–7885 |
-|       #### What the tests reuse | 7523–7608 |
-|       #### The journeys | 7609–7885 |
-|     ### Scale tests | 7886–8001 |
-|     ### Zyzzyva parity | 8002–8021 |
-|     ### Running the tests | 8022–8070 |
-|   ## Delivery Phases | 8071–8105 |
+|     ### End-to-end tests | 7516–7897 |
+|       #### What the tests reuse | 7523–7620 |
+|       #### The journeys | 7621–7897 |
+|     ### Scale tests | 7898–8013 |
+|     ### Zyzzyva parity | 8014–8033 |
+|     ### Running the tests | 8034–8082 |
+|   ## Delivery Phases | 8083–8117 |
 
 Notable anchors inside long sections:
 

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PORT, PROJECT, e2eEnv } from '../stack';
-import { createCascade, newUser, press } from './support';
+import { createCascade, newUser, openInWebKit, press } from './support';
 
 // PLAN.md § End-to-end tests → Updating the app: a second build deployed under
 // an open card, "a new version is ready", MIN_APP_VERSION raised past the old
@@ -27,7 +27,7 @@ async function build(page: Page) {
 	return Number(await page.evaluate(() => document.documentElement.dataset.build).catch(() => NaN));
 }
 
-test('updating the app @serial @full', async ({ context }) => {
+test('updating the app @serial @full', async ({ context }, testInfo) => {
 	test.setTimeout(600_000);
 	const a = await context.newPage();
 	await newUser(a, 'upd');
@@ -51,54 +51,98 @@ test('updating the app @serial @full', async ({ context }) => {
 	await press(b, 'Space');
 	await expect(b.locator('[data-grade="correct"]')).toBeVisible();
 	try {
-		// Deploy a second build.
-		execFileSync('docker', ['compose', '-p', PROJECT, 'up', '-d', '--build', '--no-deps', 'frontend'], {
-			cwd: root,
-			env: { ...process.env, ACRODONT_APP_BUILD: String(old + 1), ACRODONT_PORT: String(PORT) },
-			stdio: 'inherit'
-		});
-		// The new container takes a moment to answer: look for the new worker until it does.
-		await expect
-			.poll(() => a.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.update().then(() => true, () => false)), { timeout: 60_000 })
-			.toBe(true);
-		await expect(a.getByText('A new version is ready.')).toBeVisible({ timeout: 60_000 });
-		// The card is undisturbed.
-		await expect(a.getByText('1 / 18')).toBeVisible();
-		expect(await build(a)).toBe(old);
-		// MIN_APP_VERSION past the old build: its next sync is answered 426.
-		stackUp([`MIN_APP_VERSION=${old + 1}`]);
-		await press(a, 'Space');
-		await press(a, 'Space');
-		await expect(a.getByRole('button', { name: 'Reload to keep syncing' })).toBeVisible({ timeout: 60_000 });
-		// A plain reload does not clear it: the old worker still answers.
-		await a.reload();
-		await expect(a.getByRole('button', { name: 'Reload to keep syncing' })).toBeVisible({ timeout: 60_000 });
-		expect(await build(a)).toBe(old);
-		// The reload left the waiting build's files alone: the old worker deletes older builds'
-		// caches only, or the new one would take over with nothing and show a blank page.
-		const shells = await a.evaluate(async () => {
-			const names = (await caches.keys()).filter((n) => n.startsWith('acrodont-'));
-			return Promise.all(names.map(async (n) => !!(await (await caches.open(n)).match('/index.html'))));
-		});
-		expect(shells).toEqual([true, true]);
-		// Its own reload does: the new build, and the next sync succeeds.
-		await a.getByRole('button', { name: 'Reload to keep syncing' }).click();
-		await expect.poll(() => build(a), { timeout: 60_000 }).toBe(old + 1);
-		await expect(a.getByText('Synced')).toBeVisible({ timeout: 60_000 });
-		// The other tab did not reload: it keeps its revealed card, says the app was
-		// updated in another tab, and finishes that card from the old build.
-		await expect(b.getByText('Acrodont was updated in another tab — reload to continue')).toBeVisible({ timeout: 30_000 });
-		await expect(b.locator('[data-grade="correct"]')).toBeVisible();
-		expect(await build(b)).toBe(old);
-		await press(b, 'Space');
-		await expect(b.getByText('2 / 18')).toBeVisible();
-		// The old build's tab gave the sync lock up when the app was updated under
-		// it, so the updated tab leads. Had the old tab kept leading, its answer
-		// just now would have been synced by the old build, answered 426, and the
-		// updated tab would read "Reload to keep syncing" within a second or two.
-		await a.waitForTimeout(3_000);
-		await expect(a.getByRole('button', { name: 'Reload to keep syncing' })).toHaveCount(0);
-		await expect(a.getByText('Synced')).toBeVisible({ timeout: 60_000 });
+		// In WebKit (CI) the look for the new worker was answered (the poll below
+		// passed), and "A new version is ready." was not offered within a minute.
+		// What is not known is where it stopped: WebKit never fetched the new
+		// service-worker.js (its update check, or its HTTP cache); it installed the
+		// new worker but the page was told in a way the watcher did not read
+		// (`updatefound` delivered once the worker already waited: the watcher now
+		// reads `registration.waiting` then, and after each look, client.svelte.ts);
+		// the new worker's install failed; or it took over at once because WebKit
+		// did not count the open pages as controlled. The diagnosis reads the
+		// registration's three workers, the controller, the build the page and the
+		// server's worker script are, and the caches.
+		await openInWebKit(
+			testInfo,
+			'WebKit: after a second build is deployed and registration.update() resolves, "A new version is ready." is not offered; unknown whether the new worker is fetched, installs and waits there',
+			async () => {
+				// Deploy a second build.
+				execFileSync('docker', ['compose', '-p', PROJECT, 'up', '-d', '--build', '--no-deps', 'frontend'], {
+					cwd: root,
+					env: { ...process.env, ACRODONT_APP_BUILD: String(old + 1), ACRODONT_PORT: String(PORT) },
+					stdio: 'inherit'
+				});
+				// The new container takes a moment to answer: look for the new worker until it does.
+				await expect
+					.poll(() => a.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.update().then(() => true, () => false)), { timeout: 60_000 })
+					.toBe(true);
+				await expect(a.getByText('A new version is ready.')).toBeVisible({ timeout: 60_000 });
+				// The card is undisturbed.
+				await expect(a.getByText('1 / 18')).toBeVisible();
+				expect(await build(a)).toBe(old);
+				// MIN_APP_VERSION past the old build: its next sync is answered 426.
+				stackUp([`MIN_APP_VERSION=${old + 1}`]);
+				await press(a, 'Space');
+				await press(a, 'Space');
+				await expect(a.getByRole('button', { name: 'Reload to keep syncing' })).toBeVisible({ timeout: 60_000 });
+				// A plain reload does not clear it: the old worker still answers.
+				await a.reload();
+				await expect(a.getByRole('button', { name: 'Reload to keep syncing' })).toBeVisible({ timeout: 60_000 });
+				expect(await build(a)).toBe(old);
+				// The reload left the waiting build's files alone: the old worker deletes older builds'
+				// caches only, or the new one would take over with nothing and show a blank page.
+				const shells = await a.evaluate(async () => {
+					const names = (await caches.keys()).filter((n) => n.startsWith('acrodont-'));
+					return Promise.all(names.map(async (n) => !!(await (await caches.open(n)).match('/index.html'))));
+				});
+				expect(shells).toEqual([true, true]);
+				// Its own reload does: the new build, and the next sync succeeds.
+				await a.getByRole('button', { name: 'Reload to keep syncing' }).click();
+				await expect.poll(() => build(a), { timeout: 60_000 }).toBe(old + 1);
+				await expect(a.getByText('Synced')).toBeVisible({ timeout: 60_000 });
+				// The other tab did not reload: it keeps its revealed card, says the app was
+				// updated in another tab, and finishes that card from the old build.
+				await expect(b.getByText('Acrodont was updated in another tab — reload to continue')).toBeVisible({ timeout: 30_000 });
+				await expect(b.locator('[data-grade="correct"]')).toBeVisible();
+				expect(await build(b)).toBe(old);
+				await press(b, 'Space');
+				await expect(b.getByText('2 / 18')).toBeVisible();
+				// The old build's tab gave the sync lock up when the app was updated under
+				// it, so the updated tab leads. Had the old tab kept leading, its answer
+				// just now would have been synced by the old build, answered 426, and the
+				// updated tab would read "Reload to keep syncing" within a second or two.
+				await a.waitForTimeout(3_000);
+				await expect(a.getByRole('button', { name: 'Reload to keep syncing' })).toHaveCount(0);
+				await expect(a.getByText('Synced')).toBeVisible({ timeout: 60_000 });
+			},
+			() =>
+				a.evaluate(async () => {
+					const r = await navigator.serviceWorker.getRegistration();
+					const state = (w: ServiceWorker | null | undefined) => (w ? `${w.state} ${w.scriptURL}` : null);
+					const script = await fetch('/service-worker.js', { cache: 'no-store' }).then(
+						async (x) => ({ status: x.status, cache_control: x.headers.get('cache-control'), length: (await x.text()).length }),
+						(e) => String(e)
+					);
+					const looked = await r?.update().then(
+						() => 'resolved',
+						(e) => `rejected: ${e}`
+					);
+					return {
+						page_build: document.documentElement.dataset.build,
+						controller: state(navigator.serviceWorker.controller),
+						installing: state(r?.installing),
+						waiting: state(r?.waiting),
+						active: state(r?.active),
+						update_via_cache: r?.updateViaCache,
+						looked,
+						waiting_after_look: state(r?.waiting),
+						script,
+						caches: await caches.keys(),
+						offered: document.body.innerText.includes('A new version is ready.'),
+						status: document.querySelector('[data-sync-status]')?.textContent ?? null
+					};
+				})
+		);
 	} finally {
 		stackUp([]);
 	}

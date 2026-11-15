@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { confirm, createCascade, idb, login, newUser, outboxCount, PASSWORD, press } from './support';
+import { confirm, createCascade, idb, login, newUser, openInWebKit, outboxCount, PASSWORD, press } from './support';
 
 // PLAN.md § End-to-end tests: switching accounts in another tab, and deleting the account.
 
@@ -9,7 +9,7 @@ async function logOut(page: Page) {
 	await expect(page).toHaveURL(/\/login$/);
 }
 
-test('switching accounts in another tab', async ({ context }) => {
+test('switching accounts in another tab', async ({ context }, testInfo) => {
 	test.setTimeout(240_000);
 	const a = await context.newPage();
 	const alice = await newUser(a, 'swa');
@@ -19,6 +19,12 @@ test('switching accounts in another tab', async ({ context }) => {
 	await expect(a.getByText('Available offline')).toBeVisible({ timeout: 60_000 });
 	await a.goto(player);
 	await expect(a.getByText(/^1 \/ \d+$/).first()).toBeVisible({ timeout: 30_000 });
+	// What this tab asks of the API from here on, for the diagnosis below: asked, failed, answered.
+	const api: string[] = [];
+	const path = (url: string) => new URL(url).pathname;
+	a.on('request', (r) => r.url().includes('/api/') && api.push(`asked ${r.method()} ${path(r.url())}`));
+	a.on('requestfailed', (r) => r.url().includes('/api/') && api.push(`failed ${path(r.url())} ${r.failure()?.errorText ?? ''}`));
+	a.on('response', (r) => r.url().includes('/api/') && api.push(`answered ${r.status()} ${path(r.url())}`));
 	// This tab alone is offline.
 	await a.route('**/api/**', (r) => r.abort('internetdisconnected'));
 	// Twenty cards graded, each press once its card is ready: a press before
@@ -29,56 +35,84 @@ test('switching accounts in another tab', async ({ context }) => {
 		await expect(a.locator('[data-grade="correct"], [data-grade="missed"]')).toBeVisible();
 		await press(a, 'Space');
 	}
-	// The screen moves before the writes are saved.
-	await expect.poll(() => outboxCount(a, 'grade'), { timeout: 10_000 }).toBe(20);
-	const aliceId = await idb<string>(a, `return (await req(db.transaction('meta').objectStore('meta').get('identity'))).user_id;`);
-	// A second tab: log out, log in as Bob.
-	const b = await context.newPage();
-	await b.goto('/cascades');
-	await logOut(b);
-	await newUser(b, 'swb');
-	await createCascade(b, { name: 'Bob cascade' });
-	await expect(a.getByText('Signed out in another tab')).toBeVisible({ timeout: 10_000 });
-	// Reconnect: nothing from the first tab is applied as Bob.
-	await a.unroute('**/api/**');
-	await a.waitForTimeout(3000);
-	const inAlice = await a.evaluate(async (uid) => {
-		const db = await new Promise<IDBDatabase>((res) => {
-			const r = indexedDB.open(`acrodont-user-${uid}`);
-			r.onsuccess = () => res(r.result);
-		});
-		const get = <T>(store: string) =>
-			new Promise<T[]>((res) => {
-				const r = db.transaction(store).objectStore(store).getAll();
-				r.onsuccess = () => res(r.result as T[]);
-			});
-		const grades = (await get<{ op: { type: string } }>('outbox')).filter((e) => e.op.type === 'grade').length;
-		const bobs = (await get<{ name: string }>('cascades')).filter((c) => c.name === 'Bob cascade').length;
-		db.close();
-		return { grades, bobs };
-	}, aliceId);
-	// Alice's twenty grades are still in her outbox, and none of Bob's cascades is in her database.
-	expect(inAlice).toEqual({ grades: 20, bobs: 0 });
-	// Logging in as Alice again pushes the twenty grades.
-	await b.close();
-	await login(a, alice.username);
-	await a.goto('/cascades');
-	await expect(a.getByText('Synced')).toBeVisible({ timeout: 60_000 });
-	expect(await outboxCount(a)).toBe(0);
-	// Two tabs as Alice: one logs out and back in; the other passes through
-	// "signed out in another tab" and resumes without a reload.
-	const c2 = await context.newPage();
-	await c2.goto('/cascades');
-	await expect(c2.getByText('Synced')).toBeVisible({ timeout: 30_000 });
-	await logOut(a);
-	await expect(c2.getByText('Signed out in another tab')).toBeVisible({ timeout: 10_000 });
-	await login(a, alice.username);
-	await expect(c2.getByText('Signed out in another tab')).toHaveCount(0, { timeout: 10_000 });
-	await c2.goto(player);
-	await press(c2, 'Space');
-	await press(c2, 'Space');
-	await c2.goto('/cascades');
-	await expect(c2.getByText('Synced')).toBeVisible({ timeout: 30_000 });
+	// In WebKit (CI) the twenty cards were graded on the screen, each press
+	// answered by its grade and the next card, and ten seconds later the outbox
+	// held no grade. Which of three it is is not known: the route above does
+	// not keep a tab's requests from the server in WebKit once a service worker
+	// controls the page, so the grades were sent and acknowledged (the tool);
+	// or they were written and then lost, or never written (IndexedDB in
+	// WebKit: the app, and a loss of answers). The diagnosis tells them apart:
+	// answered `/api/sync` requests and a base quiz row that counts the twenty
+	// say the first; an empty outbox, an overlay and a base that count none,
+	// the last.
+	await openInWebKit(
+		testInfo,
+		'WebKit: 20 grades made offline are not in the outbox; unknown whether page.route let them through to the server or IndexedDB did not keep them',
+		async () => {
+			// The screen moves before the writes are saved.
+			await expect.poll(() => outboxCount(a, 'grade'), { timeout: 10_000 }).toBe(20);
+			const aliceId = await idb<string>(a, `return (await req(db.transaction('meta').objectStore('meta').get('identity'))).user_id;`);
+			// A second tab: log out, log in as Bob.
+			const b = await context.newPage();
+			await b.goto('/cascades');
+			await logOut(b);
+			await newUser(b, 'swb');
+			await createCascade(b, { name: 'Bob cascade' });
+			await expect(a.getByText('Signed out in another tab')).toBeVisible({ timeout: 10_000 });
+			// Reconnect: nothing from the first tab is applied as Bob.
+			await a.unroute('**/api/**');
+			await a.waitForTimeout(3000);
+			const inAlice = await a.evaluate(async (uid) => {
+				const db = await new Promise<IDBDatabase>((res) => {
+					const r = indexedDB.open(`acrodont-user-${uid}`);
+					r.onsuccess = () => res(r.result);
+				});
+				const get = <T>(store: string) =>
+					new Promise<T[]>((res) => {
+						const r = db.transaction(store).objectStore(store).getAll();
+						r.onsuccess = () => res(r.result as T[]);
+					});
+				const grades = (await get<{ op: { type: string } }>('outbox')).filter((e) => e.op.type === 'grade').length;
+				const bobs = (await get<{ name: string }>('cascades')).filter((c) => c.name === 'Bob cascade').length;
+				db.close();
+				return { grades, bobs };
+			}, aliceId);
+			// Alice's twenty grades are still in her outbox, and none of Bob's cascades is in her database.
+			expect(inAlice).toEqual({ grades: 20, bobs: 0 });
+			// Logging in as Alice again pushes the twenty grades.
+			await b.close();
+			await login(a, alice.username);
+			await a.goto('/cascades');
+			await expect(a.getByText('Synced')).toBeVisible({ timeout: 60_000 });
+			expect(await outboxCount(a)).toBe(0);
+			// Two tabs as Alice: one logs out and back in; the other passes through
+			// "signed out in another tab" and resumes without a reload.
+			const c2 = await context.newPage();
+			await c2.goto('/cascades');
+			await expect(c2.getByText('Synced')).toBeVisible({ timeout: 30_000 });
+			await logOut(a);
+			await expect(c2.getByText('Signed out in another tab')).toBeVisible({ timeout: 10_000 });
+			await login(a, alice.username);
+			await expect(c2.getByText('Signed out in another tab')).toHaveCount(0, { timeout: 10_000 });
+			await c2.goto(player);
+			await press(c2, 'Space');
+			await press(c2, 'Space');
+			await c2.goto('/cascades');
+			await expect(c2.getByText('Synced')).toBeVisible({ timeout: 30_000 });
+		},
+		() =>
+			idb(
+				a,
+				`const all = async (s) => req(db.transaction(s).objectStore(s).getAll());
+				const counts = (rows) => rows.map((q) => [q.level, q.status, q.correct_count, q.missed_count, q.cursor_position]);
+				const outbox = {};
+				for (const e of await all('outbox')) outbox[e.op.type] = (outbox[e.op.type] ?? 0) + 1;
+				return { outbox, base_quizzes: counts(await all('quizzes')), overlay_quizzes: counts(await all('overlay_quizzes')),
+					overlay_questions: (await all('overlay_quiz_questions')).length, held: await req(db.transaction('meta').objectStore('meta').get('held')),
+					controlled: !!navigator.serviceWorker.controller, online: navigator.onLine, api: arg };`,
+				api.slice(-60)
+			)
+	);
 	void PASSWORD;
 });
 
