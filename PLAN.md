@@ -5060,8 +5060,19 @@ The flows are the conventional ones, built directly on Axum:
   expires, with nothing to delete first. The check runs twice: before the
   hash, as the field error above, and again under the registration lock just
   before the row is written. So an expired code never
-  strands an address or a username, and either way the form cannot be used to find out which
-  emails have accounts. The password is hashed with Argon2. A confirmation code
+  strands an address or a username. **What the form does and does not
+  reveal.** One registration is answered the same whether or not its address
+  has an account: the same status, the same body, the same time. **Two
+  registrations do tell**, and this is accepted: register a username no one
+  has with the address in question, then the same username with any other
+  address. "That username is taken" the second time means the first was kept,
+  so the address had no account; a second `202` means nothing was kept, so it
+  has one. Closing that would mean holding the username for an address that
+  already has an account too, a reservation row with its own expiry and
+  purge, for a leak that tells someone who already knows an address only that
+  it is registered here. It is slow (two of a client address's ten
+  registrations a day for each address asked about) and not silent (the
+  address is mailed a confirmation or the notice each time). The password is hashed with Argon2. A confirmation code
   (32 random bytes) is emailed, and only its SHA-256 is stored, with a 24-hour
   expiry. At most three confirmation, notice or reset emails are sent to one
   address in 24 hours per requesting IP, and twenty per address in all; further
