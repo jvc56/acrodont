@@ -457,12 +457,25 @@ async fn login(
         state.limits.login_fail_ip.refund(&ip);
         return Err(limited);
     }
+    // And one from the username's bucket of logins, which a right password
+    // spends too: each costs a verify, so the holder of one password could
+    // otherwise keep every hashing turn busy. Taken last, so a request the
+    // failure buckets refuse spends none of it.
+    if let Err(limited) = state.limits.login_username.reserve(&username_key) {
+        state.limits.login_fail_ip.refund(&ip);
+        state.limits.login_fail_username.refund(&username_key);
+        return Err(limited);
+    }
     let outcome = verified_user(&state, username, body.password).await;
-    // Only a failed verify keeps its tokens: not a login that succeeds, and
-    // not one that was never judged (a `503` for a hashing turn, an error).
+    // Only a failed verify keeps its failure tokens: not a login that
+    // succeeds, and not one that was never judged (a `503` for a hashing
+    // turn, an error). The login token is kept by every verify that ran.
     if !matches!(outcome, Ok(None)) {
         state.limits.login_fail_ip.refund(&ip);
         state.limits.login_fail_username.refund(&username_key);
+    }
+    if outcome.is_err() {
+        state.limits.login_username.refund(&username_key);
     }
     let Some(user) = outcome? else {
         return Err(ApiError::Unauthorized);

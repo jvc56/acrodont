@@ -4992,18 +4992,28 @@ The flows are the conventional ones, built directly on Axum:
   and it gives both tokens back unless the verify fails. Taking first is what
   makes the limit hold for requests that arrive together: a bucket looked at
   before the verify and spent after it lets a whole burst through. A
-  successful login spends nothing, because guessing is what the limits
-  exist to stop, and a club or tournament room logging in together from one
-  address must not lock itself out; more than ten of its logins in the air at
-  the same instant can be told `429` for a second, since each holds a token
-  while its verify runs. A username no account could have (not 3 to 32
+  successful login spends neither failure token, because guessing is what
+  those limits exist to stop, and a club or tournament room logging in
+  together from one address must not lock itself out; more than ten of its
+  logins in the air at the same instant can be told `429` for a second, since
+  each holds a token while its verify runs. **Every login judged, right
+  password or wrong, also spends one of its username's logins**
+  (`LOGINS_PER_USERNAME_PER_MINUTE`, 20): a right password costs an Argon2
+  verify as a wrong one does, so without it the holder of one password could
+  keep every hashing turn busy for as long as they liked. The token is taken
+  after the two failure tokens and before the verify, a request refused for
+  it gives the failure tokens back, and it is given back only when the
+  request was never judged (a `503` for a hashing turn, an error). No person
+  logs in twenty times a minute, and a room is twenty usernames, each with
+  its own bucket. A username no account could have (not 3 to 32
   letters, digits or underscores) is answered `401` at once: it costs no
   hash, takes no token and is never kept as a bucket's key, however long it
   is. **Argon2 runs in turns**, at most four hashes or verifies at once on
   the blocking pool, for every endpoint that hashes: each holds 19 MiB while
   it runs, so a burst of sign-ins is otherwise gigabytes at once. A request
   waits at most 10 seconds for a turn and is otherwise answered `503` with
-  `Retry-After: 10`; a login turned away so keeps its tokens.
+  `Retry-After: 10`; a login turned away so is given all three of its tokens
+  back.
   The per-username limit lets anyone who
   knows a username keep its owner out for a minute at a time by failing on
   purpose; that is accepted over unlimited guessing against one account. The
@@ -5666,6 +5676,7 @@ startup rather than falling back to a default.
 | `CATALOG_RATE_PER_MINUTE` | `300` | **Per IP**, for the two endpoints that need no session: `GET /api/lexicons` and `GET /api/letter-distributions/:name`. A device needs one of each per login plus one distribution per pulled cascade on a new device, but the bucket is per **address**, and a club or tournament room behind one address is dozens of devices logging in at once; 300 covers a room of about a hundred. A larger room waits out `429`s, which every client honours, rather than failing |
 | `LOGIN_FAILURES_PER_IP_PER_MINUTE` | `10` | Failed logins per IP; a successful login spends nothing, so a room logging in together is not locked out |
 | `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE` | `10` | Failed logins per username, taken before any Argon2 verify and given back unless it fails |
+| `LOGINS_PER_USERNAME_PER_MINUTE` | `20` | Logins per username whose password was checked, right or wrong: each costs an Argon2 verify. Taken before the verify and given back only when the request was never judged |
 | `AUTH_RATE_PER_IP_PER_MINUTE` | `30` | Per IP; register, confirm-email, reset-password and its confirm. Not `GET /api/auth/me`, which needs a session, and not logout |
 | `RESET_RATE_PER_HOUR` | `5` | Password resets an hour, each key its own bucket: asking for a link per caller (`ip:`) and per address named (`em:`, lower-cased), setting a password per link (`tok:`), whoever sends it, and typing the password behind a session per account (`pw:`: Change password, Sign out everywhere, Delete account). On top of `AUTH_RATE_PER_IP_PER_MINUTE` and the email caps |
 | `CATALOG_RECONCILE_SECONDS` | `60` | Fallback reload interval if a notification is missed |
@@ -6860,7 +6871,12 @@ they run in parallel and leave nothing behind.
     succeed, while the eleventh **failed** login from that address in the minute
     is refused with `429` before any Argon2 verify runs, and a login for another
     username from a second address still succeeds; the eleventh failure for one
-    username is refused from any address; with both limits lowered to 3, of
+    username is refused from any address; the twenty-first login for one
+    username in the minute, all with the right password and each from another
+    address, is refused with `429` before any verify while another username
+    still logs in, and with `LOGINS_PER_USERNAME_PER_MINUTE` lowered to 3 two
+    wrong passwords and a right one are all of it, the request refused for it
+    having given its failure tokens back; with both failure limits lowered to 3, of
     eight failed logins sent **at once** from one address, and of eight sent at
     once for one username, three are answered `401`, five `429`, and three
     verifies run; a 100,000-character username is answered `401` without a

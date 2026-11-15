@@ -62,6 +62,8 @@ pub struct Config {
     pub sync_streams_per_user: u32,
     pub login_failures_per_ip_per_minute: u32,
     pub login_failures_per_username_per_minute: u32,
+    /// Logins judged a minute for one username, right password or wrong.
+    pub logins_per_username_per_minute: u32,
     pub auth_rate_per_ip_per_minute: u32,
     /// Password resets an hour, per caller, per address named and per link.
     pub reset_rate_per_hour: u32,
@@ -162,6 +164,7 @@ impl Config {
                 .parse_rate("LOGIN_FAILURES_PER_IP_PER_MINUTE", 10)?,
             login_failures_per_username_per_minute: r
                 .parse_rate("LOGIN_FAILURES_PER_USERNAME_PER_MINUTE", 10)?,
+            logins_per_username_per_minute: r.parse_rate("LOGINS_PER_USERNAME_PER_MINUTE", 20)?,
             auth_rate_per_ip_per_minute: r.parse_rate("AUTH_RATE_PER_IP_PER_MINUTE", 30)?,
             reset_rate_per_hour: r.parse_rate("RESET_RATE_PER_HOUR", 5)?,
             catalog_reconcile_seconds: r.parse("CATALOG_RECONCILE_SECONDS", 60)?,

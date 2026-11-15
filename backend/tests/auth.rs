@@ -1095,6 +1095,50 @@ async fn login_failure_limits(pool: sqlx::PgPool) {
     assert_eq!(app.state.argon2_verifies.load(Ordering::Relaxed), before);
 }
 
+/// A right password is limited too, per username: twenty logins a minute,
+/// right or wrong, and the twenty-first costs no verify. Another username,
+/// from the same address, is not held up: a room logging in together is twenty
+/// usernames.
+#[sqlx::test]
+async fn logins_for_one_username_are_limited_whatever_the_password(pool: sqlx::PgPool) {
+    let app = TestApp::new(pool).await;
+    app.signed_in("vera").await; // the first login
+    app.signed_in("wren").await;
+    let login = |username: &str| json!({"username": username, "password": PASSWORD});
+    for i in 1..20 {
+        let r = app.client_from(&format!("192.0.2.{i}")).post("/api/auth/login", login("vera")).await;
+        assert_eq!(r.status, StatusCode::OK, "login {i}");
+    }
+    let before = app.state.argon2_verifies.load(Ordering::Relaxed);
+    let r = app.client_from("192.0.2.99").post("/api/auth/login", login("vera")).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(r.retry_after().is_some());
+    assert_eq!(app.state.argon2_verifies.load(Ordering::Relaxed), before);
+    let r = app.client_from("192.0.2.99").post("/api/auth/login", login("wren")).await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    // A wrong password spends the same bucket: with the limit at 3 and the
+    // failure limits out of the way, two wrong and one right are all of it.
+    let app = TestApp::with(
+        app.state.db.clone(),
+        &[("LOGINS_PER_USERNAME_PER_MINUTE", "3"), ("LOGIN_FAILURES_PER_USERNAME_PER_MINUTE", "100")],
+    )
+    .await;
+    let mut c = app.client();
+    for _ in 0..2 {
+        let r = c.post("/api/auth/login", json!({"username": "vera", "password": "bad-guess"})).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(c.post("/api/auth/login", login("vera")).await.status, StatusCode::OK);
+    assert_eq!(c.post("/api/auth/login", login("vera")).await.status, StatusCode::TOO_MANY_REQUESTS);
+    // The request the login bucket refused gave its failure tokens back: the
+    // address has spent two of its ten failures, and the other eight are there.
+    for i in 0..8 {
+        let r = c.post("/api/auth/login", json!({"username": format!("nobody{i}"), "password": "bad-guess"})).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "failure {i}");
+    }
+}
+
 /// Failed logins arriving together are limited as they are one after another:
 /// each takes its token before its verify, so a burst cannot all pass a
 /// bucket it would empty.

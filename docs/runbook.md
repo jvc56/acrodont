@@ -229,7 +229,8 @@ scripts/set-setting.sh task_cpu=1024 task_memory=4096
 
 **`desired_count=2` doubles every rate limit.** The limits are counted in each
 task's memory, not shared, so with two tasks a caller gets each limit twice:
-the login limit becomes twenty failures a minute per username instead of ten,
+the login limit becomes twenty failures a minute per username instead of ten
+(and forty logins a minute per username instead of twenty),
 and the same goes for the per-address, search, sync, export and mail limits,
 for the event streams an account may hold open (16 a task) and for the Argon2
 turns. Terraform refuses more than two tasks. Run two only

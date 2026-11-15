@@ -145,6 +145,10 @@ pub struct Limiters {
     pub catalog_ip: Keyed<IpAddr>,
     pub login_fail_ip: FailureBuckets<IpAddr>,
     pub login_fail_username: FailureBuckets<String>,
+    /// Every login judged for a username, `LOGINS_PER_USERNAME_PER_MINUTE`:
+    /// the right password costs an Argon2 verify as a wrong one does. A token
+    /// is given back only when the request was never judged.
+    pub login_username: FailureBuckets<String>,
     pub sync: Keyed<Uuid>,
     /// Opens of the event stream, `SYNC_STREAM_RATE_PER_MINUTE` per user; how
     /// many one account holds open at once is counted by `sync::notify::Hub`.
@@ -165,6 +169,7 @@ impl Limiters {
             login_fail_username: FailureBuckets::per_minute(
                 c.login_failures_per_username_per_minute,
             ),
+            login_username: FailureBuckets::per_minute(c.logins_per_username_per_minute),
             sync: Keyed::per_minute(c.sync_rate_per_minute),
             sync_stream: Keyed::per_minute(c.sync_stream_rate_per_minute),
             download: Keyed::per_minute(c.download_rate_per_minute),
@@ -183,6 +188,7 @@ impl Limiters {
         self.catalog_ip.prune();
         self.login_fail_ip.prune();
         self.login_fail_username.prune();
+        self.login_username.prune();
         self.sync.prune();
         self.sync_stream.prune();
         self.download.prune();
