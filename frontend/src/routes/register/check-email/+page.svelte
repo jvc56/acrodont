@@ -7,7 +7,7 @@
 <AuthCard title="Check your email">
 	<p class="text-sm">
 		We sent a confirmation link{email ? ` to ${email}` : ''}. Follow it within 24 hours to finish
-		creating your account.
+		creating your account. If it doesn’t arrive, register again: the link you follow sets the username and password.
 	</p>
 	{#snippet footer()}<a class="underline" href="/login">Back to log in</a>{/snippet}
 </AuthCard>

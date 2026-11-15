@@ -15,7 +15,7 @@
 	import { api, ApiError } from '$lib/api';
 	import { session } from '$lib/auth/session.svelte';
 	import { loadDistribution, loadLexicons } from '$lib/catalog';
-	import { sendWithRetry } from '$lib/builder/create';
+	import { isRetriable, sendWithRetry } from '$lib/builder/create';
 	import {
 		changeLexicon,
 		changeQuizType,
@@ -182,13 +182,20 @@
 				const b = e.body as { used: number; limit: number; needed: number };
 				used = b.used;
 				limit = b.limit;
-				createError = `This cascade needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your ${formatBytes(b.limit)} is free. Empty the Trash or delete cascades to make room.`;
+				// Refused before the search ran (the account is already full), the server knows no size to name.
+				createError =
+					b.needed > 0
+						? `This cascade needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your ${formatBytes(b.limit)} is free. Empty the Trash or delete cascades to make room.`
+						: `Your storage is full: ${formatBytes(b.used)} of ${formatBytes(b.limit)} is used. Empty the Trash or delete cascades to make room.`;
 			} else if (e instanceof ApiError && e.code === 'empty') createError = 'The search matched nothing.';
 			else if (e instanceof ApiError && e.code === 'over_cap')
 				createError = `The search matched ${(e.body as { count: number }).count.toLocaleString()} questions, more than ${cap.toLocaleString()}. Narrow it.`;
 			else if (e instanceof ApiError && e.status === 400)
 				createError = e.fieldErrors.length ? e.fieldErrors.map((f) => f.message).join(' ') : 'Fix the rows marked in red.';
-			else createError = 'The cascade could not be created. Check your connection.';
+			else if (e instanceof ApiError && e.code === 'search_too_broad') createError = 'This search is too broad to finish in time. Narrow it.';
+			else if (isRetriable(e)) createError = 'The cascade could not be created. Check your connection.';
+			// The server refused it, or this device could not store it: not the connection.
+			else createError = 'The cascade could not be created. Try again.';
 		} finally {
 			creating = false;
 			busy = false;

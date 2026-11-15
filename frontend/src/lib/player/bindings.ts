@@ -44,6 +44,14 @@ export const DEFAULT_BINDINGS: Binding[] = [
 ];
 
 /**
+ * The most bindings a device holds, over its three actions. Shared with all
+ * devices, the list travels as one setting, and an account's shared settings
+ * may take 16 KB in all (a request carrying more is a 400 for the whole
+ * sync): 64 bindings are under 8 KB.
+ */
+export const MAX_BINDINGS = 64;
+
+/**
  * A stored list made valid: well-formed bindings kept, the rest dropped, no
  * stroke twice. One that leaves an action with none, or anything unreadable,
  * is the defaults, so the player always has every action.
@@ -56,7 +64,7 @@ export function normalizeBindings(stored: unknown): Binding[] {
 		if (!ACTIONS.includes(raw.action as Action) || !KINDS.includes(raw.kind as Binding['kind']) || typeof raw.code !== 'string' || !raw.code) continue;
 		const b: Binding = { action: raw.action!, kind: raw.kind!, code: raw.code, ctrl: !!raw.ctrl, shift: !!raw.shift, alt: !!raw.alt, meta: !!raw.meta };
 		if (b.kind === 'key' && b.code === 'Escape') continue;
-		if (!out.some((o) => sameStroke(o, b))) out.push(b);
+		if (out.length < MAX_BINDINGS && !out.some((o) => sameStroke(o, b))) out.push(b);
 	}
 	return ACTIONS.every((a) => out.some((b) => b.action === a)) ? out : DEFAULT_BINDINGS.map((b) => ({ ...b }));
 }
@@ -133,6 +141,7 @@ export function bind(bindings: Binding[], action: Action, s: Stroke): { bindings
 	if (s.kind === 'key' && s.code === 'Escape') return { bindings, moved: null, refused: true };
 	const existing = bindings.find((b) => sameStroke(b, s));
 	if (existing?.action === action) return { bindings, moved: null, refused: false };
+	if (!existing && bindings.length >= MAX_BINDINGS) return { bindings, moved: null, refused: true };
 	const rest = bindings.filter((b) => !sameStroke(b, s));
 	if (existing && rest.filter((b) => b.action === existing.action).length === 0) {
 		// Every action must keep at least one binding.

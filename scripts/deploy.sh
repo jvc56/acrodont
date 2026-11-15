@@ -7,7 +7,7 @@
 # In order, stopping at the first thing wrong:
 #   1. the checkout: clean, HEAD on origin/main, CI's run on main green on this
 #      exact commit (--skip-ci-check for an emergency); a red scheduled CI run
-#      on main warns;
+#      on main warns, and so does one more than two days old;
 #   2. login, Terraform outputs, prod.tfvars from the state bucket;
 #   3. what is live: the backend image tag of the service's PRIMARY deployment,
 #      which must equal prod.tfvars' image_tag (else ECS rolled back: run
@@ -52,6 +52,11 @@ cd "$OPS_ROOT"
 # 1. The checkout.
 [[ -z "$(git status --porcelain --untracked-files=no)" ]] \
   || ops_die "uncommitted changes: deploy a clean checkout (the image tag is the commit)"
+# A file git does not track is still copied into an image whose tag says it
+# is the commit (.dockerignore is not .gitignore).
+untracked=$(git ls-files --others --exclude-standard -- backend frontend docker contract-fixtures scripts)
+[[ -z "$untracked" ]] \
+  || ops_die "untracked files where the images are built from: commit, ignore or move them first: $(tr '\n' ' ' <<<"$untracked")"
 git fetch -q origin main || ops_die "git fetch origin main failed"
 git merge-base --is-ancestor HEAD origin/main \
   || ops_die "HEAD is not on origin/main: deploy only from main (git checkout main && git pull)"
@@ -65,7 +70,9 @@ if ((skip_ci)); then
 else
   # On main: a branch's run of the same commit is only the Push tier
   # (.github/workflows/ci.yml), which must never clear a deploy alone.
-  ci=$(gh run list --workflow ci.yml --branch main --commit "$commit" --limit 1 --json status,conclusion,url) \
+  # The push's own run: the newest run of the commit may be the nightly, whose
+  # green would clear a commit whose push run was red, and whose red only warns.
+  ci=$(gh run list --workflow ci.yml --branch main --commit "$commit" --event push --limit 1 --json status,conclusion,url) \
     || ops_die "gh could not list CI runs (gh auth status?)"
   ci=$(jq -r '.[0] // empty | "\(.status) \(.conclusion // "") \(.url)"' <<<"$ci")
   [[ -n "$ci" ]] || ops_die "no CI run on main for $tag yet: wait for it, or --skip-ci-check in an emergency"
@@ -75,10 +82,25 @@ else
   ops_say "CI green for $tag"
 fi
 # The nightly run covers what per-commit CI does not; red there only warns.
+# So does an old one: GitHub stops a repository's scheduled workflows after
+# sixty days without activity, and the last result then stays green for good.
+# The age is worked out by jq (GNU and BSD `date` parse differently).
 nightly=$(gh run list --workflow ci.yml --branch main --event schedule --limit 1 \
-  --json conclusion,url 2>/dev/null | jq -r '.[0] // empty | "\(.conclusion // "") \(.url)"' 2>/dev/null) || nightly=""
-if [[ -n "$nightly" && "${nightly%% *}" != success && -n "${nightly%% *}" ]]; then
-  ops_say "WARNING: the latest scheduled CI run on main is ${nightly%% *}: ${nightly#* }"
+  --json conclusion,url,createdAt 2>/dev/null | jq -r '
+    if length == 0 then "none"
+    else .[0] | "\(.conclusion // "" | if . == "" then "running" else . end) \(.url) \(try (((now - (.createdAt | fromdateiso8601)) / 86400) | floor) catch "")"
+    end' 2>/dev/null) || nightly=""
+if [[ "$nightly" == none ]]; then
+  ops_say "WARNING: no scheduled CI run on main was found: the nightly (the Main tier and the scale suite) has not checked this code. Is the schedule enabled (gh workflow view ci.yml)?"
+elif [[ -n "$nightly" ]]; then
+  read -r nightly_conclusion nightly_url nightly_age <<<"$nightly"
+  # A run still going has no conclusion yet, and says nothing either way.
+  if [[ "$nightly_conclusion" != success && "$nightly_conclusion" != running ]]; then
+    ops_say "WARNING: the latest scheduled CI run on main is $nightly_conclusion: $nightly_url"
+  fi
+  if [[ "$nightly_age" =~ ^[0-9]+$ ]] && ((nightly_age > 2)); then
+    ops_say "WARNING: the latest scheduled CI run on main is $nightly_age days old: $nightly_url. The nightly has stopped running, so its result says nothing about this code (GitHub disables schedules after 60 days without activity: gh workflow enable ci.yml)."
+  fi
 fi
 
 # 2. The stack.
@@ -93,7 +115,13 @@ ops_tfvars_fetch
 state_tag=$(ops_tfvar image_tag)
 [[ -n "$state_tag" ]] || ops_die "prod.tfvars has no image_tag (the first apply sets a placeholder; docs/runbook.md)"
 live=$(ops_live_tag) || ops_die "cannot read what the service $OPS_SERVICE runs"
-if [[ "$live" != "$state_tag" ]]; then
+if [[ "$live" != "$state_tag" && "$live" == "$tag" ]]; then
+  # An apply of this very release that stopped part-way: the service was
+  # updated, prod.tfvars was never uploaded. Not a rollback; this run ends it.
+  ops_say "the service already runs $tag, which prod.tfvars does not name yet ($state_tag): an apply of this release stopped part-way. Finishing it"
+  # Its images are in ECR already; the plan is whatever the apply left undone.
+  all=1
+elif [[ "$live" != "$state_tag" ]]; then
   ops_show_events
   ops_die "the service runs $live, but prod.tfvars (and Terraform) name $state_tag: ECS rolled back. Run scripts/rollback.sh first, then deploy"
 fi

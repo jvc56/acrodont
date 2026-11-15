@@ -16770,6 +16770,250 @@
        }
       ]
      }
+    },
+    {
+     "op": {
+      "type": "set_quiz_options",
+      "quiz": "00000000-0000-4000-8000-000000000002",
+      "segment_size": 300001
+     },
+     "result": {
+      "status": "rejected",
+      "reason": "invalid"
+     },
+     "state": {
+      "cascade": {
+       "clear_threshold": 80,
+       "depth": 1,
+       "peak_depth": 1,
+       "attempts_since_completion": 0,
+       "completions": 0,
+       "trashed": false,
+       "purged": false,
+       "segment_size": 5,
+       "progression": "ladder",
+       "require_alphabetical": false
+      },
+      "quizzes": [
+       {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "level": 1,
+        "status": "active",
+        "origin": "source",
+        "origin_quiz_id": null,
+        "origin_attempt": null,
+        "origin_segment_end": null,
+        "segment_chain": false,
+        "segment_size": 5,
+        "progression": "ladder",
+        "require_alphabetical": false,
+        "attempt": 1,
+        "shuffle_seed": "12725948651811269198",
+        "question_count": 10,
+        "questions_hash": "4855793267582207412",
+        "questions": [
+         0,
+         1,
+         2,
+         3,
+         4,
+         5,
+         6,
+         7,
+         8,
+         9
+        ],
+        "correct": 0,
+        "missed": 0,
+        "cursor": 0,
+        "run_start": 0,
+        "next_boundary": 5,
+        "run_indicator": "run 1 of 2 · 1 of 5"
+       }
+      ]
+     }
+    },
+    {
+     "op": {
+      "type": "set_quiz_options",
+      "quiz": "00000000-0000-4000-8000-000000000002",
+      "segment_size": 300000
+     },
+     "result": {
+      "status": "applied"
+     },
+     "state": {
+      "cascade": {
+       "clear_threshold": 80,
+       "depth": 1,
+       "peak_depth": 1,
+       "attempts_since_completion": 0,
+       "completions": 0,
+       "trashed": false,
+       "purged": false,
+       "segment_size": 5,
+       "progression": "ladder",
+       "require_alphabetical": false
+      },
+      "quizzes": [
+       {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "level": 1,
+        "status": "active",
+        "origin": "source",
+        "origin_quiz_id": null,
+        "origin_attempt": null,
+        "origin_segment_end": null,
+        "segment_chain": false,
+        "segment_size": 300000,
+        "progression": "ladder",
+        "require_alphabetical": false,
+        "attempt": 1,
+        "shuffle_seed": "12725948651811269198",
+        "question_count": 10,
+        "questions_hash": "4855793267582207412",
+        "questions": [
+         0,
+         1,
+         2,
+         3,
+         4,
+         5,
+         6,
+         7,
+         8,
+         9
+        ],
+        "correct": 0,
+        "missed": 0,
+        "cursor": 0,
+        "run_start": 0,
+        "next_boundary": null,
+        "run_indicator": null
+       }
+      ]
+     }
+    },
+    {
+     "op": {
+      "type": "set_cascade_options",
+      "segment_size": 300001
+     },
+     "result": {
+      "status": "rejected",
+      "reason": "invalid"
+     },
+     "state": {
+      "cascade": {
+       "clear_threshold": 80,
+       "depth": 1,
+       "peak_depth": 1,
+       "attempts_since_completion": 0,
+       "completions": 0,
+       "trashed": false,
+       "purged": false,
+       "segment_size": 5,
+       "progression": "ladder",
+       "require_alphabetical": false
+      },
+      "quizzes": [
+       {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "level": 1,
+        "status": "active",
+        "origin": "source",
+        "origin_quiz_id": null,
+        "origin_attempt": null,
+        "origin_segment_end": null,
+        "segment_chain": false,
+        "segment_size": 300000,
+        "progression": "ladder",
+        "require_alphabetical": false,
+        "attempt": 1,
+        "shuffle_seed": "12725948651811269198",
+        "question_count": 10,
+        "questions_hash": "4855793267582207412",
+        "questions": [
+         0,
+         1,
+         2,
+         3,
+         4,
+         5,
+         6,
+         7,
+         8,
+         9
+        ],
+        "correct": 0,
+        "missed": 0,
+        "cursor": 0,
+        "run_start": 0,
+        "next_boundary": null,
+        "run_indicator": null
+       }
+      ]
+     }
+    },
+    {
+     "op": {
+      "type": "set_cascade_options",
+      "segment_size": 300000
+     },
+     "result": {
+      "status": "applied"
+     },
+     "state": {
+      "cascade": {
+       "clear_threshold": 80,
+       "depth": 1,
+       "peak_depth": 1,
+       "attempts_since_completion": 0,
+       "completions": 0,
+       "trashed": false,
+       "purged": false,
+       "segment_size": 300000,
+       "progression": "ladder",
+       "require_alphabetical": false
+      },
+      "quizzes": [
+       {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "level": 1,
+        "status": "active",
+        "origin": "source",
+        "origin_quiz_id": null,
+        "origin_attempt": null,
+        "origin_segment_end": null,
+        "segment_chain": false,
+        "segment_size": 300000,
+        "progression": "ladder",
+        "require_alphabetical": false,
+        "attempt": 1,
+        "shuffle_seed": "12725948651811269198",
+        "question_count": 10,
+        "questions_hash": "4855793267582207412",
+        "questions": [
+         0,
+         1,
+         2,
+         3,
+         4,
+         5,
+         6,
+         7,
+         8,
+         9
+        ],
+        "correct": 0,
+        "missed": 0,
+        "cursor": 0,
+        "run_start": 0,
+        "next_boundary": null,
+        "run_indicator": null
+       }
+      ]
+     }
     }
    ]
   },

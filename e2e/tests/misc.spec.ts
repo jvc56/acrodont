@@ -47,9 +47,13 @@ test('hooks read Zyzzyva-style in lower case, and a Catalan multi-character hook
 	await page.goto(catalan);
 	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
 	await press(page, 'Space');
-	const a = page.getByRole('listitem').filter({ hasText: /NY/ });
-	await expect(a).toBeVisible({ timeout: 30_000 });
-	await expect(page.getByRole('listitem').filter({ hasText: /ny/ })).toHaveCount(0);
+	// In the hook cell itself: the fixture's definition of A also says "NY".
+	const hook = page
+		.getByRole('listitem')
+		.filter({ has: page.locator('[data-answer]').filter({ hasText: /^\W*A\W*$/ }) })
+		.locator('[data-hooks="back"]');
+	await expect(hook).toContainText('NY', { timeout: 30_000 });
+	await expect(hook).not.toContainText('ny');
 });
 
 test('a word row is probability, front hooks, word, back hooks, definition; the cascade chooses what shows', async ({ page }) => {

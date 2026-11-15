@@ -12,7 +12,8 @@
 # fails rolls the whole batch back. As the app role (DATABASE_URL), or with
 # --as-master as the RDS master user (acrodont-master-psql), for role and
 # grant changes. The task is polled with no time limit, its log printed, and
-# this exits with the container's exit code (psql: 3 for a failed statement).
+# this exits with the container's exit code (psql: 3 for a failed statement);
+# 2 when ECS cannot say what it was, 125 when no task could be started.
 # For anything interactive, scripts/prod-shell.sh.
 set -euo pipefail
 # shellcheck source=scripts/lib/ops.sh

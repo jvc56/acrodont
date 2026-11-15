@@ -121,6 +121,7 @@ async fn the_first_page_fixes_the_ceiling_and_the_list(pool: sqlx::PgPool) {
         pages.push(r.json());
     }
     let groups = rows(&pages, "quiz_questions");
+    assert!(!groups.is_empty(), "the listed cascade's question rows arrive");
     assert!(groups.iter().all(|g| g["quiz_id"] == json!(big.source_id)), "the first page's list holds");
     let quizzes = rows(&pages, "quizzes");
     let ids: HashSet<_> = quizzes.iter().map(|q| q["id"].clone()).collect();

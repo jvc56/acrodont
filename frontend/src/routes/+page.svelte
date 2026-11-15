@@ -17,8 +17,8 @@
 	import TrashList from '$lib/components/TrashList.svelte';
 	import { tick, untrack } from 'svelte';
 	import { cascadeSummaries, ladderText, offlineStates, type CascadeSummary } from '$lib/cascades/summary';
-	import { DEFAULT_STORAGE_LIMIT, formatBytes, levelBytes, storageState } from '$lib/cascades/storage';
-	import { applyLocally, type NewOp } from '$lib/local/apply';
+	import { DEFAULT_STORAGE_LIMIT, finishesRefused, formatBytes, levelBytes, storageState } from '$lib/cascades/storage';
+	import { applyOrRefuse, CHANGE_REFUSED, type NewOp } from '$lib/local/apply';
 	import { confirmAction } from '$lib/confirm.svelte';
 	import { getMeta } from '$lib/local/meta';
 	import type { UserDb } from '$lib/local/db';
@@ -102,10 +102,13 @@
 		untrack(() => void refresh());
 	});
 
+	/** The rules refused the last change made from the list (Move to Trash on a cascade another tab already moved). */
+	let refused = $state(false);
+
 	async function write(op: NewOp) {
 		if (!db) return;
-		await applyLocally(db, op);
-		afterLocalWrite();
+		refused = !(await applyOrRefuse(db, op));
+		if (!refused) afterLocalWrite();
 		await refresh();
 		trashVersion++;
 	}
@@ -171,7 +174,12 @@
 						style={`width: ${Math.min(100, (used / Math.max(1, limit)) * 100)}%`}
 					></div>
 				</div>
-				{#if fill === 'over'}
+				{#if finishesRefused(used, limit)}
+					<p class="text-sm text-destructive">
+						Over your storage by {formatBytes(used - limit)}, more than five times its limit: levels can’t be finished, and cascades can’t
+						be created, until you make room. Empty the <a class="underline" href="#trash">Trash</a> or delete cascades.
+					</p>
+				{:else if fill === 'over'}
 					<p class="text-sm text-destructive">
 						Over your storage by {formatBytes(used - limit)}: you can keep studying, but can’t create cascades until you make room.
 						Empty the <a class="underline" href="#trash">Trash</a> or delete cascades.
@@ -191,6 +199,7 @@
 			{/if}
 		</div>
 	</header>
+	{#if refused}<p class="mb-3 text-sm text-destructive" role="alert">{CHANGE_REFUSED}</p>{/if}
 		{#if list.length === 0 && noCatalog}
 		<!-- Nothing to build from yet: say so, and where to fix it. -->
 		<p class="text-muted-foreground">

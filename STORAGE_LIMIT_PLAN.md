@@ -7,6 +7,28 @@ were taken the same day (docs/plan-questions.md PQ-023). The default limit,
 PLAN.md § Storage limit is now the spec; this file records how it was
 decided.
 
+**Since then** the default was lowered to **10 MB** (`MAX_STORAGE_BYTES_PER_USER`
+is `10000000`), once each level's questions were packed into chunks and the
+same cascades came to a small fraction of the sizes below, and `MAX_ACCOUNTS`
+was raised from 50 to 750. Every "100 MB" and "50" in this file is the
+figure of the day it was written; PLAN.md § Storage limit has today's
+sizing. The per-row sizes under "Implementation status" are of that day too:
+`contract-fixtures/storage.json` has today's (a quiz's questions are counted
+by chunk and card, not by `quiz_question_row`, and an attempt row is 210
+bytes), and "Start over" in this file is today's Duplicate cascade.
+
+**S3 has one bound since 2026-11-14.** "Studying never fails for storage"
+holds up to **five times the limit**. Past that the server rejects a `finish`
+(and a `finish_segment` that would make a level) with the reason
+`storage_limit`: every finish adds an attempt row, so without a bound an
+account finishing a level in a loop grew without limit (the adversarial
+review's R1-11). The answers behind the refused finish are kept, and the
+level finishes once room is made. No real study reaches it: at 10 MB the
+40 MB past the limit are about 190,000 finished attempts. PLAN.md § Storage
+limit has the rule and what the device does with the refusal; § Deployment
+and Operations → Capacity has the bound. Where S3 below says a finish is
+never refused, read it with this.
+
 ### Implementation status
 
 - **The per-row sizes** are `contract-fixtures/storage.json`: `cascade_row`

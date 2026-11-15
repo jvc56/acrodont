@@ -31,7 +31,19 @@ export async function watchUpdates() {
 	registration = (await sw.getRegistration()) ?? null;
 	// A card can stay open for hours with no navigation to prompt the browser's
 	// own check, so look for a new version now and then, and on returning.
-	const lookForUpdate = () => void registration?.update().catch(() => undefined);
+	// A new version that has installed and waits, under a page an older one
+	// controls. Read from the registration itself, and not only heard of from
+	// its events: a browser that reports a registration from another process
+	// (Safari) may deliver `updatefound` once the new worker is already
+	// waiting, with no `installing` worker left to listen to.
+	const offer = (r: ServiceWorkerRegistration | null) => {
+		if (r?.waiting && sw.controller) updates.ready = true;
+	};
+	const lookForUpdate = () =>
+		void registration
+			?.update()
+			.then(() => offer(registration))
+			.catch(() => undefined);
 	setInterval(lookForUpdate, 5 * 60_000);
 	addEventListener('online', lookForUpdate);
 	document.addEventListener('visibilitychange', () => {
@@ -58,13 +70,23 @@ export async function watchUpdates() {
 	const check = (r: ServiceWorkerRegistration) => {
 		if (r.waiting) updates.ready = true;
 		r.addEventListener('updatefound', () => {
+			offer(r);
 			const w = r.installing;
 			w?.addEventListener('statechange', () => {
 				if (w.state === 'installed' && sw.controller) updates.ready = true;
+				offer(r);
 			});
 		});
 	};
 	if (registration) check(registration);
+	// A first visit: the worker is registered at the page's load event, after
+	// this ran, so there was no registration to read. Taken once there is one,
+	// or this tab would never look for a new version, however long it stays open.
+	else
+		void sw.ready.then((r) => {
+			registration = r;
+			check(r);
+		});
 }
 
 /** The user accepted the new version: the one reload they asked for. */

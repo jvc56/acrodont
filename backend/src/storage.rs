@@ -123,6 +123,20 @@ impl Usage {
     }
 }
 
+/// Studying never fails for storage, up to this many times the account's
+/// limit: past it a finish is refused (PLAN.md § Storage limit). Every finish
+/// adds an attempt row, so without a bound an account that finishes a level
+/// in a loop grows for ever, and nothing else an account does adds rows once
+/// creating is refused at the limit itself.
+pub const FINISH_REFUSED_PAST: i64 = 5;
+
+impl Usage {
+    /// Whether the account is past the point where finishes are refused.
+    pub fn refuses_finishes(&self) -> bool {
+        self.used > self.limit.saturating_mul(FINISH_REFUSED_PAST)
+    }
+}
+
 /// The account's usage now; under the user row's lock, the figure the check uses.
 pub async fn usage(conn: &mut PgConnection, user: Uuid, default_limit: u64) -> Result<Usage, sqlx::Error> {
     let r = sqlx::query!("SELECT storage_bytes, storage_limit_bytes FROM users WHERE id = $1", user)
@@ -132,13 +146,17 @@ pub async fn usage(conn: &mut PgConnection, user: Uuid, default_limit: u64) -> R
 }
 
 /// Adds `delta` to a cascade's figure and its user's total, stamping the
-/// cascade with `seq` so the change reaches every device's pull.
+/// cascade with `seq` so the change reaches every device's pull. A figure
+/// never goes below zero: what a purge frees is counted again from the rows
+/// with today's `ROW_BYTES`, and rows stored under other constants would
+/// otherwise take the figure negative, fail its CHECK and stop the purge.
+/// The recount corrects the total either way.
 pub async fn add_to_cascade(conn: &mut PgConnection, user: Uuid, cascade: Uuid, delta: i64, seq: i64) -> Result<(), sqlx::Error> {
     if delta == 0 {
         return Ok(());
     }
     sqlx::query!(
-        "UPDATE cascades SET storage_bytes = storage_bytes + $2, updated_seq = $3 WHERE id = $1",
+        "UPDATE cascades SET storage_bytes = greatest(storage_bytes + $2, 0), updated_seq = $3 WHERE id = $1",
         cascade,
         delta,
         seq
@@ -152,7 +170,7 @@ pub async fn add_to_user(conn: &mut PgConnection, user: Uuid, delta: i64) -> Res
     if delta == 0 {
         return Ok(());
     }
-    sqlx::query!("UPDATE users SET storage_bytes = storage_bytes + $2 WHERE id = $1", user, delta)
+    sqlx::query!("UPDATE users SET storage_bytes = greatest(storage_bytes + $2, 0) WHERE id = $1", user, delta)
         .execute(conn)
         .await?;
     Ok(())

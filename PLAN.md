@@ -156,8 +156,9 @@ When the user finishes an attempt of the Source quiz:
 | **Nothing correct** | The Source quiz is **reset**. Nothing is created. | The reset Source quiz |
 
 - The threshold still decides whether the attempt was a pass, and that is
-  derivable from the attempt's counts and the cascade's threshold, which never
-  changes, so no column records it; it does not decide where the user goes:
+  derivable from the attempt's counts and the cascade's threshold, so no
+  column records it (the threshold [can be changed](#quiz-options), and an
+  earlier attempt's pass is then read against the new one); it does not decide where the user goes:
   the Source quiz's misses always go down, because there is nothing for them
   to replace.
 - Progression does not apply to the Source quiz, for the same reason. The
@@ -165,7 +166,10 @@ When the user finishes an attempt of the Source quiz:
   so a Drill cascade is the Source quiz plus a drill chain at Level 2.
 - A cascade can be completed more than once; each finish with no misses
   records a new `completed_at`. The Cascades page marks complete cascades, and
-  the completion screen offers **Start over** and **Move to Trash**.
+  the completion screen offers **Start over** and **Move to Trash**. While it
+  is in front, the reset Source quiz under it takes no action: a key bound to
+  Show / Next neither shows nor grades its cards, and Space or Enter presses
+  the screen's focused button.
 - **What the completion screen counts.** *Levels* is the deepest level the
   cascade reached since the previous completion (`cascades.peak_depth`, reset
   to 1 at each completion), and *attempts* is the number of attempts finished
@@ -441,7 +445,11 @@ Moving on from the last question of a run that is not the last run:
   filters, with the same threshold and options, starting at Level 1. It takes
   this cascade's name with the next free number after it. This cascade isn't
   changed. You'll have both, and each counts toward your storage until it is
-  deleted from the Trash." (see [Storage limit](#storage-limit)).
+  deleted from the Trash." (see [Storage limit](#storage-limit)). The server
+  copies the settings it holds, so a setting changed on this device and not
+  yet sent is sent first, with the same wait an export from the server makes
+  (see [Exporting words](#exporting-words)); a sync that does not end within
+  it does not stop the duplicate, which then has the settings the server had.
 - **Exporting** works on anything in the Trash that has not been purged, so a
   cleared quiz can still be downloaded as a word list (see
   [Exporting words](#exporting-words)).
@@ -575,6 +583,31 @@ the user cannot act on, and offline the finish has already been played. Past
 the limit the account keeps studying, syncing, restoring and exporting; only
 creating a cascade, Duplicate and saving a search are refused.
 
+**Up to five times the limit.** Every finish adds an attempt row, and under
+Ladder a level, and nothing else an account does adds rows once creating is
+refused; so without a bound, an account that finishes a level in a loop
+would grow for ever. Once an account's storage is **past five times its
+limit**, the server rejects a `finish`, and a `finish_segment` whose run
+would make a drill level, with the reason `storage_limit`, writing nothing.
+The account's figure is read under the user row's lock the sync already
+holds, so an account stops at five times its limit plus what the one finish
+that crossed it added. No real study gets there: at the default 10 MB that
+is 50 MB, and the 40 MB past the limit are some 190,000 finished attempts,
+or about fourteen full-size 300,000-question levels. The grades behind a refused
+finish are kept, so the level stays fully answered and can be finished once
+room is made (the Trash emptied, a cascade deleted). **The device does not
+check this itself**: its storage figure is the server's last report, and the
+rules it shares with the server know nothing of storage. It plays the finish
+as it always does, sends it, and treats the refusal as it treats any rejected
+finish (see [Conflicts](#conflicts)): the operation leaves the outbox and is
+never sent again, the level the finish made on the device is dropped with
+any answers already given on it, the finished level returns as the server
+has it, and one notice says "Level N wasn't finished: your storage is more
+than five times its limit. Empty the Trash or delete cascades to make room,
+then finish it again." Nothing else queued is lost, and nothing loops:
+finishing again is the user's doing, and is refused again until there is
+room.
+
 - **Restores.** Restoring a quiz or a cascade adds no rows, so it is always
   allowed.
 - **The Trash counts**, because its rows are still stored and can be restored.
@@ -588,7 +621,9 @@ creating a cascade, Duplicate and saving a search are refused.
   empty the Trash or delete cascades to make room". Over the limit it says
   "Over your storage by 12 MB: you can keep studying, but can't create cascades
   until you make room", New cascade is disabled, and Duplicate is disabled
-  once storage is full.
+  once storage is full. Past five times the limit it says instead "Over your
+  storage by 41 MB, more than five times its limit: levels can't be finished,
+  and cascades can't be created, until you make room."
 
 ---
 
@@ -597,7 +632,7 @@ creating a cascade, Duplicate and saving a search are refused.
 ### Accounts
 
 Every page except the login, registration, email confirmation and password
-reset pages (and `/`, which only redirects) requires a logged-in user. An account is a username, an
+reset pages requires a logged-in user (`/` is the [Cascades page](#cascades-page); signed out, it goes to the log-in page). An account is a username, an
 email address and a password. Some accounts are **admins**, who can also upload
 and delete catalog data (see [Admin](#admin)). See
 [Authentication](#authentication).
@@ -696,7 +731,11 @@ an object of setting name to `{ value, at }`, `at` being when it was shared.
 Sharing writes the value to this device's `meta` store (`shared_device`) as
 pending, and the next sync carries the pending values in the request's
 `device_settings`; the server merges them in, the later `at` winning per
-setting, so two devices sharing the same setting agree on the last one.
+setting, so two devices sharing the same setting agree on the last one. The
+server keeps `at` as `least(at, now + 5 minutes)`, as it clamps every device
+time it compares (see [Operations](#operations)), so a device whose clock is
+months ahead wins a merge by five minutes at most and the next real share
+takes the setting back.
 **Every sync response carries the account's `device_settings`**, and a device
 takes each value whose `at` is later than the last it took for that setting
 (also kept in `shared_device`), made valid as a stored value from another
@@ -705,7 +744,9 @@ with every shared value once it has synced. A device's own later change stays
 on that device until it, or another, shares again. Sharing works offline: the
 value waits as pending until a sync carries it. The functions are in
 `lib/settings/device.ts`; the server holds at most 64 shared settings per
-account and reads no meaning into a value.
+account, 16 KB of them in all (a share that would pass either changes
+nothing: every sync response carries them, and they are outside the
+[storage limit](#storage-limit)), and reads no meaning into a value.
 
 Question order is **not** a setting: questions are always shuffled.
 
@@ -863,15 +904,17 @@ level, the cascade's [settings](#settings), **Duplicate** and
 meter (`data-storage` is `ok`, `almost` from 90%, or `over`). From 90% it adds
 "Almost full: empty the Trash or delete cascades to make room"; over the limit
 it says "Over your storage by 12 MB: you can keep studying, but can't create
-cascades until you make room", and **New cascade** is disabled. Both link to
+cascades until you make room" (past five times the limit, that levels can't
+be finished either: see [Storage limit](#storage-limit)), and **New cascade**
+is disabled. Both link to
 the Trash below. The figures are the ones `/api/auth/me` and every sync
 response last reported, so they show offline too. The header also has
 **New cascade** and
 the sync status, which is [`SyncStatus`](#frontend) in every one of its states —
 **Synced**, **Waiting to sync**, **Syncing…**, **Offline**, **Log in to sync**,
-**not enough room on this device**, **signed out in another tab** and **reload to
-keep syncing** — since this is the page a user studies from and the last four
-are the ones that need acting on.
+**not enough room on this device**, **signed out in another tab**, **reload to
+keep syncing** and **Can't sync: reload** — since this is the page a user
+studies from and the last five are the ones that need acting on.
 
 ### Trash
 
@@ -902,12 +945,12 @@ Delete forever asks for confirmation first.
 says what it frees ("Delete forever (4.2 MB)"), and its confirmation ends
 "This frees 4.2 MB of your storage." A trashed cascade's figure is the
 server's for the whole cascade; a cleared quiz's is its level's share, counted
-on the device from the same per-row costs (its attempt rows, 176 bytes each,
+on the device from the same per-row costs (its attempt rows, 210 bytes each,
 are left out of the label but freed with it).
 **Entries are grouped and not all rendered.** A cascade's group shows its name,
 how many entries it holds, its size and the earliest date among them that one is deleted
 forever ("deleted forever on …"), collapsed;
-expanding it renders a virtualized list in pages of 100 behind a **Show more**
+expanding it renders its entries a page of 100 at a time behind a **Show more**
 control. A group holding one entry is rendered expanded, since collapsing a
 single row hides nothing. One segmented attempt can leave tens of thousands of cleared quizzes
 (see [Quiz options](#quiz-options)), and a flat list of them would lock the tab.
@@ -917,6 +960,17 @@ until its rows are fetched. A
 trashed cascade is one unit: the cleared quizzes listed under it can still be
 restored (which brings the cascade back) and exported, but Delete forever is
 shown only on the cascade itself, never on its quizzes.
+**A change the rules refuse is said, not dropped in silence.** A page offers
+Restore, Delete forever, Move to Trash or a setting from what it last read,
+and another tab or a sync may have changed that since (a cascade restored
+twice, a level deleted forever in one tab and restored in another). The
+operation is then refused on the device, nothing is queued, and the page says
+"The change could not be made. Try again." (`CHANGE_REFUSED`, the sentence
+Create Cascade and Duplicate cascade end a refusal with) and reads again, so
+it shows what is true before the next press: beside the entry in the Trash (above the
+list when the entry is no longer in it), above the Cascades page's list for
+its Move to Trash, and in the player under Restore on a trashed cascade, in
+Settings, and on the completion screen for its Move to Trash.
 
 ### Taking a quiz
 
@@ -986,7 +1040,7 @@ as the term of the data model and the API.
     with (the cascade's); **Copy another cascade's settings** (a choice of the
     user's other cascades and **Copy settings**); then Duplicate and Move to
     Trash. Duplicate is disabled when the account's
-    [storage](#storage-limit) is full (`Duplicate: your storage is full`); a
+    [storage](#storage-limit) is full (`Duplicate cascade: your storage is full`); a
     `409 storage_limit` says what duplicating needs and how much is free. The two sets of level options are subgroups of the section, each
     under its own heading. Each of the cascade's settings, and the options
     for levels made from now on, says "✓ Saved for this cascade" once changed
@@ -1051,8 +1105,8 @@ as the term of the data model and the API.
   status bar, shown or hidden.
 - **The sync status shows what is happening**: "Waiting to sync" after an
   answer, "Syncing…" while the device talks to the server (a sync starts
-  within about a second of a write), then "Synced"; offline, log in, reload
-  and no room as they arise. It has a fixed width with its label flush right,
+  within about a second of a write), then "Synced"; offline, log in, reload,
+  can't sync and no room as they arise. It has a fixed width with its label flush right,
   so a changing label never shifts what is beside it.
 - **The sync status can be hidden**, with the status bar or by its own
   setting on the device (shown by default). Hidden, it is quiet rather than
@@ -1116,10 +1170,20 @@ as the term of the data model and the API.
   player takes no keys.
 - **The logout warning** ("2 changes haven't synced yet. They will sync the
   next time you log in on this device.") shows on the Account page only when
-  changes cannot sync now (offline, or the session needs a login). Online,
+  changes cannot sync now: offline, the session needs a login, the server
+  refuses the sync ("Can't sync: reload"), or **this tab has stopped
+  syncing** (signed out or updated in another tab). In a tab that has
+  stopped, the count is read from the account's own database (`unsentCount`,
+  which there is `countUnsent`), as the count before a removal is: such a tab
+  no longer counts as it goes, and the figure it last made while it synced
+  says nothing of what was studied in it since or of what another tab has
+  sent. Online,
   every change syncs within a second and the sync status in the header shows
   it; a line that came and went with each setting changed would only shift
-  the page.
+  the page. Removing the account's data is the exception: Log out with that
+  box ticked counts the unsent changes after its own sync and asks before it
+  discards any, whatever the status (see
+  [Authentication while offline](#authentication-while-offline)).
 - **Inside the quiz area**, text selection is off and the browser's context menu
   is suppressed. Middle-click autoscroll and (on Linux) middle-click paste are
   prevented, so all three mouse buttons are free for quiz actions.
@@ -1154,7 +1218,9 @@ Every quiz is driven by three actions, whatever the device:
   device, since how much a button bounces belongs to the hardware.
   Settings saved before the default changed with the old default, 50, read as
   0. The wheel's own 150 ms guard against one flick firing many
-  steps is separate.
+  steps is separate. A key held down is one press whatever the guard: the
+  keyboard's own repeats are ignored, since they would show and grade cards
+  nobody saw.
 - **Instant at any size.** Show / Next and Previous never wait for IndexedDB,
   however large the quiz and however slow the browser's storage (Firefox
   commits each read-write transaction more carefully than Chromium):
@@ -1332,9 +1398,10 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   never taken back on a later change to the same card.
 - **Protecting against accidental give-ups.** Before the answer is shown, a
   stroke bound to **Show / Next** inside the quiz area focuses the input instead
-  of acting. Strokes bound to Toggle grade and Previous, such as the default
-  right and middle clicks, still act, so a card can be marked "I don't know
-  this one" or left with the keyboard covered.
+  of acting. A stroke bound to Previous, such as the default middle click,
+  still acts, so a card can be left with the keyboard covered. One bound to
+  Toggle grade does nothing, as on any card before its answer is shown: there
+  is no grade to flip yet (see [The three actions](#the-three-actions)).
 - Switching modes in the middle of a card resets that card's typed entries.
 
 #### Controls
@@ -1347,7 +1414,7 @@ The default desktop bindings are:
 | **Toggle grade** | Right click | `X`, `M` |
 | **Previous** | Middle click | Backspace, `J` |
 
-An action can hold any number of bindings, but always at least one. A device
+An action can hold any number of bindings, up to 64 on a device in all, but always at least one. A device
 whose bindings were saved before `,`, `M`, `J` and Enter were added gets them
 with **Reset controls to defaults**.
 
@@ -1461,8 +1528,9 @@ Details:
 - **Typed mode.** The input bar is at the bottom of the page, and the page
   shrinks to the space above the on-screen keyboard (`interactive-widget=resizes-content`),
   so the bar sits just above the keyboard. The keyboard covers the zones, so while
-  it is open the bar also holds a row of three buttons: Previous, Show / Next,
-  Toggle.
+  it is open the bar also holds a row of two buttons: Previous and Show / Next.
+  It has no Toggle: the bar is there only until the answer is shown, and Toggle
+  does nothing before the reveal.
 - **Customization.** Columns or rows is the one choice; only mouse and
   keyboard controls can be rebound.
 
@@ -1562,6 +1630,19 @@ What ends up in the file, per quiz type:
   Leave Value `answer` is the value as the [Answers](#answers) rule writes it
   for exports (no `+`), and a Leave Value row's `definition` and `hooks` are
   empty; the dialog does not offer those columns for a Leave Value cascade. The header row is the column names in the order chosen.
+- **A definition is never a formula.** Definitions are free text an admin
+  uploads, and a spreadsheet runs a cell that begins with `=`, `+`, `-`, `@`,
+  a tab or a CR as a formula. So a CSV cell of definition text that begins
+  with one of those six is written with an apostrophe (`'`) before it, which a
+  spreadsheet shows as text: the `definition` cell (for an Anagram row the
+  joined cell, so only its first definition decides), and a Definition
+  quiz's `answer` cell, which is the same text. The apostrophe goes on before
+  the RFC 4180 quoting. No other cell is touched: a negative Leave Value
+  (`-8.4`) stays a number, and questions, hooks and grades hold tiles and
+  fixed words. A word list is not a spreadsheet and writes definitions as
+  they are. The device and the server do this identically, by the same
+  fixtures. Nothing reads an export back in, so nothing has to take the
+  apostrophe off again.
 - The file is named after the source, e.g. `CSW24 7s - L2 missed.txt`: the
   cascade name, then ` - L<level>` for a quiz export, then, after a single
   space, the selection's API value when it is not `all` (`correct`, `missed`
@@ -1591,7 +1672,15 @@ Answers,
 definitions and hooks come from the cascade's answer cards, and definitions and
 hooks are only in the local cards if the cascade's settings asked for them, so an
 export that needs something the device doesn't have falls back to
-the server, in two steps. A page cannot see the status of a navigation, and a
+the server, in two steps. The server makes the file from the rows it holds, so
+the dialog first sends what this device has not sent of the cascade: when the
+outbox holds an operation of it, the dialog asks for a sync and waits for it, at
+most `SYNC_WAIT_MS` (5 seconds), in whichever tab it is (`sendPending`; see
+[Frontend](#frontend)). The export is made either way. When operations of the
+cascade are still unsent after the wait (no connection to the sync endpoint, the
+account logged out, a sync that took longer), the dialog says so beside its
+confirmation: "Your download has started. Answers that haven't synced from this
+device yet are not in the file." A page cannot see the status of a navigation, and a
 navigation that lands on an error body can replace the app, so the dialog first
 `fetch`es `POST /api/cascades/:id/export-token` with the export's choices and
 `X-Acrodont-User`: that request is the one that sees `401`, `404` and `429`, and
@@ -1622,7 +1711,7 @@ changed offline. When that is needed and there is no connection, the dialog says
 so and offers to export the questions alone, which never needs anything but
 local data. A `404` from the token request means the quiz or cascade was purged on
 another device or by the retention period while the dialog was open; the dialog
-says it has been deleted and refreshes the page behind it, rather than offering
+says it has been deleted and, two seconds later, goes to the Cascades page, rather than offering
 the offline fallback, which would fail for the same reason.
 
 ---
@@ -1760,8 +1849,10 @@ line per leave, in any order, and at least one leave.
 
 The file does not have to list every possible leave; a leave missing from it
 simply cannot be quizzed. The chosen lexicon must not already have leave
-values. To replace them, delete the existing set (allowed only while no cascade
-uses it) and upload again.
+values. To change the values of the leaves it already has, use
+[Replace values](#replacing-definitions-and-leave-values); to change which
+leaves it holds, delete the existing set (allowed only while no cascade uses
+it) and upload again.
 
 ```
 ?,28.292000
@@ -1777,8 +1868,12 @@ compressing it: a lexicon's words and a leave set's leaves are each stored as
 one text compressed with zstd at level 19 (see [Schema](#schema)), about ten
 seconds for CSW24's 280,887 words and twenty-five for its 914,624 leaves,
 which then take 3.8 MB and 3.9 MB where a row for each took 40 MB and 91 MB. Admin upload endpoints
-accept request bodies up to 100 MB and have a 120-second timeout, and the ALB
-idle timeout is raised to match.
+accept request bodies up to 100 MB and have a 115-second timeout, and the ALB
+idle timeout is raised to 120 seconds, as is Nginx's wait for the app's
+answer: five seconds more than the app allows itself, so an upload that takes
+the whole time gets the app's own answer (a `408` when it ran out of time)
+rather than a `504` from a load balancer that gave up in the same moment the
+upload committed.
 
 ### Immutability and deletion
 
@@ -1875,8 +1970,10 @@ names changed:
   definitions: the Leave Value filter is the usual way to build a Leave Value
   cascade, so after a replacement a cascade of "leaves worth 5 or more" may
   hold a leave now worth less and lack one now worth more. Its answers are
-  the new values; its questions are the ones chosen at creation, until Start
-  over chooses again. The values upload page says so.
+  the new values; its questions are the ones chosen at creation: **Duplicate
+  cascade** runs the search again and so chooses them again, in a new cascade
+  (Start over is another pass of the same questions). The values upload page
+  says so.
 - **A lexicon still has at most one set.** A different list of leaves is a
   different catalog item: the old set is deleted once no cascade uses it, or
   the lexicon is uploaded again under a new name.
@@ -2317,7 +2414,7 @@ straight into Postgres; the original files are not kept.
 | `e2e/` | Playwright configuration, `globalSetup` and the [journeys](#the-journeys). |
 | `docker/` | Backend Dockerfile (a Rust build, then two targets: `backend`, the server alone, and `ops`, the tools for the backup, drill and ops tasks), the frontend's, and the Nginx configuration. Base images pinned by digest. |
 | `infra/` | Terraform. |
-| `scripts/` | `stack.py` (the one way to bring a Acrodont up: compose, health, seed, reset, down), `dev.py` (its command line), `scenarios.py` (study states through the API), `scrub.sql` (a production copy made safe locally), `backup.py`, `restore.py` and `drill.py`; the operator scripts (`deploy.sh`, `rollback.sh`, `set-setting.sh`, `prod-sql.sh`, `prod-shell.sh`, `confirm-user.sh`, `init-db-roles.sh`, `rotate-db-password.sh`, `onboard-deployer.sh`, `check-alerts.sh`) over `lib/ops.sh`, and their checks (`ops-scripts-check.sh` against stand-ins in `lib/ops_fakes.py`, `runbook-check.sh`). |
+| `scripts/` | `stack.py` (the one way to bring a Acrodont up: compose, health, seed, reset, down), `dev.py` (its command line), `scenarios.py` (study states through the API), `scrub.sql` (a production copy made safe locally), `backup.py`, `restore.py` and `drill.py`; the operator scripts (`deploy.sh`, `rollback.sh`, `set-setting.sh`, `prod-sql.sh`, `prod-shell.sh`, `confirm-user.sh`, `init-db-roles.sh`, `rotate-db-password.sh`, `cutover-db.sh`, `onboard-deployer.sh`, `check-alerts.sh`) over `lib/ops.sh`, and their checks (`ops-scripts-check.sh` against stand-ins in `lib/ops_fakes.py`, `runbook-check.sh`, and `backup-check.py`, the backup's S3 paths against a stand-in). |
 | `Makefile` | The [test targets](#running-the-tests), each runnable with no arguments. |
 | `docker-compose.yml` | Local stack. |
 
@@ -2462,8 +2559,11 @@ How a search runs:
 Pattern matching:
 
 - **Anagram and Subanagram** compare tile count vectors. `.` and bracket sets
-  are matched by a small bipartite assignment: sets are few and short, so a
-  greedy most-constrained-first assignment with backtracking is enough.
+  are matched by a bipartite matching between the word's distinct remaining
+  tiles and the pattern's distinct sets, each with its count, grown along
+  augmenting paths. A candidate costs at most its length times the number of
+  (tile, set) pairs, whatever the pattern holds: a pattern of one set sixty
+  times over is answered as fast as one of three.
 - **Pattern Match** compiles to an anchored matcher over tile indexes (`.` → any
   one tile, `*` → any run, `[..]` → a tile set, `?` → the blank tile). Compiled patterns are cached
   per request.
@@ -2501,7 +2601,7 @@ word-list search over a whole lexicon does, but a full English leave value set
 (around a million leaves) does not. What fits under the cap is still bounded
 by the account's [storage](#storage-limit): the preview reports what the
 cascade would hold (`storage_bytes`), and a 300,000-question cascade is about
-6 MB as created. Preview returns the count and the first
+5 MB as created. Preview returns the count and the first
 20 questions.
 
 ---
@@ -2715,14 +2815,26 @@ its cached `index.html`, so Nginx's `no-cache` never comes into it. The worker
 does **not** call `skipWaiting()` on install either, because taking over a running
 page would remove the old build's lazily loaded chunks from under a card in
 progress. Instead the app watches `registration.waiting`, offers "a new version
-is ready", and when the user accepts it — or presses reload in the `426` state —
+is ready" (read from the registration when `updatefound` arrives and after
+each look for an update, as well as heard from the installing worker's state
+changes: a browser may deliver `updatefound` once the new worker already
+waits, with no installing worker left to listen to), and when the user accepts it — or presses reload in the `426` state —
 posts `SKIP_WAITING` to the waiting worker, which calls `skipWaiting()`. The
 tab that posted it sets a flag first and reloads on `controllerchange` only when
 that flag is set, which is the one reload the user asked for: the event fires in
 **every** tab the new worker takes over, and the usual handler that reloads on
 it would reload the others on their own initiative, losing a revealed card. Each
 other tab shows "Acrodont was updated in another tab — reload to continue" and
-keeps running. So that it can, the new worker's `activate` deletes the previous
+keeps running, **but stops syncing and gives up the account's sync lock**
+(`tabMaySync`), whether or not the update changed the IndexedDB schema: a tab
+on the old build that went on leading would keep the updated tab from ever
+leading, and after an update the server asked for (`426`) its syncs are
+refused, so the updated tab would read "reload to keep syncing" until the old
+tab was reloaded or closed. A card open in the old tab can still be finished
+there: its answers are queued in the database both tabs read, and the updated
+tab, which now leads, sends them at its next sync, within 30 seconds (the old
+tab no longer asks the leader for one). With no updated tab left open they
+wait until this one is reloaded, as its banner asks. So that it can, the new worker's `activate` deletes the previous
 build's cache only once `clients.matchAll()` finds no page still on that build,
 checking again whenever an old tab reports that it is closing, so a tab left on
 the old build can still load the chunks the card it is on needs: a request for
@@ -2742,8 +2854,14 @@ interrupted by an update, and a user who never accepts keeps the old version
 until the `426` line. IndexedDB schema upgrades run from versioned migrations,
 and every tab listens for `versionchange` on its connections: the tab still
 running the old build closes them and shows "Acrodont was updated in another tab
-— reload to continue", so the new build's upgrade is never **blocked** by an
-old tab holding the previous version open.
+— reload to continue" (a `versionchange` that names no new version is a deletion, the account's data removed at a logout in another tab: the connection is closed and nothing is shown or stopped for it), so the new build's upgrade is never **blocked** by an
+old tab holding the previous version open. That tab can no longer sync, so it
+**stops syncing and gives up the account's sync lock** at the same moment (as
+does an old-build tab that finds the database already upgraded when it opens
+it): held by a tab with a closed database, the lock would keep the tab on the
+new build from ever leading, and nothing would be sent until the old tab was
+reloaded or closed. What the old tab had queued is in the database the new
+build now holds, and goes out with the new build's next sync.
 
 **Installing the app.** The worker lets a closed tab come back with no
 connection, but only for someone who can find the site again and whose browser
@@ -2794,9 +2912,9 @@ has kept its data, so the app is installable and asks to keep that data:
 never mix, plus one **unscoped** database holding two things: an `accounts`
 table with one row per account that has data here, and a single `signed_in`
 pointer naming the account signed in now. A row carries that account's id and
-username, when it last signed in, **its rows, keys and answer bytes** as its own
-drop pass and eviction last measured them, and a flag set while a
-`POST /api/auth/logout` for it is still unacknowledged. The pointer is what lets a
+username, when it last signed in, and a flag set while a
+`POST /api/auth/logout` for it is still unacknowledged. It carries no sizes:
+no page lists the accounts with data here, so nothing would read them. The pointer is what lets a
 reload with no connection open the right data: the user id is needed to find the
 per-user database, so it cannot live inside it, and `GET /api/auth/me` needs a
 connection. Login inserts or updates that account's row, sets the pointer and
@@ -2818,7 +2936,7 @@ stores are:
 
 | Store | Contents |
 |---|---|
-| `meta` | user id, username, `device_id` (a UUID made once per device **and user**: it lives in this user-scoped store, so each account on a device syncs as its own device, and its `device_seq` counts from 1 for that account), sync cursor, last sync time, the trash retention period and `max_quiz_questions` as `/api/auth/me` last reported them, the account's [storage](#storage-limit) (`storage_bytes` and `max_storage_bytes`) as `/api/auth/me` or the latest sync response reported it, when this device last opened each cascade (see [Downloads](#on-the-device) for what counts as an open), and the ids the [budget](#on-the-device) pass dropped while they were still inside the window, which are treated as outside it until the user opens them; and this device's own settings, never synced: the display settings (`display`) and the [controls](#controls) (`bindings`). The distribution tiles live in their own store below, not here |
+| `meta` | user id, username, `device_id` (a UUID made once per device **and user**: it lives in this user-scoped store, so each account on a device syncs as its own device, and its `device_seq` counts from 1 for that account), sync cursor, last sync time, the trash retention period and `max_quiz_questions` as `/api/auth/me` last reported them, the account's [storage](#storage-limit) (`storage_bytes` and `max_storage_bytes`) as `/api/auth/me` or the latest sync response reported it, when this device last opened each cascade (see [Downloads](#on-the-device) for what counts as an open), and the ids the [budget](#on-the-device) pass dropped while they were still inside the window, which are treated as outside it until the user opens them; `held`, the cascades whose last replay held operations back, each with the quiz whose rows they wait for (see [The sync cycle](#the-sync-cycle), step 4); and this device's own settings: the display settings (`display`) and the [controls](#controls) (`bindings`), which stay on this device unless the user shares one with all their devices, and `shared_device`, the shared values waiting for a sync and when each shared value was last taken (see [This device, or all of them](#this-device-or-all-of-them)). The distribution tiles live in their own store below, not here |
 | `distributions` | the tiles (letter, blank letter, value, vowel) of every distribution the user's cascades use, keyed by name. A pulled cascade row carries its `lexicon` and `letter_distribution` names, and the download manager fetches a distribution the store lacks from `GET /api/letter-distributions/:name` before any cascade on it shows **Available offline**; typed mode on a cascade whose distribution is missing shows "needs a connection" like a missing card, since it cannot split typed text into tiles |
 | `cascades`, `quizzes`, `quiz_questions`, `quiz_attempts` | the **base**: the server's rows as of the last pull, written only by the sync engine. A base question row also holds its `position`, which the device computes from the quiz's seed in a worker when it builds or rebuilds the quiz, once per attempt; the player keeps the inverse map in memory for the quiz being played. A base quiz row also carries a `pending` flag, set by the staging move and the drop pass on an **active** quiz when its question rows are yet to be fetched and its counters show any grade (an unplayed quiz needs only its index list; a cleared quiz is never flagged, since its rows are fetched only for a restore or an export), and cleared only by the full fetch sequence |
 | `overlay_cascades`, `overlay_quizzes`, `overlay_quiz_questions`, `overlay_quiz_attempts` | the **overlay**: only the rows the outbox has changed or created, keyed like the base. The player's view of any row is the overlay's version if there is one, else the base's. It holds a few hundred rows in normal use, never a second copy of a cascade, except for a level created by a `finish` that is still in the outbox, which lives there until the finish is acknowledged, and except during a long offline session, when it holds one row per pending grade until the outbox drains |
@@ -3113,8 +3231,17 @@ brings the server's.
   drop pass to take. What the retry means depends on which write failed:
   - **A pull's per-cascade transaction or a download**: the sync cursor is left
     unadvanced, the staging rows are for the next pull to discard and the outbox
-    is untouched, so nothing the user did is lost and studying continues on what
-    is already local.
+    is untouched (a cascade whose transaction had already committed has had its
+    acknowledged operations dropped with it, and no other), so nothing the user
+    did is lost and studying continues on what is already local. For a pull the
+    retry is the same request made again, which the server answers from its
+    records. A cascade the drop took is marked as the budget's drops are, and
+    **the rest of the download pass that was under way leaves it alone**, as
+    every later pass does: fetched back by that pass's next step, it would
+    take the room just made. And **any** error that ends a per-cascade
+    transaction part way, not only IndexedDB's own, aborts it, so a cascade is
+    never left with its acknowledged operations gone from the outbox and their
+    rows half applied.
   - **An `applyLocally`**: the aborted unit **is** what the user just did. The
     grade, cursor move or finish reached neither the overlay nor the outbox, so
     the player cannot pretend it was saved and cannot advance past the card. It
@@ -3139,8 +3266,8 @@ brings the server's.
 |---|---|---|---|
 | `grade` | quiz, attempt, attempt seed, question `idx`, grade, at (stored as `graded_at`, as `move_cursor`'s `at` is stored as `cursor_moved_at`; there is no separate `graded_at` field) | the quiz is active, its cascade is not trashed, the attempt and its seed match, the question is in the quiz (else `not found`), and the question is ungraded, or its current grade is from this device, or the device had seen the current grade (`seen_seq`, below), or the operation's `at` is later than the stored `graded_at` | Set the grade and the device that set it, and update counters. A device's own grades apply in `device_seq` order whatever their timestamps; `graded_at` only arbitrates between devices that changed the same question without seeing each other's change |
 | `move_cursor` | quiz, attempt, attempt seed, position, at | the quiz is active, its cascade is not trashed, the attempt and its seed match, the position is not below `run_start`, is below `next_boundary(quiz)` when the quiz has one and below the question count otherwise, and the cursor is unset, or was last set by this device, or had been seen by the device (`seen_seq`), or the new `at` is later | Set the cursor, `cursor_moved_at` and the device that moved it. The outbox keeps only the latest pending cursor per quiz, re-appended with a fresh `device_seq` (see [The sync cycle](#the-sync-cycle)). A rejected cursor move (`bad_cursor`) is logged but never counted in a notice; it is not the user's work |
-| `finish` | quiz, attempt, attempt seed, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, every question is graded, and `new_quiz_id` is not already a quiz (`invalid`) | Apply [Cascade Rules](#cascade-rules) using the server's grades and the quiz's own progression; any new quiz uses the device's id; record the attempt. A reset or new quiz starts at cursor 0, stamped with the operation's `at` and device. The attempt row and any new level are added to the cascade's and the account's [storage](#storage-limit), past the limit or not: studying never fails for storage. The result carries the outcome the server reached and the new quiz's question count and `questions_hash`, so the device can see when the server's grades led somewhere else (see [Conflicts](#conflicts)) |
-| `finish_segment` | quiz, attempt, attempt seed, segment end, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, its segment size is greater than 0, the segment end is a multiple of it strictly between 0 and the question count and greater than the cursor, every question before the segment end is graded, no quiz already exists for this quiz, attempt and segment end, and `new_quiz_id` is not already a quiz (`invalid`) | Create the drill quiz one level down from the misses in positions `run_start` … segment end − 1 (nothing if there are none), and set the cursor and `run_start` to the segment end, stamping `cursor_moved_at` and `cursor_device_id` from the operation; a drill quiz's level is added to the [storage](#storage-limit) as a finish's is. See [Segments](#segments) |
+| `finish` | quiz, attempt, attempt seed, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, every question is graded, `new_quiz_id` is not already a quiz (`invalid`), and the account is not past five times its [storage limit](#storage-limit) (`storage_limit`, checked last) | Apply [Cascade Rules](#cascade-rules) using the server's grades and the quiz's own progression; any new quiz uses the device's id; record the attempt. A reset or new quiz starts at cursor 0, stamped with the operation's `at` and device. The attempt row and any new level are added to the cascade's and the account's [storage](#storage-limit), past the limit or not: studying never fails for storage, up to five times the limit. The result carries the outcome the server reached and the new quiz's question count and `questions_hash`, so the device can see when the server's grades led somewhere else (see [Conflicts](#conflicts)) |
+| `finish_segment` | quiz, attempt, attempt seed, segment end, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, its segment size is greater than 0, the segment end is a multiple of it strictly between 0 and the question count and greater than the cursor, every question before the segment end is graded, no quiz already exists for this quiz, attempt and segment end, `new_quiz_id` is not already a quiz (`invalid`), and, when the run has a miss and so would make a drill quiz, the account is not past five times its [storage limit](#storage-limit) (`storage_limit`) | Create the drill quiz one level down from the misses in positions `run_start` … segment end − 1 (nothing if there are none), and set the cursor and `run_start` to the segment end, stamping `cursor_moved_at` and `cursor_device_id` from the operation; a drill quiz's level is added to the [storage](#storage-limit) as a finish's is. See [Segments](#segments) |
 | `set_cascade_options` | cascade, the changed [settings](#settings) (any of `segment_size`, `progression`, `require_alphabetical`, `clear_threshold`, `answer_mode`, `show_definitions`, `show_hooks`, `reveal_correct`, `show_found_count`, `show_probability`, `definition_column`, `leave_value_decimals`), at | the cascade exists, is neither trashed nor purged, every carried value is in range (segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, alphabetical order a flag, clear threshold 1–100, answer mode `flashcard` or `typed`, `show_definitions`, `show_hooks` and `reveal_correct` flags, leave value decimals 0–3; otherwise `invalid`, so an out-of-range value is a rejection and never a constraint violation recorded as `error`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit. The three quiz options affect only later quizzes; the clear threshold applies at once, to every finish from then on; the other settings apply at once, to what the player shows |
 | `set_quiz_options` | quiz, changed option fields (the three quiz options only: a `clear_threshold`, `answer_mode`, `show_definitions`, `show_hooks`, `reveal_correct` or `leave_value_decimals` is a `400`), at | the quiz is active, its cascade is not trashed, every carried value is in range as for `set_cascade_options`, `progression` and `segment_size` are not carried for a `segment_chain` quiz and `progression` is not carried for the Source quiz, which its rules ignore (`invalid`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit |
 | `restore_quiz` | quiz, shuffle seed | the quiz is cleared and not purged | Push it back as the new deepest level with a new attempt shuffled by the seed, cursor 0 stamped from the operation; bring back its cascade if it was trashed, and only then set `cleared_at` to now on its other cleared quizzes |
@@ -3208,6 +3335,9 @@ change that lost the `seen_seq` and timestamp comparison to another device's),
 `not_cleared` (restore or purge of a quiz that is not cleared), `not_trashed`
 (restore or purge of a cascade that is not trashed), `bad_cursor`
 (below `run_start`, or at or past the next boundary or the question count),
+`storage_limit` (a `finish`, or a `finish_segment` that would make a level,
+from an account past five times its [storage limit](#storage-limit); the
+server's alone, since the device's rules know nothing of storage),
 `invalid` (a malformed operation, including a `seen_seq` above the user's
 `sync_seq`) and `error` (a database error that is not transient, such as a
 constraint violation, inside the operation's savepoint; see
@@ -3257,7 +3387,18 @@ which alarms. Then:
    sequence: `UPDATE users SET sync_seq = sync_seq + 1 RETURNING sync_seq`. The
    lock also means two syncs for the same user never run concurrently. Every row
    this request changes is stamped with that value.
-2. Operations are applied in `device_seq` order, one savepoint each. An
+2. Operations are applied in `device_seq` order, each inside a savepoint: one
+   of its own, except that **a run of grades and cursor moves shares one**.
+   Each of those makes every check before its first write, so a rejected one
+   has written nothing and needs no rollback, and a savepoint apiece made 500
+   subtransactions of a full batch, which cost more than the statements inside
+   them. For the same economy **a run's grades write their cascade's row
+   once**: all a grade changes there is the activity time and the sequence, so
+   the row is written with the latest of the run's times before the next
+   operation of another kind, or at the end of the batch, and every operation
+   finds the row as each grade's own write would have left it. Results, their
+   order, and what other devices pull are the same as with a savepoint and a
+   cascade write for every grade. An
    operation whose `id` has already been recorded **for this user** returns its
    recorded result without being applied again, the same result in every field,
    so a `finish` whose first response was lost is acknowledged on its second
@@ -3297,7 +3438,12 @@ which alarms. Then:
    operation is applied then. Any **other** database error, such as a
    constraint violation from a rules bug, records that one operation as
    `rejected` with reason `error`, logs the operation in full, and the batch
-   continues. `error` should never occur, so monitoring alarms on any.
+   continues. `error` should never occur, so monitoring alarms on any. When
+   the error is in a grade or a cursor move, whose savepoint is shared, or in
+   the write of a run's cascade row, the batch is first undone as a whole and
+   applied again the plain way (a savepoint for every operation, every grade
+   writing its cascade's row itself), so the outcome is the same: that
+   operation alone is rejected, and the rest are applied once.
 
 **Pull.**
 1. The server returns every row belonging to the user with `updated_seq` greater
@@ -3343,14 +3489,31 @@ which alarms. Then:
    `meta.server` (as `storage_bytes` and `max_storage_bytes`), so a finish that
    took the account over its limit shows on the Cascades page with the sync
    that applied it. Each pulled cascade row carries its own `storage_bytes`;
-   the device never counts a cascade's figure itself.
+   the device never counts a cascade's figure itself. The page, the storage
+   figure and the shared settings are read **on one database connection**,
+   taken after the push's transaction has committed and given its own back:
+   a request never holds one connection of the pool while it waits for a
+   second, because with every connection held by a request waiting for
+   another, none would ever come free and each would wait out the pool's
+   30 seconds. A transient failure in that read (no connection to be had, a
+   lock or statement timeout, a lost connection) answers `503` with
+   `Retry-After` like one in the push. The push is recorded by then, so the
+   same batch sent again is answered from the server's records (push step 2)
+   with its pull.
 3. If the device's cursor is below the user's `sync_floor_seq` (the highest
    tombstone sequence the purge task has pruned; tombstones are pruned after
    30 days), the server replies `resync_required`; a cursor at or above the
    floor has missed no pruned tombstone, even when older tombstones remain
    above the floor. That response carries the `results` of the push that
-   arrived with it and no `changes`, so the device drops the acknowledged
-   operations as usual and then makes a **full pull**: a sync request with
+   arrived with it and no `changes`. The device does nothing with those
+   results: it keeps the batch in its outbox and makes a **full pull** that
+   sends the same batch again, which the server answers from its records
+   (step 2), so the operations are acknowledged in the response that carries
+   their rows. Acknowledging them from the `resync_required` response, with
+   nothing pulled, would clear the device's own rows for a level one of them
+   created before the server's rows had arrived, and the operations queued on
+   that level would then be refused in the replay and lost. A full pull is a
+   sync request with
    `cursor: null`, pushed exactly like any other sync (it may carry
    operations, and usually does on a first sync, since a device can create a
    cascade and study it before it has ever synced), which the server answers
@@ -3424,7 +3587,15 @@ positions from an older attempt. An interrupted pull, or a browser closed
 between two cascades' transactions, leaves the cursor unadvanced and staging
 rows the next pull discards, and re-pulling from the old cursor converges:
 1. Drop every outbox operation the server has now acknowledged, whether applied
-   or rejected, and note which cascades they touched.
+   or rejected, and note which cascades they touched. **Each cascade's are
+   dropped inside that cascade's transaction** (steps 2 to 4), never ahead of
+   it: what an acknowledged `finish` created is known only from its result, so
+   an operation that left the outbox before its cascade's rows were applied
+   would, after a closed tab, leave the next pull unable to tell that the level
+   was made here, and the answers queued on that level would be refused in the
+   replay. A cascade whose transaction did not commit still holds its
+   operations, the next sync sends them again, and the server answers them
+   from its records.
 2. Write the server's rows into the **base** stores. Two different things can
    follow. A **rebuild** happens when a pulled quiz's `(attempt, shuffle_seed)`
    differs from the base's, or the base does not have the quiz: its question
@@ -3457,7 +3628,13 @@ rows the next pull discards, and re-pulling from the old cursor converges:
    leaves the window, so a level finished on this device can still be exported
    from the Trash offline, and a device holding none of its rows, or only part
    of them, fetches them when a restore or an export needs them (see
-   [Downloads](#on-the-device)). So the player never sees a
+   [Downloads](#on-the-device)). A level that **one batch both made and
+   cleared** has no rows in the base yet, and a cleared quiz's rows never
+   travel: its rows are the device's own, promoted in step 3 on their hash
+   like any created quiz's. Deleted with the overlay instead, they would leave
+   a restore of that level still waiting in the outbox with nothing to reset,
+   and every answer given after the restore would be refused in the replay.
+   So the player never sees a
    quiz with a new order and no grades. A quiz that an operation applied in
    this batch created or reset takes neither path here **when the pulled quiz
    row's `(attempt, shuffle_seed)` equals that of the rows the device built
@@ -3487,10 +3664,24 @@ rows the next pull discards, and re-pulling from the old cursor converges:
    same size can differ. So a finish never ends with a fetch, and an offline
    finish's new level is playable the moment it is acknowledged. Promoted rows
    are stamped with the response's `sync_seq`, like the quiz row they belong
-   to, so a full pull in flight never deletes them. When the
+   to, so a full pull in flight never deletes them. **A promoted row takes
+   the device's question and the server's grade and place**: the overlay's
+   rows also show what the operations still waiting in the outbox did to the
+   quiz, and the base is the server's. So a promoted row carries a grade only
+   when an applied `grade` of this batch, or the pull itself, gave it one, and
+   the replay in step 4 puts the waiting grades back and counts each. Promoted
+   with a waiting grade already on it, the row would add nothing to the quiz
+   row's counters in the replay, and the level's own `finish`, queued behind,
+   would be refused `ungraded` and dropped with everything studied after it —
+   which is every offline session whose 500-operation batch boundary falls
+   between the finish that made a level and that level's finish. For the same
+   reason a **created** quiz is promoted on its question hash alone: when a
+   `finish` still waiting has since given the overlay a later attempt of it,
+   the rows are the right questions in another order, and they are placed by
+   the pulled row's seed. When the
    hashes differ, the rows are dropped, the index list fetched, and the
-   outcome-mismatch notice shown, since grades on the missing questions were
-   not kept. When the server's outcome carries no new quiz at all (a
+   outcome-mismatch notice shown. The operations still waiting on that level
+   are not judged without its list: step 4 holds them. When the server's outcome carries no new quiz at all (a
    `finish_segment` the device computed as `drilled` that the server applied as
    `continued`, or a `finish` the server answered `cleared` with no misses,
    `completed` or `reshuffled`), the device's rows are dropped
@@ -3509,6 +3700,70 @@ rows the next pull discards, and re-pulling from the old cursor converges:
    operations to replay are read inside it, so the player never observes an
    empty overlay, and an `applyLocally` from another tab during the rebase
    waits for it and then lands on the rebuilt overlay.
+
+   **Held operations.** The replay cannot judge an operation on a quiz the
+   server holds as active while the device does not hold all of its question
+   rows: a level the server built from another set than the device computed
+   (two devices, one of them offline; step 3 did not promote it), until its
+   index list has been fetched. Which of the device's answers are to
+   questions the server's level holds is not known yet, and refusing them
+   `not_found` would drop answers the server would keep. So the first
+   answer, `finish` or `finish_segment` on such a quiz (the operations that
+   read a quiz's question rows; a cursor move or a change of a level's
+   options reads only the quiz row and is applied) is **held**, and so is
+   every operation of the cascade after it, whatever it is: held from that
+   point on, and not one by one, they are applied later in the order they were
+   made, the only order the rules were checked in (a `finish` of the level
+   above, replayed while the held level's own finish was not, would be refused
+   `not_deepest`). A held operation stays in the outbox, untouched: it is not
+   in the overlay, it is not refused, and it makes no notice. The cascade and
+   the quiz waited for are recorded in `meta` (`held`), in the same
+   transaction. From there:
+   - **It is sent in its turn like any other operation**, and the server
+     judges it with the rules: an answer to a question its level holds is
+     applied, one to a question it lacks is rejected `not_found` and counted in
+     the usual notice, and the level's own finish applies or is refused
+     `ungraded` ("Level N has answers the server did not get. Finish it
+     again.") according to what the server's level then holds. So a device
+     that drains its outbox without ever fetching the list loses nothing the
+     server would have kept.
+   - **When the list arrives first** (the download manager's materialisation,
+     in any tab), the leading tab's engine makes the replay again for that
+     cascade before it sends anything (`replayHeld`): the overlay is cleared
+     and every waiting operation of the cascade applied in order, with the
+     same result as the server's rules give, a refused one leaving the outbox
+     with its notice. The download manager tells the engine as rows land;
+     and **a player that waited for the level's rows makes the replay
+     itself**, in its own tab and before it reads the level (`ensureCascade`),
+     so the level is not shown, and answered, without the held answers. It
+     does not ask the leading tab for a sync and wait: the replay is one
+     transaction on the database every tab shares and needs nothing of the
+     server, while the leading tab's engine may be minutes into sending a
+     backlog (exactly the device that holds operations), or in a cycle that
+     ends with no connection and starts no other. The leading tab's request
+     may be out with some of the held operations at that moment; the server
+     judges them as the replay did, and **a rejection of an operation that
+     has already left the outbox is not settled again**, so its notice is
+     given once. Every sync cycle begins by
+     looking in `meta`, so a reload, a crash or a new leading tab while
+     operations are held finds them from the database alone.
+   - **Until one of the two happens** (no connection, a list that cannot be
+     fetched, an account that must log in) they wait: the outbox count the
+     sync status and the Account page show includes them, since they are
+     unsent; the level reads as not yet downloaded; and the cascade is as the
+     server has it, without what the held operations did. An operation made
+     meanwhile, in any tab, is appended behind them and applied after them.
+     If the level is answered and finished again in the moment between its
+     list arriving and the replay, the held finish is applied first and the
+     second is refused `stale_attempt` or `not_active` with its answers
+     counted, under the sentence "Level N was finished on another device.",
+     which names a device that was this one.
+   - A later full replay of the cascade judges afresh, and releases them if
+     the rows are there; the fast path below replays nothing, so they stay
+     held across it while any operation of the cascade waits. An engine
+     stopped by a change of account replays nothing: they wait in that
+     account's database. No room for the replay leaves them held, to be sent
+     and judged by the server.
 
    **The fast path.** For a cascade where every acknowledged operation was
    applied, none of them created, reset or restored a quiz, and **every pulled
@@ -3562,7 +3817,17 @@ acknowledgement's work proportional to its own batch; the
 [scale test](#scale-tests) asserts the budget. `429`
 backoff applies to sync like any other request, and so does `503`: the device
 resends the same batch after `Retry-After`, and nothing is dropped, because
-nothing was recorded.
+nothing was recorded, or, when it was the pull that failed, because what was
+recorded is answered again from the record. A `4xx` **of the server's own**
+other than `401`, `426` and `429`, in answer to
+the request or to a later page of its pull, is a **refused** sync: nothing is
+applied and nothing dropped, the status reads "Can't sync: reload", and the
+same request is made again no sooner than five minutes later (see
+[`SyncStatus`](#frontend)). The device knows the server's own answer by its
+body: every error the API answers is a JSON object with a string `error`
+(`{ "error": "invalid_request", … }`). A `4xx` without it is not the
+server's — a proxy's `408` for an upload that stalled, a hotel sign-in
+page's `403` or `407` — and is no connection, like a `5xx`.
 
 #### Telling the other devices
 
@@ -3588,11 +3853,24 @@ within a second or two of the change:
   timeouts, and ends after five minutes, when the browser opens it again with
   the session checked again; the server's shutdown ends every stream, so a
   deploy is not held open by them.
+- **An account's streams are limited**, per instance like every other limit,
+  because each holds a connection, a task and a receiver for its five minutes
+  and is the one request a signed-in caller can hold open for nothing: at most
+  `SYNC_STREAMS_PER_USER` (16) open at once, and `SYNC_STREAM_RATE_PER_MINUTE`
+  (30) opens a minute. A device needs one stream, held by the tab that leads
+  its syncing, and opens it once every five minutes, so neither is in reach of
+  a person's devices. An open past either is a `429` with `Retry-After`; the
+  device opens the stream again later (below) and syncs every 30 seconds
+  meanwhile.
 - **Nothing depends on a note arriving.** A device still syncs on every
   trigger above; a stream opened again syncs, since a change may have come
   while it was closed; a listener that loses its connection tells every stream
   to sync; and a stream the server refuses (signed out) stays closed, leaving
-  the 30-second sync.
+  the 30-second sync. A browser opens a stream again by itself only after a
+  dropped connection: an answer that is not a stream (a `502` while the server
+  is being replaced, a `429`) ends it for good, so the device opens a new one
+  itself, after 5 seconds and then twice as long each time up to five minutes,
+  unless the sync engine says the account needs to log in.
 
 ### Conflicts
 
@@ -3618,7 +3896,7 @@ offline**. Using one device on a plane never conflicts. The rules:
 | Quiz options changed on one device while the quiz was finished on another | Rejected if the quiz is no longer active, with no notice, since an option on a finished quiz has nothing left to apply to; the rebase drops the overlay row. Otherwise the change applies to the reset quiz. |
 | Quiz or cascade options changed on two devices | **The later operation wins whole**: this covers every one of a cascade's [settings](#settings) (the threshold, answer mode, definitions, hooks, reveal grade and leave rounding as well as the quiz options), and a widening or a copy, which are ordinary `set_cascade_options`. Unless the device had seen the row's current options (`seen_seq`), an operation whose `at` is older than the row's last change is rejected as `stale`, even when it carries a different field, and the rebase reverts that field on the losing device. One timestamp per row is enough for this, and the loser simply sets the option again. |
 | A quiz created while the cascade's options were different | Nothing happens to it. Options are copied at creation and never revisited. |
-| A `finish` applied with a different outcome than the device computed | Another device's grade changed the score, or an options change on the finished quiz changed its progression, so the server cleared where the device descended, or the reverse, or built the new quiz from a different set of misses. The result's `new_quiz_questions_hash` is what tells the device whether the server's new quiz holds the same questions as its own. The new quiz has the same id and seed on both sides, so the device's grades on it stand wherever the question exists in the server's copy; a grade for a question the server's copy lacks is rejected as `not found`. When the two sides disagree about the finished quiz itself (one cleared it, the other reset it), the device's rows for it are not promoted; the quiz is rebuilt from the pulled row like any quiz whose seed differs from the base's, or, when the server cleared it, the base's rows and positions stay as they are, as for any cleared quiz. The device rebases the cascade and, when the outcome kind (cleared, replaced, descended, completed, reshuffled) or the level structure differs from what it showed, tells the user: "Level 2 came out differently on the server because of changes made on another device." When only the new quiz's question count differs, nothing is said. **This path never opens the completion screen**, even when the server's outcome is `completed`: that screen reports `peak_depth` and `attempts_since_completion`, which the server's own `Completed` has already reset to 1 and 0, and the result carries neither, so the device has no honest numbers to show — the pulled row's would read "after 1 level and 0 attempts". The notice stands, and the Complete badge appears from the pulled cascade row like any other. The screen is shown only for a `Completed` this device computed and the server confirmed, where the device's own rule run reported both numbers before resetting them. Rejected grades, if any, are counted in the usual "weren't kept" notice, separately. |
+| A `finish` applied with a different outcome than the device computed | Another device's grade changed the score, or an options change on the finished quiz changed its progression, so the server cleared where the device descended, or the reverse, or built the new quiz from a different set of misses. The result's `new_quiz_questions_hash` is what tells the device whether the server's new quiz holds the same questions as its own. The new quiz has the same id and seed on both sides, so the device's grades on it stand wherever the question exists in the server's copy; a grade for a question the server's copy lacks is rejected as `not found`. Grades on the new quiz still waiting in the outbox when the finish is acknowledged are not dropped for want of its list: the replay holds them until the list is fetched or the server has judged them ([step 4](#the-sync-cycle)). When the two sides disagree about the finished quiz itself (one cleared it, the other reset it), the device's rows for it are not promoted; the quiz is rebuilt from the pulled row like any quiz whose seed differs from the base's, or, when the server cleared it, the base's rows and positions stay as they are, as for any cleared quiz. The device rebases the cascade and, when the outcome kind (cleared, replaced, descended, completed, reshuffled) or the level structure differs from what it showed, tells the user: "Level 2 came out differently on the server because of changes made on another device." When only the new quiz's question count differs, nothing is said. **This path never opens the completion screen**, even when the server's outcome is `completed`: that screen reports `peak_depth` and `attempts_since_completion`, which the server's own `Completed` has already reset to 1 and 0, and the result carries neither, so the device has no honest numbers to show — the pulled row's would read "after 1 level and 0 attempts". The notice stands, and the Complete badge appears from the pulled cascade row like any other. The screen is shown only for a `Completed` this device computed and the server confirmed, where the device's own rule run reported both numbers before resetting them. Rejected grades, if any, are counted in the usual "weren't kept" notice, separately. |
 | A quiz's segment size changed on one device while another device passed a boundary | The `finish_segment` is rejected if its segment end is no longer a multiple of the size the server has. The drill quiz it created locally and the grades on it are dropped, with the usual notice. |
 | The cascade's options changed on one device while another, offline with the old options, finished a quiz or restored one | The server builds the new or restored quiz from the options it has, so the device's local copy of that quiz may carry different options. The rebase replaces it with the server's row, and any `finish_segment` the device sent against a segment size the server's copy does not have is rejected and dropped. |
 | The cursor moved on two devices in the same attempt | A device that had seen the other's cursor (`seen_seq`) wins; otherwise the later `cursor_moved_at`. A device's own moves always apply in order. If the winning cursor is already past a boundary the loser then tries to pass, the loser's `finish_segment` is rejected and its drill quiz dropped, with the usual notice. |
@@ -3644,7 +3922,9 @@ the size or place "was changed" would name a change nobody made; `bad_segment`
 keeps the sentence below for its other causes (no segment size, not a multiple
 of it, or past the question count) "Level N's
 segment size or place was changed on another device."; `ungraded` "Level N has
-answers the server did not get. Finish it again."; `invalid` and `error` as under
+answers the server did not get. Finish it again."; `storage_limit` "Level N
+wasn't finished: your storage is more than five times its limit. Empty the
+Trash or delete cascades to make room, then finish it again."; `invalid` and `error` as under
 [Operations](#operations). For a `restore_quiz`: `not_cleared` "This quiz was
 restored on another device."; `not_found` "This quiz was deleted, on another
 device or by the Trash's retention period."; `invalid` and `error` as under
@@ -3701,7 +3981,15 @@ of divergence (see [Monitoring](#deployment-and-operations)).
   So every authenticated request the app sends carries the user id the tab runs
   as, in an `X-Acrodont-User` header read from `meta`, and the server refuses a
   request whose header differs from the session's user with `401` **before
-  anything is applied or read** (see [Security](#authentication)). The ordinary
+  anything is applied or read** (see [Security](#authentication)). The same
+  holds **inside one tab**, when another account logs in while a sync is under
+  way: the sync engine and its download manager send the id of the account
+  whose database they were started on, not whichever account the tab runs as
+  at the moment a request leaves, so a batch read a moment before the login is
+  refused `401` like any other and stays in its outbox; and an engine stopped
+  by the change of account sends nothing more, uses no answer that arrives
+  afterwards, and reports no status, so the `401` is not shown to the account
+  that has just logged in. The ordinary
   `401` rule then does the right thing: the tab keeps its data and its outbox and
   shows **Log in to sync**. At startup, once online, the app compares
   `GET /api/auth/me`'s `user_id` with the pointer and treats a difference the same
@@ -3721,7 +4009,14 @@ of divergence (see [Monitoring](#deployment-and-operations)).
   because wiping on `401` would also destroy the unsynced work of a user who
   pressed Sign out everywhere while their phone was offline.
 - **A different user.** If a different user logs in on the device, the previous
-  user's local data stays, untouched, until that user logs in again.
+  user's local data stays, untouched, until that user logs in again. What was
+  on screen for the previous user does not: a sync notice not yet dismissed
+  ("3 answers from this device weren't kept") leaves the screen when its
+  account logs out of the tab or another takes the tab, so it is not shown on
+  the log-in page or to the next user; and a session check or a sync that was
+  under way at the logout and ends after it puts nothing of that account back,
+  not its name in the tab and not, after the removal below, an empty database
+  named for it.
 - **A deleted account** is the one case where a `401` is not the whole story.
   The device that ran `DELETE /api/account` removes its own copy at once (see
   [Authentication](#authentication)), because keeping data for an account that
@@ -3759,7 +4054,11 @@ of divergence (see [Monitoring](#deployment-and-operations)).
   [needs neither a session nor a CSRF token](#auth-and-account) and answers
   `2xx` as well, because there is nothing left to clear. The one `403` left is a
   session cookie with the CSRF cookie gone — a browser that cleared part of its
-  site data — and the class rule above clears the flag for it rather than
+  site data. For that the app asks `GET /api/auth/me` once, which sets the
+  token again for a session that still holds, and sends the logout once more,
+  so the cookie is cleared rather than left valid on a machine someone else
+  may use; if that too is refused, the class rule above clears the flag
+  rather than
   firing the same doomed request at every startup for the life of the
   installation. It runs only while no account is signed in
   because the endpoint clears whatever session cookie the browser holds, and the
@@ -3778,8 +4077,19 @@ of divergence (see [Monitoring](#deployment-and-operations)).
   says how many and that they will sync the next time that user logs in on this
   device. The dialog also offers **Remove this account's data from this
   device**, which deletes the per-user database and, when the outbox is not
-  empty, says how many changes that discards. It then empties that account's
-  `accounts` row — its totals and its last-signed-in time — and deletes the row
+  empty, says how many changes that discards. **That is asked whenever
+  anything is unsent, whatever the sync status reads**: after the sync the
+  logout tries first, the outbox is counted again, from the account's own database rather than from what the tab's sync last read, and if it is not empty —
+  a long outbox still draining, a server that asked the device to wait, a
+  sync another tab leads, a tab that has stopped syncing (signed out in another tab) and was studied in since — or could not be counted, a confirmation names the count (or says it could not be checked) and says that
+  removing discards those changes for good, and that logging out without
+  removing keeps them for the next login here; declined, nothing is logged
+  out or removed. **The removal does not wait for the network**: it is done
+  as soon as the pointer is cleared, before the logout request is sent, so a
+  connection that accepts that request and never answers cannot leave the
+  account's database on a shared machine, and the request itself is given up
+  after 15 seconds and left queued. It then empties that account's
+  `accounts` row of its last-signed-in time, and deletes the row
   itself **unless the row still holds an unacknowledged logout**, in which case
   a row carrying that account's id, its username and the flag alone survives
   until the request goes through and is deleted when the flag clears. Because `ROW_STORAGE_BUDGET` and
@@ -3920,7 +4230,6 @@ CREATE TABLE users (
     email               CITEXT NOT NULL UNIQUE
                             CHECK (length(email) BETWEEN 3 AND 254),
     password_hash       TEXT NOT NULL,                  -- Argon2 PHC string
-    email_confirmed_at  TIMESTAMPTZ,
     is_admin            BOOLEAN NOT NULL DEFAULT false, -- set only via SQL
     session_generation  INTEGER NOT NULL DEFAULT 0,     -- bumped to revoke all sessions
     sync_seq            BIGINT NOT NULL DEFAULT 0,      -- last sync sequence value issued
@@ -3931,19 +4240,34 @@ CREATE TABLE users (
     storage_limit_bytes BIGINT CHECK (storage_limit_bytes >= 0),
                             -- set only via SQL: replaces MAX_STORAGE_BYTES_PER_USER
                             -- for this account
+    device_settings     JSONB NOT NULL DEFAULT '{}'::jsonb
+                            CHECK (jsonb_typeof(device_settings) = 'object'),
+                            -- device settings shared with all of the account's
+                            -- devices: setting name -> {value, at} (Settings)
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+                            -- when the address was confirmed: a row is made by
+                            -- the confirmation, never before it
     CHECK (sync_floor_seq <= sync_seq)
 );
 
-CREATE TABLE email_confirmations (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    code_hash   BYTEA NOT NULL UNIQUE CHECK (octet_length(code_hash) = 32), -- SHA-256
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at  TIMESTAMPTZ NOT NULL,               -- created_at + 24 hours
-    used_at     TIMESTAMPTZ
+-- A registration whose address is not confirmed yet: no users row exists for
+-- it. Each registration keeps its own username and password hash with its own
+-- code, and confirming a code makes the account from that row's and deletes
+-- the address's other rows. Registering again for the address is another
+-- row, with whatever username and password that request gave (Authentication).
+CREATE TABLE pending_registrations (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username      CITEXT NOT NULL CHECK (username ~ '^[A-Za-z0-9_]{3,32}$'),
+                      -- not unique: an address's rows may share one. While a
+                      -- row's code is valid, no other address may register it
+    email         CITEXT NOT NULL CHECK (length(email) BETWEEN 3 AND 254),
+    password_hash TEXT NOT NULL,                    -- Argon2 PHC string
+    code_hash     BYTEA NOT NULL UNIQUE CHECK (octet_length(code_hash) = 32), -- SHA-256
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at    TIMESTAMPTZ NOT NULL              -- created_at + 24 hours
 );
-CREATE INDEX email_confirmations_user_id ON email_confirmations (user_id);
+CREATE INDEX pending_registrations_email ON pending_registrations (email);
+CREATE INDEX pending_registrations_username ON pending_registrations (username);
 
 CREATE TABLE password_reset_tokens (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -4770,12 +5094,22 @@ it:
 - **prunes** `sync_operations` and `sync_tombstones` older than
   `SYNC_RETENTION_DAYS`, raising each affected user's `sync_floor_seq` to the
   highest tombstone sequence it removed
-- **deletes** accounts that were never confirmed and whose last confirmation
-  code expired more than 7 days ago, so an abandoned registration does not hold
-  an email address forever
+- **deletes** registrations (`pending_registrations`) whose confirmation code
+  has expired: from that moment one holds neither its username nor a place
+  and nothing can confirm it, so only a password hash would be kept
 - **prunes** `export_tokens_spent` rows past their `expires_at`
 - **prunes** `catalog_instance_status` rows whose heartbeat is older than
   3 minutes, left by instances that have stopped
+
+**One failure does not stop a run.** Each step runs whatever the others did,
+and a step that works account by account goes on to the next account when
+one fails; every failure is logged, with the account, and the run is then
+reported as failed. One account's bad row therefore cannot keep every other
+account's Trash from being purged, or the pruning and the recount from
+running, hour after hour. What a purge frees is counted from the rows with
+the current sizes, so a figure never goes below zero: taking more off than
+was once added would fail the column's CHECK, and the recount corrects the
+total either way.
 
 ---
 
@@ -4785,6 +5119,12 @@ The flows are the conventional ones, built directly on Axum:
 
 - **Register** (`/register`): username, email and password. The server
   validates all fields and returns `400` with **every** field error at once.
+  An address must be ASCII: SES sends to no address whose local part holds
+  anything else and takes a domain only in its `xn--` form (the SES
+  `SendEmail` reference says so; it was not tried), and an address SES
+  refuses would log `alarm = "mail_failed"` at any visitor's will. One with
+  another character is the field error "We can't send mail to an address
+  with accented or non-Latin characters."
   **The strength rule**, which a reset's new password meets too: 8 to 128
   characters, then a `zxcvbn` score of at least 3, scored against the
   username, the address and the address's local part. zxcvbn matches each
@@ -4799,13 +5139,42 @@ The flows are the conventional ones, built directly on Axum:
   and that check runs before anything below, so a `400` never also sends an
   email. An email already in use gets the same response as a successful
   registration.
+  **A registration makes no account.** It is kept in `pending_registrations`
+  with its own username, its own password hash and its own confirmation code,
+  and the account is made, from that row, when its code is confirmed. An
+  address may have several registrations waiting, each with its own username,
+  password and code; **the link that is followed decides** which username and
+  password the account has, and the address's other registrations are deleted
+  with it, so no other link for the address works afterwards. Two things
+  follow. **Registering again is the resend**: someone whose confirmation
+  mail never came registers again, with the same username and password or
+  others, and gets a new mail; an address's own registrations never hold a
+  username against it. And **a stranger who registers someone's address
+  first sets nothing**: the owner registers, follows the link in the mail
+  their own registration sent, and has the username and password they chose;
+  the stranger's registration is deleted, its password never having opened
+  anything. The confirmation mail names the username its link makes the
+  account with, so someone holding two mails can tell them apart. ("The last
+  registration wins" would not do: a stranger registering the address after
+  its owner would then set the password the owner's link activates.)
   **Registration closes at `MAX_ACCOUNTS`, 750 accounts.** The number is a
   constant in the backend (`backend/src/auth/routes.rs`), deliberately not a
-  setting: raising it is a release. It counts accounts that hold a place:
-  confirmed, or with a confirmation code still valid. The count and the check
+  setting: raising it is a release. It counts what holds a place: an
+  account, and an address with a registration whose code is still valid
+  (once, however many registrations it has waiting). The count and the check
   run inside the registration's transaction, after it takes a
-  transaction-scoped advisory lock that every registration takes in turn, so
-  concurrent registrations cannot pass the limit together. At the limit every
+  transaction-scoped advisory lock that every registration and every
+  confirmation takes in turn, so concurrent registrations cannot pass the
+  limit together, and two addresses cannot come to hold one username.
+  **Of the addresses waiting, at most `MAX_UNCONFIRMED_PLACES` (50) are
+  counted**, so registrations no one will confirm cannot close the site: one
+  client could otherwise take every place for a day, and again the next. More
+  may then be waiting than there are places, so **the ceiling is held again
+  when a code is confirmed**: with `MAX_ACCOUNTS` accounts already, the
+  confirmation is refused `403 registration_closed`, its code unspent, and the
+  page says "Acrodont isn't taking new accounts right now. Your link works
+  until it expires: try it again later." It takes more than fifty people
+  waiting at once, at the ceiling, for anyone to see that. At the limit every
   registration gets `403 registration_closed` and sends nothing, a new address
   and a known one alike; the check runs before the address is looked up, so a
   closed site reveals nothing about which addresses have accounts. The
@@ -4813,43 +5182,110 @@ The flows are the conventional ones, built directly on Axum:
   with `DEV_LOGIN` on, which only a local one can have, does not apply the
   limit, since the end-to-end journeys register an account per spec on a stack
   kept between runs.
+  **One client address keeps `REGISTRATIONS_PER_IP_PER_DAY` (10)
+  registrations a day**: a bucket of ten, refilled at ten a day, taken once a
+  request has passed its field checks and before its password is hashed,
+  whatever then becomes of it, for a known address and a new one alike. Past
+  it the answer is `429` with `Retry-After`, which the page reads as "Too
+  many attempts. Try again in 3 hours." Each registration mails whatever
+  address it names, and the per-minute rate alone let one client mail 43,200
+  strangers a day. A household or a club registering together from one
+  address is ten people a day.
   The password is hashed on every path, whether or not the hash is stored, so
   the response takes the same time whichever branch runs.
-  If that email belongs to a **confirmed** account, its owner is emailed a
-  notice instead. If it belongs to an account that was **never confirmed**: while
-  its code is still valid, a fresh code is sent to the same address and both
-  stay valid until they expire, so a stranger who knows the address cannot keep
-  the real registrant from confirming; once the code has expired, the old
-  account row is deleted (its dependents go by cascade) and the new
-  registration creates a fresh one through the ordinary path, with a new id,
-  username and password, and a fresh code is sent. A username held by an
-  unconfirmed account is taken while that account's latest code is valid and
-  free once it has expired, in which case the old row is deleted as above. So an expired code never
-  strands an address, and either way the form cannot be used to find out which
-  emails have accounts. The password is hashed with Argon2. A confirmation code
+  If that email belongs to an account, its owner is emailed a notice instead
+  and nothing is kept. Otherwise the registration is kept and its code sent,
+  whether or not the address has others waiting: every code stays valid until
+  it expires or one of the address's codes is confirmed. **A username is
+  taken** when an account has it, or when a registration whose code is still
+  valid has it **for another address**; it is free again the moment that code
+  expires, with nothing to delete first. The check runs twice: before the
+  hash, as the field error above, and again under the registration lock just
+  before the row is written. So an expired code never
+  strands an address or a username. **What the form does and does not
+  reveal.** One registration is answered the same whether or not its address
+  has an account: the same status, the same body, the same time. **Two
+  registrations do tell**, and this is accepted: register a username no one
+  has with the address in question, then the same username with any other
+  address. "That username is taken" the second time means the first was kept,
+  so the address had no account; a second `202` means nothing was kept, so it
+  has one. Closing that would mean holding the username for an address that
+  already has an account too, a reservation row with its own expiry and
+  purge, for a leak that tells someone who already knows an address only that
+  it is registered here. It is slow (two of a client address's ten
+  registrations a day for each address asked about) and not silent (the
+  address is mailed a confirmation or the notice each time). The password is hashed with Argon2. A confirmation code
   (32 random bytes) is emailed, and only its SHA-256 is stored, with a 24-hour
   expiry. At most three confirmation, notice or reset emails are sent to one
   address in 24 hours per requesting IP, and twenty per address in all; further
   requests get the same response and send nothing, and the per-IP scope means
-  a stranger cannot use the cap to block the address's owner. A
-  registration that replaces an expired unconfirmed account still replaces it
-  when the cap has been reached; its code goes out with the next registration
-  after the window. Registration inserts only the user row: it takes no sync
-  sequence, so a new account's `sync_seq` starts at 0, the column default, and
-  its first pull carries nothing until it has a cascade.
-- **Confirm email** (`/confirm-email?code=…`): the page submits the code; on
-  success the user is sent to `/login`. Login is refused with `403` until the
-  email is confirmed.
-- **Login**: by **username** and password, never by email, so the `403` for an
-  unconfirmed account reveals nothing that the public username does not. Rate
+  a stranger cannot use the cap to block the address's owner. **And at
+  most `MAIL_MAX_PER_HOUR` (200) to every address together in any hour**,
+  whatever the kind: the SES account and its reputation are shared with
+  birdtest, and bounces from a script's invented addresses would pause
+  sending for both sites. A mail held back for it is logged with
+  `alarm = "mail_capped"` (at most once a minute), which raises the
+  `acrodont-mail-capped` alarm as `mail_failed` raises its own; a mail one
+  cap holds back takes no slot of another. A
+  registration whose mail a cap would hold back is answered the same and
+  **not kept**: a code no mail carries can never be followed. The
+  `/register/check-email` page says "We sent a confirmation link to …. Follow
+  it within 24 hours to finish creating your account. If it doesn't arrive,
+  register again: the link you follow sets the username and password."
+- **Confirm email** (`/confirm-email?code=…`): the page submits the code.
+  Under the registration lock the server deletes the registration the code
+  belongs to (its SHA-256, not expired), inserts the `users` row with that
+  registration's username, address and password hash, and deletes the
+  address's other registrations, in one transaction; a code that is unknown,
+  expired, already used, or whose address was confirmed by another of its
+  links is `400 invalid_code`, and two links of one address followed at the
+  same moment make one account. The insert is the user row alone: it takes no
+  sync sequence, so a new account's `sync_seq` starts at 0, the column
+  default, and its first pull carries nothing until it has a cascade. On
+  success the user is sent to `/login`, which says "Your email address is
+  confirmed. Log in to start."; a refused code reads "This confirmation link
+  has expired or was already used. Register again to get a new one." Login is
+  refused with `403` until the email is confirmed: with no account for the
+  username, the password is verified against the username's **latest
+  registration still waiting** (one verify, as every login costs), and when
+  it is that registration's password the answer is `403 email_unconfirmed`,
+  which the page shows as "Confirm your email address first: follow the link
+  we sent you. If it never came, register again." Any other password is `401`.
+- **Login**: by **username** and password, never by email (a username, like
+  an address, is the same whatever its case: `Vera` logs in as `vera`, and
+  every lookup compares as `CITEXT`), so the `403` for a
+  registration not yet confirmed, which only its own password gets, reveals nothing that the public username does not. Rate
   limited on **failed** attempts, per IP and per username
   (`LOGIN_FAILURES_PER_IP_PER_MINUTE` and
-  `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE`, 10 each): a request is refused with
-  `429` **before** any Argon2 verify runs when either bucket is empty, so no
-  guess ever costs a hash, and a token is taken from both only when the verify
-  fails. A successful login spends nothing, because guessing is what the limits
-  exist to stop, and a club or tournament room logging in together from one
-  address must not lock itself out. The per-username limit lets anyone who
+  `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE`, 10 each): a request takes a token
+  from both buckets **before** any Argon2 verify runs and is refused with
+  `429` when either is empty, so no guess past the limit ever costs a hash,
+  and it gives both tokens back unless the verify fails. Taking first is what
+  makes the limit hold for requests that arrive together: a bucket looked at
+  before the verify and spent after it lets a whole burst through. A
+  successful login spends neither failure token, because guessing is what
+  those limits exist to stop, and a club or tournament room logging in
+  together from one address must not lock itself out; more than ten of its
+  logins in the air at the same instant can be told `429` for a second, since
+  each holds a token while its verify runs. **Every login judged, right
+  password or wrong, also spends one of its username's logins**
+  (`LOGINS_PER_USERNAME_PER_MINUTE`, 20): a right password costs an Argon2
+  verify as a wrong one does, so without it the holder of one password could
+  keep every hashing turn busy for as long as they liked. The token is taken
+  after the two failure tokens and before the verify, a request refused for
+  it gives the failure tokens back, and it is given back only when the
+  request was never judged (a `503` for a hashing turn, an error). No person
+  logs in twenty times a minute, and a room is twenty usernames, each with
+  its own bucket. A username no account could have (not 3 to 32
+  letters, digits or underscores) is answered `401` at once: it costs no
+  hash, takes no token and is never kept as a bucket's key, however long it
+  is. **Argon2 runs in turns**, at most four hashes or verifies at once on
+  the blocking pool, for every endpoint that hashes: each holds 19 MiB while
+  it runs, so a burst of sign-ins is otherwise gigabytes at once. A request
+  waits at most 10 seconds for a turn and is otherwise answered `503` with
+  `Retry-After: 10`; a login turned away so is given all three of its tokens
+  back.
+  The per-username limit lets anyone who
   knows a username keep its owner out for a minute at a time by failing on
   purpose; that is accepted over unlimited guessing against one account. The
   other auth endpoints that need no session — register, confirm-email,
@@ -4891,7 +5327,8 @@ The flows are the conventional ones, built directly on Axum:
     forgotten that as well. The mail goes only to the address's owner.
     Asking is limited to `RESET_RATE_PER_HOUR` (5) an hour **per caller** and
     **per address named** (lower-cased), on top of the per-IP auth bucket and
-    the email caps under Register. The first bounds bulk probing; the second
+    the email caps under Register. Something that is not an address gets the
+    same `202` and goes no further: it is never kept as a bucket's key. The first bounds bulk probing; the second
     stops one address being buried in reset mail from many sources. Past
     either, the answer is `429` with `Retry-After`, alike for every address,
     so the limit reveals nothing about which addresses have accounts.
@@ -4914,16 +5351,27 @@ The flows are the conventional ones, built directly on Axum:
     new hash and increments `session_generation`. That signs out every
     session, an attacker's included: a reset is what someone does who
     suspects another person has access. The `204` clears the caller's session
-    and CSRF cookies as well, and the page forgets any session it holds and
-    goes to `/login` with no message: signing in with the new password is the
-    confirmation.
+    and CSRF cookies as well, and the page goes to `/login` with no message:
+    signing in with the new password is the confirmation. If an account was
+    signed in in that tab, the device records **a logout** for it
+    (`signedOutByReset`, which is the Account page's Log out without removing
+    data): the signed-in pointer is cleared, so a reload shows the log-in page
+    and not that account with an expired session and "Log in to sync"; the
+    account's other tabs read "signed out in another tab"; and its data stays
+    on the device with whatever it had not sent, which syncs at its next login
+    here (see [Authentication while offline](#authentication-while-offline)).
 - **Change password** is on `/account`: the current password and the new one
   (`POST /api/account/password`). Nothing is typed but the two passwords and
   no mail is sent: the session says whose account it is. A wrong current
   password is a `current_password` field error; the new one is held to the
   strength rule against the account's username and address
   (`new_password`). Tries are limited to `RESET_RATE_PER_HOUR` an hour per
-  account, since each costs a hash and maybe a scoring. A change stores the
+  account, since each costs a hash and maybe a scoring, and is a guess at the
+  password by whoever holds the session. The password re-entry of Sign out
+  everywhere and of Delete account draws on the same bucket, for the same
+  reason: past it, each answers `429` with `Retry-After`. A try is counted
+  once its Argon2 turn is held, as a link's is once its scoring turn is, so a
+  request turned away busy (`503`) spends none. A change stores the
   new hash, spends every outstanding reset token (they were asked for under
   the old password), and, like Sign out everywhere, bumps
   `session_generation` and issues a new session to this device: every other
@@ -4969,7 +5417,9 @@ Security generally:
 - `/api/admin/*` requires `is_admin`, and non-admins get `404`, so the admin
   surface is not advertised.
 - `governor` rate limits on auth endpoints, and per-user limits on search,
-  preview, cascade creation, saving and loading a saved search, sync, export, admin uploads, and
+  preview, cascade creation, saving and loading a saved search, sync, opening the
+  [event stream](#telling-the-other-devices) (`SYNC_STREAM_RATE_PER_MINUTE`, with
+  `SYNC_STREAMS_PER_USER` open at once), export, admin uploads, and
   the card, question-list and grades pages, which are the expensive calls. Each
   has a named refill rate in [Configuration](#configuration):
   `DOWNLOAD_RATE_PER_MINUTE` for the one shared bucket over the card,
@@ -4977,7 +5427,7 @@ Security generally:
   cascade creation, saving a search and loading one — `GET /api/searches/:id`
   reads up to 300,000 word-list rows and returns megabytes, so it is as
   expensive as the preview beside it — `EXPORT_RATE_PER_MINUTE`,
-  `ADMIN_UPLOAD_RATE_PER_MINUTE` — a 100 MB body with a 120-second synchronous
+  `ADMIN_UPLOAD_RATE_PER_MINUTE` — a 100 MB body with a 115-second synchronous
   validation behind it is the most expensive call in the plan, admins are few,
   and ten a minute is far more than any real cataloguing session needs — and
   `SYNC_RATE_PER_MINUTE`. The download default of 120 is what this plan's
@@ -4991,7 +5441,10 @@ Security generally:
   pages hold ten times as many rows, so ten cascades' keys fit in the bucket
   that one cascade's answers would have filled. In bytes the pass is about a
   quarter of cards without definitions, not a tenth, so it is the request
-  count and not the bandwidth that this default is sized against. The buckets are in memory, so every limit in this plan holds per
+  count and not the bandwidth that this default is sized against. The buckets are in memory, and each
+  instance forgets a bucket once it has refilled (on the purge task's timer,
+  with the email caps' addresses outside their 24 hours), so the memory they
+  take follows recent callers and not every caller there has ever been. Every limit in this plan holds per
   backend instance and the deployment's task count multiplies it: with two
   tasks the login limit is effectively twenty failures a minute per username. Until a
   shared limiter is needed, the Terraform module caps the service at two
@@ -5067,19 +5520,22 @@ enough for a filter tree holding a 300,000-entry In Word List; Axum's default of
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/auth/register` | Create an account; sends the confirmation email |
-| `POST` | `/api/auth/confirm-email` | Confirm with the emailed code |
-| `POST` | `/api/auth/login` | Start a session |
+| `POST` | `/api/auth/register` | Keep a registration (username, address, password hash) with a confirmation code of its own, and send the code; no account yet. `202 {}` whether or not the address has an account |
+| `POST` | `/api/auth/confirm-email` | `{ code }`: make the account from the registration the code belongs to. `204`, or `400 invalid_code` |
+| `POST` | `/api/auth/login` | Start a session. `429` once the caller's address or the username has no failure token left; `503` with `Retry-After: 10` when no Argon2 turn comes within 10 seconds (see [Authentication](#authentication)) |
 | `POST` | `/api/auth/logout` | Clear the session cookie **and the CSRF cookie**, so no token outlives the session it was issued with; login re-sets both. The token is stateless, so a copy of it stays valid until its TTL; a user who suspects a copy uses **Sign out everywhere**. This is the one endpoint that needs **neither a session nor a CSRF token** *when no session cookie arrives with it*: there is then nothing to clear and nothing to forge, and it answers `2xx`, so a device offline past both cookies' TTL is not left retrying forever. With a session cookie it is CSRF-checked like any other write, which is the ordinary state of the [queued logout](#authentication-while-offline). It is **exempt from the account-binding `X-Acrodont-User` check**: the queued logout is sent while no account is signed in, so it could never satisfy it, and a `401` would clear its flag with the cookie still alive. The queued logout runs when no account is **signed in**, not when no cookie is held, and the `httpOnly` session cookie it exists to clear is still in the browser, so the app sends the double-submit token with it. Either way the answer is a `2xx`, never a `401`-or-`403` guess |
 | `POST` | `/api/auth/reset-password` | Body `{ email }` → `202 {}` whether or not the address has an account; the lookup and the reset email (with the account's username) follow the response. `429` past `RESET_RATE_PER_HOUR` per caller or per address named, alike for every address (see [Authentication](#authentication)) |
-| `POST` | `/api/auth/reset-password/confirm` | Body `{ token, password }` → `204`, clearing the caller's session and CSRF cookies. The link is checked first (`400 invalid_token`, before any scoring), then the link's own `RESET_RATE_PER_HOUR` bucket (`429`), then the strength rule against the account's username and address (`400` field error on `password`; the link still works); `503` with `Retry-After: 10` when no scoring turn comes within 10 seconds. Spends every outstanding token of the account and bumps `session_generation`. The one way to change a password |
+| `POST` | `/api/auth/reset-password/confirm` | Body `{ token, password }` → `204`, clearing the caller's session and CSRF cookies. The link is checked first (`400 invalid_token`, before any scoring), then the link's own `RESET_RATE_PER_HOUR` bucket (`429`), then the strength rule against the account's username and address (`400` field error on `password`; the link still works); `503` with `Retry-After: 10` when no scoring turn comes within 10 seconds. Spends every outstanding token of the account and bumps `session_generation`. The way to change a password without a session; signed in, it is `POST /api/account/password` |
 | `GET` | `/api/auth/me` | `{ user_id, username, is_admin, trash_retention_days, max_quiz_questions, storage_bytes, max_storage_bytes }` or `401`, where `storage_bytes` is the account's [storage](#storage-limit) and `max_storage_bytes` its effective limit (`users.storage_limit_bytes` when set, otherwise `MAX_STORAGE_BYTES_PER_USER`), both numbers. Login and dev-login answer with the same body. Exempt from the account-binding `X-Acrodont-User` check, since it only reports whose session cookie the browser holds, which the startup comparison reads. The retention period, the cap and the storage figures go into the `meta` store, so the Trash can show purge dates offline, the option forms validate segment size against the server's cap, and the Cascades page and the builder show the account's storage offline |
 | `POST` | `/api/account/password` | Body `{ current_password, new_password }` → `204`. A wrong current password or a weak new one is a `400` field error. Stores the new hash, spends the account's reset tokens, bumps `session_generation` and re-issues this device's cookies, as Sign out everywhere does |
-| `POST` | `/api/account/sign-out-everywhere` | Body `{ password }`. Bump `session_generation` and re-issue this device's session and CSRF cookies, so every other session is refused from its next request while this one keeps working |
-| `DELETE` | `/api/account` | Delete the account (requires password). On a `2xx` the device removes its own local copy of that account, as [Authentication](#authentication) describes |
+| `POST` | `/api/account/sign-out-everywhere` | Body `{ password }`. Bump `session_generation` and re-issue this device's session and CSRF cookies, so every other session is refused from its next request while this one keeps working. `429` past `RESET_RATE_PER_HOUR` passwords typed for the account, with Change password and Delete account |
+| `DELETE` | `/api/account` | Delete the account (requires password; `429` past the same per-account bucket). On a `2xx` the device removes its own local copy of that account, as [Authentication](#authentication) describes |
 
 A cascade's settings are read and written through sync, not a separate
-endpoint; this device's settings never leave it.
+endpoint. This device's settings stay on it, except those the user shares
+with **all your devices**: they travel in the sync request's and response's
+`device_settings` and are kept in `users.device_settings` (see
+[Settings](#settings)).
 
 ### Catalog and search
 
@@ -5157,8 +5613,8 @@ person to write it copies names rather than choosing them.
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/grades?from=<idx>&limit=<n>` | The quiz's graded rows for the attempt its row names, which for a cleared quiz is the attempt it finished on (its grades each dated that finish, the quiz's `last_activity_at`, since a cleared quiz keeps no grade times), as the parallel arrays a pull uses, in idx order, with the quiz row's `attempt` and `shuffle_seed` so the device can tell whether they belong to the order it holds. `from` is an **index, not an offset**, as on the card pages: the response holds the graded rows whose `question_idx` is in `from … from+limit−1`, `limit` ≤ 50,000, so the device pages the index space by `from += limit` until `from` reaches the cascade's `question_count` and a sparse page — most of a quiz's questions may be ungraded — means nothing is left behind. The questions endpoint below reads `from` the other way, as an offset into a dense list, which is why the two are written `<idx>` and `<n>`. There is no `min_updated_seq` here, which only a pull's fast path needs; the device stamps these rows with the sequence of the sync it made before the fetch. Not cacheable. Fetched when the device materialises a quiz whose rows it dropped on leaving the download window; never part of a pull. If the device's quiz row names a different attempt or seed, the device discards the response, syncs and fetches again. `404` for another user's or a purged quiz. |
 | `POST` | `/api/cascades/:id/export-token` | Body: the export's choices, as the query of the export row below. Checks the session, `X-Acrodont-User`, the cascade and quiz, and `EXPORT_RATE_PER_MINUTE`, answering `401`, `404` and `429` with `Retry-After` exactly as any other request does, which a navigation could not show the page; on success returns `{ url }`, the export URL with a token valid for **60 seconds and one use**, bound to this user and these choices: a PASETO under the HKDF-derived export key, which any task can verify and no session validator can decrypt, its use recorded in `export_tokens_spent` (see [Exporting words](#exporting-words)). The dialog navigates a hidden `<iframe>` to it at once, and mints a new one for any retry |
 | `GET` | `/api/cascades/:id/export?scope=<cascade\|quiz>&quiz_id=<uuid>&which=<all\|correct\|missed\|ungraded>&format=<txt\|csv>&lines=<answers\|questions>&columns=<list>&order=<study\|alphabetical>&definitions=<0\|1>&hooks=<0\|1>&decimals=<0-3>&token=<token>` | The same file the device builds locally (see [Exporting words](#exporting-words)), streamed as `text/plain` or `text/csv` with a `Content-Disposition` filename. Used when the device doesn't have what the export needs. `token` is the single-use, 60-second token the row above issued for exactly these choices; it is the request's proof of account, since a download navigation cannot send a header, and an expired, reused or mismatched token answers `204 No Content`, which the dialog's hidden frame discards. `404` for another user's or a purged cascade, and for a `quiz_id` that is not this cascade's, has been purged, or is unknown. |
-| `GET` | `/api/sync/events?user=<id>&device=<id>` | Server-Sent Events: a `changed` event whenever another device of the account syncs a change (see [Telling the other devices](#telling-the-other-devices)). The session cookie, and `user` in place of `X-Acrodont-User`, which `EventSource` cannot send; a mismatch or no session is a `401`. Ends after five minutes |
-| `POST` | `/api/sync` | Body `{ device_id, app_version, cursor, page_token?, question_rows_for[], ops[], device_settings? }` (`device_settings`: values shared with all the account's devices, see [This device, or all of them](#this-device-or-all-of-them)), where `app_version` is the frontend build's **monotonic integer build number**, injected into the SPA at build time and compared numerically against `MIN_APP_VERSION` (see [Configuration](#configuration)) — never a hash or a semver string, so "too old to sync" is one comparison and raising the floor is one number in the task definition; the build's git hash is logged beside it for support but decides nothing. `question_rows_for` lists every cascade whose question rows this device holds or wants: in its window and not [budget-dropped](#on-the-device), kept automatically by size, **or whose base already holds question rows** (at most `MAX_QUESTION_ROWS_FOR`, 1,000 cascades, a protocol bound rather than a quota: a device holding rows for more splits them across requests; 1,001 is a `400`). The third case is what keeps a cascade the drop pass spared for its pending operations from going stale: the device holds its rows, so it must keep receiving their changes. A cascade the device holds no rows for and will not open is left out, and stays pending on the device. It is expected on every non-paged request, an omitted field means an empty list, ids that belong to another user or no longer exist are ignored, and the server omits `quiz_questions` rows for every other cascade. `cursor` is `null` for a full pull (a first sync or a resync), whose operations are pushed like any other's → `{ results: [{ op_id, status, reason?, outcome?, new_quiz_question_count?, new_quiz_questions_hash? }], changes: { cascades[], quizzes[], quiz_questions[], quiz_attempts[], tombstones[] }, sync_seq, next_page_token?, resync_required?, storage: { used, limit }, device_settings }`. `storage` is on every `200` and `426` response: the account's [storage](#storage-limit) and its effective limit, as numbers, read after the push so it counts what the push's finishes and purges changed; the device keeps them in `meta`. Pulled `cascades[]` rows carry `storage_bytes`, decimal text like every 64-bit value. `outcome` is set on an applied `finish` (a `finish_outcome`) or `finish_segment` (`drilled` or `continued`), and `new_quiz_question_count` and `new_quiz_questions_hash` whenever a quiz was created, reset or restored: the created quiz's when one was created, otherwise the reset or restored quiz's own; a repeated operation returns the recorded fields unchanged; pulled `quizzes[]` rows carry `questions_hash`. |
+| `GET` | `/api/sync/events?user=<id>&device=<id>` | Server-Sent Events: a `changed` event whenever another device of the account syncs a change (see [Telling the other devices](#telling-the-other-devices)). The session cookie, and `user` in place of `X-Acrodont-User`, which `EventSource` cannot send; a mismatch or no session is a `401`. An open past the account's `SYNC_STREAM_RATE_PER_MINUTE` or with `SYNC_STREAMS_PER_USER` already open is a `429` with `Retry-After`. Ends after five minutes |
+| `POST` | `/api/sync` | Body `{ device_id, app_version, cursor, page_token?, question_rows_for[], ops[], device_settings? }` (`device_settings`: values shared with all the account's devices, see [This device, or all of them](#this-device-or-all-of-them)), where `app_version` is the frontend build's **monotonic integer build number**, injected into the SPA at build time and compared numerically against `MIN_APP_VERSION` (see [Configuration](#configuration)) — never a hash or a semver string, so "too old to sync" is one comparison and raising the floor is one number in the task definition; the build's git hash is logged beside it for support but decides nothing. `question_rows_for` lists every cascade whose question rows this device holds or wants: in its window and not [budget-dropped](#on-the-device), kept automatically by size, **or whose base already holds question rows** (at most `MAX_QUESTION_ROWS_FOR`, 1,000 cascades, a protocol bound rather than a quota; 1,001 is a `400`. **The device sends the list whole and does not split it across requests**: one holding question rows for more than 1,000 cascades would have its sync refused and read "Can't sync: reload" (see [`SyncStatus`](#frontend)), keeping what it has not sent. That is accepted and not built around: under the [storage limit](#storage-limit)'s 10 MB an account could hold that many only as very small cascades, which is not ordinary use). The third case is what keeps a cascade the drop pass spared for its pending operations from going stale: the device holds its rows, so it must keep receiving their changes. A cascade the device holds no rows for and will not open is left out, and stays pending on the device. It is expected on every non-paged request, an omitted field means an empty list, ids that belong to another user or no longer exist are ignored, and the server omits `quiz_questions` rows for every other cascade. `cursor` is `null` for a full pull (a first sync or a resync), whose operations are pushed like any other's → `{ results: [{ op_id, status, reason?, outcome?, new_quiz_question_count?, new_quiz_questions_hash? }], changes: { cascades[], quizzes[], quiz_questions[], quiz_attempts[], tombstones[] }, sync_seq, next_page_token?, resync_required?, storage: { used, limit }, device_settings }`. `storage` is on every `200` and `426` response: the account's [storage](#storage-limit) and its effective limit, as numbers, read after the push so it counts what the push's finishes and purges changed; the device keeps them in `meta`. Pulled `cascades[]` rows carry `storage_bytes`, decimal text like every 64-bit value. `outcome` is set on an applied `finish` (a `finish_outcome`) or `finish_segment` (`drilled` or `continued`), and `new_quiz_question_count` and `new_quiz_questions_hash` whenever a quiz was created, reset or restored: the created quiz's when one was created, otherwise the reset or restored quiz's own; a repeated operation returns the recorded fields unchanged; pulled `quizzes[]` rows carry `questions_hash`. |
 
 On the wire, `quiz_questions` changes are grouped per quiz as parallel arrays
 (`question_idx[]`, `grade[]`, `graded_at[]`), with no positions: the device
@@ -5234,8 +5690,9 @@ A segment descent and an options change on the wire:
 `set_cascade_options` and `set_quiz_options` carry only the fields that changed,
 out of `segment_size`, `progression` and `require_alphabetical`, and for
 `set_cascade_options` also `clear_threshold`, `answer_mode`,
-`show_definitions`, `show_hooks`, `reveal_correct` and
-`leave_value_decimals`; any other field is a `400`.
+`show_definitions`, `show_hooks`, `reveal_correct`, `show_found_count`,
+`show_probability`, `definition_column` and `leave_value_decimals`; any other
+field is a `400`.
 
 ### Admin
 
@@ -5265,7 +5722,7 @@ SvelteKit static SPA. The routes:
 | `/` | No page of its own. It goes to the Cascades page, the landing page, when logged in, where logging in lands too, and to the log-in page (with Create an account) when logged out. A deleted account ends on the log-in page. With no lexicon yet, the empty Cascades page says so (and, to an admin, where to upload one). Every logged-in page but the player shows the site header (`AppHeader`): Acrodont (home, the Cascades page); for admins only, a Main nav holding just Admin; then the sync status and the account link. New cascade and the Trash are on the Cascades page, not in the header |
 | `/register`, `/register/check-email`, `/confirm-email`, `/login` | Auth |
 | `/reset-password` | "Reset your password": an address, then "If that address has a confirmed account, a reset link is on its way, with the account's username. The link expires in 30 minutes." |
-| `/reset-password/confirm` | "Choose a new password" (every device will be signed out), one field and **Set new password**. On success it forgets any session this tab holds and goes to `/login` with no message. A `429` says "Too many tries, with this link or from this address. Try again in N minutes, or ask for a new link."; a `503` says the server is busy checking passwords; a spent or expired link says to ask for a new one; a link with no token says so, with a link to ask for a new one, and shows no form |
+| `/reset-password/confirm` | "Choose a new password" (every device will be signed out), one field and **Set new password**. On success it logs out, on this device, any account this tab was signed in as (its data and unsent changes stay) and goes to `/login` with no message. A `429` says "Too many tries, with this link or from this address. Try again in N minutes, or ask for a new link."; a `503` says the server is busy checking passwords; a spent or expired link says to ask for a new one; a link with no token says so, with a link to ask for a new one, and shows no form |
 | `/` | Cascades page, the landing page (an old link to `/cascades` redirects here): the account's [storage](#storage-limit) against its limit with a meter, New cascade, then one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done, 31.58%)`), its size, its download status and Move to Trash; the rest is in the player's Settings. Below the cascades, the [Trash](#trash) (`#trash`) |
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, name, preview with what the cascade will use against the account's storage), with no settings: a note says a new cascade's settings are changed in its Settings once it is created |
 | `/cascades/:id` | Player for the cascade's deepest level, whose Settings dialog holds the ladder and every [setting](#settings), the cascade's and this device's |
@@ -5286,9 +5743,16 @@ Modules:
   `device_seq` in `meta`, and appends the operation to the
   outbox, all in one IndexedDB transaction, so two tabs can never mint the
   same sequence; the base is written only by the sync
-  engine. One tab at a time runs the sync engine and the download manager,
+  engine. A page's own buttons (a setting, Move to Trash, Restore, Delete
+  forever) go through `applyOrRefuse`, which answers null where the rules
+  refuse the operation, for the page to say so (see [Trash](#trash));
+  "use for all cascades" and Copy settings write only to cascades they have
+  just read as reachable, and call `applyLocally` directly. One tab at a time runs the sync engine and the download manager,
   elected with the Web Locks API (`navigator.locks.request` on a per-user
-  lock held for the tab's life); the other tabs read the shared stores and
+  lock held for as long as the tab runs as that account and can sync: it is
+  given up at a logout, when the account is signed out in another tab, and
+  when another tab activates a newer build, whether or not that build takes
+  the database); the other tabs read the shared stores and
   show the leader's status. Where Web Locks is missing, every tab syncs and
   idempotency keeps that correct, at the cost of duplicate rebase work.
 - **`lib/sync/`**: the sync engine (triggers, push, paged pull, rebase, backoff,
@@ -5296,7 +5760,17 @@ Modules:
   backoff, yielding to a page the player needs, card pages split into the
   `questions` and `cards` stores with `keys=1` first, the 14-day policy,
   `ROW_STORAGE_BUDGET`, the automatic keep by size, eviction of answers only, and the
-  quota-error path).
+  quota-error path). `runtime.svelte.ts` runs them for the signed-in account
+  and is what pages call. `syncAndWait` asks for a sync and waits for it, at
+  most `SYNC_WAIT_MS` (5 seconds): the leading tab runs its own engine's, and
+  any other tab asks the leader on the account's `BroadcastChannel` (`sync`,
+  with an id) and waits for the leader's answer when that sync has ended
+  (`synced`, with the id and whether it ended with the server's answer
+  applied). It answers false when the sync failed, when no tab leads, or when
+  the wait ran out, and the caller goes on either way. `sendPending(cascade)`
+  makes that wait only when the outbox holds an operation of the cascade, and
+  says whether everything of the cascade is sent afterwards: an export from
+  the server and Duplicate cascade call it before their request.
 - **`lib/settings/cascade.ts`**: a cascade's [settings](#settings):
   `CASCADE_SETTINGS` (the fields `set_cascade_options` can carry), `appliesTo`
   and `kindOf` (which settings only one kind of cascade has), `reachable` (the
@@ -5400,10 +5874,33 @@ Components:
 - **`LeaveValue`**: formats a raw value with a sign and the cascade's number of
   decimal places.
 - **`FinishBanner`**: the non-blocking message after each finish.
-- **`SyncStatus`**: Synced, Waiting to sync, Syncing…, Offline, Log in to
+- **`SyncStatus`**: the list is closed. Synced, Waiting to sync, Syncing…,
+  Offline, Log in to
   sync, not enough room on this device, **signed out in another tab** (see
-  [Authentication while offline](#authentication-while-offline)), or
-  **reload to keep syncing** — the
+  [Authentication while offline](#authentication-while-offline)),
+  **Can't sync: reload** — the server refused the sync request itself, with a
+  `4xx` of its own other than `401`, `426` and `429` (a `400` for a request
+  it cannot read, one over its size limit, or one whose `question_rows_for`
+  names more than 1,000 cascades, a `403` for a CSRF token it does not
+  accept, a `415`), known by the JSON `error` body the API writes on every
+  error: the answer is
+  the same however often the same request is made, so this is not "Offline",
+  which promises a sync when the connection returns. The label is a button
+  that reloads the app, taking a newer build if one is waiting, since a
+  request this build sends wrongly is what a newer build would send
+  otherwise; if the refusal remains after a reload, it is the operator's to
+  look into. **The batch is never dropped for it**: the outbox stays whole,
+  studying continues and goes on being queued, and the Account page counts
+  what is unsent as it does offline. In this state the device asks the
+  server again **no sooner than every five minutes** (`REFUSED_RETRY_MS`),
+  whatever would otherwise start a sync (an answer, the 30-second timer, the
+  tab becoming visible, a change on another device), and at once from the
+  engine a reload starts; the first request answered otherwise ends the
+  state. A `5xx` other than `503`, and anything that is not an answer from
+  the sync endpoint — a `4xx` without the API's `error` body among them: a
+  `408` from Nginx or the load balancer, the `403` or `407` of a network's
+  sign-in page — is still "Offline" and asked again at the next sync —
+  or **reload to keep syncing** — the
   `426` state (see [Deployment](#deployment-and-operations)), shown from the
   first `426` until a sync succeeds, because the app never reloads on its own,
   a plain reload is served the old build by the old worker, and its own reload
@@ -5429,7 +5926,8 @@ Components:
 - **`lib/cascades/storage.ts`**: the account's [storage](#storage-limit) on
   the device: the per-row costs (`STORAGE_COSTS`, equal to
   `contract-fixtures/storage.json` by test), `DEFAULT_STORAGE_LIMIT` until the
-  server has reported one, `storageState` (`ok`, `almost` from 90%, `over`),
+  server has reported one, `storageState` (`ok`, `almost` from 90%, `over`), `finishesRefused` (past
+  five times the limit),
   `levelBytes` for one level's share, and `formatBytes` in decimal units. It
   imports nothing, so the session can read it without the local stores. The
   device shows the server's figures and counts only a level's share itself.
@@ -5468,14 +5966,14 @@ startup rather than falling back to a default.
 | `SECURE_COOKIES` | `false` | `true` in any TLS deployment |
 | `MAIL_BACKEND` | `console` | `console`, `ses` or `file`. `file` is the console backend plus one JSON file per message in `MAIL_OUTBOX_DIR`, named for its recipient, which `scripts/stack.py` and the end-to-end tests read instead of the log; every local stack uses it |
 | `MAIL_OUTBOX_DIR` | — | Required with `MAIL_BACKEND=file` |
-| `MAIL_MAX_PER_SECOND` | `1` | With `ses`: messages wait in a bounded queue (an hour's worth) drained at this rate, the SES account's maximum send rate (1 in the sandbox, usually 14 after), since SES refuses a faster burst. Each send times out at 30 s; a message whose link expired while queued is dropped; every failure is logged with `alarm = "mail_failed"` |
+| `MAIL_MAX_PER_SECOND` | `1` | With `ses`: messages wait in a bounded queue (an hour's worth) drained at this rate, since SES refuses a burst faster than the account's maximum send rate (1 in the sandbox, usually 14 after). Production sets 5, not 14: the SES account and its rate are shared with birdtest. Each send times out at 30 s; a message whose link expired while queued is dropped; every failure is logged with `alarm = "mail_failed"` |
 | `MAIL_FROM` | `no-reply@acrodont.local` | |
 | `PUBLIC_URL` | `http://localhost:5173` | Base URL for email links |
 | `MAX_QUIZ_QUESTIONS` | `300000` | May be lowered; a value above 300,000 fails startup. Lowering it bounds **new** values only: cascades and quizzes already holding a larger segment size keep working and are never rewritten, and the forms clamp what they prefill (see [Quiz options](#quiz-options)) |
 | `MAX_STORAGE_BYTES_PER_USER` | `10000000` (10 MB) | The [storage limit](#storage-limit): what an account's cascades (the Trash included) and saved searches may hold on the server, in bytes, by the storage formula. Checked inside the creation, Duplicate and save transactions; reported by `/api/auth/me` as `max_storage_bytes`. Must be at least 1. An account's `users.storage_limit_bytes`, set only through SQL, replaces it for that account. There is no limit on how many cascades or saved searches an account has |
 | `SEARCH_TIMEOUT_MS` | `2000` | Production sets 4,000: on half a vCPU a search runs at half a core's speed |
 | `SEARCH_CONCURRENCY` | `2` | Searches running at once per instance, sized to the task's vCPUs. A request waiting longer than `SEARCH_TIMEOUT_MS` for a permit gets `503` with `Retry-After`, never `422` |
-| `EXPORT_CONCURRENCY` | `2` | Server-streamed exports at once per instance (production sets 1). A permit is held for the whole stream and taken before the token is spent; a request waits up to 50 seconds for one, then gets `503` with `Retry-After`. It is what bounds peak memory (the catalog plus this many exports) whatever the number of users |
+| `EXPORT_CONCURRENCY` | `2` | Server-streamed exports at once per instance (production sets 1). A permit is held for the whole stream and taken before the token is spent; a request waits up to 50 seconds for one, then gets `503` with `Retry-After`. The stream's reader in production is Nginx, which buffers an export (see [Deployment and Operations](#deployment-and-operations)), so the permit is held while the file is formatted and not while it downloads. A reader that takes nothing for 30 seconds is dropped and the permit freed: its download ends as a failed one, never as a short file. It is what bounds peak memory (the catalog plus this many exports) whatever the number of users |
 | `TRASH_RETENTION_DAYS` | `30` | Y: how long cleared quizzes and trashed cascades stay in the Trash |
 | `SYNC_RETENTION_DAYS` | `30` | How long operation records and tombstones are kept. A device offline longer resyncs in full on its return; its unsent work still applies |
 | `SYNC_MAX_OPS` | `500` | Operations accepted per sync request; a request carrying more is a `400` |
@@ -5485,18 +5983,24 @@ startup rather than falling back to a default.
 | `ADMIN_UPLOAD_MAX_BYTES` | `104857600` (100 MB) | |
 | `API_MAX_BODY_BYTES` | `16777216` (16 MB) | JSON request bodies, sized for a 300,000-entry In Word List |
 | `SYNC_RATE_PER_MINUTE` | `120` | Per-user sync requests; sized so a full offline attempt drains in minutes |
+| `SYNC_STREAM_RATE_PER_MINUTE` | `30` | Per-user; opens of `GET /api/sync/events`. A device opens its stream once every five minutes |
+| `SYNC_STREAMS_PER_USER` | `16` | Event streams one account may hold open at once on an instance; an open past it is a `429`. A device holds one, in the tab that leads its syncing (one per tab only where the browser has no Web Locks) |
 | `DOWNLOAD_RATE_PER_MINUTE` | `120` | Per-user; the one shared bucket over the card, question-list and grades pages. Sized for one 300,000-question cascade's reopen per minute |
 | `SEARCH_RATE_PER_MINUTE` | `30` | Per-user; search, preview, cascade creation, saving a search and loading one (`GET /api/searches/:id`) |
 | `EXPORT_RATE_PER_MINUTE` | `10` | Per-user; server-streamed exports, counted when the dialog asks for an export token, since that is the request whose `429` the page can see |
-| `ADMIN_UPLOAD_RATE_PER_MINUTE` | `10` | Per-user; the three admin upload endpoints, each of which can carry 100 MB and hold a connection for 120 seconds |
+| `ADMIN_UPLOAD_RATE_PER_MINUTE` | `10` | Per-user; the three admin upload endpoints, each of which can carry 100 MB and hold a connection for 115 seconds |
 | `CATALOG_RATE_PER_MINUTE` | `300` | **Per IP**, for the two endpoints that need no session: `GET /api/lexicons` and `GET /api/letter-distributions/:name`. A device needs one of each per login plus one distribution per pulled cascade on a new device, but the bucket is per **address**, and a club or tournament room behind one address is dozens of devices logging in at once; 300 covers a room of about a hundred. A larger room waits out `429`s, which every client honours, rather than failing |
-| `LOGIN_FAILURES_PER_IP_PER_MINUTE` | `10` | Failed logins per IP; a successful login spends nothing, so a room logging in together is never refused |
-| `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE` | `10` | Failed logins per username, checked before any Argon2 verify |
+| `LOGIN_FAILURES_PER_IP_PER_MINUTE` | `10` | Failed logins per IP; a successful login spends nothing, so a room logging in together is not locked out |
+| `LOGIN_FAILURES_PER_USERNAME_PER_MINUTE` | `10` | Failed logins per username, taken before any Argon2 verify and given back unless it fails |
+| `LOGINS_PER_USERNAME_PER_MINUTE` | `20` | Logins per username whose password was checked, right or wrong: each costs an Argon2 verify. Taken before the verify and given back only when the request was never judged |
+| `REGISTRATIONS_PER_IP_PER_DAY` | `10` | Per IP: registrations that passed their field checks, a bucket of this many refilled at this many a day. `429` with `Retry-After` past it. Local stacks raise it (`docker/backend.defaults.env`): every browser there comes from one address |
+| `MAX_UNCONFIRMED_PLACES` | `50` | How many addresses with a registration not yet confirmed count toward `MAX_ACCOUNTS`; the ceiling is held again at confirmation |
+| `MAIL_MAX_PER_HOUR` | `200` | Confirmation, notice and reset mails in any hour, to every address together, per instance. Past it nothing is sent, a registration is not kept, and `alarm = "mail_capped"` is logged. Local stacks raise it |
 | `AUTH_RATE_PER_IP_PER_MINUTE` | `30` | Per IP; register, confirm-email, reset-password and its confirm. Not `GET /api/auth/me`, which needs a session, and not logout |
-| `RESET_RATE_PER_HOUR` | `5` | Password resets an hour, each key its own bucket: asking for a link per caller (`ip:`) and per address named (`em:`, lower-cased), and setting a password per link (`tok:`), whoever sends it. On top of `AUTH_RATE_PER_IP_PER_MINUTE` and the email caps |
+| `RESET_RATE_PER_HOUR` | `5` | Password resets an hour, each key its own bucket: asking for a link per caller (`ip:`) and per address named (`em:`, lower-cased), setting a password per link (`tok:`), whoever sends it, and typing the password behind a session per account (`pw:`: Change password, Sign out everywhere, Delete account). On top of `AUTH_RATE_PER_IP_PER_MINUTE` and the email caps |
 | `CATALOG_RECONCILE_SECONDS` | `60` | Fallback reload interval if a notification is missed |
 | `TRUSTED_PROXY_HOPS` | `0` | `1` behind the ALB or compose Nginx |
-| `DEV_LOGIN` | `false` | `true` only on a local stack: adds `POST /api/dev/login {username}`, a session for a confirmed account without its password, answered as `/api/auth/login` is, for `./scripts/dev.py --login-as`. Startup **refuses** it together with `SECURE_COOKIES=true`, so a TLS deployment cannot start with it on; without it the route does not exist (404) |
+| `DEV_LOGIN` | `false` | `true` only on a local stack: adds `POST /api/dev/login {username}`, a session for an account without its password, answered as `/api/auth/login` is, for `./scripts/dev.py --login-as`. Startup **refuses** it together with `SECURE_COOKIES=true`, so a TLS deployment cannot start with it on; without it the route does not exist (404) |
 
 Client-side limits (14-day download window, 500 MB answer storage soft limit,
 the 2 GB `ROW_STORAGE_BUDGET` for rows and question keys, the 50,000-row
@@ -5639,8 +6143,8 @@ manual walk through a `dev.py` instance that precedes a launch.
 
 ## Deployment and Operations
 
-Sized for the [scale assumptions](#overview): one user at first, at most 100
-accounts. The stack costs about $53 a month (docs/runbook.md, "What it
+Sized for the [scale assumptions](#overview): one user at first, at most 750
+accounts (`MAX_ACCOUNTS`). The stack costs about $53 a month (docs/runbook.md, "What it
 costs"). Birdtest, a sibling app on the same stack that has been live since
 October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
 
@@ -5653,6 +6157,23 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
     timeout for admin uploads, and invalid header fields dropped. Nginx's
     `keepalive_timeout` (130 s) must outlast the idle timeout, or the ALB
     reuses connections Nginx has closed and answers 502; a Vitest test pins it.
+    With `redirect_www` the certificate also names `www.<domain>` and both
+    listeners answer that host with a `301` to the bare domain, which is the
+    site's one address.
+  - Nginx passes the API straight through, unbuffered, **except a
+    [server export](#exporting-words)'s download**, which it buffers: it takes
+    the file as fast as the backend formats it, into memory and past about
+    half a megabyte a temporary file, and the client reads it from Nginx at its own speed. Read
+    straight through, one throttled download held the only export permit and
+    every other export waited 50 seconds and failed. The disk is the task's
+    own 20 GiB: a temporary file holds at most 512 MB (the largest export, a
+    300,000-question cascade with definitions, is tens of megabytes) and
+    sixteen exports download at once, 8 GiB at the very most; a seventeenth
+    is answered `503`. Nginx drops a client that takes nothing for 60
+    seconds. An export past 512 MB would be read at the client's speed again,
+    where the backend's own rule applies: a reader that takes nothing for 30
+    seconds is dropped. A Vitest test pins the location, its limits and that
+    it matches the download alone.
   - ECS cluster (Container Insights off; ECS Exec sessions never logged), one
     service of **one task** with backend and Nginx containers, at **0.5 vCPU
     and 2 GiB**, on **Fargate Spot** by default (`use_fargate_spot`).
@@ -5666,10 +6187,18 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
       before the old one drains, which is safe because Acrodont runs correctly
       as two instances.
     - **Startup and shutdown:** a circuit breaker rolls back a release whose
-      task cannot start, and an EventBridge rule mails why. `stopTimeout` is
+      task cannot start, and an EventBridge rule mails why. Terraform keeps
+      the app task definition's earlier revisions registered
+      (`skip_destroy`), so the revision it rolls back to exists. `stopTimeout` is
       120 s so graceful shutdown can finish a streaming export. The container
       health check's `startPeriod` (240 s) must stay at least twice the measured
-      catalog load, which the backend logs as `load_ms`.
+      catalog load, which the backend logs as `load_ms`. `/health` fails
+      while the database is away, so the container's check and the target
+      group's each allow ten misses 30 seconds apart before the task is
+      replaced: a database restart (the weekly maintenance window, a minor
+      upgrade, a class change) is ridden out by a task that keeps its catalog
+      in memory, where a replacement could not start until the database was
+      back and would then index everything again.
   - An **ops task definition** on the ops image (Postgres 16 client and
     server, python3, `restore.py`, `acrodont-master-psql`). Every SQL step of
     the runbook runs from it, by `scripts/prod-sql.sh` and
@@ -5679,8 +6208,9 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
     dumps cover anything older. An RDS event subscription reports low storage,
     failure and allocation near the autoscaling ceiling.
   - SES domain identity, MAIL FROM subdomain, account-level suppression of
-    bounces and complaints, and alarms on the bounce and complaint rates and on
-    any failed send.
+    bounces and complaints, and alarms on the bounce and complaint rates, on
+    any failed send, and on the hourly mail cap being reached
+    (`acrodont-mail-capped`).
   - SSM parameters, referenced **by ARN only**: declared as resources, their
     decrypted values would sit in Terraform's state. `scripts/init-db-roles.sh`
     creates them.
@@ -5695,7 +6225,10 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
   - It refuses a dirty tree, a commit not on `origin/main`, a commit whose CI
     run on `main` is not green (a branch's run of the same commit is only the
     Push tier, see [Running the tests](#running-the-tests)), and a change to
-    an applied migration.
+    an applied migration. It warns, and goes on, when the last nightly run
+    on `main` failed, is more than two days old or is missing (GitHub stops a
+    schedule after 60 days without activity, and an old green result would
+    otherwise stand).
   - It builds only the images ECR lacks: backend, ops and frontend, tagged with
     the commit.
   - It sets `image_tag` in `prod.tfvars` (kept in the state bucket), then plans
@@ -5750,8 +6283,12 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
     version — the build number described under [the endpoint](#cascades-and-sync) —
     and a request below `MIN_APP_VERSION` gets `426` with a
     reload prompt, after its operations have been accepted. The `426` body
-    carries the same `results` array as a `200`, and the device drops the
-    acknowledged operations from its outbox, then shows
+    carries the same `results` array and the same pull as a `200`, and the
+    device takes both exactly as it takes a `200`'s (further pages are asked
+    for by token, which are never refused for the version), so what it just
+    pushed stays on the device as the server has it; acknowledging the
+    operations without their pull would clear the device's rows for them with
+    nothing in their place. It then shows
     [`SyncStatus`](#frontend)'s **reload to keep syncing** until a sync
     succeeds. It keeps the rest of the outbox and goes on letting the user
     study, because the `426` applied the operations it carried and more are
@@ -5762,7 +6299,8 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
     reload; and offline the new worker cannot even be fetched, so the state
     persists until the device is online and the handshake runs.
 - **Granting admin** in production is `scripts/confirm-user.sh --admin USER`,
-  one SQL statement run from the ops task. It is documented in the runbook.
+  one batch of SQL run from the ops task (it also makes the account from the
+  username's registration, when its address was never confirmed). It is documented in the runbook.
 - **Catalog uploads** happen in the browser at `/admin`. Every running instance
   picks up changes through `LISTEN/NOTIFY`, with no restart or redeploy.
 - **Backups** have their own section: see [Backups](#backups).
@@ -5776,7 +6314,19 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
   counted: allowing twice the live figure, 15 GB, the worst case still fits
   the starting allocation with the tenth that autoscaling keeps free and
   about 3 GB for Postgres itself, which is where the 750 comes from. A
-  realistic one is a small fraction of that. Filter specs
+  realistic one is a small fraction of that. The limit itself gates only
+  creating: studying takes an account past it, and **the hard bound on what
+  the formula counts is five times the limit**, where finishes are refused
+  (see [Storage limit](#storage-limit)). That is 50 MB an account and, were
+  all 750 there, 37.5 GB of live rows: inside what autoscaling may grow to
+  (100 GiB) and not inside the starting 20 GiB. Getting there takes every
+  account studying its way to five times its limit, about 190,000 finished
+  attempts each, and the RDS storage events say so long before. What the
+  bound does not cover is `sync_operations`: a `finish`, `finish_segment` or
+  `restore_quiz` record is kept for `SYNC_RETENTION_DAYS` whether it was
+  applied or rejected, a refused finish included, so a client that sends
+  finishes in a loop still adds records, at most `SYNC_MAX_OPS` a request and
+  `SYNC_RATE_PER_MINUTE` requests a minute. Filter specs
   count toward the same limit: a 300,000-entry In Word List of 8-letter words
   costs about 2.7 MB of `search_conditions.entries` (its bytes plus a line
   break an entry), which is the **most one spec can hold**, since the 300,000
@@ -5821,7 +6371,13 @@ backend's build plus Postgres 16 and python3), with a read-only database role.
 Its task role can write dumps but read only the daily dump it copies to
 `monthly/`; the drill's can only read. It writes to a key named for the day,
 so a corrupted dump cannot overwrite a good one, and the bucket's versioning and
-object lock mean neither can a mistake or a compromised task role.
+object lock mean neither can a mistake or a compromised task role. The dump
+streams to the bucket, so a `pg_dump` that dies part-way still leaves an
+object under the day's key; a run whose dumps both succeeded writes a marker
+beside it last (`daily/YYYY-MM-DD.ok`, holding the dump's size), and the
+drill and `restore.py` take no dump without its marker or of another size.
+The size comparison below is likewise made against the last dump that has
+one.
 
 Uploaded catalog files are **not** backed up. They are licensed data that
 Acrodont never stores as files, only as rows, and those rows are in the dump.
@@ -5829,10 +6385,14 @@ Acrodont never stores as files, only as rows, and those rows are in the dump.
 ### Alarms
 
 - No successful dump in **36 hours**.
-- A dump more than 30% smaller than the previous one, which catches a truncated
-  or partial run.
-- A backup or drill task that exits non-zero, within minutes (an EventBridge
-  rule on the task's exit code).
+- A dump more than 30% smaller than the previous finished one, which catches
+  a run that succeeded with much of the data missing.
+- No restore drill that passed in **seven days**, a drill that never ran
+  counting as a miss. This is what reports a drill that has stopped being
+  started; seven days is the longest a CloudWatch alarm can look back.
+- A backup or drill task that exits non-zero or never starts (no image to
+  pull, no secret to read), within minutes (an EventBridge rule on the task's
+  exit code and its stop code: a task that never started has no exit code).
 - RDS storage events: low storage, failure, and allocation near the
   autoscaling ceiling. A fixed free-storage threshold is meaningless under
   storage autoscaling, since free space is measured against the current
@@ -5842,8 +6402,13 @@ Acrodont never stores as files, only as rows, and those rows are in the dump.
 
 The runbook has the full procedure; the parts specific to Acrodont are:
 
-1. **Restore into a new instance**, never over the live one, and point a staging
-   backend at it to check `/health` and a few cascades before any cutover.
+1. **Restore into a new database**, never over the live one, and check a
+   scrubbed copy of the same dump on a local stack (`./scripts/dev.py
+   --restore DUMP`: `/health` and a few cascades) before any cutover.
+   The new database is owned by the app role and restored as that role: the
+   app could neither read nor migrate one the master user made. The cutover
+   (`scripts/cutover-db.sh`) repoints the app's URL and the nightly dump's
+   together, so the dump never goes on reading the abandoned database.
 2. **Re-index the catalog**: `/health` stays not-ready until every lexicon and
    leave value set has been built into memory, which takes a few seconds per
    item. Nothing has to be re-uploaded.
@@ -5869,16 +6434,21 @@ The runbook has the full procedure; the parts specific to Acrodont are:
 
 ### The drill
 
-**Monthly, automatically.** The `acrodont-drill` task (`scripts/drill.py`)
-restores the newest nightly dump into a Postgres started inside its own task,
+**Twice a week, automatically** (Sundays and Wednesdays, so that the
+seven-day alarm on a missing drill has days of margin, which drills a week
+apart would not give it). The `acrodont-drill` task (`scripts/drill.py`)
+restores the newest finished nightly dump into a Postgres started inside its own task,
 never on the production instance. Birdtest's drill once ran against production
-and could fill its storage. It then checks:
+and could fill its storage. It restores as the app role into a database that
+role owns, as a real restore is made, so a restore only a superuser could
+make fails here first. It then checks:
 - every table the schema-only dump names is present;
 - migrations are recorded;
-- every cascade has its questions;
+- there are users, and every cascade has its questions;
 - the sequence bump leaves every user's floor at `sync_seq`, above 2^32.
 
-It reports `DrillSucceeded` and `DrillSeconds`; a failure mails at once.
+It reports `DrillSucceeded` and `DrillSeconds`; a failure mails at once, and
+seven days without a drill that passed alarm (see [Alarms](#alarms)).
 
 **Quarterly, by hand**, the part a machine cannot do. Restore the latest dump
 locally with `./scripts/dev.py --restore DUMP` (scrubbed, sequences bumped).
@@ -6164,13 +6734,19 @@ Pure functions and in-memory structures, no database and no network.
 - **Configuration**: `MAX_QUIZ_QUESTIONS` defaults to 300,000 and 300,001
   fails startup; `MAX_STORAGE_BYTES_PER_USER` defaults to 10,000,000 and `0`
   or a non-number fails startup.
+- **Mail and registration caps** (`auth/mail.rs`, `rate.rs`): the hourly mail
+  cap counts every address together over the hour just past, and a mail it
+  holds back takes no slot of its address's own caps; a daily limit is a
+  burst of its size and then asks for the wait to the next token, a tenth of
+  a day at ten a day.
 
 **Frontend** (`npm run check`, then Vitest): `lib/cascade` against the shared
 rule and shuffle vectors, `lib/local` against `fake-indexeddb`, `lib/sync`'s
 rebase and backoff, and `lib/export`'s formatters against the export fixtures.
 `lib/cascades/storage.ts` uses the server's per-row costs (equal to
 `contract-fixtures/storage.json`), counts a level as its quiz row plus a row
-per question, is `ok`, `almost` from 90% and `over` past the limit, and
+per question, is `ok`, `almost` from 90% and `over` past the limit, says
+finishes are refused past five times the limit and not at it, and
 formats in decimal units; and the sync engine writes every response's
 `storage` into `meta.server`.
 A Vitest over the cascade builder's preview feeds it a stubbed `503` with
@@ -6222,11 +6798,10 @@ pointer and no row, a startup with no pointer opening no per-user database,
 removing an account's data with **no** pending logout deleting its row and its
 database while the other account's survive, and the whole path running with
 `indexedDB.databases()` deleted from the global, since Safari and Firefox lack
-it. They also assert that `storageLine`'s figures for an account that is not
-signed in come from its `accounts` row with **no `open` on its database**, and
+it. They also
 cover the queued logout end to end: removing the data of an account that
 **does** hold an unacknowledged logout leaving a row carrying its id, username
-and flag alone, absent from `storageLine`, and deleted once the request goes
+and flag alone, and deleted once the request goes
 through; the flag clearing on a `2xx`, on a `401` and on a `403` — the class is
 any `4xx` but `429`, and a `403` is what a browser that cleared only its CSRF
 cookie would meet — while a `429`, a `503` and a network error each leave it
@@ -6236,18 +6811,34 @@ app wants it to or not, and carrying none once both cookies have expired; the
 retry being sent at a startup with no pointer and **not** sent while an account
 is signed in; and a second account's login clearing every pending flag, so the
 queued logout never reaches the server after the cookie it was for was
-replaced. A fixture unscoped
+replaced; a logout that removes the account's data deleting its database
+while the logout request is still unanswered, the emptied row kept for that
+request and deleted when it is answered; the request being given up as no
+connection after its timeout; and a session check (`/api/auth/me`) answered
+after such a logout setting nothing of the account in the tab and not making
+its database again; and a password reset set in a signed-in tab being a logout on the device, with no account signed in afterwards, the account's row and database kept and its unsent operation still in the outbox, and nothing done in a tab with no account. The sync runtime's tests (`runtime.test.ts`, with a
+stand-in for Web Locks) cover: a leading tab whose database a newer version
+is opened over stopping, giving the lock to the tab waiting for it, not left
+saying "Syncing…" for the request it had out, its queued operation still in
+the upgraded database, and sending nothing and opening nothing afterwards; a
+tab that finds the database already at a newer version saying it was updated
+in another tab and not keeping the lock; an account's notices staying while
+the tab only stops and restarts syncing for it, and going when it logs out or
+another account starts syncing in the tab; and a sync or a count asked for
+after a logout that removed the account's data not making its database
+again; **`tabMaySync`** being false once another tab activated a newer build, with the database left as it was, as it is once the database was taken or the account signed out elsewhere, and a tab stopped for it giving the lock to the waiting tab, sending nothing more, and leaving what it writes afterwards in the outbox that tab reads; **a sync asked for and waited for** (`syncAndWait`, `sendPending`): in the leading tab, the cascade's unsent operation sent before the answer and nothing asked when nothing of the cascade is unsent; the wait given up, with the operation still counted unsent, when the sync does not end; in a tab that does not lead, the leader asked on the channel and its answer waited for, and the wait given up when the leader's sync failed or no tab answers; and the leading tab answering another tab's request once its sync has ended (the Export dialog's sentence and Duplicate's call are the pages' own, exercised by no test); the count before a removal, and the Account page's line (`unsentCount`), reading the outbox in a tab that has stopped syncing, where the tab's own last count is stale (the line's count being the tab's running one while it syncs), leaving no connection open, making no database that is not there, and answering "not known" for one it cannot read or open in time; and a tab whose database another tab's removal deleted not being told it was updated, and syncing again. (The layout's two lines that call these, at a change of account and
+at the "updated in another tab" state, are not exercised by a unit test; the update journey walks the second.) `applyOrRefuse` answering null, with nothing queued, for a Restore of a cascade that is not in the Trash, a Delete forever of a level being studied and a second Move to Trash, where `applyLocally` throws, and throwing what is not the rules' refusal (the line each page then shows is the page's own, exercised by no test). A fixture unscoped
 database at each earlier version opens at the current one with its rows and
 pointer intact.
-The rebase tests cover: a rejected `finish` removing the quiz it created in
+The rebase tests cover: a `finish` rejected `storage_limit` leaving its level
+answered and unfinished with its own notice, sent once and never again, and
+applied once the server has room; a rejected `finish` removing the quiz it created in
 the overlay; rejected grades on a trashed cascade disappearing from the overlay
 although no server row changed; an applied `finish` with a different outcome
 kind showing the notice and one differing only in question count staying
-silent; a pulled quiz with a new seed being rebuilt; a pull that only echoes the
-device's own operations touching a handful of overlay rows and no base rows; the
+silent; a pulled quiz with a new seed being rebuilt; a pull that only echoes the device's own operations emptying the overlay, the grades then read from the base; the
 outbox keeping one `move_cursor` per quiz, re-appended after a queued
-`finish_segment`; the engine draining a 600-batch outbox back to back; a pull
-a stale-rejected change to a cascade's settings reverting it while the other
+`finish_segment`; the engine draining a 600-batch outbox back to back; a stale-rejected change to a cascade's settings reverting it while the other
 device's change stands; a second device building a
 Source quiz from a pull that carries no question rows; a reset pulled with no
 graded rows completing its rebuild at the last page; a cascade outside the
@@ -6255,132 +6846,65 @@ download window fetching its index lists and materialising on first open, and,
 when it leaves the window with nothing pending, dropping every question row,
 position and card while keeping its cascade, quiz and attempt rows, then on
 reopen fetching index lists and graded rows and materialising with every
-grade intact; a cascade created while a full pull is in flight surviving the
-last page with its grades; a level promoted from an acknowledged `finish`
-while a full pull is in flight surviving the last page; the staging swap
-surviving a browser kill between two cascades' transactions, with the cursor
-unadvanced and the next pull converging; a pull for an out-of-window cascade
+grade intact; a cascade created while a full pull is in flight surviving the last page; a level promoted from an acknowledged `finish` by a full pull's own response keeping its rows — every one, where the device had placed it, with the grade the server holds — and the answers queued on it; **a tab closed between two cascades' transactions** leaving the cursor unadvanced, the first cascade's acknowledged operation gone with its rows and the second's acknowledged `finish` still in the outbox, so the next sync sends it again and the answers queued on the level it made, beyond that sync's batch, are kept; **a level's own `finish` queued behind the batch that made the level** being applied with everything studied after it, whether it clears the level or descends from it, the base holding the server's level with no answer yet after the first acknowledgement; answers queued behind the finish that reset their quiz being counted once it is acknowledged; an answer regraded behind that batch being promoted as the server has it; **a level made and cleared inside one acknowledged batch** keeping its rows in the base, in the finished attempt's order and graded, so that a restore of it queued behind the batch keeps the answers given after it; a pull for an out-of-window cascade
 writing no question rows and leaving its quizzes pending; a grades fetch whose
 attempt differs from the base row being discarded and the device syncing
-again; a grades fetch cut off after its first page leaving the quiz **pending**
-and fetched again, because the rows it wrote fall short of the quiz row's
+again; a grades fetch cut off after its first page being made again, because the rows it wrote fall short of the quiz row's
 `correct_count + missed_count`, while the same fetch run to `question_count`
-clears the flag in one pass; the 1,200-operation outbox vector with its `finish` dropped in replay
+clears the flag in one pass; an outbox of the 1,200-operation vector's shape (1,002 operations, built by hand) with its `finish` dropped in replay
 showing one `stale_attempt` notice counting the grades behind it; the drop
 pass removing a 300,000-question cascade's rows within budget; a full
 segmented attempt pushed as the device emits it producing no `bad_cursor` or
-`bad_segment` rejection and its `finish` applied, not `ungraded`; an
-out-of-window cascade re-entering the window through a pull ending with every
-grade present, its pending mark surviving the index-list fetch until the
-grades arrive; grade rows arriving in a pull for a pending quiz being written
+`bad_segment` rejection and its `finish` applied, not `ungraded`; an out-of-window cascade opened again ending with every grade present; grade rows arriving in a pull for a pending quiz being written
 nowhere and the quiz staying pending until the full sequence runs; a new
 unplayed quiz materialising with an index-list fetch and no grades request,
 and the drop pass leaving such a quiz unflagged; a cascade active on another
 device but never opened here holding no question rows and no cards until first
-open, one over the automatic keep threshold on such a device keeping nothing
-until then, a cascade opened here 15 days ago and studied elsewhere
-yesterday leaving this device's window, a cascade studied continuously for 15
-days staying in the window and never dropped under an open player, and an
-export of a never-opened cascade counting as an open; an out-of-window
-cascade whose rows the drop pass spared for its pending operations staying in
-`question_rows_for`, receiving another device's grade on those rows, and
-having no quiz flagged pending, then surviving a resync with its rows and its
-`finish` intact; an
+open, one over the automatic keep threshold being kept automatically once it is opened, a cascade opened here 15 days ago leaving this device's window, a grade recording an open while a `trash_cascade` and a `set_cascade_options` record none, and the drop pass sparing the rows of an out-of-window cascade that holds pending operations or whose player is open; an
 offline restore of a quiz with no local rows leaving it
-pending until first open; a cascade whose large cleared level was exported
-from the Trash (its rows fetched for that) leaving the window, the cleared
-rows dropped, and a second Trash export fetching them again; a Trash export of
-a cleared quiz holding only part of its rows, or its rows without positions,
-or a set that fails the hash check, fetching them before it writes anything;
+pending until first open; an export of a quiz holding only part of its rows, or a set that fails the hash check, reporting the rows missing before it writes anything;
 a pull that reports a pending quiz cleared clearing its flag; eviction taking an automatically kept cascade's answers while
 sparing its rows and its question keys, and taking
-them in **last-opened order, oldest first** — three cascades over the limit with
-distinct last-open times, the oldest losing its answers first and the one opened
-this morning last, and none exempt while the total is over the limit — with the
+them in **last-opened order, oldest first** — three cascades with distinct last-open times and a limit that fits two, the oldest alone losing its answers — with the
 player then showing that cascade's questions from the `questions` store and
 "answer needs a connection" on the reveal, grading still saved, and a
 questions-only export of it still written from local data; a **typed** anagram
 card of that cascade falling back to flashcard mode, its grade starting Correct
 and Toggle deciding it, rather than every entry counting wrong; a card whose key
 never arrived, from a download stopped part way, reading "this question needs a
-connection", emitting no grade, and its level marked still downloading, with a
+connection", emitting no grade, with a
 questions-only export of that cascade falling back to the server, and the last
 card of that card's run emitting no `finish_segment` while the player names how
 many questions still need a connection; the download
-manager fetching every in-window cascade's keys with `keys=1` before any
-cascade's answers, and a restored quiz's per-quiz sequence fetching the
-cascade's missing keys too; a tombstone and a full pull's deletion each removing
-a cascade's `questions` and `cards` entries with its rows, and its `meta`
-entries too — its last-open time and its budget-dropped mark — so the device's
-sizes stop counting it; the drop pass
-removing a cascade's question keys along with its rows, and the next open
-fetching both back from the card pages;
-a quiz cleared offline getting a provisional `cleared_at` from the operation's
-`at`, and a cascade trashed offline a provisional `trashed_at`, both entries
-reading "deleted forever 30 days after this syncs", the trashed cascade still listed in
-the Trash while it is gone from the Cascades page, and the acknowledged rows
-replacing both; the drop pass dropping the least recently opened unkept cascade
-when the base's rows and keys pass `ROW_STORAGE_BUDGET`, before its 14 days are
-up, and skipping one that holds pending operations or has its player open; the
-same pass taking its two tiers in order, so an **automatically kept** cascade,
+manager fetching every in-window cascade's keys with `keys=1` before any cascade's answers; a tombstone removing a cascade with its question rows and its last-open time; the drop pass removing a cascade's question keys along with its rows, and the next open fetching the rows back with every grade;
+a quiz cleared offline and a cascade trashed offline each listed in the Trash as provisional, with no date it is deleted forever, the trashed cascade gone from the Cascades page, and the acknowledged row replacing the cascade's; the drop pass dropping the least recently opened unkept cascade
+when the base's rows and keys pass `ROW_STORAGE_BUDGET`, before its 14 days are up; the same pass taking its two tiers in order, so an **automatically kept** cascade,
 even the least recently opened, is dropped only once every unkept one is gone,
 and then oldest first with none exempt; a cascade the budget dropped **while it was
 still inside the window** being marked in `meta` and left alone by the next
-pull's download manager — no index list, no grades, no keys, no cards, absent
-from `question_rows_for`, its quizzes pending — so the pass settles in one run
+pull's download manager — no index list, no grades, no keys, no cards, absent from `question_rows_for` — so the pass settles in one run
 instead of dropping and refetching the same cascade forever, then opening it
 clearing the mark and fetching it back whole, a marked cascade over
 `AUTO_KEEP_OFFLINE_ROWS` counting as neither wanted nor kept until it is
-opened, and the same mark left by the
-quota path's drop so its retry refetches nothing; a `QuotaExceededError` thrown by a pull's per-cascade transaction
-leaving the cursor unadvanced and the outbox intact, running the drop pass **and
-then the answer eviction**, in that order, and
-retrying once, and on a second failure showing "not enough room on this
-device" while studying continues; the same error thrown by an **`applyLocally`**
+opened, and the same mark left by a forced drop (in the scale tier); a write that runs out of room **part way through** a pull's per-cascade transaction, after that transaction has taken the acknowledged operations out of the outbox — the transaction really aborted, its own error naming the quota while the failed write reports only the abort — leaving the cursor unadvanced and the outbox intact, asking once for room to be made and making the pull again with the same batch, which then loses nothing, and on a second failure reporting no room, with the status no longer "Syncing…", the staging rows left for the next pull and studying continuing until a later sync applies everything; the same failure while **a page of the pull is written** making room and pulling once more from the same cursor; an error that is **not IndexedDB's**, thrown part way through a cascade's transaction, rolling the whole of it back, its acknowledged operations still queued and nothing of the level they made in the base; an acknowledged operation of **another cascade lying between this cascade's** in the outbox, one of this cascade's having since been replaced, staying queued until its own cascade's transaction; the same error thrown by an **`applyLocally`**
 instead, where the grade reached neither the overlay nor the outbox: the player
 stays on that card with the storage message in place of the grade, Show / Next
 advances nothing, and the grade is written once a cascade is removed and the
 retry succeeds; the download manager reading a missing
-distribution's tiles from the `distributions` store and never from `meta`; a page of a pull written while the player is on
-the quiz changing nothing the player reads until the last page; a `finish`
-rejected `ungraded` after a `not_found` grade dropping the finish and leaving
-the missing questions to grade; an acknowledged offline
-`finish` leaving its new level playable with no network request, a
-same-count, different-set promotion refused by `new_quiz_questions_hash` and
-refetched with the notice, and a device-created quiz never triggering an
-index-list fetch after acknowledgement; a `finish` the device computed as
+distribution's tiles from the `distributions` store; a `finish` rejected `ungraded` after a `not_found` grade being dropped and leaving the missing question to grade; an acknowledged offline `finish` leaving its new level playable in the one request that acknowledged it, with no index list asked for, and a same-count, different-set promotion refused by `new_quiz_questions_hash`, its list marked to be fetched, with the notice; **operations held for a level the server built from another set**, queued behind the batch whose finish made it: all of them still in the outbox and out of the overlay after that batch, the held cascade recorded in `meta`, and the came-out-differently notice counting no answer; once the list is fetched, replayed with no connection, the answers to questions the server's level holds kept and the one it lacks dropped with the level's finish and one notice; sent before the list is fetched, judged by the server to the same end; a batch that acknowledges two of them leaving the rest held in order; a new engine on the same database, as after a reload, replaying them from `meta`; a list that cannot be fetched asking nothing of the server and leaving them held, a setting changed meanwhile going behind them and applied after them; a stopped engine replaying nothing; a change of a level's options, made for a level this device has not downloaded, being replayed and not held; and the level answered and finished again before the replay, the held finish applied first and the second refused with its answers counted; the replay made by the player's tab while the leading tab's request carrying two, three or all six of them is out, the answer then losing nothing, leaving nothing in the overlay and giving the notice once (in the runtime's tests, a level opened while operations are held for it having them applied before it is read with no sync asked for, in the leading tab, in the leading tab while its sync is out and never answered, and in a tab that does not lead, which asks the leader nothing); a `finish` the device computed as
 `cleared` that the server applied as `descended` leaving the finished quiz
 rebuilt from the server's seed with no grades, the reverse leaving the base's
 graded rows untouched with no fetch, and a `finish_segment` computed as
 `drilled` but applied as `continued` dropping the drill quiz with no request,
-and the same for a `finish` the server answered `completed` or `reshuffled`
-where the device had built a new level — the `completed` case showing the
-came-out-differently notice and the Complete badge from the pulled row and
-**no completion screen**, since the counters it reports were reset by that
-same finish; a completion this device computed while three finishes another
-device had made were still unpulled showing **this device's own** counts on the
-screen, with no notice, since the outcome matched, and nothing fetching the
-server's higher numbers afterwards;
+and the same for a `finish` the server answered `completed` where the device had built a new level, with the came-out-differently notice and `completed_at` from the pulled row;
 a `finish` acknowledged on its second send, after a lost response, promoting
 its rows with no notice; the fast path taking a batch of applied grades
-without touching the other pending grades' overlay rows or replaying them,
-decided from each pulled question group's `min_updated_seq` and not from the
-grade values, so the full path still runs for a batch whose group carries a
-`min_updated_seq` below the response's `sync_seq` although every grade in it
-matches what this device sent, as well as for one holding a rejection or a row
-from another device, and likewise for a batch whose **cascade, quiz or attempt**
-row carries an `updated_seq` below that sequence, or whose tombstone carries
-such a `seq`, read from the pulled rows themselves and never from the sequence
-the device stamps them with; every base row carrying the sequence of the response that
-wrote it, so a full pull deletes the rows an earlier pull wrote and spares
-those a creation, a promotion or a grades fetch wrote while it was in flight;
+without touching the other pending grades' overlay rows or reading the cascade's other pending operations; **the full path being chosen from a question group's `min_updated_seq`**: another device's grade, on a quiz and a cascade whose rows this push stamped again, arriving on an earlier page than this device's own, with one answer still queued, leaves the quiz counting both, where the fast path would have kept the overlay's count from before it; every base row carrying the sequence of the response that
+wrote it, so a full pull deletes the rows an earlier pull wrote and spares those a creation wrote while it was in flight;
 a `restore_quiz` rejected with reason `error` dropping its overlay quiz row and
 showing the could-not-be-restored notice; a batch whose only acknowledged
 operation is an applied `purge_cascade` taking the fast path with its tombstone
-still applied in step 2, and the grades still queued behind the batch limit for
-that cascade dropped when the full path next runs; a `finish` rejected `not_deepest` with every grade kept
-showing the `not_deepest` sentence alone, and one rejected `stale_attempt` with
-42 dropped grades showing both sentences; **two offline finishes in one batch**,
+still applied in step 2; **grades behind an applied `purge_cascade`** (an order the player cannot make, since a purged cascade takes no answers: the test writes it into the outbox) staying in the outbox across that fast path, then being sent, refused `not_found` and dropped with the cascade-was-deleted notice and their count, with no overlay or base row of the cascade left and nothing more to send; a `finish` rejected `stale_attempt` with dropped grades showing both sentences; **two offline finishes in one batch**,
 the first rejected `not_deepest` and the second — with the grades on the level it
 created — rejected `not_found` because that level never reached the server,
 showing **one** notice, the `not_deepest` one, whose count covers both levels'
@@ -6388,61 +6912,73 @@ dropped grades and which never says the cascade was deleted, while the same
 `not_found` on a cascade the pull's tombstone removed does show the deletion
 sentence, and grades rejected `not_found` for questions the server's own miss set
 lacks show the came-out-differently sentence with their count and no deletion
-sentence; a `questions_hash` mismatch found after
-materialisation refetching the list; the drop pass running after a pull; a cleared quiz
+sentence; the drop pass running after a pull; a cleared quiz
 pulled by a new device arriving as one row with no question rows, restorable
 offline and pending until online, and a Trash export of it fetching its
 rows; a `finish` clearing a quiz leaving that quiz's rows and positions in
-the base, so a Trash export of it works offline, until the cascade leaves the
-window; a pull that reports a quiz cleared never flagging it pending; grade
-rows pulled for a pending quiz of a cascade with a pending `trash_cascade`
-being written nowhere; a full pull deleting no base row of a cascade with
-pending operations although it is absent from `question_rows_for`; a `stale`
+the base, so a Trash export of it works offline; a pull that reports a quiz cleared never flagging it pending; a full pull deleting no base row of a cascade with
+pending operations: not the cascade, when the server no longer has it, and not a quiz of it that the pull did not carry, which goes at the first full pull after the outbox is empty; a `stale`
 grade beside an applied `finish` with a matching outcome showing the grade's
 own sentence; a new order-filter row opening at rank 1; the drop pass in a
-browser without Web Locks skipping the running tab's open cascade; a quiz restored on acknowledgment and fetched at once surviving
-the next drop pass, while a `trash_cascade`, `purge_quiz` or
-`set_quiz_options` does not refresh a cascade's last-open time; the drop
+browser without Web Locks skipping the running tab's open cascade; the drop
 pass skipping a cascade whose player is open in a second tab that holds its
-Web Lock; a Catalan cascade pulled from another device having its
-distribution stored before Available offline, and typed mode on one whose
+Web Lock; a cascade pulled from another device having its distribution fetched and stored, and typed mode on one whose
 distribution is missing showing "needs a connection"; a `set_quiz_options`
-with a segment size above the cap `/api/auth/me` reported being refused on
-the device, while a quiz **already** holding a larger size keeps playing and the
-player's Settings prefill the cap rather than a cascade's larger stored size for
-levels made from now on, so a lowered cap never sends a value the server
-refuses; a resync on a device holding five 300,000-question cascades
+with a segment size above the cap `/api/auth/me` reported being refused on the device; a resync on a device holding five 300,000-question cascades
 comparing base and pull within the [scale test](#scale-tests)'s budget; the
 Cascades page showing **Available offline**, not the download label, for a
-cascade opened inside the window; the `stale`,
-`stale_attempt` and `not_active` grade notices for grades with no finish of
-this device behind them; a `finish` rejected `not_active` showing the
-finished-elsewhere sentence; and a restored quiz whose options the server
-built from cascade options changed elsewhere taking the server's row; a
-cascade over `AUTO_KEEP_OFFLINE_ROWS` not being dropped when it leaves the
+cascade opened inside the window; the `stale_attempt` grade notice for grades with no finish of this device behind them; a `finish` rejected `not_active` showing the
+finished-elsewhere sentence; a cascade over `AUTO_KEEP_OFFLINE_ROWS` not being dropped when it leaves the
 window, and eviction taking its cards all the same; cards fetched
-without definitions, the cascade's setting turned on offline, the player showing
-words only, and the cards refetched with definitions on reconnect, read from
+without definitions, the cascade's setting turned on offline, and the cards refetched with definitions on reconnect, read from
 the cascade as the device sees it, before the change is sent; a first sync
-sending `cursor: null`; a `resync_required` response dropping the acknowledged
-operations, replacing the base from a `cursor: null` pull and replaying the rest
-of the outbox with nothing lost, refetching no index list and recomputing no
-positions for a quiz whose seed is unchanged, and deleting a quiz the full pull
-did not carry; an interrupted pull converging on the next
-sync; a `426` acknowledging its operations, showing **reload to keep syncing**
+sending `cursor: null`; a `resync_required` response answered by a
+`cursor: null` pull that sends the same batch again, replacing the base and replaying the rest
+of the outbox with nothing lost — an answer given on the level a finish of the batch made, still queued behind the resent batch, replayed onto the promoted rows — and deleting a quiz the full pull
+did not carry; **a full pull of several pages promoting a level**: with a row a page, the level a finish of the batch made takes the device's own rows where the device placed them, with this device's grade and a grade another device gave between the refused batch and the full pull, which only a later page than the quiz row's carries, and is then played on and finished with nothing refused; a `resync_required` answered to a full pull being asked no third time (an engine that went on asking fails the request count, not the test's timeout); an interrupted pull converging on the next
+sync; a `426` acknowledging its operations and applying their pull (the level
+an acknowledged finish made stays, with the answers queued on it), showing **reload to keep syncing**
 rather than a waiting count, keeping the rest of the outbox and the grades that
-follow it, and still showing that state after a reload the service worker
-answered from its cache, until a sync succeeds; a `503` resending the same batch
-after `Retry-After` with the outbox intact; and `429`
-backoff honouring `Retry-After`. The **download manager** has its own: a `429`
-on a card, keys, index-list or grades page pausing that cascade's fetches until
-`Retry-After` and then finishing them, with its progress indicator unchanged and
-no page lost or refetched twice; ten kept 300,000-question cascades draining
-through a bucket that answers `429` from the 120th request of each minute and
-completing rather than stalling or spinning; and a page the player needs on the
-current card taking priority, so the download manager starts nothing while one
-is outstanding and the card shows its answer instead of "answer needs a
-connection".
+follow it, and still showing that state from a new engine's first status on the same database, as after a reload, while the server answers `426`, until a sync succeeds; a `503` and a `429` each resending the same batch with the outbox intact (the wait itself is a stand-in the tests do not time); **a refused sync** (a `400`, then a `403`, each with the API's `error` body) reading "Can't sync", never "Offline", keeping the whole batch and the answers given meanwhile, sending nothing for five minutes whatever asks, asking once after them, and a new engine on the same database asking at once; a refusal ending at the first request answered otherwise, with no wait after it; a `502` still being no connection and asked again at the next sync; **a `4xx` without that body** (a `408` and a `403` with a page of HTML, a `407` with none, a `400` and a `413` with other JSON) being no connection too, asked again at the next sync and never held five minutes, as the first request and as a later page; a later page of a pull refused the same way applying nothing; **a batch read before another account logged in in the same tab** being sent under the account the engine was started for, refused `401` by a stand-in server that checks the binding, and left in the outbox with "Log in to sync"; an engine stopped by that change of account sending nothing, using no answer that arrives after it was stopped and reporting no status; a change stream the browser gave up being opened again after a wait that doubles, one the browser is reopening itself being left to it, and one refused while the account needs to log in staying closed. The **download manager** has its own: a `429` on a cards page being waited out and that page fetched again, with no page lost or fetched twice; a write with no room dropping the least recently opened cascade, marking it, **not fetching it back in the rest of the same pass**, and retrying once, a second failure saying there is no room; and a page the player needs on the current card taking priority, so the download manager starts nothing while one is outstanding.
+
+**Not asserted by any test today.** Each of these is behaviour this plan
+states and the code is written to; none has a test whose body would fail if it
+broke, so none should be read as covered: the full path being chosen from a
+cascade, quiz or attempt row's `updated_seq` or a tombstone's `seq` below the
+response's `sync_seq` (a question group's `min_updated_seq` is tested; for the
+others, which path ran is not observed by any test); a page of a pull
+written while the player is on the quiz changing nothing the player reads until
+the last page; a pending mark surviving the index-list fetch until the grades
+arrive, and a cascade re-entering the window through a pull rather than an
+open; a `questions_hash` mismatch found after materialisation refetching the
+list; a cleared level's rows fetched for a Trash export being dropped when the
+cascade leaves the window and fetched again for a second export, and an export
+of rows that lack positions; a restored quiz's sequence fetching the cascade's
+missing keys, its surviving the next drop pass, and its taking the server's
+options row; a full pull's deletion removing a cascade's `questions` and
+`cards` entries and its budget-dropped mark and sizes (a tombstone's removal of
+keys and cards is not asserted either: the device in that test holds none); the
+keys coming back on the open after a drop; a cascade studied for 15 days
+staying in the window, one studied elsewhere leaving it, and an export counting
+as an open; a `purge_quiz` or `set_quiz_options` not refreshing the last-open
+time; **the drop pass running
+before the answer eviction** on the quota path, and the eviction there at all (the download manager's test sees the drop and the retry; the engine's sees only that room was asked for once); a completion computed while another
+device's finishes were unpulled showing this device's own counts, the
+came-out-differently path opening **no completion screen**, and a `finish` the
+server answered `reshuffled`; a `finish` rejected `not_deepest` with every
+grade kept showing its sentence alone, and the `stale` and `not_active` grade
+notices with no finish behind them; a quiz already holding a segment size above
+a lowered cap still playing, and Settings prefilling the cap (`clampPrefill`);
+a grades-fetch row written while a full pull is in flight being spared; a
+resync refetching no index list for an unchanged seed; the budget pass's own
+skip of a cascade with pending operations (the window's pass is tested); the
+second and third cascades' order under eviction; `429`s on keys, index-list and
+grades pages, the progress indicator across one, and ten 300,000-question
+cascades draining through a bucket that answers `429` from the 120th request of
+a minute; rows a promotion wrote while a full pull was in flight being spared by it; a full pull sparing the graded rows of a cascade with pending operations that is absent from `question_rows_for`; a `426` state surviving a reload that the service worker answered from its cache (the engine's first status is tested, the worker is not); and the Account page's
+confirmation before a logout that removes data with changes still unsent (the
+count is tested in `runtime.test.ts`; the question is the page's own, and no journey logs out that way).
+`Retry-After`'s length is never timed.
 
 The **export formatters** are held to one set of fixtures on both sides.
 `contract-fixtures/export/` covers all three quiz types, the four selections,
@@ -6454,7 +6990,11 @@ multi-word anagram answer cells, an anagram row whose definitions contain ` / `
 and one whose definition contains ` | ` (written as it is, since the cell is
 for reading),
 the `hooks` and `grade` cell forms including a word with four front hooks in
-tile order, leave values at every decimal setting, empty `definition` and
+tile order, definitions that begin with `=`, `+`, `-`, `@`, a tab and a CR
+(an apostrophe before the `definition` cell and a Definition quiz's `answer`
+cell, none before a later word's definition inside an Anagram cell, none in a
+word list, and none before a negative leave value),
+leave values at every decimal setting, empty `definition` and
 `hooks` cells for Leave Value rows, the
 filename rule applied to a default cascade name with `·` and `–` in it, to a
 name holding a character outside the Basic Multilingual Plane (one `_`, not
@@ -6462,6 +7002,11 @@ two) and to a name longer than 100 characters, and the
 cascade-wide definition of correct and missed across several active quizzes. A Rust test and a Vitest test
 run the same fixtures, and an [integration test](#integration-tests) checks that
 `GET /api/cascades/:id/export` returns the same bytes for the same request.
+Backend unit tests drive the export's stream with its own reader: one that
+keeps reading gets the whole file; one that takes a chunk and then nothing is
+dropped once a chunk has waited its time, the only permit coming back while it
+still holds the stream, and what it reads afterwards ends in an error and not
+as a whole file; one that goes away frees the permit at once.
 
 ### Integration tests
 
@@ -6473,7 +7018,11 @@ they run in parallel and leave nothing behind.
   [File formats](#file-formats). Each asserts the line numbers in the error list
   and that nothing was written. A file with many errors reports the first 1,000
   and the total. Every letter distribution file in MAGPIE-DATA, fetched at a
-  pinned commit, uploads unchanged and produces the expected tiles.
+  pinned commit, uploads unchanged and produces the expected tiles. A form
+  field holding a NUL (the lexicon's distribution, the leave set's lexicon, a
+  distribution's name) is a `400` with nothing written, and a NUL in the name
+  of `GET /api/letter-distributions/:name` a `404`, where Postgres's refusal
+  of the byte was a `500`.
 - **Schema tests**:
   - Every one of the 23 condition types round-trips through
     `search_conditions` and back into an equal `ConditionKind`, In Lexicon in
@@ -6696,7 +7245,19 @@ they run in parallel and leave nothing behind.
     succeed, while the eleventh **failed** login from that address in the minute
     is refused with `429` before any Argon2 verify runs, and a login for another
     username from a second address still succeeds; the eleventh failure for one
-    username is refused from any address; and with
+    username is refused from any address; the twenty-first login for one
+    username in the minute, all with the right password and each from another
+    address, is refused with `429` before any verify while another username
+    still logs in, and with `LOGINS_PER_USERNAME_PER_MINUTE` lowered to 3 two
+    wrong passwords and a right one are all of it, the request refused for it
+    having given its failure tokens back; with both failure limits lowered to 3, of
+    eight failed logins sent **at once** from one address, and of eight sent at
+    once for one username, three are answered `401`, five `429`, and three
+    verifies run; a 100,000-character username is answered `401` without a
+    verify however often it is sent, and a reset asked for one `202` without
+    spending the caller's hourly bucket; with `RESET_RATE_PER_HOUR` lowered to
+    3, a fourth password typed into Sign out everywhere, Delete account or
+    Change password is answered `429`, another account's first is not; and with
     `AUTH_RATE_PER_IP_PER_MINUTE` lowered to 1, a second register,
     confirm-email, reset-password or reset-password/confirm from one address in
     the minute answers `429` with `Retry-After`, while `GET /api/auth/me` and
@@ -6742,24 +7303,78 @@ they run in parallel and leave nothing behind.
     violation) leaves the rest of the batch applied and records that operation
     as `rejected` with reason `error`; a forced serialization failure answers
     `503` with `Retry-After` and records nothing, and the same batch sent again
-    is applied in full; and the purge task running against a concurrent sync
-    for the same user completes without a deadlock.
-  - Re-registering an unconfirmed email re-sends a code while the old one is
-    valid and replaces the account once it has expired, and its username is
-    taken while the code is valid and free after; a fourth confirmation,
+    is applied in full; **a pull that meets a lock timeout after its push
+    committed** answers `503` with `Retry-After` too, and the same batch sent
+    again is answered `applied` from the records with the rows it wrote;
+    **over a pool of one connection** a push with its pull, a request sharing
+    device settings, a later page, both `resync_required` answers and three
+    accounts syncing at once are all answered `200`, which a request that
+    held its connection while it waited for a second could not be; and the
+    purge task running against a concurrent sync
+    for the same user completes without a deadlock. The same violation
+    injected into **one grade of a run** of grades and cursor moves rejects
+    that grade alone as `error`, with the grades and the cursor move on either
+    side of it applied and counted once; and injected into every write of the
+    cascade's row, it rejects each grade as `error`, applies the cursor move
+    and answers `200`.
+  - A batch of grades over three chunks with a cursor move, a regrade and a
+    rejected grade among them writes the cascade's row **once** (a trigger
+    counts), under **one** savepoint (the chunks' rows carry one transaction
+    id), and leaves the cascade's and the quiz's activity time at the latest
+    grade's, both stamped with the request's sequence, the counters right,
+    and all of it in another device's next pull. A trash between two grades
+    finds the row already written by the grades before it.
+  - A registration makes no `users` row: it is kept with its own username,
+    password hash and code, and confirming makes the account with them.
+    Registering again for an address not yet confirmed sends another code,
+    with the same username (never "taken" for its own address) or another
+    username and password; each logs in `403` with its own password while it
+    waits; the code followed decides the account's username and password,
+    first or last; the address's other codes and a second use are then
+    `400`; a stranger's earlier registration of the address leaves the owner
+    with the owner's own password; two of an address's codes confirmed at once
+    make one account; a username is taken for another address while the code
+    is valid and free after, and an expired code is refused; a fourth confirmation,
     notice or reset email to one address from one IP within 24 hours (with
     `RESET_RATE_PER_HOUR` raised, so the reset limits do not answer first) is not sent
     while the response stays the same and a request from another IP still
     sends, while the **twenty-first** to that address within 24 hours is not sent
     from any IP, however many addresses the requests come from, so the per-IP cap
-    cannot be walked around with a fresh IP each time; and a replacement made under the cap still
-    replaces the account and sends its code with the next registration after
-    the window; the purge task deletes stale unconfirmed accounts.
+    cannot be walked around with a fresh IP each time; and a registration past the cap is answered
+    the same, kept nowhere and not sent, and the next one after the window is
+    kept and sent; the purge task deletes registrations whose code has expired
+    and leaves the valid ones. With `REGISTRATIONS_PER_IP_PER_DAY` lowered to
+    3, a client address's fourth registration is `429` for a new address and
+    a known one alike, keeping and sending nothing, a request refused for its
+    fields having spent none, and another client address still registers; with
+    `MAX_UNCONFIRMED_PLACES` at 2 and three places left, five registrations
+    are all accepted, three of their codes make accounts, the fourth is
+    refused `403 registration_closed` with its code unspent and makes its
+    account once a place is free; with `MAIL_MAX_PER_HOUR` at 3, a fourth
+    mail in the hour is not sent, a registration past it is kept nowhere and
+    a reset past it sends nothing, and mail goes again an hour on. A username in another case logs in, and dev-logs
+    in, as the account; a reset asked for the address in another case is
+    sent; and registering the name or the address in another case is "taken"
+    and the notice. An
+    address with a character outside ASCII is a field error at register,
+    creating and sending nothing, and a reset asked for one is answered `202`.
   - A 300,000-question `finish` and reset complete within budget, and the reset
     is pulled by another device as one quiz row. The integration suite
     (`sync_faults.rs`) runs this case at 130,000 questions, as `pull.rs` runs
     the grades endpoint's; the [scale tests](#scale-tests) cover the finish at
     300,000.
+  - The event stream: another device of the account hears of a change at
+    once, the device that made it and another account do not, and a stream
+    needs the session and the account it names; with `SYNC_STREAMS_PER_USER`
+    at 2 and `SYNC_STREAM_RATE_PER_MINUTE` at 5, a third stream while two are
+    open is a `429` and takes no place, another account's count is its own, a
+    stream the client closed gives its place back, and an open past the
+    minute's rate is a `429` with a place free, while `POST /api/sync` is
+    limited by neither.
+  - Shared device settings merging per setting by the later `at`, coming back
+    on every response, refusing malformed shares and a `NUL`, and a share
+    stamped decades ahead being kept as five minutes from now at most, so the
+    next share takes the setting back.
 - **Other integration tests** (`cargo test`, `TEST_DATABASE_URL`) drive the real
   router in-process, covering:
   - the auth flows, including the reset-password response taking the same time
@@ -6860,7 +7475,11 @@ they run in parallel and leave nothing behind.
     account already at its limit refused before any search with `needed` 0;
     two simultaneous creations racing for the last space, one winning; a
     finish that takes the account over its limit still applied, with the pull
-    and every sync response showing the new figure; purging a cleared quiz or
+    and every sync response showing the new figure; a finish at five times the
+    limit exactly applied and one past it rejected `storage_limit` with
+    nothing written and its grades kept, a `finish_segment` whose run has a
+    miss rejected the same way and one whose run has none applied, and the
+    level finished once the limit is raised; purging a cleared quiz or
     a trashed cascade, through sync or the purge task, freeing exactly what
     was counted, trashing and restoring changing nothing, and each change
     reaching the pull; the purge task recounting a drifted total; a
@@ -6923,7 +7542,10 @@ for the purge journey (`@purge`), and `MAIL_BACKEND=file` so the confirmation
 code can be read out of the stack's mail outbox (or `console`, out of the
 backend's logs — which is also how a developer confirms an account locally).
 Every suite stack also raises the per-IP auth and catalog limits
-(`AUTH_RATE_PER_IP_PER_MINUTE`, `CATALOG_RATE_PER_MINUTE`), because every
+(`AUTH_RATE_PER_IP_PER_MINUTE`, `CATALOG_RATE_PER_MINUTE`), and every local
+stack the registrations a day per address and the mails an hour
+(`REGISTRATIONS_PER_IP_PER_DAY`, `MAIL_MAX_PER_HOUR`, in
+`docker/backend.defaults.env`), because every
 browser of every Playwright worker comes from `127.0.0.1`; no journey asserts
 those limits, and the integration tests do. A state that only data can make,
 such as one account's own storage limit (`users.storage_limit_bytes`, for
@@ -6945,7 +7567,34 @@ alone (it restarts its stack), and takes the stacks down at the end: Docker
 starting or stopping a stack changes the host's network interfaces, and
 Chromium then drops the page loads under way in every browser on the machine
 (`net::ERR_NETWORK_CHANGED`), so a stack must not start or stop beside a
-running journey. The backend image of every suite stack is the release binary built on
+running journey.
+
+The journeys run in Chromium. Three of them, the shell, tabs and update
+journeys (`shell.spec.ts`, `tabs.spec.ts`, `update.spec.ts`), run a second
+time in Playwright's WebKit (project `webkit`), the nearest thing to Safari
+that runs on Linux, because the service worker, several tabs on one IndexedDB
+and the Web Locks that syncing stands on differ most there. That pass runs
+after the update journey, on its stack, when `E2E_WEBKIT=1`, which CI's Main
+tier sets; it is off by default on a developer's machine, where WebKit's
+system libraries may not be installed. Playwright's WebKit is not Safari: it
+says nothing of iOS, of Safari's clearing of a site's data after seven days
+unused, or of an installed app. One expectation is wider there: the header's
+"data kept" state may read unknown, since that build may have no
+`navigator.storage.persist()`. **Two steps are not made there**: the shell
+journeys' navigations with no connection, because Playwright's WebKit fails a
+`page.goto` made under `setOffline(true)` ("WebKit encountered an internal
+error") before the service worker is asked; everything before them is
+asserted. **Two stretches are open there** (`openInWebKit` in
+`support.ts`): the tabs journey from its count of twenty grades made
+offline, which WebKit's outbox did not hold, and the update journey from "a
+new version is ready", which WebKit did not offer. Neither cause is known
+yet. Each stretch still runs in WebKit, and where it fails the journey
+prints a diagnosis (the outbox, the quiz rows and the tab's API requests;
+the registration's workers, the controller and the caches) and is reported
+`fixme`, not failed, so the Main tier is not red for what may be the tool's
+and the next run says which it is.
+
+The backend image of every suite stack is the release binary built on
 the host and copied into a thin image (`backend-prebuilt` in
 `docker/backend.Dockerfile`), not compiled again inside Docker.
 
@@ -7009,14 +7658,17 @@ through the ordinary endpoints, so there is still no test-only path.
   login replaced the cookie the request was for. With unsent work, the dialog names the count and says those
   changes sync at
   the next login here, and **Remove this account's data from this device**
-  deletes the per-user database after naming what that discards, and drops that
-  account from the accounts list while a logout still queued for it is sent on
-  the next connection with no account signed in. A second
+  deletes the per-user database after naming what that discards. A second
   account logging in on the same browser sees none of the first account's
-  cascades, and its Account page lists **both** accounts with their totals and
-  removes the first one's data, leaving its own untouched. Removing its **own**
-  data from the same line clears the signed-in pointer and lands on the login
-  page.
+  cascades, and the browser's `accounts` store (which the journey reads, since
+  no page lists it) holds both; no logout is sent while it is signed in.
+  Logging out with its **own** data removed lands on the log-in page and
+  leaves the store holding the first account alone, which then logs in and
+  finds its cascades. **No page lists the accounts with data on a device or
+  removes another account's data** (see [On the device](#on-the-device)), so
+  no journey does either; the row left for a logout still queued, and its
+  going once the request is through, are covered by the unit tests of
+  `lib/local/accounts.ts` alone.
 - **Switching accounts in another tab:** as Alice, grade twenty cards offline
   in one tab; in a second tab, log out and log in as Bob; see the first tab show
   **signed out in another tab** at once and stop syncing. Reconnect, and see
@@ -7031,16 +7683,29 @@ through the ordinary endpoints, so there is still no test-only path.
   build running after one reload. With `MIN_APP_VERSION` raised past the old
   build, see **reload to keep syncing**, press its reload while online and see it
   clear, where a plain browser reload had not; and with a second tab open on the
-  old build and a card revealed in it, accept the update in the first tab and
+  old build and a card revealed in it (a card of another cascade: a `426`
+  applies its pull, so a tab on the cascade the first tab answers in follows it
+  to the next card, as after any sync), accept the update in the first tab and
   see only that tab reload, the second keep its revealed card, show that the app
   was updated in another tab, finish that card from the old build's cache, and
-  report the update rather than block the new build's IndexedDB upgrade.
-- **Asking for a reset link** from `/account` (`accounts.spec.ts`): the
-  card says a link is on its way. The same spec sees a Cascades row's quiz
-  type after its name.
+  report the update rather than block the new build's IndexedDB upgrade; and
+  see the updated tab, three seconds after that answer, not reading **reload to
+  keep syncing** (the old tab gave up the sync lock, so its answer was not
+  synced by the old build and answered `426`) and then **Synced**.
+- **The account forms** (`forms.spec.ts`): registering from the log-in
+  page's link, logging in before the address is confirmed, following the
+  mail's confirmation link (and a second use of it), a wrong password,
+  Forgot password and its mail's link with a weak password and then a strong
+  one (and a second use of the link), the old password refused and the new
+  one accepted, and Sign out everywhere with a wrong and the right password.
+  The links come from the stack's mail outbox. The other journeys register
+  and confirm through the API.
+- **Changing the password** from `/account` (`accounts.spec.ts`): a wrong
+  current password is said under its field and nothing is changed. The same
+  spec sees a Cascades row's quiz type after its name.
 - **Deleting the account** from `/account`, with a second account's data also on
   the browser, lands on the log-in page, leaves no per-user database or
-  `accounts` row for the deleted account — so the browser's accounts list holds only the second — and a reload offers the login page rather than the deleted
+  `accounts` row for the deleted account — so the browser's `accounts` store, read by the journey, holds only the second — and a reload offers the login page rather than the deleted
   account's cascades. On a second browser context still signed in as that
   account, the next sync answers `401`, it shows **Log in to sync** with its
   cascades still readable, and its Account page still offers to remove them.
@@ -7053,15 +7718,11 @@ through the ordinary endpoints, so there is still no test-only path.
   shows in the answer, and grades missed, a found word shows in green as the
   last entry and is the one green word among the found words in the answer
   space (the latest of them all once every anagram is found), finding every anagram reveals nothing until Enter on an empty input,
-  which then grades correct, a repeated entry is ignored, a right click before the reveal still toggles the grade while a
+  which then grades correct, a repeated entry is ignored, a right click before the reveal does nothing while a
   left click only focuses the input, the next card's input has the focus with
   no click, and switching modes mid-card clears the entries. Two answers typed on one line (`RETAINS NASTIER`) stay in the input
   with "not an anagram of the question" and the card, with every anagram then found,
-  still grades correct. With **Enter bound to Toggle grade**, Enter on a typed
-  word submits it and leaves the grade alone, and Enter on an empty input
-  reveals the answer; with **`Shift+T` bound to Toggle grade**, typing a `T`
-  with Shift held puts `T` in the input; and both bindings act as bound once
-  the input loses focus and in flashcard mode.
+  still grades correct. That the typed input keeps Enter and `Shift+T` when they are bound to Toggle grade is a unit test's (`inputOwns`), not a journey's; the controls journey checks only that Ctrl+Backspace still acts as Previous from the input.
 - With **alphabetical order** on, entering answers in order grades correct, and
   an out-of-order answer reveals the card at once, missed, with "Out of order".
   With the option off, the same sequence grades correct.
@@ -7093,11 +7754,7 @@ through the ordinary endpoints, so there is still no test-only path.
   shows the question count, from the `questions` store, and drops the entry count
   rather than blocking or showing a line count it cannot know. Online, export a
   cascade with definitions the device never downloaded, so it comes from the
-  server through a token, and double-click **Download**: one file arrives and the
-  app stays on screen, the second request having been answered `204` inside the
-  hidden frame. The download reaches the server rather than the service worker,
-  and the frame never loads the app: no second sync leader, no second member on
-  the account `BroadcastChannel`. All of this runs with the production security
+  server through a token, and double-click **Export**: one file arrives, the dialog stays on screen, and exactly one export request is answered `200`. (That a second use of a token is answered `204` is the [integration test](#integration-tests)'s; the button is disabled while the first press is at work, so the journey may send no second request at all. Nothing in the journey looks at the service worker, the sync leader or the account's `BroadcastChannel`, so the frame never loading the app is not asserted beyond the dialog staying up.) All of this runs with the production security
   headers and the build's own `<meta>` policy on, so a `frame-ancestors` or
   `X-Frame-Options` change that blocked the frame would fail here. The suite's
   first journey also asserts that the app **boots** under that policy, with no
@@ -7145,7 +7802,8 @@ through the ordinary endpoints, so there is still no test-only path.
 - With the account's own storage limit (`users.storage_limit_bytes`) set to
   20,000 bytes, create cascades until the builder says the next "won't fit" and
   Create Cascade is disabled; study two passes of one, missing everything, and
-  see the account go over its limit (studying is never refused), the Cascades
+  see the account go over its limit (studying is not refused short of five
+  times the limit), the Cascades
   page say "Over your storage by …" with New cascade disabled; move that
   cascade to the Trash and see it still over; Delete forever and see room
   again, with Create Cascade enabled in the builder.
@@ -7159,9 +7817,7 @@ through the ordinary endpoints, so there is still no test-only path.
   "downloads when online" note and the ladder's "waiting for download" level,
   go online and see it download without opening the cascade, then open it and
   play.
-- Over the answer limit with two automatic keeps, see the least recently
-  opened one's answers freed while its questions still show in the player, and
-  the Account page list both with their answer and key sizes. Go offline
+- Over the answer limit with two automatic keeps, see the least recently opened one's answers freed while its questions still show in the player (no page lists what the device holds; the journey reads the stores). Go offline
   and see that cascade's badge read "answers need a connection" rather than a
   download bar at zero, and see it return to progress on reconnecting.
 - Over `ROW_STORAGE_BUDGET`, lowered with a test constant, see the least
@@ -7169,12 +7825,9 @@ through the ordinary endpoints, so there is still no test-only path.
   **automatically** kept one takes the total over, and the kept one's rows held
   while its player is open; then, with a second automatic keep and nothing
   unkept left, see the oldest automatically kept cascade dropped once its player
-  closes, then the next. See the Account page's total against the budget, and
-  the dropped cascades absent from its list of cascades on this device rather
-  than sitting in it at zero bytes. Stay online for several sync cycles and see them stay
+  closes, then the next. Stay online for several sync cycles and see them stay
   dropped — the storage total steady, no download progress reappearing, and the
-  Cascades page offering "open to download" — then open one and see it come
-  back whole and listed again.
+  Cascades page offering "open to download" — then open one and see it come back whole.
 - Trash a cascade offline and see it listed in the Trash with "deleted forever 30 days
   after this syncs", not missing from the cascades list and the Trash alike.
 - In the Settings of a large cascade, type a segment size for the level being
@@ -7187,17 +7840,15 @@ through the ordinary endpoints, so there is still no test-only path.
   blank standing for a tile.
 - **Desktop controls:**
   - Left click shows and advances, right click toggles, and middle click goes
-    back, with no context menu appearing; a double click advances once, and a
-    wheel binding fires once per flick.
-  - Clicks on the side rails do nothing to the quiz.
+    back, with no context menu appearing; with the repeat guard at its default of
+    off, both clicks of a double click count; and a wheel binding fires once
+    per flick.
+  - Clicks on the status bar do nothing to the quiz.
   - Rebind Toggle grade to the wheel and to `Shift+T` in the player's
     Settings, under Device Settings, and see both work, survive a reload, and
     **not** reach a second browser context, which keeps the defaults: controls
     are per device.
-  - Bind wheel-down to Show / Next, reveal a Definition card whose definition
-    overflows the panel, and see wheel-down advance without scrolling the text,
-    the capture box having warned it would, while the scrollbar and the Page
-    Down key still reach the end of the definition and wheel-up still scrolls.
+  - (Not covered by a journey: wheel-down bound to Show / Next over a definition that overflows its panel, advancing without scrolling the text after the capture box's warning, with the scrollbar, Page Down and wheel-up still scrolling.)
   - A binding can't be removed from an action that has only one, and Escape
     cancels capture instead of being bound, leaving Settings open.
   - Binding a stroke that already belongs to another action **moves** it, with
@@ -7208,7 +7859,8 @@ through the ordinary endpoints, so there is still no test-only path.
     are held back, and middle click still goes back with the input focused.
 - **Touch zones** (mobile viewport emulation, portrait and landscape): each
   zone fires its action, a drag in the Show / Next zone scrolls a long answer
-  without advancing, and a quick double tap advances only once.
+  without advancing, and a quick double tap advances only once. In typed mode,
+  with the input focused, the bar holds Previous and Show / Next and no Toggle.
 - Set a leave value cascade's decimals to 3 in its Settings and see a leave
   answer rendered to three places.
 - **A cascade's settings** (`settings.spec.ts`): with two cascades, see no
@@ -7388,9 +8040,10 @@ where PQ-019 runs a case at a tenth.
 | `make test-integration` | Every integration test binary's tests in one pool (`cargo nextest run`, 16 at a time) against a throwaway Postgres it starts itself |
 | `make test-e2e-core` | Every end-to-end journey on one stack, four side by side, then the `@serial` ones; not the update journey or the `@env` passes |
 | `make test-e2e SPEC=<file>` | One spec file (any Playwright file filter) on the suite's stack |
-| `make test-e2e-main` | The update journey and the `@env` passes, each on a stack of its own: every stack up first, the `@env` passes side by side, the update journey alone, then the stacks down |
+| `make test-e2e-main` | The update journey and the `@env` passes, each on a stack of its own: every stack up first, the `@env` passes side by side, the update journey alone, then the stacks down. With `E2E_WEBKIT=1`, the shell, tabs and update journeys then run again in WebKit before the stacks go down |
 | `make test-e2e` | `test-e2e-core`, then `test-e2e-main`: the whole end-to-end suite |
 | `make test-e2e-seeding` | Seeding under a two-a-minute upload limit |
+| `make test-ops-image` | The ops image builds, `backup.py` dumps a seeded stack, and `drill.py` restores the dump inside the image |
 | `make test-scale` | The 300,000-question budgets |
 | `make test-parity` | Zyzzyva comparison; skipped with a notice unless the licensed files are present |
 | `make test` | Unit, integration and end-to-end |
@@ -7411,9 +8064,9 @@ CI (`.github/workflows/ci.yml`) runs three tiers, each a superset of the last:
 
 | Tier | When | What |
 |---|---|---|
-| **Push** | Every push, every branch | Clippy, the unit tests (a backend and a frontend job), `make test-integration`, `make test-e2e-core`, `make infra-validate`, `make ops-check`. About 5 minutes |
-| **Main** | A push to `main`, and a manual run on any branch | The Push tier, plus `make test-e2e-main` and `make test-e2e-seeding` |
-| **Nightly** | 04:30 UTC on `main` | The Main tier, plus `make test-scale`. A failure opens (or comments on) one issue |
+| **Push** | Every push, every branch | Clippy, the unit tests (a backend and a frontend job), `make test-integration`, `make test-e2e-core`, `make infra-validate`, `make ops-check`, `make contract-check` (the generators in `contract-fixtures/tools/` still write the checked-in fixtures). About 5 minutes |
+| **Main** | A push to `main`, and a manual run on any branch | The Push tier, plus `make test-e2e-main` with `E2E_WEBKIT=1` (the shell, tabs and update journeys in WebKit too), `make test-e2e-seeding` and `make test-ops-image` (the last also on a push that changes `scripts/` or `docker/`) |
+| **Nightly** | 04:30 UTC on `main` | The Main tier, plus `make test-scale` (which a manual run on any branch runs too). A failure opens (or comments on) one issue |
 
 The seeding check also runs on a push that changes `scripts/`. A branch can be
 green and still fail on `main`; deploys come from `main`, and

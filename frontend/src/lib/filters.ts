@@ -168,10 +168,17 @@ export function ceilingOf(def: FilterDef, ctx: CeilingContext): number | null {
 	}
 }
 
-/** A new integer range row starts at its floor and its ceiling. */
-export function defaultRange(def: FilterDef, ctx: CeilingContext | null): { min: number; max: number } {
+/**
+ * A new integer range row starts at its floor and its ceiling. Before the
+ * lexicon's figures have arrived (`ctx` null: the builder's first row is made
+ * then), a ceiling that needs none of them is already known from the quiz
+ * type, so Length opens at 1 to 15 and not at 1 to 1.
+ */
+export function defaultRange(def: FilterDef, ctx: CeilingContext | null, quizType?: QuizType): { min: number; max: number } {
 	const floor = def.floor ?? 0;
-	return { min: floor, max: (ctx && ceilingOf(def, ctx)) ?? floor };
+	if (ctx) return { min: floor, max: ceilingOf(def, ctx) ?? floor };
+	const known = def.ceiling === 'tiles' ? (quizType === 'leave_value' ? 6 : 15) : def.ceiling === 'percent' ? 100 : null;
+	return { min: floor, max: known ?? floor };
 }
 
 /**

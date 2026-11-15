@@ -142,20 +142,22 @@ export function upgradeFrom(
 export const USER_DB_VERSION = MIGRATIONS.length;
 
 /**
- * Opens the signed-in account's database. `onVersionChange` runs when a newer
- * build in another tab needs the database: the connection is already closed
- * by then, and the caller shows "Acrodont was updated in another tab — reload
- * to continue".
+ * Opens the signed-in account's database. `onVersionChange` runs when another
+ * tab needs the database: the connection is already closed by then. Told
+ * `deleted` false, a newer build is upgrading it, and the caller shows
+ * "Acrodont was updated in another tab — reload to continue"; told true, the
+ * database is being deleted (the account's data removed at a logout), which
+ * the event says by naming no new version.
  */
-export async function openUserDb(userId: string, onVersionChange?: () => void): Promise<UserDb> {
+export async function openUserDb(userId: string, onVersionChange?: (deleted: boolean) => void): Promise<UserDb> {
 	const db = await openDB<UserSchema>(userDbName(userId), USER_DB_VERSION, {
 		upgrade(db, oldVersion, _newVersion, transaction) {
 			void upgradeFrom(db, transaction, oldVersion);
 		}
 	});
-	db.addEventListener('versionchange', () => {
+	db.addEventListener('versionchange', (ev) => {
 		db.close();
-		onVersionChange?.();
+		onVersionChange?.(ev.newVersion === null);
 	});
 	return db;
 }

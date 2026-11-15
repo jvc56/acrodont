@@ -38,9 +38,14 @@ pub struct Ctx {
     pub device: Uuid,
     pub seq: i64,
     pub cap: u32,
+    /// `MAX_STORAGE_BYTES_PER_USER`, where the account has no limit of its own.
+    pub storage_limit: u64,
     /// The transaction's `now()`, which is fixed for its length: device times
     /// are clamped to it plus five minutes without a round trip per operation.
     pub now: DateTime<Utc>,
+    /// One savepoint an operation, and each grade writing its cascade's row
+    /// itself: the plain way, which a batch falls back to (routes::apply_batch).
+    pub each: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +180,35 @@ async fn write_cascade(
     Ok(())
 }
 
+/// The cascade rows of a run of applied grades, written once each: the
+/// latest of the grades' times against the row's own, and the request's
+/// sequence. That is what one `write_cascade` per grade left, since a grade
+/// changes nothing else on the row (its cascade is not in the Trash, and the
+/// depth and counters it would write back are the ones it read), at a five
+/// hundredth of the row versions and index entries in a full batch.
+///
+/// The caller writes these before any operation that is not a grade or a
+/// cursor move, and at the end of the batch, so every operation that reads or
+/// writes a cascade row finds it exactly as it would have. A cursor move
+/// touches only its quiz's row.
+pub async fn touch_cascades(conn: &mut PgConnection, ctx: &Ctx, touched: &mut Vec<(Uuid, DateTime<Utc>)>) -> Result<(), sqlx::Error> {
+    if touched.is_empty() {
+        return Ok(());
+    }
+    let (ids, ats): (Vec<Uuid>, Vec<DateTime<Utc>>) = touched.drain(..).unzip();
+    sqlx::query(
+        "UPDATE cascades c SET last_activity_at = greatest(c.last_activity_at, t.at), updated_seq = $3
+         FROM UNNEST($1::uuid[], $2::timestamptz[]) AS t(id, at)
+         WHERE c.id = t.id",
+    )
+    .bind(&ids)
+    .bind(&ats)
+    .bind(ctx.seq)
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
 /// A new attempt in place: grades cleared, and the new seed on the quiz row,
 /// from which every side computes the order. Only the quiz row is stamped.
 async fn reset_quiz(conn: &mut PgConnection, ctx: &Ctx, quiz: Uuid, attempt: u32, seed: u64, at: DateTime<Utc>) -> Result<Vec<u32>, sqlx::Error> {
@@ -282,6 +316,9 @@ pub async fn apply(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpRes
     }
 }
 
+/// **Every rejection comes before the first write**, here and in
+/// `move_cursor`: a batch runs its grades and cursor moves under one shared
+/// savepoint and does not roll a rejected one back (routes::apply_batch).
 async fn grade(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult {
     let quiz = uuid_of(op, "quiz_id")?;
     let attempt = u32_of(op, "attempt")?;
@@ -322,10 +359,15 @@ async fn grade(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult 
     )
     .execute(&mut *conn)
     .await?;
-    write_cascade(conn, ctx, l.cascade_id, &l.cascade, Some(at)).await?;
-    Ok(Effects::default())
+    if ctx.each {
+        write_cascade(conn, ctx, l.cascade_id, &l.cascade, Some(at)).await?;
+        return Ok(Effects::default());
+    }
+    // The cascade's row is written by the batch, once: see `touch_cascades`.
+    Ok(Effects { touch: Some((l.cascade_id, at)), ..Effects::default() })
 }
 
+/// Every rejection comes before the write: see `grade`.
 async fn move_cursor(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult {
     let quiz = uuid_of(op, "quiz_id")?;
     let attempt = u32_of(op, "attempt")?;
@@ -384,6 +426,17 @@ async fn record_attempt(
     Ok(())
 }
 
+/// The one bound on studying: an account past five times its storage limit
+/// finishes nothing that adds rows (`storage_limit`), until it has made room.
+/// The sync holds the user row's lock, so the figure is the one this batch's
+/// earlier operations left.
+async fn check_storage(conn: &mut PgConnection, ctx: &Ctx) -> Result<(), OpError> {
+    if storage::usage(conn, ctx.user, ctx.storage_limit).await?.refuses_finishes() {
+        return Err(OpError::Rejected(Reason::StorageLimit));
+    }
+    Ok(())
+}
+
 async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult {
     let quiz = uuid_of(op, "quiz_id")?;
     let attempt = u32_of(op, "attempt")?;
@@ -400,6 +453,9 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
         return Err(OpError::Rejected(Reason::Ungraded));
     }
     id_free(conn, ctx.user, new_id).await?;
+    // After every other refusal, so each keeps its reason: this one says
+    // only that a finish the rules would take has no room.
+    check_storage(conn, ctx).await?;
     let at = clamp(ctx, at);
     let misses: Vec<u32> =
         cards::cards(conn, quiz).await?.into_iter().filter(|c| c.grade == Some(Grade::Missed)).map(|c| c.idx).collect();
@@ -408,7 +464,8 @@ async fn finish(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult
     let outcome = r.outcome();
     record_attempt(conn, ctx, &l, outcome, at).await?;
     // Studying never fails for storage (STORAGE_LIMIT_PLAN.md § S3): the
-    // attempt and any new level are counted, past the limit or not.
+    // attempt and any new level are counted, past the limit or not, up to
+    // the five times `check_storage` refused above.
     let mut added = storage::attempt_bytes();
     let mut fx = Effects { outcome: Some(outcome.as_str().to_owned()), ..Default::default() };
     match &r {
@@ -506,6 +563,10 @@ async fn finish_segment(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> 
     let mut added = 0;
     match &r {
         SegmentResult::Drilled(n) => {
+            // A run that makes a level adds rows, as a finish does; one that
+            // missed nothing adds none and is never refused. The savepoint
+            // takes back nothing: nothing is written before this.
+            check_storage(conn, ctx).await?;
             let (c, h) = insert_quiz(conn, ctx, new_id, l.cascade_id, quiz, n, at).await?;
             added = storage::level_bytes(c.into(), false);
             fx.outcome = Some("drilled".into());
@@ -566,6 +627,7 @@ async fn restore_quiz(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> Op
         outcome: None,
         new_quiz_question_count: Some(qs.len() as i32),
         new_quiz_questions_hash: Some(questions_hash(&qs)),
+        touch: None,
     })
 }
 

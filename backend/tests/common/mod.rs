@@ -72,6 +72,8 @@ pub fn test_config(overrides: &[(&str, &str)]) -> Config {
         ("DATABASE_URL".into(), "postgres://unused".into()),
         ("SESSION_SIGNING_KEY".into(), "11".repeat(32)),
         ("TRUSTED_PROXY_HOPS".into(), "1".into()),
+        // Most tests register every account from one address, 203.0.113.1.
+        ("REGISTRATIONS_PER_IP_PER_DAY".into(), "100000".into()),
     ]);
     for (k, v) in overrides {
         env.insert((*k).into(), (*v).into());

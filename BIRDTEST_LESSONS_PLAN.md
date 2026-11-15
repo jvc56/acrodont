@@ -5,6 +5,15 @@
 account (see "Implementation status" below). The decisions D1–D6 were taken
 as recommended.
 
+**Since then** the limits this file names have changed: registration closes
+at **750** accounts (`MAX_ACCOUNTS`), not 50; the per-account cascade count
+gave way to one storage limit of 10 MB; and the question ceiling is 300,000.
+PLAN.md has today's figures, and where this file says otherwise it is the
+figure of the day it was written. Acrodont also has one SSE stream now,
+`/api/sync/events`, where sections 13 and 14 say "no SSE"; what they
+conclude still holds, since the stream is fed through `NOTIFY` on every
+instance, is not compressed, and closes on shutdown.
+
 ## Implementation status (2026-11-09)
 
 After this plan was written, the owner set the scale: one user at first, up to
@@ -55,7 +64,7 @@ deploy, backup and ops tooling. It was not done; it is the owner's call.
 | SEC-3 | Done | 17 offline `terraform test` cases |
 | SEC-4 | Done | ALB drops invalid headers, the backups bucket requires TLS, actions pinned by SHA, base images by digest |
 | OPS-1–3 | Done | The ops scripts over `scripts/lib/ops.sh`, 24 harness cases; docs/runbook.md rewritten around the two-phase first apply |
-| BAK-1 | Done | `scripts/drill.py`, monthly, on the ops image |
+| BAK-1 | Done | `scripts/drill.py`, twice a week, on the ops image; `acrodont-no-drill-7d` alarms on seven days without one that passed |
 | BAK-2 | Done | Failure rules; the backup role reads only `daily/` (to copy monthly dumps); SIGTERM handled |
 | CI-1 | Mostly | Parallel jobs and clippy. **Not done:** caching the e2e job's Docker builds across runs (needs a CI experiment) and nextest partitions (the integration job runs in about 7 minutes as is) |
 | CI-2 | Done | `make infra-validate` runs fmt, validate and `terraform test` |

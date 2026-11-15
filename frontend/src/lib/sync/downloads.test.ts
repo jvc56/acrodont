@@ -41,6 +41,10 @@ class Dev {
 	calls: Call[] = [];
 	/** Throws for a call before it reaches the server. */
 	fail: ((c: Call) => Error | null) | null = null;
+	/** Runs to its end before a call reaches the server: what another device does in between. */
+	before: ((c: Call) => Promise<void>) | null = null;
+	/** The question_rows_for of every sync request sent, in order. */
+	asked: string[][] = [];
 	now = Date.now();
 	openHere: string | null = null;
 	openElsewhere: Set<string> | null = null;
@@ -51,31 +55,38 @@ class Dev {
 		d.db = await openUserDb(USER);
 		await initMeta(d.db, USER, 'bob');
 		const clock = () => new Date(d.now);
-		d.engine = new SyncEngine(d.db, {}, { transport: async (r) => server.sync(JSON.parse(JSON.stringify(r))), wait: async () => undefined, now: clock });
-		const guard = (c: Call) => {
+		d.engine = new SyncEngine(d.db, {}, {
+			transport: async (r) => {
+				d.asked.push([...r.question_rows_for]);
+				return server.sync(JSON.parse(JSON.stringify(r)));
+			},
+			wait: async () => undefined, now: clock
+		});
+		const guard = async (c: Call) => {
 			d.calls.push(c);
+			await d.before?.(c);
 			const e = d.fail?.(c);
 			if (e) throw e;
 		};
 		const api: DownloadApi = {
 			questions: async (cascade, quiz, from, limit) => {
-				guard({ kind: 'questions', cascade, quiz, from });
+				await guard({ kind: 'questions', cascade, quiz, from });
 				return server.questions(quiz, from, limit)!;
 			},
 			grades: async (cascade, quiz, from, limit) => {
-				guard({ kind: 'grades', cascade, quiz, from });
+				await guard({ kind: 'grades', cascade, quiz, from });
 				return server.grades(quiz, from, limit)!;
 			},
 			keys: async (cascade, from, limit) => {
-				guard({ kind: 'keys', cascade, from });
+				await guard({ kind: 'keys', cascade, from });
 				return server.keys(cascade, from, limit)!;
 			},
 			cards: async (cascade, from, limit, hooks, definitions) => {
-				guard({ kind: 'cards', cascade, from, definitions });
+				await guard({ kind: 'cards', cascade, from, definitions });
 				return server.cards(cascade, from, limit, hooks, definitions)!;
 			},
 			distribution: async (name) => {
-				guard({ kind: 'distribution', cascade: name, from: 0 });
+				await guard({ kind: 'distribution', cascade: name, from: 0 });
 				return { name, tiles: [] };
 			}
 		};
@@ -198,25 +209,27 @@ describe('the download manager', () => {
 		const b = await Dev.make(server);
 		await b.sync();
 		await b.open(C1);
-		// Between B's sync and its fetch, A finishes the attempt: the fetch names the new one.
+		// Between B's sync and its fetch, A finishes the attempt and grades as many
+		// cards of the next one: the fetch names the new attempt, and its three
+		// grades are the number B's row of the old attempt expects.
 		let once = false;
-		b.fail = (c) => {
-			if (c.kind === 'grades' && !once) {
-				once = true;
-				server.sync({
-					device_id: 'x',
-					app_version: 0,
-					cursor: server.seq,
-					question_rows_for: [],
-					ops: [3, 4, 5].map((p, i) => ({ id: crypto.randomUUID(), device_seq: 100 + i, seen_seq: server.seq, at: new Date().toISOString(), type: 'noop', p }))
-				});
-			}
-			return null;
+		b.before = async (c) => {
+			if (c.kind !== 'grades' || once) return;
+			once = true;
+			await a.grade(Q1, [3, 4, 5], 'missed');
+			await a.finish(Q1, '5');
+			await a.grade(Q1, [0, 1, 2], 'missed');
+			await a.engine.sync();
 		};
 		await b.dl.ensureCascade(C1);
-		const syncsBefore = kinds(b).filter((k) => k === 'grades').length;
-		expect(syncsBefore).toBeGreaterThanOrEqual(1);
-		expect((await b.rows(Q1)).filter((r) => r.grade === 'correct')).toHaveLength(3);
+		expect(once).toBe(true);
+		// The first fetch is discarded, the device syncs, and the second is laid on the new attempt.
+		expect(kinds(b).filter((k) => k === 'grades')).toHaveLength(2);
+		expect((await b.quizRow(Q1))!.attempt).toBe(2);
+		expect((await b.quizRow(Q1))!.pending).toBeUndefined();
+		const rows = await b.rows(Q1);
+		expect(rows.filter((r) => r.grade === 'missed')).toHaveLength(3);
+		expect(rows.filter((r) => r.grade === 'correct')).toHaveLength(0);
 	});
 
 	it('a grades fetch cut off after its first page leaves the quiz pending and is fetched again; run to the end it clears in one pass', async () => {
@@ -350,7 +363,7 @@ describe('the download manager', () => {
 		b.calls = [];
 		await b.sync();
 		expect(b.calls.filter((c) => c.cascade === C1)).toEqual([]);
-		expect(b.engine['transport']).toBeDefined();
+		expect(b.asked.at(-1)).toEqual([C2]);
 		// Opening it clears the mark and fetches it back whole.
 		(b.dl as unknown as { rowBudget: number }).rowBudget = 1e12;
 		await b.open(C1);
@@ -559,10 +572,14 @@ describe('the download manager', () => {
 			return put(...args);
 		}) as typeof put;
 		await b.db.delete('distributions', 'english');
+		expect(await b.count('quiz_questions', C1)).toBe(3);
 		await b.dl.run();
-		// The retry succeeded after the drop pass took the older cascade.
+		// The retry succeeded after the drop pass took the older cascade: its
+		// rows are gone, and it is marked so that the pass does not fetch it back.
 		expect(await b.db.get('distributions', 'english')).toBeDefined();
 		expect(b.dl.noRoom).toBe(false);
+		expect(await b.count('quiz_questions', C1)).toBe(0);
+		expect(await getMeta(b.db, 'budget_dropped')).toEqual([C1]);
 		quota = 2;
 		await b.db.delete('distributions', 'english');
 		await expect(b.dl.run()).rejects.toThrow();

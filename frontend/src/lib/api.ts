@@ -58,6 +58,14 @@ export interface RequestOptions {
 	body?: unknown;
 	/** Send X-Acrodont-User (default true when a user is bound). */
 	bindUser?: boolean;
+	/**
+	 * The account this request is made for, sent as X-Acrodont-User in place of
+	 * the tab's. Whatever outlives a change of account in the tab — the sync
+	 * engine, the download manager — names the account whose database it holds,
+	 * so a request it had under way when another account logged in is refused
+	 * `401` rather than applied to that other account.
+	 */
+	user?: string;
 	signal?: AbortSignal;
 	headers?: Record<string, string>;
 }
@@ -84,7 +92,8 @@ export async function request<T = unknown>(
 		const csrf = readCookie(CSRF_COOKIE);
 		if (csrf) headers[CSRF_HEADER] = csrf;
 	}
-	if ((opts.bindUser ?? true) && boundUserId) headers[USER_HEADER] = boundUserId;
+	const user = opts.user ?? ((opts.bindUser ?? true) ? boundUserId : null);
+	if (user) headers[USER_HEADER] = user;
 	const resp = await fetch(path, {
 		method,
 		headers,

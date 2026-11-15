@@ -24,9 +24,9 @@ export SQLX_OFFLINE := true
 export CARGO_BUILD_JOBS ?= 2
 
 .PHONY: infra-validate ops-check test test-quick test-unit test-unit-backend test-unit-frontend \
-        test-integration test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-scale test-parity \
+        test-integration test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-ops-image test-scale test-parity \
         frontend-deps e2e-deps e2e-binary e2e-pass-full e2e-pass-ttl e2e-pass-purge e2e-pass-answers \
-        e2e-pass-budget $(addprefix e2e-up-,full ttl purge answers budget) $(addprefix e2e-down-,full ttl purge answers budget) \
+        e2e-pass-budget e2e-pass-webkit $(addprefix e2e-up-,full ttl purge answers budget) $(addprefix e2e-down-,full ttl purge answers budget) \
         sqlx-db sqlx-prepare
 
 test: test-unit test-integration test-e2e
@@ -92,16 +92,24 @@ test-integration:
 ##                               own stack: every stack up first, the @env
 ##                               passes side by side, update.spec alone, then
 ##                               the stacks down. CI's Main tier adds it
+##                               With E2E_WEBKIT=1 (CI's Main tier sets it)
+##                               the shell, tabs and update journeys then run
+##                               again in WebKit, on the update journey's stack
 ##   make test-e2e               both: the whole suite
 ##   make test-e2e SPEC=typed    one spec file (or any Playwright file filter)
 ##                               on the suite's stack; not the @env journeys
 ##   make test-e2e-seeding       seeding under a two-a-minute upload limit
 E2E_WORKERS ?= 4
 export E2E_WORKERS
-test-e2e test-e2e-core test-e2e-main test-e2e-seeding e2e-binary: export ACRODONT_BACKEND_TARGET ?= backend-prebuilt
+test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-ops-image e2e-binary: export ACRODONT_BACKEND_TARGET ?= backend-prebuilt
 
+# WebKit is off unless asked for: its build needs system libraries
+# (`npx playwright install --with-deps webkit`, which asks for root), and
+# Playwright has none for an Ubuntu older than 22.04.
+E2E_WEBKIT ?= 0
 e2e-deps: frontend-deps
 	cd e2e && { [ -d node_modules ] || npm ci; } && npx playwright install chromium >/dev/null
+	if [ "$(E2E_WEBKIT)" = 1 ]; then npx playwright install webkit >/dev/null; fi
 
 e2e-binary:
 	if [ "$$ACRODONT_BACKEND_TARGET" = backend-prebuilt ]; then
@@ -137,6 +145,9 @@ test-e2e-main: e2e-deps e2e-binary
 	  E2E_STACK_READY=1 E2E_KEEP_STACK=1 $(MAKE) --no-print-directory -k -j4 --output-sync=target \
 	    e2e-pass-ttl e2e-pass-purge e2e-pass-answers e2e-pass-budget || status=$$?
 	  E2E_STACK_READY=1 E2E_KEEP_STACK=1 $(MAKE) --no-print-directory e2e-pass-full || status=$$?
+	  if [ "$(E2E_WEBKIT)" = 1 ]; then
+	    E2E_STACK_READY=1 E2E_KEEP_STACK=1 $(MAKE) --no-print-directory e2e-pass-webkit || status=$$?
+	  fi
 	fi
 	$(MAKE) --no-print-directory -k $(addprefix e2e-down-,$(E2E_MAIN)) || status=$$?
 	exit $$status
@@ -176,6 +187,15 @@ e2e-pass-full:
 	$(call e2e_run,full) --project serial --no-deps --grep @full --output test-results/full
 e2e-pass-ttl e2e-pass-purge e2e-pass-answers e2e-pass-budget: e2e-pass-%:
 	$(call e2e_run,$*) --project parallel --grep @$* --output test-results/$*
+# The shell and tabs journeys side by side, then the update journey alone (it
+# restarts the stack), in WebKit, on the update journey's stack. The second
+# runs even when the first fails, so every failure shows.
+e2e-pass-webkit:
+	status=0
+	$(call e2e_run,full) --project webkit --grep-invert @full --workers 2 --output test-results/webkit || status=$$?
+	cd ..
+	$(call e2e_run,full) --project webkit --grep @full --workers 1 --output test-results/webkit-update || status=$$?
+	exit $$status
 # A pass's stack alone, up and seeded and answering a browser, and left up:
 # the global setup, with a journey that does nothing.
 $(addprefix e2e-up-,$(E2E_MAIN)): e2e-up-%:
@@ -191,6 +211,35 @@ test-e2e-seeding: e2e-binary
 	trap 'python3 scripts/stack.py down --project acrodont-ci-seed --volumes' EXIT
 	python3 scripts/stack.py up --project acrodont-ci-seed --port 5190 --env ADMIN_UPLOAD_RATE_PER_MINUTE=2
 	python3 scripts/stack.py seed --project acrodont-ci-seed --port 5190
+
+## The ops image and what runs on it (PLAN.md § Backups): the image builds
+## (its Postgres comes from an apt repository outside this one) and imports
+## boto3; backup.py, inside the image with the image's own pg_dump, dumps a
+## seeded stack that holds a cascade, over the stack's network; and drill.py
+## restores that dump inside the image, as root with its own Postgres, the way
+## the scheduled drill task does. Otherwise the image's first build is the first
+## release's, and the backup's and the drill's first runs are in production.
+## The S3 paths do not run here: scripts/backup-check.py (make ops-check) runs
+## them against a stand-in. CI runs this on main, nightly, and when scripts/,
+## docker/, the migrations, the compose file or this file change. The dump is
+## left in a directory under the system's temporary one.
+test-ops-image: e2e-binary
+	trap 'python3 scripts/stack.py down --project acrodont-ci-ops --volumes' EXIT
+	out=$$(mktemp -d)
+	# The image's root writes the dump here, and this user lists it.
+	chmod 755 "$$out"
+	docker build --target ops -f docker/backend.Dockerfile -t acrodont-ops:ci .
+	docker run --rm --entrypoint python3 acrodont-ops:ci -c 'import boto3; print("boto3", boto3.__version__)'
+	python3 scripts/stack.py up --project acrodont-ci-ops --port 5191
+	python3 scripts/stack.py seed --project acrodont-ci-ops --port 5191
+	python3 -c 'import sys; sys.path.insert(0, "scripts"); import stack, scenarios; scenarios.seed(stack.ensure_user("http://localhost:5191", stack.User(), "acrodont-ci-ops"), "acrodont-ci-ops", ["studying"])'
+	docker run --rm --network acrodont-ci-ops_default -v "$$out:/dumps" --entrypoint python3 acrodont-ops:ci \
+	  /opt/acrodont/scripts/backup.py --database-url postgres://acrodont:acrodont@postgres:5432/acrodont --out /dumps
+	dump=$$(cd "$$out" && ls *.dump)
+	docker run --rm -v "$$out:/dumps:ro" --entrypoint python3 acrodont-ops:ci \
+	  /opt/acrodont/scripts/drill.py --dump "/dumps/$$dump" | tee "$$out/drill.log"
+	grep -Eq '[1-9][0-9]* cascades' "$$out/drill.log" \
+	  || { echo "the drill restored no cascade: its question check ran on nothing" >&2; exit 1; }
 
 ## The 300,000-question budgets (PLAN.md § Scale tests): the server's half
 ## against a throwaway Postgres with production durability settings, in
@@ -250,9 +299,23 @@ infra-validate:
 	$(TF) fmt -check $$(cd infra && git ls-files '*.tf' '*.tftest.hcl')
 	$(TF) test
 
+## The contract fixtures are what their generators write today: each generator
+## (Python's standard library only, under a second) writes its files again, and
+## a difference from the checked-in ones fails. gen_filters.py reads PLAN.md's
+## filter tables, so a table edited without regenerating fails here too.
+.PHONY: contract-check
+contract-check:
+	python3 contract-fixtures/tools/gen_cascade.py
+	python3 contract-fixtures/tools/gen_export.py
+	python3 contract-fixtures/tools/gen_filters.py
+	git diff --exit-code --stat -- contract-fixtures || { \
+	  echo "contract-fixtures differ from what contract-fixtures/tools/ generates: commit the regenerated files, or fix the generator" >&2; exit 1; }
+
 ## Operator scripts: the runbook's fenced blocks (labelled, parsing, AWS_PAGER
-## off), and scripts/*.sh against stand-ins for aws, terraform, gh and docker.
+## off), scripts/*.sh against stand-ins for aws, terraform, gh and docker, and
+## the backup's S3 paths (the dump marker) against a stand-in S3 and pg_dump.
 .PHONY: ops-check
 ops-check:
 	scripts/runbook-check.sh
 	scripts/ops-scripts-check.sh
+	python3 scripts/backup-check.py

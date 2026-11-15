@@ -23,7 +23,9 @@
 			error =
 				e instanceof ApiError && e.status === 400
 					? 'This confirmation link has expired or was already used. Register again to get a new one.'
-					: describe(e);
+					: e instanceof ApiError && e.code === 'registration_closed'
+						? 'Acrodont isn’t taking new accounts right now. Your link works until it expires: try it again later.'
+						: describe(e);
 		}
 	});
 </script>

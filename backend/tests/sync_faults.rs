@@ -65,6 +65,108 @@ async fn a_database_error_in_one_savepoint(pool: sqlx::PgPool) {
     assert_eq!(recorded, "error");
 }
 
+/// One question's grade as stored, by idx.
+async fn stored(app: &TestApp, quiz: uuid::Uuid) -> std::collections::HashMap<u32, Option<Grade>> {
+    let mut conn = app.db().acquire().await.unwrap();
+    acrodont::cards::cards(&mut conn, quiz).await.unwrap().into_iter().map(|c| (c.idx, c.grade)).collect()
+}
+
+/// Grades and cursor moves share a savepoint, so a database error in one of
+/// them cannot be rolled back alone: the batch is undone and applied again
+/// with one savepoint an operation, and the outcome is what that always gave.
+/// Here the second grade's chunk cannot be written (a CHECK violation
+/// injected by a trigger): it alone is rejected `error`, and the grades and
+/// the cursor move on either side of it are applied, once.
+#[sqlx::test]
+async fn a_database_error_in_one_grade_of_a_run_rejects_that_grade_alone(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("SYNC_RATE_PER_MINUTE", "100000")]).await;
+    let s = Setup::new(600);
+    let mut d = setup(&app, &s).await;
+    sqlx::raw_sql(
+        "CREATE TABLE wf_cascade_writes (n int);
+         CREATE FUNCTION wf_count() RETURNS trigger AS $$
+         BEGIN INSERT INTO wf_cascade_writes VALUES (1); RETURN NEW; END $$ LANGUAGE plpgsql;
+         CREATE TRIGGER wf_count AFTER UPDATE ON cascades FOR EACH ROW EXECUTE FUNCTION wf_count();
+         CREATE FUNCTION wf_fault() RETURNS trigger AS $$
+         BEGIN
+           IF NEW.first_idx = 256 THEN
+             RAISE EXCEPTION 'injected' USING ERRCODE = 'check_violation';
+           END IF;
+           RETURN NEW;
+         END $$ LANGUAGE plpgsql;
+         CREATE TRIGGER wf_fault BEFORE UPDATE ON quiz_cards FOR EACH ROW EXECUTE FUNCTION wf_fault();",
+    )
+    .execute(app.db())
+    .await
+    .unwrap();
+    let q = common::sync::quiz_now(&app, s.source_id).await;
+    let grade = |d: &mut Device<'_>, idx: u32, g: &str| {
+        d.op("grade", json!({ "quiz_id": s.source_id, "attempt": q.attempt, "attempt_seed": q.seed, "question_idx": idx, "grade": g }))
+    };
+    let ops = vec![
+        grade(&mut d, 3, "correct"),
+        grade(&mut d, 300, "correct"), // the chunk that cannot be written
+        d.op("move_cursor", json!({ "quiz_id": s.source_id, "attempt": q.attempt, "attempt_seed": q.seed, "position": 2 })),
+        grade(&mut d, 5, "missed"),
+        grade(&mut d, 599, "correct"),
+    ];
+    let r = d.sync(ops).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let got: Vec<(String, Option<String>)> = (0..5)
+        .map(|i| (result(&r, i)["status"].as_str().unwrap().to_owned(), result(&r, i)["reason"].as_str().map(str::to_owned)))
+        .collect();
+    let applied = || ("applied".to_owned(), None);
+    assert_eq!(got, vec![applied(), ("rejected".to_owned(), Some("error".to_owned())), applied(), applied(), applied()]);
+
+    let cards = stored(&app, s.source_id).await;
+    assert_eq!((cards[&3], cards[&300], cards[&5], cards[&599]), (Some(Grade::Correct), None, Some(Grade::Missed), Some(Grade::Correct)));
+    let (correct, missed, cursor, quiz_seq): (i32, i32, i32, i64) =
+        sqlx::query_as("SELECT correct_count, missed_count, cursor, updated_seq FROM quizzes WHERE id = $1").bind(s.source_id).fetch_one(app.db()).await.unwrap();
+    let seq: i64 = r.json()["sync_seq"].as_str().unwrap().parse().unwrap();
+    assert_eq!((correct, missed, cursor, quiz_seq), (2, 1, 2, seq), "each applied grade counted once, though the batch was applied twice over");
+    let cascade_seq: i64 = sqlx::query_scalar("SELECT updated_seq FROM cascades WHERE id = $1").bind(s.cascade_id).fetch_one(app.db()).await.unwrap();
+    assert_eq!(cascade_seq, seq);
+    // The second pass is the plain one: each applied grade wrote the cascade's row.
+    let writes: i64 = sqlx::query_scalar("SELECT count(*) FROM wf_cascade_writes").fetch_one(app.db()).await.unwrap();
+    assert_eq!(writes, 3);
+    let recorded: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT status::text, reason FROM sync_operations ORDER BY device_seq").fetch_all(app.db()).await.unwrap();
+    assert_eq!(recorded, got, "recorded once each, as answered");
+}
+
+/// The cascade's row is written once for a run of grades, outside any one
+/// grade's savepoint. If that write fails in the database, the batch is
+/// applied again the plain way, where each grade writes the row itself and is
+/// rejected `error` alone, as it always was; the cursor move writes no
+/// cascade row and is applied.
+#[sqlx::test]
+async fn a_database_error_writing_the_cascade_row_rejects_the_grades_and_nothing_else(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("SYNC_RATE_PER_MINUTE", "100000")]).await;
+    let s = Setup::new(8);
+    let mut d = setup(&app, &s).await;
+    sqlx::raw_sql(
+        "CREATE FUNCTION wf_fault() RETURNS trigger AS $$
+         BEGIN RAISE EXCEPTION 'injected' USING ERRCODE = 'check_violation'; END $$ LANGUAGE plpgsql;
+         CREATE TRIGGER wf_fault BEFORE UPDATE ON cascades FOR EACH ROW EXECUTE FUNCTION wf_fault();",
+    )
+    .execute(app.db())
+    .await
+    .unwrap();
+    let q = common::sync::quiz_now(&app, s.source_id).await;
+    let mut ops = grades(&app, &mut d, s.source_id, 0, "CM").await;
+    ops.push(d.op("move_cursor", json!({ "quiz_id": s.source_id, "attempt": q.attempt, "attempt_seed": q.seed, "position": 1 })));
+    let r = d.sync(ops).await;
+    assert_eq!(r.status, StatusCode::OK, "a write the batch makes for its grades must not fail the request");
+    for i in 0..2 {
+        assert_eq!((result(&r, i)["status"].clone(), result(&r, i)["reason"].clone()), (json!("rejected"), json!("error")));
+    }
+    assert_eq!(result(&r, 2)["status"], "applied");
+    assert!(stored(&app, s.source_id).await.values().all(Option::is_none), "a rejected grade leaves no grade");
+    let (correct, missed, cursor): (i32, i32, i32) =
+        sqlx::query_as("SELECT correct_count, missed_count, cursor FROM quizzes WHERE id = $1").bind(s.source_id).fetch_one(app.db()).await.unwrap();
+    assert_eq!((correct, missed, cursor), (0, 0, 1));
+}
+
 /// "a forced serialization failure answers 503 with Retry-After and records
 /// nothing, and the same batch sent again is applied in full".
 #[sqlx::test]
@@ -97,6 +199,89 @@ async fn a_serialization_failure_is_503_and_the_resend_applies(pool: sqlx::PgPoo
     let r = d.sync(ops).await;
     assert_eq!(r.status, StatusCode::OK);
     assert!(r.json()["results"].as_array().unwrap().iter().all(|x| x["status"] == "applied"));
+}
+
+/// A pool like the test's own, with its size and its wait for a connection chosen.
+async fn pool_of(pool: &sqlx::PgPool, connections: u32, options: &[(&str, &str)]) -> sqlx::PgPool {
+    let mut connect = (*pool.connect_options()).clone();
+    if !options.is_empty() {
+        connect = connect.options(options.iter().copied());
+    }
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(connections)
+        .acquire_timeout(std::time::Duration::from_secs(3))
+        .connect_with(connect)
+        .await
+        .unwrap()
+}
+
+/// A sync holds one connection of the pool at a time: over a pool of one,
+/// every kind of answer is given. A request that kept its connection while it
+/// waited for a second would wait out the pool's timeout and fail; with every
+/// connection of a larger pool held that way, so would every request.
+#[sqlx::test]
+async fn a_sync_never_waits_for_a_second_connection(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool_of(&pool, 1, &[]).await, &[("SYNC_RATE_PER_MINUTE", "100000")]).await;
+    let s = Setup::new(5);
+    let mut d = setup(&app, &s).await;
+    let user = d.client.user_id.unwrap();
+    // A push with its pull, and shared device settings.
+    let ops = grades(&app, &mut d, s.source_id, 0, "C").await;
+    let r = d.sync(ops).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let cursor = d.cursor.unwrap();
+    let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let r = d
+        .raw_sync(json!({ "device_id": d.id, "app_version": 1, "cursor": cursor, "question_rows_for": [], "ops": [],
+                          "device_settings": { "border_px": { "value": 2, "at": at } } }))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    // A later page of a pull.
+    let token = acrodont::sync::pull::PageToken { u: user, cur: None, ceil: cursor, qrf: vec![], table: 0, after: vec![] };
+    let r = d
+        .raw_sync(json!({ "device_id": d.id, "app_version": 1, "cursor": null, "page_token": token.encode(), "question_rows_for": [] }))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["changes"]["cascades"].as_array().unwrap().len(), 1);
+    // A cursor ahead of the server, and one below the floor.
+    let r = d.raw_sync(json!({ "device_id": d.id, "app_version": 1, "cursor": cursor + 1000, "question_rows_for": [], "ops": [] })).await;
+    assert_eq!((r.status, r.json()["resync_required"].clone()), (StatusCode::OK, json!(true)));
+    sqlx::query("UPDATE users SET sync_floor_seq = sync_seq WHERE id = $1").bind(user).execute(app.db()).await.unwrap();
+    let r = d.raw_sync(json!({ "device_id": d.id, "app_version": 1, "cursor": 1, "question_rows_for": [], "ops": [] })).await;
+    assert_eq!((r.status, r.json()["resync_required"].clone()), (StatusCode::OK, json!(true)));
+    // Several accounts at once: each waits its turn for the one connection.
+    let mut b = Device::new(app.signed_in("bob").await);
+    let mut c = Device::new(app.signed_in("carol").await);
+    d.cursor = None;
+    for _ in 0..5 {
+        let (x, y, z) = tokio::join!(d.sync(vec![]), b.sync(vec![]), c.sync(vec![]));
+        assert_eq!((x.status, y.status, z.status), (StatusCode::OK, StatusCode::OK, StatusCode::OK));
+    }
+}
+
+/// A transient failure in the pull, after the push is committed, is `503`
+/// with `Retry-After` like one in the push: the same batch sent again is
+/// answered from the server's records, with its pull. Here the pull's read of
+/// `quiz_attempts` meets a lock it does not wait out.
+#[sqlx::test]
+async fn a_transient_failure_in_the_pull_is_503_and_the_resend_is_answered(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool_of(&pool, 5, &[("lock_timeout", "300ms")]).await, &[("SYNC_RATE_PER_MINUTE", "100000")]).await;
+    let s = Setup::new(5);
+    let mut d = setup(&app, &s).await;
+    let ops = grades(&app, &mut d, s.source_id, 0, "CM").await;
+    let mut lock = pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE quiz_attempts IN ACCESS EXCLUSIVE MODE").execute(&mut *lock).await.unwrap();
+    let r = d.sync(ops.clone()).await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{:?}", r.json());
+    assert!(r.retry_after().is_some());
+    let recorded: i64 = sqlx::query_scalar("SELECT count(*) FROM sync_operations").fetch_one(app.db()).await.unwrap();
+    assert_eq!(recorded, 2, "the push was committed before the pull");
+    lock.rollback().await.unwrap();
+    let r = d.sync(ops).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.json()["results"].as_array().unwrap().iter().all(|x| x["status"] == "applied"));
+    let graded: usize = r.json()["changes"]["quiz_questions"].as_array().unwrap().iter().map(|g| g["question_idx"].as_array().unwrap().len()).sum();
+    assert_eq!(graded, 2, "and its pull carries what it wrote");
 }
 
 /// "the purge task running against a concurrent sync for the same user

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT q.id FROM quizzes q JOIN cascades c ON c.id = q.cascade_id\n             WHERE q.user_id = $1 AND q.status = 'cleared' AND c.trashed_at IS NULL\n               AND q.cleared_at < now() - make_interval(days => $2)\n             ORDER BY q.cleared_at, q.id LIMIT $3",
+  "query": "SELECT q.id FROM quizzes q JOIN cascades c ON c.id = q.cascade_id\n         WHERE q.user_id = $1 AND q.status = 'cleared' AND c.trashed_at IS NULL\n           AND q.cleared_at < now() - make_interval(days => $2)\n         ORDER BY q.cleared_at, q.id LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -26,5 +26,5 @@
       false
     ]
   },
-  "hash": "89929d00c704867bcd32d4291c1a484d6744a29c426bae1ee3cc09eba62ed923"
+  "hash": "d642a88b5c877a05ac4df0744c055c1c5f8f2b3dafa64168c4fcab609aef156e"
 }

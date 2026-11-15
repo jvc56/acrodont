@@ -131,7 +131,13 @@ def main() -> int:
         expected = read_export(LICENSED / "zyzzyva" / f"{s['name']}.txt")
         extra = sorted(set(got) - set(expected))
         lacking = sorted(set(expected) - set(got))
-        known = deviations.get(s["name"])
+        # A recorded deviation names its words: {"why": …, "only_in_acrodont":
+        # […], "only_in_zyzzyva": […]}. Any other difference on the same
+        # search is still a failure.
+        entry = deviations.get(s["name"])
+        known = (isinstance(entry, dict)
+                 and sorted(entry.get("only_in_acrodont", [])) == extra
+                 and sorted(entry.get("only_in_zyzzyva", [])) == lacking)
         ok = not extra and not lacking
         verdict = "ok" if ok else ("known deviation" if known else "DIFF")
         print(f"{verdict:>15} {s['name']}: {len(got)} words, search {elapsed_ms:.0f} ms"

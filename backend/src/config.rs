@@ -34,6 +34,13 @@ pub struct Config {
     pub mail_from: String,
     pub mail_outbox_dir: Option<String>,
     pub mail_max_per_second: u32,
+    /// Confirmation, notice and reset mails in an hour, to every address together.
+    pub mail_max_per_hour: u32,
+    /// Registrations a day from one client address.
+    pub registrations_per_ip_per_day: u32,
+    /// How many addresses with a registration not yet confirmed count toward
+    /// `MAX_ACCOUNTS`.
+    pub max_unconfirmed_places: u32,
     pub public_url: String,
     pub max_quiz_questions: u32,
     /// An account's server storage in bytes (STORAGE_LIMIT_PLAN.md § S2);
@@ -56,8 +63,14 @@ pub struct Config {
     pub export_rate_per_minute: u32,
     pub admin_upload_rate_per_minute: u32,
     pub catalog_rate_per_minute: u32,
+    /// Opens of `GET /api/sync/events` a minute, per user.
+    pub sync_stream_rate_per_minute: u32,
+    /// Event streams one account may hold open at once on this instance.
+    pub sync_streams_per_user: u32,
     pub login_failures_per_ip_per_minute: u32,
     pub login_failures_per_username_per_minute: u32,
+    /// Logins judged a minute for one username, right password or wrong.
+    pub logins_per_username_per_minute: u32,
     pub auth_rate_per_ip_per_minute: u32,
     /// Password resets an hour, per caller, per address named and per link.
     pub reset_rate_per_hour: u32,
@@ -131,6 +144,9 @@ impl Config {
             mail_from: r.string("MAIL_FROM", "no-reply@acrodont.local"),
             mail_outbox_dir,
             mail_max_per_second: r.parse_rate("MAIL_MAX_PER_SECOND", 1)?,
+            mail_max_per_hour: r.parse_rate("MAIL_MAX_PER_HOUR", 200)?,
+            registrations_per_ip_per_day: r.parse_rate("REGISTRATIONS_PER_IP_PER_DAY", 10)?,
+            max_unconfirmed_places: r.parse("MAX_UNCONFIRMED_PLACES", 50)?,
             public_url: r.string("PUBLIC_URL", "http://localhost:5173"),
             max_quiz_questions,
             max_storage_bytes_per_user,
@@ -152,10 +168,13 @@ impl Config {
             export_rate_per_minute: r.parse_rate("EXPORT_RATE_PER_MINUTE", 10)?,
             admin_upload_rate_per_minute: r.parse_rate("ADMIN_UPLOAD_RATE_PER_MINUTE", 10)?,
             catalog_rate_per_minute: r.parse_rate("CATALOG_RATE_PER_MINUTE", 300)?,
+            sync_stream_rate_per_minute: r.parse_rate("SYNC_STREAM_RATE_PER_MINUTE", 30)?,
+            sync_streams_per_user: r.parse_rate("SYNC_STREAMS_PER_USER", 16)?,
             login_failures_per_ip_per_minute: r
                 .parse_rate("LOGIN_FAILURES_PER_IP_PER_MINUTE", 10)?,
             login_failures_per_username_per_minute: r
                 .parse_rate("LOGIN_FAILURES_PER_USERNAME_PER_MINUTE", 10)?,
+            logins_per_username_per_minute: r.parse_rate("LOGINS_PER_USERNAME_PER_MINUTE", 20)?,
             auth_rate_per_ip_per_minute: r.parse_rate("AUTH_RATE_PER_IP_PER_MINUTE", 30)?,
             reset_rate_per_hour: r.parse_rate("RESET_RATE_PER_HOUR", 5)?,
             catalog_reconcile_seconds: r.parse("CATALOG_RECONCILE_SECONDS", 60)?,
@@ -250,6 +269,7 @@ mod tests {
         assert_eq!(c.search_concurrency, 2);
         assert_eq!(c.api_max_body_bytes, 16_777_216);
         assert_eq!(c.mail_backend, MailBackend::Console);
+        assert_eq!((c.registrations_per_ip_per_day, c.max_unconfirmed_places, c.mail_max_per_hour), (10, 50, 200));
         assert_eq!(c.bind_addr.to_string(), "0.0.0.0:8080");
     }
 
@@ -264,6 +284,9 @@ mod tests {
             ("MAX_STORAGE_BYTES_PER_USER", "100 MB"),
             ("EXPORT_CONCURRENCY", "0"),
             ("MAIL_MAX_PER_SECOND", "0"),
+            ("MAIL_MAX_PER_HOUR", "0"),
+            ("REGISTRATIONS_PER_IP_PER_DAY", "0"),
+            ("MAX_UNCONFIRMED_PLACES", "-1"),
             ("DEV_LOGIN", "yes"),
             ("SESSION_SIGNING_KEY", "abcd"),
         ] {

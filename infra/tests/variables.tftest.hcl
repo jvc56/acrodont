@@ -48,16 +48,98 @@ run "defaults_plan" {
     error_message = "deploys must roll: the new task serves before the old one drains"
   }
   assert {
+    condition     = aws_ecs_task_definition.app.skip_destroy == true
+    error_message = "the app task definition's earlier revisions must stay registered: the circuit breaker rolls back to one"
+  }
+  assert {
     condition     = one(aws_ecs_service.app.capacity_provider_strategy).capacity_provider == "FARGATE_SPOT"
     error_message = "the app runs on Spot by default"
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.down) == 1
-    error_message = "a running service has its down alarm"
+    condition     = length(aws_cloudwatch_metric_alarm.down) == 1 && length(aws_cloudwatch_metric_alarm.app_5xx) == 1
+    error_message = "a running service has its down alarm and its application 5xx alarm"
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_log_metric_filter.mail_capped.pattern == "{ $.fields.alarm = \"mail_capped\" }" &&
+      aws_cloudwatch_metric_alarm.mail_capped.metric_name == one(aws_cloudwatch_log_metric_filter.mail_capped.metric_transformation).name &&
+      aws_cloudwatch_metric_alarm.mail_capped.threshold == 1 &&
+      length(aws_cloudwatch_metric_alarm.mail_capped.alarm_actions) == 1
+    )
+    error_message = "the hourly mail cap being reached raises an alarm from the backend's alarm = \"mail_capped\" log line"
+  }
+  assert {
+    condition     = local.dmarc_record == "v=DMARC1; p=none"
+    error_message = "the DMARC record publishes no address: no rua until there is a mailbox meant for reports"
+  }
+  assert {
+    condition     = length(aws_lb_listener_rule.www) == 0
+    error_message = "www is answered only when redirect_www asks for it"
   }
   assert {
     condition     = aws_db_instance.main.backup_retention_period == 7 && aws_db_instance.main.allocated_storage == 20
     error_message = "the database defaults changed"
+  }
+  assert {
+    condition     = one(aws_lb_target_group.web.health_check).interval * one(aws_lb_target_group.web.health_check).unhealthy_threshold >= 300
+    error_message = "the target group's health check must ride out a five-minute database restart before the task is replaced"
+  }
+  assert {
+    condition     = local.backend_health_check.interval * local.backend_health_check.retries >= 300
+    error_message = "the backend container's health check must ride out the same five minutes: ECS replaces a task whose container is unhealthy whatever the target group says"
+  }
+  assert {
+    condition     = jsonencode(local.task_failed_any_of) == "[{\"containers\":{\"exitCode\":[{\"anything-but\":0}]}},{\"stopCode\":[\"TaskFailedToStart\"]}]"
+    error_message = "the backup and drill failure rules changed: change task_pattern in scripts/lib/ops_fakes.py with them, which scripts/check-alerts.sh is checked against"
+  }
+  assert {
+    condition = alltrue([
+      for t in concat(values(aws_cloudwatch_event_target.task_failed), [aws_cloudwatch_event_target.deploy_failed]) : alltrue([
+        for p in regexall("<([^>]*)>", t.input_transformer[0].input_template) : contains(keys(t.input_transformer[0].input_paths), p[0])
+      ])
+    ])
+    error_message = "a mail template holds <...> that is not a key of its input_paths: EventBridge reads it as a placeholder"
+  }
+  assert {
+    condition     = aws_scheduler_schedule.tasks["drill"].schedule_expression == "cron(0 5 ? * SUN,WED *)"
+    error_message = "the drill runs twice a week: further apart than that, the seven-day alarm on a missing drill has no margin"
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.drill_missing.namespace == "Acrodont/Backups" &&
+      aws_cloudwatch_metric_alarm.drill_missing.metric_name == "DrillSucceeded" &&
+      aws_cloudwatch_metric_alarm.drill_missing.statistic == "Sum" &&
+      aws_cloudwatch_metric_alarm.drill_missing.comparison_operator == "LessThanThreshold" &&
+      aws_cloudwatch_metric_alarm.drill_missing.threshold == 1 &&
+      aws_cloudwatch_metric_alarm.drill_missing.period * aws_cloudwatch_metric_alarm.drill_missing.evaluation_periods == 604800 &&
+      aws_cloudwatch_metric_alarm.drill_missing.datapoints_to_alarm == aws_cloudwatch_metric_alarm.drill_missing.evaluation_periods &&
+      aws_cloudwatch_metric_alarm.drill_missing.treat_missing_data == "breaching" &&
+      length(aws_cloudwatch_metric_alarm.drill_missing.alarm_actions) == 1
+    )
+    error_message = "seven days with no DrillSucceeded of 1 must alarm, a drill that never ran counting as a miss (seven days is the most CloudWatch allows)"
+  }
+  assert {
+    condition     = anytrue([for r in aws_s3_bucket_lifecycle_configuration.backups.rule : length(r.abort_incomplete_multipart_upload) == 1])
+    error_message = "the backups bucket must abort unfinished multipart uploads"
+  }
+}
+
+run "www_redirects_to_the_bare_domain" {
+  command = plan
+  variables {
+    redirect_www = true
+  }
+  assert {
+    condition     = contains(aws_acm_certificate.site.subject_alternative_names, "www.acrodont.example.org")
+    error_message = "redirect_www must put www on the certificate"
+  }
+  assert {
+    condition = length(aws_lb_listener_rule.www) == 2 && alltrue([
+      for r in aws_lb_listener_rule.www :
+      one(one(r.action).redirect).host == "acrodont.example.org" && one(one(r.action).redirect).status_code == "HTTP_301"
+      && contains(one(one(r.condition).host_header).values, "www.acrodont.example.org")
+    ])
+    error_message = "redirect_www must answer www on both listeners with a 301 to the bare domain"
   }
 }
 
@@ -72,7 +154,7 @@ run "on_demand_and_no_tasks" {
     error_message = "use_fargate_spot = false must use on-demand Fargate"
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.down) == 0 && length(aws_cloudwatch_metric_alarm.backend_memory_high) == 0
+    condition     = length(aws_cloudwatch_metric_alarm.down) == 0 && length(aws_cloudwatch_metric_alarm.backend_memory_high) == 0 && length(aws_cloudwatch_metric_alarm.app_5xx) == 0
     error_message = "a stack with no tasks must not page"
   }
 }

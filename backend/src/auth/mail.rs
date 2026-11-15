@@ -1,10 +1,11 @@
-//! Outgoing email and the per-address caps (PLAN.md § Authentication → Register).
+//! Outgoing email and its caps (PLAN.md § Authentication → Register).
 //!
 //! At most three confirmation, notice or reset emails go to one address in
-//! 24 hours per requesting IP, and twenty per address in all. Further requests
+//! 24 hours per requesting IP, and twenty per address in all; and at most
+//! `MAIL_MAX_PER_HOUR` to every address together in an hour. Further requests
 //! get the same response and send nothing.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
@@ -19,7 +20,7 @@ pub const PER_ADDRESS: usize = 20;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MailKind {
-    /// A new registration's confirmation code.
+    /// A registration's confirmation code.
     Confirmation { code: String },
     /// Sent instead of a code when the address already has a confirmed account.
     AccountExists,
@@ -183,7 +184,7 @@ fn lifetime(kind: &MailKind) -> Option<std::time::Duration> {
 }
 
 /// SES refuses sends above the account's rate (1 a second in the sandbox,
-/// usually 14 after), so a burst of registrations, a club signing up together,
+/// usually 14 after, shared with birdtest: production sets 5), so a burst of registrations, a club signing up together,
 /// lost mail when sent at once (birdtest). Messages wait in a bounded queue,
 /// an hour's worth, drained at `MAIL_MAX_PER_SECOND` by one task; each send
 /// times out at 30 s; a message whose link has expired while queued is
@@ -261,39 +262,92 @@ impl Mailer for RecordingMailer {
     }
 }
 
-/// The 24-hour caps. In memory, per instance, like every limit in the plan.
+#[derive(Default)]
+struct Sent {
+    /// Per address: when, and asked for from where, in the last 24 hours.
+    by_address: HashMap<String, Vec<(DateTime<Utc>, IpAddr)>>,
+    /// Every mail of the last hour, oldest first.
+    last_hour: VecDeque<DateTime<Utc>>,
+    /// When the hourly cap last logged its alarm.
+    alarmed_at: Option<DateTime<Utc>>,
+}
+
+/// The caps on what is sent: per address over 24 hours, and
+/// `MAIL_MAX_PER_HOUR` in all over an hour. In memory, per instance, like
+/// every limit in the plan.
+///
+/// The hourly cap is what stands between a script and the SES account's
+/// reputation, which birdtest shares: registrations each name a new address,
+/// so no per-address cap ever sees them. A mail it holds back is logged with
+/// `alarm = "mail_capped"`, at most once a minute, which a CloudWatch metric
+/// filter alarms on as it does on `mail_failed`.
 pub struct EmailCaps {
     clock: Arc<Clock>,
-    sent: Mutex<HashMap<String, Vec<(DateTime<Utc>, IpAddr)>>>,
+    max_per_hour: usize,
+    sent: Mutex<Sent>,
 }
 
 impl EmailCaps {
-    pub fn new(clock: Arc<Clock>) -> Self {
+    pub fn new(clock: Arc<Clock>, max_per_hour: u32) -> Self {
         EmailCaps {
             clock,
-            sent: Mutex::new(HashMap::new()),
+            max_per_hour: max_per_hour as usize,
+            sent: Mutex::new(Sent::default()),
         }
     }
 
     /// Takes a slot for one email to `address` requested from `ip`, or
-    /// returns false when either cap is reached.
+    /// returns false when a cap is reached. A mail one cap holds back takes
+    /// no slot of another.
     pub fn try_reserve(&self, address: &str, ip: IpAddr) -> bool {
         let now = self.clock.now();
         let window_start = now - Duration::hours(24);
         let key = address.to_lowercase();
         let mut sent = self.sent.lock().expect("caps lock");
-        let entries = sent.entry(key).or_default();
+        let sent = &mut *sent;
+        let entries = sent.by_address.entry(key).or_default();
         entries.retain(|(at, _)| *at > window_start);
         let from_ip = entries.iter().filter(|(_, i)| *i == ip).count();
         if from_ip >= PER_IP_PER_ADDRESS || entries.len() >= PER_ADDRESS {
+            tracing::info!("the address's email cap is reached; not sent");
             return false;
         }
+        let hour_start = now - Duration::hours(1);
+        while sent.last_hour.front().is_some_and(|at| *at <= hour_start) {
+            sent.last_hour.pop_front();
+        }
+        if sent.last_hour.len() >= self.max_per_hour {
+            if sent.alarmed_at.is_none_or(|at| now - at >= Duration::minutes(1)) {
+                sent.alarmed_at = Some(now);
+                tracing::error!(
+                    alarm = "mail_capped",
+                    max_per_hour = self.max_per_hour,
+                    "the hourly mail cap is reached: account mail is not being sent"
+                );
+            }
+            return false;
+        }
+        sent.last_hour.push_back(now);
         entries.push((now, ip));
         true
     }
+
+    /// Forgets every address with nothing sent in the window. Run on a timer
+    /// (`purge::spawn`): `try_reserve` only clears the address it is asked about.
+    pub fn prune(&self) {
+        let window_start = self.clock.now() - Duration::hours(24);
+        let mut sent = self.sent.lock().expect("caps lock");
+        sent.by_address.retain(|_, entries| {
+            entries.retain(|(at, _)| *at > window_start);
+            !entries.is_empty()
+        });
+        sent.by_address.shrink_to_fit();
+    }
 }
 
-pub fn confirmation_email(public_url: &str, to: &str, code: &str) -> Email {
+/// The username too: an address may have several registrations waiting, each
+/// with its own username and password, and the link activates its own.
+pub fn confirmation_email(public_url: &str, to: &str, username: &str, code: &str) -> Email {
     let link = format!(
         "{}/confirm-email?code={}",
         public_url.trim_end_matches('/'),
@@ -303,7 +357,9 @@ pub fn confirmation_email(public_url: &str, to: &str, code: &str) -> Email {
         to: to.into(),
         subject: "Confirm your Acrodont account".into(),
         body: format!(
-            "Welcome to Acrodont.\n\nConfirm your email address within 24 hours:\n{link}\n"
+            "Welcome to Acrodont.\n\nConfirm your email address within 24 hours:\n{link}\n\n\
+             This link makes the account with the username {username} and the password chosen with it. \
+             If you did not register, you can ignore this email.\n"
         ),
         kind: MailKind::Confirmation { code: code.into() },
     }
@@ -350,7 +406,7 @@ mod tests {
     use super::*;
 
     fn confirmation(to: &str) -> Email {
-        confirmation_email("http://x", to, "code")
+        confirmation_email("http://x", to, "reader", "code")
     }
 
     #[tokio::test(start_paused = true)]
@@ -415,7 +471,7 @@ mod tests {
     #[test]
     fn caps_per_ip_and_per_address() {
         let clock = Arc::new(Clock::system());
-        let caps = EmailCaps::new(clock.clone());
+        let caps = EmailCaps::new(clock.clone(), 1000);
         let a: IpAddr = "10.0.0.1".parse().unwrap();
         for _ in 0..3 {
             assert!(caps.try_reserve("x@y.z", a));
@@ -429,5 +485,47 @@ mod tests {
         assert!(!caps.try_reserve("x@y.z", "10.0.2.1".parse().unwrap()));
         clock.advance(Duration::hours(24) + Duration::seconds(1));
         assert!(caps.try_reserve("x@y.z", a));
+    }
+
+    #[test]
+    fn pruning_forgets_addresses_outside_the_window() {
+        let clock = Arc::new(Clock::system());
+        let caps = EmailCaps::new(clock.clone(), 1000);
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        assert!(caps.try_reserve("old@y.z", ip));
+        clock.advance(Duration::hours(23));
+        assert!(caps.try_reserve("new@y.z", ip));
+        caps.prune();
+        assert_eq!(caps.sent.lock().unwrap().by_address.len(), 2);
+        clock.advance(Duration::hours(2));
+        caps.prune();
+        let sent = caps.sent.lock().unwrap();
+        assert_eq!(sent.by_address.keys().collect::<Vec<_>>(), ["new@y.z"]);
+    }
+
+    /// The hourly cap counts every address together, over the hour just
+    /// past; a mail it holds back takes no slot of its address's own caps.
+    #[test]
+    fn the_hourly_cap_is_over_every_address() {
+        let clock = Arc::new(Clock::system());
+        let caps = EmailCaps::new(clock.clone(), 5);
+        let ip = |i: u8| -> IpAddr { format!("10.0.0.{i}").parse().unwrap() };
+        for i in 0..5 {
+            assert!(caps.try_reserve(&format!("u{i}@y.z"), ip(i)), "mail {i}");
+            clock.advance(Duration::minutes(10));
+        }
+        // Fifty minutes on, five are inside the hour: a sixth is held back,
+        // to a new address and to a known one alike.
+        assert!(!caps.try_reserve("new@y.z", ip(9)));
+        assert!(!caps.try_reserve("u0@y.z", ip(9)));
+        // The first leaves the hour, and one more goes.
+        clock.advance(Duration::minutes(10) + Duration::seconds(1));
+        assert!(caps.try_reserve("new@y.z", ip(9)));
+        assert!(!caps.try_reserve("other@y.z", ip(9)));
+        // The two held back for new@y.z took none of its three from this address.
+        clock.advance(Duration::hours(1));
+        assert!(caps.try_reserve("new@y.z", ip(9)));
+        assert!(caps.try_reserve("new@y.z", ip(9)));
+        assert!(!caps.try_reserve("new@y.z", ip(9)));
     }
 }

@@ -84,6 +84,13 @@ describe('exports built on the device', () => {
 		expect(await localInput(db, c, quiz)).toEqual({ missing: 'rows' });
 	});
 
+	it('go to the server for a quiz the device no longer holds', async () => {
+		const c = await setup();
+		const gone: DeviceChoices = { ...base, scope: 'quiz', quiz_id: 'a9000000-0000-4000-8000-000000000000' };
+		expect(await localInput(db, c, gone)).toEqual({ missing: 'rows' });
+		expect(await localInput(db, c, { ...gone, quiz_id: undefined })).toEqual({ missing: 'rows' });
+	});
+
 	it('write a leave value at the chosen decimals with no plus sign', async () => {
 		const c = await setup('leave_value');
 		const r = await localInput(db, c, { ...base, lines: 'answers', decimals: 2 });

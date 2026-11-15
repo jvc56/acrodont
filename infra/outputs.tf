@@ -21,10 +21,16 @@ output "backups_bucket" { value = aws_s3_bucket.backups.bucket }
 output "alb_dns_name" { value = aws_lb.main.dns_name }
 
 output "acm_validation_records" {
-  description = "Create these DNS records out of band to validate the certificate."
+  description = "Create these DNS records out of band to validate the certificate: one for the domain, and with redirect_www one for www."
   value = [for o in aws_acm_certificate.site.domain_validation_options : {
     name = o.resource_record_name, type = o.resource_record_type, value = o.resource_record_value
   }]
+}
+
+# No rua: a report address is published in DNS for anyone to read and to mail,
+# and there is no mailbox meant for DMARC reports. Add one here when there is.
+locals {
+  dmarc_record = "v=DMARC1; p=none"
 }
 
 output "ses_dns_records" {
@@ -36,7 +42,7 @@ output "ses_dns_records" {
     [
       { name = "mail.${var.domain_name}", type = "MX", value = "10 feedback-smtp.${var.region}.amazonses.com" },
       { name = "mail.${var.domain_name}", type = "TXT", value = "v=spf1 include:amazonses.com ~all" },
-      { name = "_dmarc.${var.domain_name}", type = "TXT", value = "v=DMARC1; p=none; rua=mailto:${var.alarm_email}" },
+      { name = "_dmarc.${var.domain_name}", type = "TXT", value = local.dmarc_record },
     ],
   )
 }

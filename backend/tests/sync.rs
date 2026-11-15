@@ -51,6 +51,121 @@ async fn a_repeated_operation_is_applied_once_with_the_same_result(pool: sqlx::P
 /// A finish whose seed and resulting hash are both above 2^63: stored as
 /// negative BIGINTs, answered, pulled and repeated as unsigned decimal text;
 /// the seed recognised as a later grade's attempt_seed.
+/// A batch's grades and cursor moves leave exactly what each left when it
+/// was applied alone, from less work: the cascade's row is written once for
+/// them (it used to be once a grade), and they share one savepoint (it used
+/// to be one each, a subtransaction apiece).
+#[sqlx::test]
+async fn a_batch_of_grades_writes_its_cascade_row_once_and_leaves_what_each_grade_left(pool: sqlx::PgPool) {
+    use chrono::Timelike;
+    let app = app(pool).await;
+    let mut d = device(&app, "alice").await;
+    let s = cascade(&app, &mut d, Setup::new(600)).await; // three chunks of questions
+    sqlx::raw_sql(
+        "CREATE TABLE wf_cascade_writes (n int);
+         CREATE FUNCTION wf_count() RETURNS trigger AS $$
+         BEGIN INSERT INTO wf_cascade_writes VALUES (1); RETURN NEW; END $$ LANGUAGE plpgsql;
+         CREATE TRIGGER wf_count AFTER UPDATE ON cascades FOR EACH ROW EXECUTE FUNCTION wf_count();",
+    )
+    .execute(app.db())
+    .await
+    .unwrap();
+    // A second device, up to date before the batch.
+    let mut other = d.sibling(&app);
+    other.qrf = d.qrf.clone();
+    other.sync_all(vec![]).await;
+    let q = quiz_now(&app, s.source_id).await;
+    // Device times ahead of the row's own (and inside the five minutes a
+    // device's clock may lead by), out of order: the latest is the third's.
+    let base = Utc::now().with_nanosecond(0).unwrap();
+    let grade = |d: &mut Device<'_>, idx: u32, g: &str, secs: i64| {
+        let fields = json!({ "quiz_id": s.source_id, "attempt": q.attempt, "attempt_seed": q.seed, "question_idx": idx, "grade": g });
+        d.op_at("grade", fields, base + Duration::seconds(secs))
+    };
+    let ops = vec![
+        grade(&mut d, 0, "correct", 60),
+        grade(&mut d, 300, "missed", 70),
+        d.op("move_cursor", json!({ "quiz_id": s.source_id, "attempt": q.attempt, "attempt_seed": q.seed, "position": 2 })),
+        grade(&mut d, 599, "correct", 180),
+        grade(&mut d, 0, "missed", 120), // the first question regraded
+        // Rejected, in the middle of the run: another attempt's.
+        d.op("grade", json!({ "quiz_id": s.source_id, "attempt": q.attempt + 1, "attempt_seed": q.seed, "question_idx": 7, "grade": "correct" })),
+        grade(&mut d, 301, "correct", 90),
+    ];
+    let r = d.sync(ops).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let statuses: Vec<Value> = (0..7).map(|i| result(&r, i)["status"].clone()).collect();
+    assert_eq!(statuses, ["applied", "applied", "applied", "applied", "applied", "rejected", "applied"].map(Value::from));
+    assert_eq!(result(&r, 5)["reason"], "stale_attempt");
+    let seq: i64 = r.json()["sync_seq"].as_str().unwrap().parse().unwrap();
+
+    let writes: i64 = sqlx::query_scalar("SELECT count(*) FROM wf_cascade_writes").fetch_one(app.db()).await.unwrap();
+    assert_eq!(writes, 1, "the cascade's row is written once for the batch's grades");
+    let (activity, cascade_seq): (chrono::DateTime<Utc>, i64) =
+        sqlx::query_as("SELECT last_activity_at, updated_seq FROM cascades WHERE id = $1").bind(s.cascade_id).fetch_one(app.db()).await.unwrap();
+    assert_eq!((activity, cascade_seq), (base + Duration::seconds(180), seq), "the latest of the grades' times, and the request's sequence");
+    let (correct, missed, cursor, quiz_activity, quiz_seq): (i32, i32, i32, chrono::DateTime<Utc>, i64) =
+        sqlx::query_as("SELECT correct_count, missed_count, cursor, last_activity_at, updated_seq FROM quizzes WHERE id = $1")
+            .bind(s.source_id)
+            .fetch_one(app.db())
+            .await
+            .unwrap();
+    assert_eq!((correct, missed, cursor, quiz_activity, quiz_seq), (2, 2, 2, base + Duration::seconds(180), seq));
+    // One subtransaction wrote all three chunks: rows written under separate
+    // savepoints carry separate transaction ids.
+    let writers: i64 = sqlx::query_scalar("SELECT count(DISTINCT xmin::text) FROM quiz_cards WHERE quiz_id = $1 AND cards IS NOT NULL")
+        .bind(s.source_id)
+        .fetch_one(app.db())
+        .await
+        .unwrap();
+    assert_eq!(writers, 1, "the batch's grades share one savepoint");
+
+    // The other device's next pull has the cascade, the quiz and the four
+    // graded questions: all three were stamped with this request's sequence.
+    let (_, pages) = other.sync_all(vec![]).await;
+    assert!(rows(&pages, "cascades").iter().any(|c| c["id"] == json!(s.cascade_id)), "the cascade is pulled");
+    assert!(rows(&pages, "quizzes").iter().any(|c| c["id"] == json!(s.source_id)), "the quiz is pulled");
+    let graded: usize = rows(&pages, "quiz_questions").iter().map(|g| g["question_idx"].as_array().unwrap().len()).sum();
+    assert_eq!(graded, 4);
+}
+
+/// An operation that is neither a grade nor a cursor move finds the cascade's
+/// row as the grades before it left it: here a trash, which stamps the row
+/// itself, between two runs of grades (the second run rejected, in the Trash).
+#[sqlx::test]
+async fn the_cascade_row_is_written_before_an_operation_of_another_kind(pool: sqlx::PgPool) {
+    use chrono::Timelike;
+    let app = app(pool).await;
+    let mut d = device(&app, "alice").await;
+    let s = cascade(&app, &mut d, Setup::new(4)).await;
+    sqlx::raw_sql(
+        "CREATE TABLE wf_cascade_writes (at timestamptz, trashed boolean);
+         CREATE FUNCTION wf_count() RETURNS trigger AS $$
+         BEGIN INSERT INTO wf_cascade_writes VALUES (NEW.last_activity_at, NEW.trashed_at IS NOT NULL); RETURN NEW; END $$ LANGUAGE plpgsql;
+         CREATE TRIGGER wf_count AFTER UPDATE ON cascades FOR EACH ROW EXECUTE FUNCTION wf_count();",
+    )
+    .execute(app.db())
+    .await
+    .unwrap();
+    let q = quiz_now(&app, s.source_id).await;
+    let base = Utc::now().with_nanosecond(0).unwrap();
+    let grade = |d: &mut Device<'_>, idx: u32, secs: i64| {
+        let fields = json!({ "quiz_id": s.source_id, "attempt": q.attempt, "attempt_seed": q.seed, "question_idx": idx, "grade": "correct" });
+        d.op_at("grade", fields, base + Duration::seconds(secs))
+    };
+    let ops = vec![grade(&mut d, 0, 100), grade(&mut d, 1, 90), d.op("trash_cascade", json!({ "cascade_id": s.cascade_id })), grade(&mut d, 2, 200)];
+    let r = d.sync(ops).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let statuses: Vec<Value> = (0..4).map(|i| result(&r, i)["status"].clone()).collect();
+    assert_eq!(statuses, ["applied", "applied", "applied", "rejected"].map(Value::from), "{:?}", r.json()["results"]);
+    // The grades' write, then the trash's own; the rejected grade writes nothing.
+    let writes: Vec<(chrono::DateTime<Utc>, bool)> =
+        sqlx::query_as("SELECT at, trashed FROM wf_cascade_writes ORDER BY ctid").fetch_all(app.db()).await.unwrap();
+    assert_eq!(writes.len(), 2, "{writes:?}");
+    assert_eq!(writes[0], (base + Duration::seconds(100), false), "the trash found the row as the two grades left it");
+    assert!(writes[1].1);
+}
+
 #[sqlx::test]
 async fn sixty_four_bit_values_travel_as_unsigned_text(pool: sqlx::PgPool) {
     let app = app(pool).await;
@@ -134,7 +249,20 @@ async fn request_level_400s(pool: sqlx::PgPool) {
     cases.push(("SYNC_MAX_OPS + 1", b));
     let mut b = base.clone();
     b["ops"] = json!([ops[0]]);
-    b["page_token"] = json!("x");
+    // A token the server would take on its own, so the operation is what is refused.
+    let token = acrodont::sync::pull::PageToken {
+        u: d.client.user_id.unwrap(),
+        cur: None,
+        ceil: 0,
+        qrf: vec![],
+        table: 0,
+        after: vec![],
+    }
+    .encode();
+    b["page_token"] = json!(token);
+    let mut alone = base.clone();
+    alone["page_token"] = json!(token);
+    assert_eq!(d.raw_sync(alone).await.status, StatusCode::OK, "the token without an operation");
     cases.push(("page_token with an operation", b));
     let mut b = base.clone();
     b["question_rows_for"] = json!((0..=acrodont::config::MAX_QUESTION_ROWS_FOR).map(|_| Uuid::new_v4()).collect::<Vec<_>>());
@@ -152,6 +280,12 @@ async fn request_level_400s(pool: sqlx::PgPool) {
     o["x"] = json!(1);
     b["ops"] = json!([o]);
     cases.push(("an options op with another field", b));
+    // A NUL is text Postgres cannot hold, in a shared setting's value at any depth.
+    for value in [json!("a\u{0}b"), json!({ "inner": ["\u{0}"] }), json!({ "k\u{0}": 1 })] {
+        let mut b = base.clone();
+        b["device_settings"] = json!({ "border_px": { "value": value, "at": "2026-11-11T10:00:00Z" } });
+        cases.push(("a NUL in a shared setting", b));
+    }
     for (what, body) in cases {
         let r = d.raw_sync(body).await;
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{what}");
@@ -834,6 +968,16 @@ async fn shared_device_settings_merge_and_come_back(pool: sqlx::PgPool) {
     other.raw_sync(body(&other, json!({ "answer_size_px": { "value": 30, "at": "2026-11-11T11:00:00.000Z" } }))).await;
     let shared = d.sync(vec![]).await.json()["device_settings"].clone();
     assert_eq!((&shared["answer_size_px"]["value"], &shared["bindings"]["value"][0]["action"]), (&json!(30), &json!("show_next")));
+    // A share stamped by a clock far ahead is kept as five minutes from now at
+    // most, so the next real share of that setting wins it back.
+    d.raw_sync(body(&d, json!({ "border_px": { "value": 9, "at": "2099-01-01T00:00:00.000Z" } }))).await;
+    let kept = other.sync(vec![]).await.json()["device_settings"]["border_px"].clone();
+    let at: chrono::DateTime<Utc> = kept["at"].as_str().unwrap().parse().unwrap();
+    assert_eq!(kept["value"], json!(9));
+    assert!(at <= Utc::now() + Duration::minutes(5), "clamped: {at}");
+    let soon = (Utc::now() + Duration::minutes(6)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    other.raw_sync(body(&other, json!({ "border_px": { "value": 2, "at": soon } }))).await;
+    assert_eq!(d.sync(vec![]).await.json()["device_settings"]["border_px"]["value"], json!(2));
     // A malformed share is a 400, and changes nothing.
     for bad in [
         json!([]),
@@ -845,6 +989,16 @@ async fn shared_device_settings_merge_and_come_back(pool: sqlx::PgPool) {
         assert_eq!(d.raw_sync(body(&d, bad.clone())).await.status, StatusCode::BAD_REQUEST, "{bad}");
     }
     assert_eq!(d.sync(vec![]).await.json()["device_settings"]["answer_size_px"]["value"], json!(30));
+    // A share that would take the account's settings past 16 KB changes
+    // nothing: each request may carry that much, and every response carries
+    // them all.
+    let big = |name: &str| json!({ name: { "value": "x".repeat(7_000), "at": "2026-11-11T12:00:00.000Z" } });
+    for name in ["note_a", "note_b", "note_c"] {
+        assert_eq!(d.raw_sync(body(&d, big(name))).await.status, StatusCode::OK);
+    }
+    let shared = d.sync(vec![]).await.json()["device_settings"].clone();
+    assert!(shared.get("note_b").is_some() && shared.get("note_c").is_none(), "the third did not fit");
+    assert_eq!(shared["answer_size_px"]["value"], json!(30));
     // Another account sees none of it.
     let mut bob = device(&app, "bob").await;
     assert_eq!(bob.sync(vec![]).await.json()["device_settings"], json!({}));
@@ -899,4 +1053,57 @@ async fn other_devices_hear_of_a_change_at_once(pool: sqlx::PgPool) {
     assert_eq!(d.client.open_stream(&format!("/api/sync/events?user={bob_user}")).await.0, StatusCode::UNAUTHORIZED);
     assert_eq!(d.client.open_stream("/api/sync/events").await.0, StatusCode::UNAUTHORIZED);
     assert_eq!(app.client().open_stream(&path(d.id)).await.0, StatusCode::UNAUTHORIZED);
+}
+
+/// An account's event streams are limited, per instance: how many it holds
+/// open at once (`SYNC_STREAMS_PER_USER`) and how often it opens one
+/// (`SYNC_STREAM_RATE_PER_MINUTE`). Each stream holds a connection and a task
+/// for five minutes, and no other limit covers the route.
+#[sqlx::test]
+async fn an_account_s_event_streams_are_limited(pool: sqlx::PgPool) {
+    let app = TestApp::with(pool, &[("SYNC_STREAMS_PER_USER", "2"), ("SYNC_STREAM_RATE_PER_MINUTE", "5")]).await;
+    // Both accounts first: the opens below must fall well inside one minute.
+    let bob = device(&app, "bob").await;
+    let mut alice = device(&app, "alice").await;
+    let user = alice.client.user_id.unwrap();
+    let path = format!("/api/sync/events?user={user}&device={}", alice.id);
+    let (status, first) = alice.client.open_stream(&path).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _second) = alice.client.open_stream(&path).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(app.state.changes.open_streams(user), 2);
+    // A third while two are open is refused, and takes no place.
+    assert_eq!(alice.client.open_stream(&path).await.0, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(app.state.changes.open_streams(user), 2);
+    // Another account's streams are its own.
+    let bobs = format!("/api/sync/events?user={}&device={}", bob.client.user_id.unwrap(), bob.id);
+    let (status, _bobs) = bob.client.open_stream(&bobs).await;
+    assert_eq!(status, StatusCode::OK);
+    // A stream the client closed gives its place back.
+    drop(first);
+    for _ in 0..50 {
+        if app.state.changes.open_streams(user) < 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(app.state.changes.open_streams(user), 1);
+    let (status, _third) = alice.client.open_stream(&path).await;
+    assert_eq!(status, StatusCode::OK);
+    // Four opens so far, the refused one among them: the fifth is the last of
+    // this minute's, and is refused for the two that are open; the sixth is
+    // refused for the minute's rate with a place free.
+    assert_eq!(alice.client.open_stream(&path).await.0, StatusCode::TOO_MANY_REQUESTS);
+    drop(_second);
+    for _ in 0..50 {
+        if app.state.changes.open_streams(user) < 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(app.state.changes.open_streams(user), 1);
+    assert_eq!(alice.client.open_stream(&path).await.0, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(app.state.changes.open_streams(user), 1, "an open refused for its rate takes no place");
+    // The sync itself is not limited by either.
+    assert_eq!(alice.raw_sync(json!({ "device_id": alice.id, "app_version": 1, "cursor": null, "question_rows_for": [], "ops": [] })).await.status, StatusCode::OK);
 }

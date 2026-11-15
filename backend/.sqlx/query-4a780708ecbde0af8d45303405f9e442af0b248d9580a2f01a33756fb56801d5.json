@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM pending_registrations\n           WHERE code_hash = $1 AND expires_at > now()\n           RETURNING username::text AS \"username!\", email::text AS \"email!\", password_hash",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "username!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "email!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "password_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "pending_registrations",
+            "name": "password_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      false
+    ]
+  },
+  "hash": "4a780708ecbde0af8d45303405f9e442af0b248d9580a2f01a33756fb56801d5"
+}

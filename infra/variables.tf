@@ -38,6 +38,12 @@ variable "domain_name" {
   }
 }
 
+variable "redirect_www" {
+  description = "Also answer www.<domain_name>, with a 301 to the bare domain: the certificate gains the name and both listeners redirect it. Its DNS records are made out of band like the others: the certificate's second validation record (acm_validation_records) and an alias for www to the load balancer. Changing it replaces the certificate."
+  type        = bool
+  default     = false
+}
+
 variable "mail_from" {
   description = "From address; defaults to no-reply@domain_name. SES sends only from the verified domain."
   type        = string
@@ -157,7 +163,7 @@ variable "export_concurrency" {
 }
 
 variable "mail_max_per_second" {
-  description = "MAIL_MAX_PER_SECOND: the SES account's maximum send rate. 1 in the sandbox; raise it (usually 14) once production access is granted."
+  description = "MAIL_MAX_PER_SECOND: how fast mail is sent to SES. 1 in the sandbox; 5 once production access is granted. The SES account's own rate (usually 14) is shared with birdtest, so this stays below it."
   type        = number
   default     = 1
   validation {

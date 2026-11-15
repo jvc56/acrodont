@@ -166,18 +166,23 @@ async fn the_token_request_answers_401_404_and_429(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test]
-async fn a_purged_quiz_is_404(pool: sqlx::PgPool) {
+async fn a_purged_cascade_or_another_cascades_quiz_is_404(pool: sqlx::PgPool) {
     let app = app(pool, &[]).await;
     let c = app.seed_fixture_catalog("root").await;
     let mut d = Device::new(c);
     let (cascade, source) = create(&mut d.client, "anagram", "Sevens").await;
     let cid: Uuid = cascade.parse().unwrap();
+    let choices = json!({ "scope": "quiz", "quiz_id": source, "which": "all", "format": "txt", "lines": "questions", "order": "study", "decimals": 1 });
+    // A quiz of another cascade of the same account is not this cascade's: 404.
+    let (other, _) = create(&mut d.client, "anagram", "Other sevens").await;
+    assert_eq!(token(&mut d.client, &other, choices.clone()).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(token(&mut d.client, &cascade, choices.clone()).await.status, StatusCode::OK);
     d.qrf = vec![cid];
     d.sync(vec![]).await;
     let t = d.op("trash_cascade", json!({ "cascade_id": cid }));
     let p = d.op("purge_cascade", json!({ "cascade_id": cid }));
     d.sync(vec![t, p]).await;
-    let r = token(&mut d.client, &cascade, json!({ "scope": "quiz", "quiz_id": source, "which": "all", "format": "txt", "lines": "questions", "order": "study", "decimals": 1 })).await;
+    let r = token(&mut d.client, &cascade, choices).await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
 }
 

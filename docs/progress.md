@@ -2,6 +2,12 @@
 
 Resume from this file plus `docs/plan-index.md`. PLAN.md is the spec.
 
+The phase records below are of their day. Where a figure or a decision in
+them has changed since, PLAN.md has today's: in particular the storage limit
+is 10 MB (not 100 MB), `MAX_ACCOUNTS` is 750 (not 50), Change password is
+back on the Account page, and the player's Settings disable Duplicate
+cascade (not Start over) when storage is full.
+
 ## Current
 
 - **Phase:** 8 — Production, prepared up to the steps that need credentials
@@ -490,7 +496,8 @@ accounts, 20 cascades and 130,000 questions per quiz.
   - SSM parameters are referenced by ARN only. There are SES suppression and
     reputation alarms, a mail-failed alarm, a budget and an anomaly
     subscription.
-  - The drill task runs monthly, there are backup and drill failure rules, and
+  - The drill task runs twice a week (seven days without one that passed
+    alarm), there are backup and drill failure rules, and
     the backups bucket requires TLS. The ECR lifecycle keeps 40 images.
   - `alarm_email` is required, and Terraform 1.11 or later is required.
   - The variable validations are tested offline by `infra/tests/` (17 cases).
@@ -572,7 +579,9 @@ TEST_TIME_PLAN.md, as decided (T1–T5 yes, T3 = C1, T6 no):
   limits. `builder`, `pages` and `player` register their own users. `@limits`
   is gone: `storage.spec.ts` sets the account's `users.storage_limit_bytes`
   with SQL on the main stack. update.spec (`@full`) and the four `@env` passes
-  run side by side on stacks of their own (`make test-e2e-main`).
+  run side by side on stacks of their own (`make test-e2e-main`). With
+  `E2E_WEBKIT=1` (CI's Main tier) the shell, tabs and update journeys run
+  again in WebKit (project `webkit`) on the update journey's stack.
 - **Images:** `backend-prebuilt` (ubuntu:24.04) copies in the release binary
   built on the host (`make e2e-binary`); compose picks it through
   `ACRODONT_BACKEND_TARGET`; production's `backend` target is unchanged.
@@ -595,11 +604,11 @@ the authoritative sequence; in short:
 4. `scripts/init-db-roles.sh`, then `scripts/deploy.sh`, then
    `scripts/set-setting.sh desired_count=1` and pin `azs`.
 5. `scripts/check-alerts.sh`.
-6. SES production access, then `mail_max_per_second=14`; don't announce
+6. SES production access, then `mail_max_per_second=5`; don't announce
    before it is granted.
 7. The first admin (`scripts/confirm-user.sh --admin`) and the catalog upload
    at /admin, checking index sizes against `task_memory` (2 GiB).
-8. The first quarterly manual drill, recorded in the runbook (the monthly
+8. The first quarterly manual drill, recorded in the runbook (the twice-weekly
    automated drill runs itself).
 
 ## Open PQs
@@ -621,8 +630,8 @@ the authoritative sequence; in short:
 - PQ-015 (cascade limit as a client constant) — superseded by PQ-023: there is no cascade limit; `/api/auth/me` and every sync response report the account's storage.
 - PQ-016 (expired-session journey TTL 20 s, not 2 s) — provisional.
 - PQ-017 (forty-cascade drop pass; ROW_BYTES 150; "only the kept one") — provisional.
-- PQ-018 (answer-limit journey vs "never its cards") — provisional.
-- PQ-019 (device scale cases at a tenth; the first-sync budget) — decided: the budget is the measurement, 150 s for one heavily played cascade (49–107 s measured at the 130,000 cap).
+- PQ-018 (answer-limit journey vs "never its cards") — decided (see `plan-questions.md`; listed here as provisional until 2026-11-13).
+- PQ-019 (device scale cases at a tenth; the first-sync budget) — decided: the budget is the measurement, 150 s for one heavily played cascade (49–107 s measured at the 130,000 cap). Since then: 300 s, at the 300,000-question ceiling (see the Phase 7 note above and `scale-first-sync.scale.ts`).
 - PQ-023 (one storage limit, 100 MB; saved searches and the Trash count; 300,000 questions; no count cap) — decided 2026-11-11.
 
 ## Known failing tests

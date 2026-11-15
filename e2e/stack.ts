@@ -21,10 +21,11 @@ export function stack(cmd: 'up' | 'seed' | 'reset' | 'down', args: string[] = []
 /**
  * Every suite stack's configuration: the per-IP limits raised, because every
  * browser of every worker comes from 127.0.0.1, so four workers registering
- * users trip the 30-a-minute auth limit meant for one person. No journey
+ * users trip the 30-a-minute auth limit meant for one person, and a stack kept
+ * up for several runs would spend the five resets an hour one address may ask for. No journey
  * asserts these limits; backend/tests/auth.rs and catalog.rs do.
  */
-const SUITE_ENV = ['AUTH_RATE_PER_IP_PER_MINUTE=100000', 'CATALOG_RATE_PER_MINUTE=100000'];
+const SUITE_ENV = ['AUTH_RATE_PER_IP_PER_MINUTE=100000', 'CATALOG_RATE_PER_MINUTE=100000', 'RESET_RATE_PER_HOUR=100000'];
 
 /** The suite's stack configuration, then E2E_ENV's, through the same --env flag a developer uses; a later value wins. */
 export function e2eEnv(): string[] {

@@ -51,6 +51,11 @@ pub struct Effects {
     pub outcome: Option<String>,
     pub new_quiz_question_count: Option<i32>,
     pub new_quiz_questions_hash: Option<u64>,
+    /// A grade's cascade and the grade's (clamped) time: all a grade changes
+    /// on its cascade's row is the activity time and the sequence, so the
+    /// batch writes the row once for its grades (`ops::touch_cascades`)
+    /// where each grade used to write it.
+    pub touch: Option<(Uuid, DateTime<Utc>)>,
 }
 
 /// An operation as sent, with the fields every operation carries.

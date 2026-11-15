@@ -61,6 +61,8 @@ pub enum Reason {
     NotCleared,
     NotTrashed,
     BadCursor,
+    /// A finish from an account past five times its storage limit.
+    StorageLimit,
     Invalid,
     Error,
 }
@@ -80,6 +82,7 @@ impl Reason {
             Reason::NotCleared => "not_cleared",
             Reason::NotTrashed => "not_trashed",
             Reason::BadCursor => "bad_cursor",
+            Reason::StorageLimit => "storage_limit",
             Reason::Invalid => "invalid",
             Reason::Error => "error",
         }

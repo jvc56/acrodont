@@ -13,7 +13,10 @@ Fargate task on the backend image, and locally before a risky migration edit.
 With --s3-bucket the dump streams to `daily/YYYY-MM-DD.dump` (and
 `.schema.sql`), named for the day so a bad run cannot overwrite a good one;
 on the first of the month it is also written to `monthly/YYYY-MM.dump`, kept a
-year. With --metrics-region it reports `Acrodont/Backups` DumpSucceeded,
+year. The upload finishes whatever pg_dump did, so a pg_dump that dies
+part-way leaves a truncated object under the day's key; only a run whose two
+dumps both exited 0 then writes `daily/YYYY-MM-DD.ok`, holding the dump's
+size, and restore.py and drill.py take no dump without it. With --metrics-region it reports `Acrodont/Backups` DumpSucceeded,
 DumpBytes and DumpSizeRatio (this dump over the previous one), which the
 alarms in infra/alarms.tf watch. The database URL comes from --database-url
 or DATABASE_URL; production gives it a read-only role.
@@ -95,14 +98,19 @@ def to_directory(args: argparse.Namespace, day: dt.date) -> int:
 
 
 def previous_size(s3, bucket: str, key: str) -> Optional[int]:
-    """The size of the latest daily dump before `key`."""
-    best = None
+    """The size of the latest complete daily dump before `key`: one a failed
+    run left truncated has no marker, and is nothing to compare with."""
+    sizes = {}
     for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix="daily/"):
         for o in page.get("Contents", []):
-            k = o["Key"]
-            if k.endswith(".dump") and k < key and (best is None or k > best[0]):
-                best = (k, o["Size"])
-    return best[1] if best else None
+            sizes[o["Key"]] = o["Size"]
+    complete = [k for k in sizes if k.endswith(".dump") and k < key and marker_key(k) in sizes]
+    return sizes[max(complete)] if complete else None
+
+
+def marker_key(dump_key: str) -> str:
+    """Beside `X.dump`, `X.ok`: written last, by a run that succeeded."""
+    return dump_key[: -len(".dump")] + ".ok"
 
 
 def to_s3(args: argparse.Namespace, day: dt.date) -> int:
@@ -117,9 +125,11 @@ def to_s3(args: argparse.Namespace, day: dt.date) -> int:
 
     size = run_dump(args, False, uploader(key))
     run_dump(args, True, uploader(f"daily/{day.isoformat()}.schema.sql"))
+    # Both pg_dumps exited 0: the marker, with the size the dump must have.
+    s3.put_object(Bucket=args.s3_bucket, Key=marker_key(key), Body=str(size).encode())
     if day.day == 1:
         until = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=MONTHLY_RETENTION_DAYS)
-        for suffix in (".dump", ".schema.sql"):
+        for suffix in (".dump", ".schema.sql", ".ok"):
             s3.copy_object(
                 Bucket=args.s3_bucket,
                 Key=f"monthly/{day.strftime('%Y-%m')}{suffix}",

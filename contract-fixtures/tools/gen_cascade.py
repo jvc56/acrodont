@@ -277,6 +277,11 @@ def scenarios():
     v.op({"type": "set_cascade_options", "segment_size": 4}, expect="invalid")
     v.op({"type": "set_cascade_options", "segment_size": 0})
     v.op({"type": "set_cascade_options", "segment_size": 5})
+    # The upper bound, the question ceiling: at it, and one past it.
+    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 300001}, expect="invalid")
+    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 300000})
+    v.op({"type": "set_cascade_options", "segment_size": 300001}, expect="invalid")
+    v.op({"type": "set_cascade_options", "segment_size": 300000})
     out.append(v)
 
     v = Vector("run numbering after a size change", [SEG, "How a run is numbered"], count=250, opts=(100, "ladder", False))

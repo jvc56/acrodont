@@ -18,10 +18,20 @@ test('the app shell boots under its CSP with the Nginx headers', async ({ page }
 	expect(errors.filter((e) => /Content Security Policy/i.test(e))).toEqual([]);
 });
 
+// Why the offline navigations below are not made in the `webkit` project. With
+// `context.setOffline(true)`, Playwright's WebKit fails `page.goto` itself with
+// "WebKit encountered an internal error" for a page the service worker would
+// have answered from its cache (CI, both journeys below, at their first
+// navigation with no connection), where Chromium hands the navigation to the
+// worker. That is the test browser's emulation of "offline", not the app: the
+// same journeys reach "Available offline" and a controlling worker in WebKit
+// before that line. Everything before the navigation is still asserted there.
+const OFFLINE_NAVIGATION = 'Playwright’s WebKit fails a navigation made under setOffline(true) before the service worker is asked';
+
 // PLAN.md § On the device → App shell: once the service worker is active, a
 // reload of an app route with no connection still loads the app, while /api
 // navigations go to the network untouched.
-test('the service worker serves the shell offline', async ({ page, context }) => {
+test('the service worker serves the shell offline', async ({ page, context, browserName }) => {
 	await page.goto('/');
 	await page.evaluate(async () => {
 		await navigator.serviceWorker.ready;
@@ -49,18 +59,23 @@ test('the service worker serves the shell offline', async ({ page, context }) =>
 	);
 	expect(refused).toBe(true);
 	expect(await page.evaluate(() => (window as unknown as { __injected?: boolean }).__injected)).toBeUndefined();
+	test.skip(browserName === 'webkit', OFFLINE_NAVIGATION);
 	await context.setOffline(true);
 	await page.goto('/login');
 	await expect(page.getByLabel('Username')).toBeVisible();
+	// A route never visited: the worker answers it with the shell, and the app,
+	// signed out, goes to the log-in page. The browser's own offline page has a
+	// body too, so it is the app's form that is looked for.
 	await page.goto('/cascades/00000000-0000-4000-8000-000000000000').catch(() => undefined);
-	await expect(page.locator('body')).not.toBeEmpty();
+	await expect(page).toHaveURL(/\/login$/);
+	await expect(page.getByLabel('Username')).toBeVisible();
 	await context.setOffline(false);
 });
 
 // PLAN.md § On the device → Installing the app: the manifest and its icons, the
 // header's offline status, the browser's install offer, a closed tab reopened
 // with no connection, and the iPhone's one-time tip.
-test('installing: the manifest, the offline status, Install, and a tab reopened offline', async ({ page, context, browser, baseURL }) => {
+test('installing: the manifest, the offline status, Install, and a tab reopened offline', async ({ page, context, browser, baseURL, browserName }) => {
 	test.setTimeout(120_000);
 	const manifest = await page.request.get('/manifest.webmanifest');
 	expect(manifest.headers()['content-type']).toContain('application/manifest+json');
@@ -76,7 +91,10 @@ test('installing: the manifest, the offline status, Install, and a tab reopened 
 	// Ready offline, and the browser asked to keep the data, whatever it answered.
 	const status = page.locator('[data-offline]');
 	await expect(status).toHaveAttribute('data-offline', 'ready');
-	await expect(status).toHaveAttribute('data-kept', /^(true|false)$/);
+	// Playwright's WebKit may have no navigator.storage.persist(), or refuse it in the
+	// throwaway profile a test runs in: the status then reads "unknown", as it would in
+	// any browser that cannot say, and that is not what this journey is about.
+	await expect(status).toHaveAttribute('data-kept', browserName === 'webkit' ? /^(true|false|unknown)$/ : /^(true|false)$/);
 	await status.hover();
 	await expect(page.getByRole('tooltip')).toContainText('Acrodont opens on this device with no connection.');
 	await page.mouse.move(0, 400);
@@ -97,14 +115,6 @@ test('installing: the manifest, the offline status, Install, and a tab reopened 
 	expect(await page.evaluate(() => (window as unknown as { prompted?: boolean }).prompted)).toBe(true);
 	await expect(page.getByRole('button', { name: 'Install Acrodont' })).toHaveCount(0);
 
-	// Closed with no connection and opened again: the cascade is there to study.
-	await context.setOffline(true);
-	await page.close();
-	const again = await context.newPage();
-	await again.goto(path);
-	await expect(again.getByText('1 / 18')).toBeVisible({ timeout: 20_000 });
-	await context.setOffline(false);
-
 	// On an iPhone, which never offers to install, a tip says how, once.
 	const phone = await browser.newContext({ ...devices['iPhone 13'], baseURL });
 	const p = await phone.newPage();
@@ -117,4 +127,13 @@ test('installing: the manifest, the offline status, Install, and a tab reopened 
 	await expect(p.getByRole('heading', { name: 'Cascades' })).toBeVisible();
 	await expect(tip).toHaveCount(0);
 	await phone.close();
+
+	// Closed with no connection and opened again: the cascade is there to study.
+	test.skip(browserName === 'webkit', OFFLINE_NAVIGATION);
+	await context.setOffline(true);
+	await page.close();
+	const again = await context.newPage();
+	await again.goto(path);
+	await expect(again.getByText('1 / 18')).toBeVisible({ timeout: 20_000 });
+	await context.setOffline(false);
 });

@@ -58,8 +58,26 @@ locals {
   }
 }
 
+# The backend container's own check, a local so that the offline test can
+# read it (the container definitions are not known at plan).
+locals {
+  backend_health_check = {
+    command     = ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+    interval    = 30
+    timeout     = 5
+    retries     = 10
+    startPeriod = var.health_check_start_period
+  }
+}
+
 resource "aws_ecs_task_definition" "app" {
-  family                   = "acrodont"
+  family = "acrodont"
+  # A release replaces this resource with a new revision. Without this,
+  # Terraform deregisters the old revision first, and that is the revision
+  # the circuit breaker below rolls the service back to when the new one
+  # cannot start. Kept, old revisions pile up (one per release, free, no
+  # secret in them): docs/runbook.md, Rolling back, says how to prune.
+  skip_destroy             = true
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = var.task_cpu
@@ -78,13 +96,13 @@ resource "aws_ecs_task_definition" "app" {
       # The 30 s default SIGKILLs graceful shutdown's in-flight work (a
       # streaming export, a large sync batch); 120 is Fargate's maximum.
       stopTimeout = 120
-      healthCheck = {
-        command     = ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
-        interval    = 10
-        timeout     = 5
-        retries     = 3
-        startPeriod = var.health_check_start_period
-      }
+      # /health fails while the database is away. Ten tries at 30 s ride out
+      # a restart of it (the weekly maintenance window, a minor upgrade, a
+      # class change): at three tries of 10 s the task was killed after half
+      # a minute, its replacements exited until the database was back, and
+      # the one that stayed had the whole catalog to index again. The target
+      # group's check (alb.tf) allows the same five minutes.
+      healthCheck      = local.backend_health_check
       logConfiguration = local.log_config
     },
     {
@@ -112,7 +130,8 @@ resource "aws_ecs_service" "app" {
   health_check_grace_period_seconds = 300
   # Rolls: the new task serves before the old one drains. Acrodont runs safely
   # as two instances for that minute (advisory-locked purge, NOTIFY catalog
-  # reload, no SSE), unlike birdtest's stop-first single task.
+  # reload, and its one SSE stream, /api/sync/events, is fed through NOTIFY
+  # and closed on shutdown), unlike birdtest's stop-first single task.
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
   # A release whose task cannot start rolls back instead of retrying forever;
@@ -123,6 +142,10 @@ resource "aws_ecs_service" "app" {
   }
   # Exec goes to ops tasks only (infra/ops.tf), never into the task serving users.
   enable_execute_command = false
+  # Without this the provider replaces the service when its capacity provider
+  # changes: use_fargate_spot = false, the runbook's answer to a Spot outage,
+  # would destroy the service and make it again.
+  force_new_deployment = true
 
   capacity_provider_strategy {
     capacity_provider = var.use_fargate_spot ? "FARGATE_SPOT" : "FARGATE"

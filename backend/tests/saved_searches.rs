@@ -214,6 +214,11 @@ async fn a_save_validates_its_tree(pool: sqlx::PgPool) {
         ("word list total", json!({ "op": "and", "children": [
             { "type": "in_word_list", "negated": false, "entries": vec!["AB"; 150_001] },
             { "type": "in_word_list", "negated": false, "entries": vec!["AB"; 150_000] }] })),
+        // Neither fits its column: a field error, not a failed insert.
+        ("bound past INTEGER", json!({ "op": "and", "children": [
+            { "type": "point_value", "negated": false, "min": 0, "max": 3_000_000_000u64 }] })),
+        ("NUL in a text", json!({ "op": "and", "children": [
+            { "type": "definition", "negated": false, "text": "a\u{0}b" }] })),
     ];
     for (what, filters) in cases {
         let r = c.post("/api/searches", save_body(Uuid::new_v4(), what, filters)).await;
@@ -240,6 +245,8 @@ async fn a_save_validates_its_tree(pool: sqlx::PgPool) {
     assert_eq!(r.json()["errors"][0]["field"], "name");
     let r = c.post("/api/searches", save_body(Uuid::new_v4(), &"é".repeat(101), simple())).await;
     assert_eq!(r.json()["errors"][0]["field"], "name");
+    let r = c.post("/api/searches", save_body(Uuid::new_v4(), "a\u{0}b", simple())).await;
+    assert_eq!((r.status, r.json()["errors"][0]["field"].as_str()), (StatusCode::BAD_REQUEST, Some("name")));
     let r = c.post("/api/searches", save_body(Uuid::new_v4(), &"é".repeat(100), simple())).await;
     assert_eq!(r.status, StatusCode::CREATED);
 }

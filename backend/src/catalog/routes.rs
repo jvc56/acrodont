@@ -21,8 +21,12 @@ use crate::auth::Admin;
 use crate::auth::routes::ClientIp;
 use crate::error::{ApiError, ApiResult};
 
-/// Admin uploads are synchronous, with a 120-second timeout (PLAN.md § Upload limits).
-pub const UPLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+/// Admin uploads are synchronous, with a timeout (PLAN.md § Upload limits).
+/// Five seconds inside the 120 seconds Nginx (`proxy_read_timeout`) and the
+/// load balancer (`idle_timeout`, infra/alb.tf) wait for an answer: at the
+/// same figure an upload that took the whole time could commit just as they
+/// gave up and be answered `504`.
+pub const UPLOAD_TIMEOUT: Duration = Duration::from_secs(115);
 
 pub fn router(state: &AppState) -> Router<AppState> {
     let uploads = Router::new()
@@ -141,6 +145,10 @@ async fn letter_distribution(
     Path(name): Path<String>,
 ) -> ApiResult<Response> {
     state.limits.catalog_ip.check(&ip)?;
+    // No name holds a NUL, and Postgres refuses one in a text parameter (a 500).
+    if name.contains('\0') {
+        return Err(ApiError::NotFound);
+    }
     let Some(id) = sqlx::query_scalar!("SELECT id FROM letter_distributions WHERE name = $1", name)
         .fetch_optional(&state.db)
         .await?
@@ -382,6 +390,10 @@ async fn read_form(mp: &mut Multipart) -> ApiResult<Form> {
             form.file = Some((filename, bytes.to_vec()));
         } else {
             let text = field.text().await.map_err(multipart_error)?;
+            // Postgres refuses a NUL in a text parameter: said here, not as a 500.
+            if text.contains('\0') {
+                return Err(form_error("a form field holds a NUL character"));
+            }
             form.fields.insert(name, text.trim().to_owned());
         }
     }

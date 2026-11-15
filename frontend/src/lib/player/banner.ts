@@ -24,6 +24,9 @@ export function percent(correct: number, count: number): number {
 	return count === 0 ? 0 : Math.floor((correct * 100) / count);
 }
 
+/** "1 missed question", "5 missed questions". */
+const missed = (n: number) => `${n} missed ${n === 1 ? 'question' : 'questions'}`;
+
 export function finishBanner(f: FinishFacts): string {
 	const p = percent(f.correct, f.count);
 	const n = f.level;
@@ -37,16 +40,16 @@ export function finishBanner(f: FinishFacts): string {
 	}
 	switch (f.outcome) {
 		case 'completed':
-			return `Level 1: 100%. Cascade complete after ${f.completion!.levels} levels and ${f.completion!.attempts} ${f.completion!.attempts === 1 ? 'pass' : 'passes'}.`;
+			return `Level 1: 100%. Cascade complete after ${f.completion!.levels} ${f.completion!.levels === 1 ? 'level' : 'levels'} and ${f.completion!.attempts} ${f.completion!.attempts === 1 ? 'pass' : 'passes'}.`;
 		case 'reshuffled':
 			return `Level ${n}: 0%. Reshuffled. Try again.`;
 		case 'descended':
-			if (n === 1) return `Level 1: ${p}%. Reshuffled, and its ${f.misses} missed questions are now Level 2.`;
-			return `Level ${n}: ${p}%, and ${f.threshold}% is needed to clear. Level ${n} is reshuffled and waiting. Down to Level ${n + 1} with ${f.misses} missed questions.`;
+			if (n === 1) return `Level 1: ${p}%. Reshuffled, and its ${missed(f.misses)} ${f.misses === 1 ? 'is' : 'are'} now Level 2.`;
+			return `Level ${n}: ${p}%, and ${f.threshold}% is needed to clear. Level ${n} is reshuffled and waiting. Down to Level ${n + 1} with ${missed(f.misses)}.`;
 		case 'replaced':
-			return `Level ${n}: ${p}%. Replaced with its ${f.misses} missed questions.`;
+			return `Level ${n}: ${p}%. Replaced with its ${missed(f.misses)}.`;
 		case 'cleared':
-			if (f.misses > 0) return `Level ${n} cleared with ${p}%. Its ${f.misses} missed questions are now Level ${n}.`;
+			if (f.misses > 0) return `Level ${n} cleared with ${p}%. Its ${missed(f.misses)} ${f.misses === 1 ? 'is' : 'are'} now Level ${n}.`;
 			return `Level ${n} cleared with 100%. Back to Level ${n - 1}.`;
 		default:
 			return '';

@@ -38,6 +38,17 @@ export function levelBytes(questionCount: number, source: boolean): number {
 	return c.quiz_row + chunks * c.chunk_row + questionCount * (c.card + (source ? 0 : c.card_idx));
 }
 
+/**
+ * Studying never fails for storage, up to this many times the limit: past it
+ * the server refuses a finish (`storage_limit`) until room is made.
+ */
+export const FINISH_REFUSED_PAST = 5;
+
+/** Whether the server would refuse a finish for the account's storage. */
+export function finishesRefused(used: number, limit: number): boolean {
+	return used > limit * FINISH_REFUSED_PAST;
+}
+
 export type StorageState = 'ok' | 'almost' | 'over';
 
 export function storageState(used: number, limit: number): StorageState {

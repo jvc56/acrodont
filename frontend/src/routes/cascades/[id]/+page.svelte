@@ -13,6 +13,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, ApiError } from '$lib/api';
+	import { isRetriable, sendWithRetry } from '$lib/builder/create';
 	import { session } from '$lib/auth/session.svelte';
 	import CascadeLadder from '$lib/components/CascadeLadder.svelte';
 	import QuizOptionsForm from '$lib/components/QuizOptionsForm.svelte';
@@ -28,7 +29,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { display, textStyle } from '$lib/player/display.svelte';
 	import { controls } from '$lib/player/controls.svelte';
-	import { applyLocally, type NewOp } from '$lib/local/apply';
+	import { applyOrRefuse, CHANGE_REFUSED, type NewOp } from '$lib/local/apply';
 	import { storeCreated, type Created } from '$lib/local/created';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta, recordOpen } from '$lib/local/meta';
@@ -46,7 +47,7 @@
 	import type { AnswerMode, AttemptRow, CascadeRow } from '$lib/local/rows';
 	import type { RwTx } from '$lib/local/view';
 	import { PLAYER_LOCK } from '$lib/sync/downloads';
-	import { afterLocalWrite, ensureCascade, fetchAhead, fetchCard, fetchDistribution, playerActs, syncState } from '$lib/sync/runtime.svelte';
+	import { afterLocalWrite, ensureCascade, fetchAhead, fetchCard, fetchDistribution, playerActs, sendPending, syncState } from '$lib/sync/runtime.svelte';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import PanelBottomCloseIcon from '@lucide/svelte/icons/panel-bottom-close';
 	import PanelBottomOpenIcon from '@lucide/svelte/icons/panel-bottom-open';
@@ -56,7 +57,9 @@
 	import { clampPrefill, type QuizOptions } from '$lib/options';
 	import { confirmAction, confirmState } from '$lib/confirm.svelte';
 
-	const id = $derived(page.params.id as string);
+	// The cascade this player was made for. The layout beside this page makes a
+	// new page for another id, so it never changes under the player.
+	const id = page.params.id as string;
 
 	let db = $state<UserDb | null>(null);
 	let player = $state<Player | null>(null);
@@ -72,6 +75,8 @@
 	let typedWrong = $state(false);
 	/** The last entry the card took (an anagram of the question), shown under the input: green if right, red if wrong. */
 	let lastEntry = $state<{ text: string; correct: boolean } | null>(null);
+	/** Typed mode: the answer found most recently on this card, as the answer list spells it. */
+	let lastFound = $state<string | null>(null);
 	/** The scrolling quiz area, and the answer inside it that shrinks to fit it. */
 	let fitArea = $state<HTMLElement | null>(null);
 	let answerBox = $state<HTMLElement | null>(null);
@@ -111,7 +116,12 @@
 	/** A percentage to two decimal places, rounded. */
 	const pct = (p: number) => `${p.toFixed(2)}%`;
 	/** Whether the share correct so far would clear the level: green on track, red not; nothing before a grade. */
-	let onTrack = $derived(correctPct === null || !v?.cascade ? null : correctPct >= v.cascade.clear_threshold);
+	let onTrack = $derived(
+		correctPct === null || !v?.cascade || !levelQuiz
+			? null
+			: // Compared exactly, as a finish compares it: 57 of 100 at a threshold of 57 is on track.
+				levelQuiz.correct_count * 100 >= v.cascade.clear_threshold * (levelQuiz.correct_count + levelQuiz.missed_count)
+	);
 	/** The grade the quiz area's border shows once the answer is shown; none before. */
 	let gradeState = $derived(v?.status === 'ready' && v.card?.revealed ? v.card.grade : null);
 	// Each grade's border is a setting: by default a missed answer shows red and a correct one nothing.
@@ -166,16 +176,22 @@
 			const d = await userDb(session.userId, session.username);
 			if (cancelled) return;
 			db = d;
-			maxQuiz = (await getMeta(d, 'server')).max_quiz_questions;
+			const max = (await getMeta(d, 'server')).max_quiz_questions;
+			if (cancelled) return;
+			maxQuiz = max;
 			await display.load(d);
 			await controls.load(d);
+			if (cancelled) return;
 			// Navigating to the player is an open (§ Downloads).
 			const tx = d.transaction(['meta'], 'readwrite');
 			await recordOpen(tx as unknown as RwTx, id, new Date().toISOString());
 			await tx.done;
+			// The page was left while those ran: no lock, no open cascade, no player.
+			if (cancelled) return;
 			// Each player tab holds a Web Lock named for its cascade, so no drop pass takes it.
+			// A lock granted after the page is left is given straight back.
 			if (navigator.locks) {
-				void navigator.locks.request(PLAYER_LOCK + id, () => new Promise<void>((r) => (release = r)));
+				void navigator.locks.request(PLAYER_LOCK + id, () => (cancelled ? undefined : new Promise<void>((r) => (release = r))));
 			}
 			syncState.openCascade = id;
 			const p = new Player(d, id, {
@@ -226,7 +242,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	 * its writes are saved (PLAN.md § Taking a quiz → Instant at any size).
 	 */
 	function act(a: Action) {
-		if (!player || !actions.pass(a, performance.now())) return;
+		// The completion screen is in front: the new pass under it takes no action.
+		if (!player || v?.completion || !actions.pass(a, performance.now())) return;
 		const card = v?.card;
 		// Before the reveal, Show / Next on a typed card focuses the input instead of giving up.
 		if (a === 'show_next' && card?.typed && !card.revealed && !typedFocused) {
@@ -263,7 +280,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 			if (e.key === 'Escape') settingsOpen = false;
 			return;
 		}
-		if (!v || v.status !== 'ready') return;
+		// The completion screen keeps its keys: Space or Enter presses its focused button.
+		if (!v || v.status !== 'ready' || v.completion) return;
 		const t = e.target as HTMLElement | null;
 		const inTyped = t === typedInput;
 		// Text fields outside the quiz area keep their keys.
@@ -272,6 +290,8 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		const a = actionFor(controls.value, keyStroke(e));
 		if (!a) return;
 		e.preventDefault();
+		// A key held down is one press: its repeats would show and grade cards unseen.
+		if (e.repeat) return;
 		void act(a);
 	}
 
@@ -361,28 +381,41 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		void typingCard;
 		typedWrong = false;
 		lastEntry = null;
+		lastFound = null;
 	});
 
 	async function onTypedKey(e: KeyboardEvent) {
 		if (e.key !== 'Enter' || !player) return;
 		e.preventDefault();
+		// A key held down is one press: the repeat would arrive with the input
+		// just cleared, and an empty entry gives the card up.
+		if (e.repeat) return;
 		const text = typedText;
 		const r = await player.enter(text);
 		// A word that is not an anagram of the question stays in the input to fix; everything else clears it.
 		if (r && r.kind !== 'not_anagram') typedText = '';
 		typedWrong = r?.kind === 'wrong';
+		// The word found by this entry is the green one among the found words.
+		if (r?.kind === 'found' || r?.kind === 'out_of_order') lastFound = r.word;
 		// An anagram of the question is taken, right or wrong, and shown under the input.
 		if (r?.kind === 'found' || r?.kind === 'already' || r?.kind === 'wrong') {
 			lastEntry = { text: text.trim().toUpperCase(), correct: r.kind !== 'wrong' };
 		}
 	}
 
-	async function write(op: NewOp) {
-		if (!db) return;
-		await applyLocally(db, op);
-		afterLocalWrite();
+	/**
+	 * One change made from this page. False when the rules refused it (the page
+	 * was showing what another tab or a sync has since changed): the page says
+	 * so and reads again, so what it shows is true before the next press.
+	 */
+	async function write(op: NewOp): Promise<boolean> {
+		if (!db) return false;
+		const applied = await applyOrRefuse(db, op);
+		if (applied) afterLocalWrite();
+		else cascadeError = CHANGE_REFUSED;
 		await refreshSide();
 		await player?.load(true);
+		return applied !== null;
 	}
 
 	/**
@@ -395,7 +428,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		if (!c || !Object.keys(fields).length) return;
 		// Definitions, hooks or probability orders change what an answer holds: the cards in memory go first.
 		if (fields.show_definitions !== undefined || fields.show_hooks !== undefined || fields.show_probability !== undefined) player?.settingsChanged();
-		await write({ type: 'set_cascade_options', cascade_id: c.id, ...fields } as NewOp);
+		if (!(await write({ type: 'set_cascade_options', cascade_id: c.id, ...fields } as NewOp))) return;
 		// Switching mode mid-card resets its typed entries.
 		if (fields.answer_mode !== undefined) await player?.modeChanged();
 		await offer(key, fields);
@@ -438,8 +471,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		if (o.progression !== q.progression) op.progression = o.progression;
 		if (o.require_alphabetical !== q.require_alphabetical) op.require_alphabetical = o.require_alphabetical;
 		if (Object.keys(op).length <= 2) return;
-		await write(op as unknown as NewOp);
-		levelSaved++;
+		if (await write(op as unknown as NewOp)) levelSaved++;
 	}
 
 	/** The options the cascade's new levels start with: saved as soon as one is changed, like its other settings. */
@@ -519,6 +551,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	}
 
 	async function restore() {
+		cascadeError = null;
 		await write({ type: 'restore_cascade', cascade_id: id });
 	}
 
@@ -532,8 +565,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 			action: 'Move to Trash'
 		});
 		if (!ok) return;
-		await write({ type: 'trash_cascade', cascade_id: id });
-		await goto('/');
+		if (await write({ type: 'trash_cascade', cascade_id: id })) await goto('/');
 	}
 
 	let starting = $state<{ stage: 'server' | 'device'; progress: number; count: number | null } | null>(null);
@@ -549,10 +581,20 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		if (!ok) return;
 		const { device_id } = await getMeta(db, 'device');
 		const body = { id: crypto.randomUUID(), source_quiz_id: crypto.randomUUID(), device_id, at: new Date().toISOString() };
-		starting = { stage: 'server', progress: 0, count: null };
 		cascadeError = null;
+		if (!navigator.onLine) {
+			cascadeError = 'Duplicating a cascade needs a connection.';
+			return;
+		}
+		starting = { stage: 'server', progress: 0, count: null };
 		try {
-			const created = await api.post<Created>(`/api/cascades/${id}/duplicate`, body);
+			// The server copies the settings it holds: one changed here and not
+			// yet sent is sent first, and waited for a few seconds.
+			await sendPending(db, id);
+			// Retried with the same ids on a 5xx, a 429 or a dropped connection, as
+			// Create Cascade is (builder/create.ts): the server answers a repeat
+			// with the cascade it already made.
+			const created = await sendWithRetry(() => api.post<Created>(`/api/cascades/${id}/duplicate`, body));
 			starting = { stage: 'device', progress: 0, count: Number(created.source_quiz.question_count) };
 			await storeCreated(db, created, new Date(), (f) => starting && (starting.progress = f));
 			settingsOpen = false;
@@ -560,8 +602,19 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		} catch (e) {
 			if (e instanceof ApiError && e.code === 'storage_limit') {
 				const b = e.body as { used: number; limit: number; needed: number };
-				cascadeError = `Duplicating needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your storage is free. Empty the Trash or delete cascades to make room.`;
-			} else cascadeError = 'Duplicating a cascade needs a connection.';
+				// Refused before the search ran (the account is already full), the server knows no size to name.
+				cascadeError =
+					b.needed > 0
+						? `Duplicating needs about ${formatBytes(b.needed)}, and ${formatBytes(Math.max(0, b.limit - b.used))} of your storage is free. Empty the Trash or delete cascades to make room.`
+						: `Your storage is full: ${formatBytes(b.used)} of ${formatBytes(b.limit)} is used. Empty the Trash or delete cascades to make room.`;
+			} else if (e instanceof ApiError && e.code === 'empty') {
+				// The search is run again, on today's catalog: trying again finds the same.
+				cascadeError = 'This cascade’s search matches nothing now, so there is nothing to duplicate.';
+			} else if (e instanceof ApiError && e.code === 'over_cap') {
+				cascadeError = `This cascade’s search now matches ${(e.body as { count: number }).count.toLocaleString()} questions, more than a cascade may hold.`;
+			} else if (isRetriable(e)) cascadeError = 'Duplicating a cascade needs a connection.';
+			// The server refused it, or this device could not store it: not the connection.
+			else cascadeError = 'The cascade could not be duplicated. Try again.';
 		} finally {
 			starting = null;
 		}
@@ -618,6 +671,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 						answer={card.answer}
 						settings={v.cascade!}
 						typing={card.typed.found}
+						entered={lastFound}
 						font={dsp.answer_font}
 						size={dsp.answer_size_px}
 						spacing={dsp.answer_spacing}
@@ -683,6 +737,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	{:else if v.status === 'trashed'}
 		<p>This cascade is in the Trash.</p>
 		<Button class="mt-4" onclick={restore}>Restore</Button>
+		{#if cascadeError}<p class="mt-2 text-sm text-destructive" role="alert">{cascadeError}</p>{/if}
 		<div class="mt-6"><CascadeLadder {rows} /></div>
 	{/if}
 {/snippet}
@@ -694,11 +749,11 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		{@const typed = v.card.typed}
 		<div class="shrink-0 border-t bg-background px-4 py-3">
 			{#if mobile && typedFocused}
-				<!-- The on-screen keyboard covers the zones: three buttons sit above it. -->
-				<div class="mb-2 flex justify-around">
+				<!-- The on-screen keyboard covers the zones: two buttons sit above it. There is no
+				     Toggle: the bar is gone once the answer is shown, and before that there is no grade. -->
+				<div class="mb-2 flex justify-around" data-typed-actions>
 					<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('previous')}>Previous</Button>
 					<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('show_next')}>Show / Next</Button>
-					<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('toggle_grade')}>Toggle</Button>
 				</div>
 			{/if}
 			<div class="mx-auto max-w-sm space-y-1">
@@ -1181,6 +1236,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 				<Button onclick={startOver}>Start over</Button>
 				<Button variant="outline" onclick={moveToTrash}>Move to Trash</Button>
 			</div>
+			{#if cascadeError}<p class="text-sm text-destructive" role="alert">{cascadeError}</p>{/if}
 		</div>
 	</div>
 {/if}

@@ -4,7 +4,7 @@
 // server does, and pulls exactly the rows changed since the cursor, in table
 // order, paged by total rows with the ceiling fixed by the first page
 // (PLAN.md § The sync cycle). The server itself is tested in backend/tests.
-import { levelBytes, STORAGE_COSTS } from '$lib/cascades/storage';
+import { finishesRefused, levelBytes, STORAGE_COSTS } from '$lib/cascades/storage';
 import { questionsHash, toI64, fromI64 } from '$lib/cascade/order';
 import { Rejected, type Grade, type Progression } from '$lib/cascade/rules';
 import { positionsOf, SimCascade, type Op, type SimQuiz } from '$lib/cascade/sim';
@@ -330,6 +330,11 @@ export class FakeServer {
 		if (type === 'set_cascade_options' && !(e.options_device === device || e.options_seq <= seen || at > e.options_at)) {
 			throw new Rejected('stale');
 		}
+		// The one bound on studying (§ Storage limit): past five times the limit a
+		// finish is refused. The server checks it after the rules, so a finish
+		// they refuse keeps their reason; this stand-in checks it first, which
+		// differs only for a finish refused twice over.
+		if (type === 'finish' && finishesRefused(this.storage().used, this.storageLimit)) throw new Rejected('storage_limit');
 		const before = new Set(e.sim.quizzes.keys());
 		const r = e.sim.apply(op as unknown as Op);
 		if (type === 'trash_cascade') e.trashed_at = at;

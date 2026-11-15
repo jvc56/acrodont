@@ -2,7 +2,7 @@
 // server's (contract-fixtures/storage.json), and the figures read as stated.
 import { describe, expect, it } from 'vitest';
 import costs from '../../../../contract-fixtures/storage.json';
-import { formatBytes, levelBytes, STORAGE_COSTS, storageState } from './storage';
+import { finishesRefused, formatBytes, levelBytes, STORAGE_COSTS, storageState } from './storage';
 
 describe('storage', () => {
 	it('uses the server’s per-row costs', () => {
@@ -23,6 +23,12 @@ describe('storage', () => {
 		expect(storageState(90, 100)).toBe('almost');
 		expect(storageState(100, 100)).toBe('almost');
 		expect(storageState(101, 100)).toBe('over');
+	});
+
+	it('finishes are refused past five times the limit, not at it', () => {
+		expect(finishesRefused(101, 100)).toBe(false);
+		expect(finishesRefused(500, 100)).toBe(false);
+		expect(finishesRefused(501, 100)).toBe(true);
 	});
 
 	it('reads in decimal units, as the limit is stated', () => {

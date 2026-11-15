@@ -90,6 +90,27 @@ resource "aws_cloudwatch_metric_alarm" "api_5xx" {
   ok_actions          = [aws_sns_topic.alarms.arn]
 }
 
+# The application answering 5xx for fifteen minutes. The alarm above counts
+# only what the load balancer itself answers (no target, a dropped
+# connection): a backend returning 500 on every /api call while /health still
+# passes is a target response, a different metric, and nothing else would say.
+resource "aws_cloudwatch_metric_alarm" "app_5xx" {
+  count               = local.service_alarms
+  alarm_name          = "acrodont-app-5xx"
+  alarm_description   = "acrodont's application has answered 5xx for fifteen minutes"
+  namespace           = "AWS/ApplicationELB"
+  metric_name         = "HTTPCode_Target_5XX_Count"
+  dimensions          = { TargetGroup = aws_lb_target_group.web.arn_suffix, LoadBalancer = aws_lb.main.arn_suffix }
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 3
+  threshold           = 5
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+}
+
 resource "aws_cloudwatch_metric_alarm" "backend_cpu_high" {
   count               = local.service_alarms
   alarm_name          = "acrodont-backend-cpu-high"
@@ -152,6 +173,29 @@ resource "aws_cloudwatch_metric_alarm" "backup_missing" {
   period              = 21600
   evaluation_periods  = 6
   datapoints_to_alarm = 6
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+}
+
+# No successful drill in seven days: seven one-day periods with no success,
+# missing data counting as a miss. scripts/drill.py reports DrillSucceeded, 1
+# or 0, so a drill that fails and one that is never started (a schedule that
+# cannot call RunTask, a task that reports nothing) both count. Seven days is
+# the longest an alarm may look back (period times evaluation periods), which
+# is why the drill runs twice a week (backups.tf). Before the first drill
+# there is no data, so this alarm is in ALARM from the first apply until then.
+resource "aws_cloudwatch_metric_alarm" "drill_missing" {
+  alarm_name          = "acrodont-no-drill-7d"
+  alarm_description   = "No successful restore drill in seven days (PLAN.md § Backups)."
+  namespace           = "Acrodont/Backups"
+  metric_name         = "DrillSucceeded"
+  statistic           = "Sum"
+  period              = 86400
+  evaluation_periods  = 7
+  datapoints_to_alarm = 7
   threshold           = 1
   comparison_operator = "LessThanThreshold"
   treat_missing_data  = "breaching"

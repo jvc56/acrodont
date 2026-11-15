@@ -38203,6 +38203,855 @@
    "case": "leave_value default lines"
   },
   {
+   "name": "Formulas",
+   "quiz_type": "anagram",
+   "tiles": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z"
+   ],
+   "questions": [
+    {
+     "idx": 0,
+     "key": "AB",
+     "words": [
+      {
+       "word": "AB",
+       "definition": "=HYPERLINK(\"http://x.test\",\"a muscle\")",
+       "front_hooks": "CDFGJKLNSTW",
+       "back_hooks": "AOSY"
+      },
+      {
+       "word": "BA",
+       "definition": "=the soul",
+       "front_hooks": "AO",
+       "back_hooks": "ADGHLMNPRSTY"
+      }
+     ]
+    },
+    {
+     "idx": 1,
+     "key": "AD",
+     "words": [
+      {
+       "word": "AD",
+       "definition": "+an advertisement",
+       "front_hooks": "",
+       "back_hooks": "DOSZ"
+      },
+      {
+       "word": "DA",
+       "definition": "a father",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 2,
+     "key": "AE",
+     "words": [
+      {
+       "word": "AE",
+       "definition": "-one",
+       "front_hooks": "",
+       "back_hooks": ""
+      },
+      {
+       "word": "EA",
+       "definition": "@a river",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 3,
+     "key": "AG",
+     "words": [
+      {
+       "word": "AG",
+       "definition": "@SUM(1,2)",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 4,
+     "key": "AH",
+     "words": [
+      {
+       "word": "AH",
+       "definition": "\tto exclaim",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 5,
+     "key": "AI",
+     "words": [
+      {
+       "word": "AI",
+       "definition": "\ra sloth",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 6,
+     "key": "AL",
+     "words": [
+      {
+       "word": "AL",
+       "definition": "a tree = an East Indian one",
+       "front_hooks": "",
+       "back_hooks": ""
+      },
+      {
+       "word": "LA",
+       "definition": "=a note",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 7,
+     "key": "AM",
+     "words": [
+      {
+       "word": "AM",
+       "definition": "'=already quoted",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    }
+   ],
+   "quizzes": [
+    {
+     "level": 1,
+     "active": true,
+     "order": [
+      7,
+      6,
+      5,
+      4,
+      3,
+      2,
+      1,
+      0
+     ],
+     "grades": {
+      "0": "missed",
+      "3": "correct"
+     }
+    }
+   ],
+   "choices": {
+    "scope": "cascade",
+    "which": "all",
+    "order": "study",
+    "decimals": 1,
+    "format": "csv",
+    "columns": [
+     "question",
+     "answer",
+     "definition",
+     "hooks",
+     "grade"
+    ]
+   },
+   "expected": {
+    "filename": "Formulas.csv",
+    "body": "question,answer,definition,hooks,grade\r\nAB,AB BA,\"'=HYPERLINK(\"\"http://x.test\"\",\"\"a muscle\"\") | =the soul\",C D F G J K L N S T W|A O S Y / A O|A D G H L M N P R S T Y,missed\r\nAD,AD DA,'+an advertisement | a father,|D O S Z / |,\r\nAE,AE EA,'-one | @a river,| / |,\r\nAG,AG,\"'@SUM(1,2)\",|,correct\r\nAH,AH,'\tto exclaim,|,\r\nAI,AI,\"'\ra sloth\",|,\r\nAL,AL LA,a tree = an East Indian one | =a note,| / |,\r\nAM,AM,'=already quoted,|,\r\n"
+   },
+   "case": "formula anagram csv all"
+  },
+  {
+   "name": "Formulas",
+   "quiz_type": "anagram",
+   "tiles": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z"
+   ],
+   "questions": [
+    {
+     "idx": 0,
+     "key": "AB",
+     "words": [
+      {
+       "word": "AB",
+       "definition": "=HYPERLINK(\"http://x.test\",\"a muscle\")",
+       "front_hooks": "CDFGJKLNSTW",
+       "back_hooks": "AOSY"
+      },
+      {
+       "word": "BA",
+       "definition": "=the soul",
+       "front_hooks": "AO",
+       "back_hooks": "ADGHLMNPRSTY"
+      }
+     ]
+    },
+    {
+     "idx": 1,
+     "key": "AD",
+     "words": [
+      {
+       "word": "AD",
+       "definition": "+an advertisement",
+       "front_hooks": "",
+       "back_hooks": "DOSZ"
+      },
+      {
+       "word": "DA",
+       "definition": "a father",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 2,
+     "key": "AE",
+     "words": [
+      {
+       "word": "AE",
+       "definition": "-one",
+       "front_hooks": "",
+       "back_hooks": ""
+      },
+      {
+       "word": "EA",
+       "definition": "@a river",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 3,
+     "key": "AG",
+     "words": [
+      {
+       "word": "AG",
+       "definition": "@SUM(1,2)",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 4,
+     "key": "AH",
+     "words": [
+      {
+       "word": "AH",
+       "definition": "\tto exclaim",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 5,
+     "key": "AI",
+     "words": [
+      {
+       "word": "AI",
+       "definition": "\ra sloth",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 6,
+     "key": "AL",
+     "words": [
+      {
+       "word": "AL",
+       "definition": "a tree = an East Indian one",
+       "front_hooks": "",
+       "back_hooks": ""
+      },
+      {
+       "word": "LA",
+       "definition": "=a note",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 7,
+     "key": "AM",
+     "words": [
+      {
+       "word": "AM",
+       "definition": "'=already quoted",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    }
+   ],
+   "quizzes": [
+    {
+     "level": 1,
+     "active": true,
+     "order": [
+      7,
+      6,
+      5,
+      4,
+      3,
+      2,
+      1,
+      0
+     ],
+     "grades": {
+      "0": "missed",
+      "3": "correct"
+     }
+    }
+   ],
+   "choices": {
+    "scope": "cascade",
+    "which": "all",
+    "order": "study",
+    "decimals": 1,
+    "format": "csv",
+    "columns": [
+     "definition",
+     "question"
+    ]
+   },
+   "expected": {
+    "filename": "Formulas.csv",
+    "body": "definition,question\r\n\"'=HYPERLINK(\"\"http://x.test\"\",\"\"a muscle\"\") | =the soul\",AB\r\n'+an advertisement | a father,AD\r\n'-one | @a river,AE\r\n\"'@SUM(1,2)\",AG\r\n'\tto exclaim,AH\r\n\"'\ra sloth\",AI\r\na tree = an East Indian one | =a note,AL\r\n'=already quoted,AM\r\n"
+   },
+   "case": "formula anagram csv definition first"
+  },
+  {
+   "name": "Formulas",
+   "quiz_type": "anagram",
+   "tiles": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z"
+   ],
+   "questions": [
+    {
+     "idx": 0,
+     "key": "AB",
+     "words": [
+      {
+       "word": "AB",
+       "definition": "=HYPERLINK(\"http://x.test\",\"a muscle\")",
+       "front_hooks": "CDFGJKLNSTW",
+       "back_hooks": "AOSY"
+      },
+      {
+       "word": "BA",
+       "definition": "=the soul",
+       "front_hooks": "AO",
+       "back_hooks": "ADGHLMNPRSTY"
+      }
+     ]
+    },
+    {
+     "idx": 1,
+     "key": "AD",
+     "words": [
+      {
+       "word": "AD",
+       "definition": "+an advertisement",
+       "front_hooks": "",
+       "back_hooks": "DOSZ"
+      },
+      {
+       "word": "DA",
+       "definition": "a father",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 2,
+     "key": "AE",
+     "words": [
+      {
+       "word": "AE",
+       "definition": "-one",
+       "front_hooks": "",
+       "back_hooks": ""
+      },
+      {
+       "word": "EA",
+       "definition": "@a river",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 3,
+     "key": "AG",
+     "words": [
+      {
+       "word": "AG",
+       "definition": "@SUM(1,2)",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 4,
+     "key": "AH",
+     "words": [
+      {
+       "word": "AH",
+       "definition": "\tto exclaim",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 5,
+     "key": "AI",
+     "words": [
+      {
+       "word": "AI",
+       "definition": "\ra sloth",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 6,
+     "key": "AL",
+     "words": [
+      {
+       "word": "AL",
+       "definition": "a tree = an East Indian one",
+       "front_hooks": "",
+       "back_hooks": ""
+      },
+      {
+       "word": "LA",
+       "definition": "=a note",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    },
+    {
+     "idx": 7,
+     "key": "AM",
+     "words": [
+      {
+       "word": "AM",
+       "definition": "'=already quoted",
+       "front_hooks": "",
+       "back_hooks": ""
+      }
+     ]
+    }
+   ],
+   "quizzes": [
+    {
+     "level": 1,
+     "active": true,
+     "order": [
+      7,
+      6,
+      5,
+      4,
+      3,
+      2,
+      1,
+      0
+     ],
+     "grades": {
+      "0": "missed",
+      "3": "correct"
+     }
+    }
+   ],
+   "choices": {
+    "scope": "cascade",
+    "which": "all",
+    "order": "study",
+    "decimals": 1,
+    "format": "txt",
+    "lines": "answers"
+   },
+   "expected": {
+    "filename": "Formulas.txt",
+    "body": "AB\nBA\nAD\nDA\nAE\nEA\nAG\nAH\nAI\nAL\nLA\nAM\n"
+   },
+   "case": "formula anagram txt answers"
+  },
+  {
+   "name": "Formula defs",
+   "quiz_type": "definition",
+   "tiles": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z"
+   ],
+   "questions": [
+    {
+     "idx": 0,
+     "key": "AB",
+     "definition": "=1+1",
+     "front_hooks": "",
+     "back_hooks": "S"
+    },
+    {
+     "idx": 1,
+     "key": "AD",
+     "definition": "-2, a negative",
+     "front_hooks": "",
+     "back_hooks": ""
+    },
+    {
+     "idx": 2,
+     "key": "AE",
+     "definition": "one",
+     "front_hooks": "",
+     "back_hooks": ""
+    },
+    {
+     "idx": 3,
+     "key": "AG",
+     "definition": "+\"plus\"",
+     "front_hooks": "",
+     "back_hooks": ""
+    }
+   ],
+   "quizzes": [
+    {
+     "level": 1,
+     "active": true,
+     "order": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "grades": {
+      "1": "missed"
+     }
+    }
+   ],
+   "choices": {
+    "scope": "cascade",
+    "which": "all",
+    "order": "study",
+    "decimals": 1,
+    "format": "csv",
+    "columns": [
+     "question",
+     "answer",
+     "definition",
+     "hooks",
+     "grade"
+    ]
+   },
+   "expected": {
+    "filename": "Formula defs.csv",
+    "body": "question,answer,definition,hooks,grade\r\nAB,'=1+1,'=1+1,|S,\r\nAD,\"'-2, a negative\",\"'-2, a negative\",|,missed\r\nAE,one,one,|,\r\nAG,\"'+\"\"plus\"\"\",\"'+\"\"plus\"\"\",|,\r\n"
+   },
+   "case": "formula definition csv all"
+  },
+  {
+   "name": "Formula defs",
+   "quiz_type": "definition",
+   "tiles": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z"
+   ],
+   "questions": [
+    {
+     "idx": 0,
+     "key": "AB",
+     "definition": "=1+1",
+     "front_hooks": "",
+     "back_hooks": "S"
+    },
+    {
+     "idx": 1,
+     "key": "AD",
+     "definition": "-2, a negative",
+     "front_hooks": "",
+     "back_hooks": ""
+    },
+    {
+     "idx": 2,
+     "key": "AE",
+     "definition": "one",
+     "front_hooks": "",
+     "back_hooks": ""
+    },
+    {
+     "idx": 3,
+     "key": "AG",
+     "definition": "+\"plus\"",
+     "front_hooks": "",
+     "back_hooks": ""
+    }
+   ],
+   "quizzes": [
+    {
+     "level": 1,
+     "active": true,
+     "order": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "grades": {
+      "1": "missed"
+     }
+    }
+   ],
+   "choices": {
+    "scope": "cascade",
+    "which": "all",
+    "order": "study",
+    "decimals": 1,
+    "format": "csv",
+    "columns": [
+     "definition",
+     "question"
+    ]
+   },
+   "expected": {
+    "filename": "Formula defs.csv",
+    "body": "definition,question\r\n'=1+1,AB\r\n\"'-2, a negative\",AD\r\none,AE\r\n\"'+\"\"plus\"\"\",AG\r\n"
+   },
+   "case": "formula definition csv definition first"
+  },
+  {
+   "name": "Formula defs",
+   "quiz_type": "definition",
+   "tiles": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z"
+   ],
+   "questions": [
+    {
+     "idx": 0,
+     "key": "AB",
+     "definition": "=1+1",
+     "front_hooks": "",
+     "back_hooks": "S"
+    },
+    {
+     "idx": 1,
+     "key": "AD",
+     "definition": "-2, a negative",
+     "front_hooks": "",
+     "back_hooks": ""
+    },
+    {
+     "idx": 2,
+     "key": "AE",
+     "definition": "one",
+     "front_hooks": "",
+     "back_hooks": ""
+    },
+    {
+     "idx": 3,
+     "key": "AG",
+     "definition": "+\"plus\"",
+     "front_hooks": "",
+     "back_hooks": ""
+    }
+   ],
+   "quizzes": [
+    {
+     "level": 1,
+     "active": true,
+     "order": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "grades": {
+      "1": "missed"
+     }
+    }
+   ],
+   "choices": {
+    "scope": "cascade",
+    "which": "all",
+    "order": "study",
+    "decimals": 1,
+    "format": "txt",
+    "lines": "answers"
+   },
+   "expected": {
+    "filename": "Formula defs.txt",
+    "body": "=1+1\n-2, a negative\none\n+\"plus\"\n"
+   },
+   "case": "formula definition txt answers"
+  },
+  {
    "name": "Trash export",
    "quiz_type": "anagram",
    "tiles": [

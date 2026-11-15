@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# First-time database setup, after the first apply (desired_count = 0) and
-# before the service is scaled up.
+# First-time database setup: after the first apply (desired_count = 0) and
+# the first scripts/deploy.sh, which builds the ops image this runs its task
+# on, and before the service is scaled up.
 #
 #   scripts/init-db-roles.sh
 #
@@ -97,4 +98,4 @@ SQL"
 rc=0
 ops_run_ops_script "$script" || rc=$?
 ((rc == 0)) || ops_die "creating the roles failed (exit $rc): the SSM parameters stay; fix the cause and run this again"
-ops_say "roles ready. Next (docs/runbook.md): scripts/deploy.sh, then scripts/set-setting.sh desired_count=1"
+ops_say "roles ready. Next (docs/runbook.md): scripts/set-setting.sh desired_count=1"

@@ -49,6 +49,7 @@
 		definition = { font: 'Inter', size: 20, spacing: 0 },
 		word = null,
 		typing = null,
+		entered = null,
 		definitionWidth = 0,
 		hookSize = 27
 	}: {
@@ -70,6 +71,8 @@
 		word?: Word | null;
 		/** Typed mode before the reveal: the words found so far, shown bare. */
 		typing?: string[] | null;
+		/** Typed mode: the word found most recently, which `typing` (kept in tile order) cannot say. */
+		entered?: string | null;
 		/** This device's choice: the definition column's greatest width in px; 0 is all the room there is. */
 		definitionWidth?: number;
 		/** This device's choice: the size of the hooks and the probability order, in px. */
@@ -90,7 +93,7 @@
 	let hooks = $derived(!typing && settings.show_hooks !== false);
 	let definitions = $derived(!typing && settings.show_definitions !== false);
 	/** Typed mode: the word typed last, green among the others. */
-	let latest = $derived(typing?.at(-1) ?? null);
+	let latest = $derived(typing ? (entered && typing.includes(entered) ? entered : (typing.at(-1) ?? null)) : null);
 	/** The cascade's choice: a definition in a column of its own after the back hooks, or centred under its word. */
 	let definitionColumn = $derived(settings.definition_column !== false);
 	let showProbability = $derived(!typing && settings.show_probability === true);

@@ -120,16 +120,26 @@ const q = (params: Record<string, string | number | boolean>) =>
 		.map(([k, v]) => `${k}=${v === true ? 1 : v}`)
 		.join('&');
 
-export const httpApi: DownloadApi = {
-	questions: (c, qz, from, limit) => api.get(`/api/cascades/${c}/quizzes/${qz}/questions?${q({ from, limit })}`),
-	grades: (c, qz, from, limit) => api.get(`/api/cascades/${c}/quizzes/${qz}/grades?${q({ from, limit })}`),
-	keys: (c, from, limit) => api.get(`/api/cascades/${c}/cards?${q({ from, limit, keys: true })}`),
-	cards: (c, from, limit, hooks, definitions) =>
-		api.get(`/api/cascades/${c}/cards?${q({ from, limit, hooks, definitions })}`),
-	cardsByIdx: (c, idx, hooks, definitions) =>
-		api.get(`/api/cascades/${c}/cards?${q({ idx: idx.join(','), hooks, definitions })}`),
-	distribution: (name) => api.get(`/api/letter-distributions/${encodeURIComponent(name)}`, { bindUser: false })
+/**
+ * The download endpoints over fetch. `userId` is the account whose database
+ * the manager holds, named on every request whatever account the tab has since
+ * come to run as (see `transportFor` in engine.ts); without it the requests
+ * name the tab's account.
+ */
+export const httpApiFor = (userId?: string): DownloadApi => {
+	const as = { user: userId };
+	return {
+		questions: (c, qz, from, limit) => api.get(`/api/cascades/${c}/quizzes/${qz}/questions?${q({ from, limit })}`, as),
+		grades: (c, qz, from, limit) => api.get(`/api/cascades/${c}/quizzes/${qz}/grades?${q({ from, limit })}`, as),
+		keys: (c, from, limit) => api.get(`/api/cascades/${c}/cards?${q({ from, limit, keys: true })}`, as),
+		cards: (c, from, limit, hooks, definitions) => api.get(`/api/cascades/${c}/cards?${q({ from, limit, hooks, definitions })}`, as),
+		cardsByIdx: (c, idx, hooks, definitions) =>
+			api.get(`/api/cascades/${c}/cards?${q({ idx: idx.join(','), hooks, definitions })}`, as),
+		distribution: (name) => api.get(`/api/letter-distributions/${encodeURIComponent(name)}`, { bindUser: false })
+	};
 };
+
+export const httpApi: DownloadApi = httpApiFor();
 
 export interface DownloadOptions {
 	api?: DownloadApi;
@@ -145,8 +155,6 @@ export interface DownloadOptions {
 	/** ROW_STORAGE_BUDGET and the answer soft limit; tests shrink them. */
 	rowBudget?: number;
 	answerLimit?: number;
-	/** The device's totals, kept on the account's `accounts` row. */
-	onTotals?: (t: { rows: number; keys: number; answer_bytes: number }) => void;
 }
 
 const isQuota = (e: unknown) => e instanceof DOMException && e.name === 'QuotaExceededError';
@@ -162,6 +170,7 @@ export class DownloadManager {
 	private running: Promise<void> | null = null;
 	/** A first open's progress, per cascade: each step reports the units it finished (ensureCascade). */
 	private readonly meters = new Map<string, (units: number) => void>();
+	/** A write failed for room even after the drop pass and eviction: the sync status says so. */
 	noRoom = false;
 
 	constructor(
@@ -242,14 +251,23 @@ export class DownloadManager {
 		return this.call(fn);
 	}
 
+	/**
+	 * The quota path's two passes: the drop pass as though the row budget were
+	 * exceeded, then the answer eviction as though its limit were. Also run for
+	 * a pull that found no room (the sync engine's `makeRoom`).
+	 */
+	async makeRoom() {
+		await this.dropPass(await policy(this.db, this.now()), { force: true });
+		await this.evict({ force: true });
+	}
+
 	/** A unit of work; a QuotaExceededError runs the drop pass, then eviction, and retries once. */
 	private async unit<T>(fn: () => Promise<T>): Promise<T> {
 		try {
 			return await fn();
 		} catch (e) {
 			if (!isQuota(e)) throw e;
-			await this.dropPass(await policy(this.db, this.now()), { force: true });
-			await this.evict({ force: true });
+			await this.makeRoom();
 			try {
 				return await fn();
 			} catch (e2) {
@@ -272,17 +290,27 @@ export class DownloadManager {
 	}
 
 	private async pass(): Promise<void> {
+		// Said again only if this pass, too, cannot make room.
+		this.noRoom = false;
 		await this.dropPass(await policy(this.db, this.now()));
 		// Judged again after the pass, so a cascade the budget just dropped is not fetched back.
 		const pol = await policy(this.db, this.now());
 		const wanted = [...pol.wanted];
-		for (const id of wanted) await this.distributionFor(id);
-		for (const id of wanted) await this.questionRows(id);
+		// A cascade the quota path dropped during this pass is wanted no longer
+		// (it is marked, as the next pass's policy will read): fetched back by
+		// a later step of the same pass, it would take the room just made.
+		const each = async (step: (id: string) => Promise<void>) => {
+			for (const id of wanted) {
+				if ((await getMeta(this.db, 'budget_dropped')).includes(id)) continue;
+				await step(id);
+			}
+		};
+		await each((id) => this.distributionFor(id));
+		await each((id) => this.questionRows(id));
 		// Keys come before any cascade's answers: they make every level playable.
-		for (const id of wanted) await this.keys(id);
-		for (const id of wanted) await this.cards(id);
+		await each((id) => this.keys(id));
+		await each((id) => this.cards(id));
 		await this.evict();
-		await this.totals();
 	}
 
 	/** Everything one cascade needs, now: a first open, a restore (§ Downloads). */
@@ -791,14 +819,6 @@ export class DownloadManager {
 			await tx.done;
 			evicted = true;
 		}
-	}
-
-	private async totals() {
-		const sizes = await getMeta(this.db, 'sizes');
-		const rows = (await this.db.count('quiz_questions')) * ROW_BYTES;
-		const keys = Object.values(sizes).reduce((n, s) => n + s.key_bytes, 0);
-		const answer_bytes = Object.values(sizes).reduce((n, s) => n + s.answer_bytes, 0);
-		this.opts.onTotals?.({ rows, keys, answer_bytes });
 	}
 
 	// -------------------------------------------------------------------------

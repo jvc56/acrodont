@@ -18,9 +18,10 @@ this page parses.
 | `scripts/set-setting.sh KEY=VALUE` | Changes a Terraform setting through the same plan gate |
 | `scripts/prod-sql.sh "SQL"` | Runs one batch of SQL from an ops task inside the VPC |
 | `scripts/prod-shell.sh` | Opens a shell in an ops task: psql, pg_restore, restore.py |
-| `scripts/confirm-user.sh [--admin] USER` | Confirms an account by hand, and can grant admin |
+| `scripts/confirm-user.sh [--admin] USER` | Confirms a registration by hand (within 24 hours of registering), and can grant admin |
 | `scripts/init-db-roles.sh` | First-time database roles and SSM secrets |
 | `scripts/rotate-db-password.sh` | Rotates the app or backup password, or the signing key |
+| `scripts/cutover-db.sh DATABASE` | Points the site and the nightly backup at a restored database |
 | `scripts/check-alerts.sh` | Proves alarms reach your inbox |
 
 Terraform is the only deployer: `deploy.sh` sets `image_tag` in `prod.tfvars`
@@ -68,26 +69,39 @@ DNS and the GitHub repository.
 
    ```bash
    export AWS_PAGER=""
-   aws rds describe-orderable-db-instance-options --engine postgres --engine-version 16 \
-     --db-instance-class db.t4g.micro --query 'OrderableDBInstanceOptions[0].DBInstanceClass'
+   aws rds describe-orderable-db-instance-options --engine postgres \
+     --db-instance-class db.t4g.micro --output text \
+     --query 'OrderableDBInstanceOptions[?starts_with(EngineVersion,`16.`)].EngineVersion'
    ```
 
-   If it prints `null`, set `db_instance_class = "db.t3.micro"`.
+   If it prints nothing, set `db_instance_class = "db.t3.micro"`. (The
+   command takes no `--engine-version 16`: AWS wants a full version there.)
+
+   To have `www.` redirect to the bare domain, add `redirect_www = true`.
 
 4. **Onboard.** Run `scripts/onboard-deployer.sh`. It writes `~/.acrodont-env`,
    initialises Terraform against the state bucket and fetches `prod.tfvars`.
-   On the very first setup its closing plan reports changes, because nothing
-   exists yet. That is expected; carry on.
+   On the very first setup the state holds no stack, and the script says so:
+   its closing plan must then show the whole stack to add. On any later
+   machine the plan must show no changes.
 
 5. **The first apply.** Run `terraform -chdir=infra apply -var-file=prod.tfvars`.
    It waits on certificate validation, so create the DNS records in step 6
    while it waits.
 
 6. **DNS**, from `terraform -chdir=infra output`:
-   - `acm_validation_records`: the CNAMEs that validate the certificate.
+   - `acm_validation_records`: the CNAMEs that validate the certificate. The
+     apply is still waiting on them, and an output may not be readable until
+     it ends: read them from the certificate itself (`aws acm
+     list-certificates`, then `aws acm describe-certificate`, under
+     `DomainValidationOptions`).
    - `ses_dns_records`: three DKIM CNAMEs, the `mail.` MX and SPF TXT for the
-     MAIL FROM domain, and a `_dmarc` TXT.
-   - The domain itself: an alias (or CNAME) to `alb_dns_name`.
+     MAIL FROM domain, and a `_dmarc` TXT. The DMARC record is
+     `v=DMARC1; p=none` with no `rua`: it publishes no address, so no
+     aggregate reports are sent anywhere. Add `rua` in `infra/outputs.tf`
+     when there is a mailbox meant for them.
+   - The domain itself: an alias (or CNAME) to `alb_dns_name`; with
+     `redirect_www`, another for `www`.
 
 7. **Confirm the alarm subscription.** SNS mails `alarm_email` a confirmation
    link. Until it is clicked, every alarm goes nowhere.
@@ -106,15 +120,19 @@ DNS and the GitHub repository.
    activate the `Project` cost allocation tag in Billing, so the budget and the
    monitor count only acrodont's resources.
 
-9. **Database roles and secrets.** Run `scripts/init-db-roles.sh`. It creates
-   the three SSM parameters if they don't exist yet (it never overwrites one).
-   Then, as the RDS master user, it creates the `acrodont_app` and
-   `acrodont_backup` roles from those values. Terraform never sees a secret.
+9. **The first release.** Run `scripts/deploy.sh`. It builds and pushes the
+   backend, ops and frontend images, sets `image_tag` and applies. The
+   service is still at no tasks, so nothing starts and it needs no secret.
+   It comes before the roles because they are made from an ops task, and
+   the ops task's image is one this builds: under the placeholder
+   `image_tag` there is none to run.
 
-10. **The first release.** Run `scripts/deploy.sh`. It builds and pushes the
-    backend, ops and frontend images, sets `image_tag` and applies. Then start
-    the service, and pin the zones the first apply chose (a subnet cannot
-    change zone later):
+10. **Database roles and secrets.** Run `scripts/init-db-roles.sh`. It creates
+    the three SSM parameters if they don't exist yet (it never overwrites
+    one). Then, as the RDS master user, it creates the `acrodont_app` and
+    `acrodont_backup` roles from those values. Terraform never sees a secret.
+    Then start the service, and pin the zones the first apply chose (a subnet
+    cannot change zone later):
 
     ```bash
     scripts/set-setting.sh desired_count=1
@@ -131,15 +149,18 @@ DNS and the GitHub repository.
     "Transactional"; mention the suppression list and the bounce and complaint
     alarms). It took birdtest about a day. **Don't announce the site until it is
     granted.** Until then, confirmation mail reaches no one else. Once granted,
-    raise the send rate to the account's rate, usually 14:
+    raise the send rate to 5 a second. The account's rate (usually 14) is
+    shared with birdtest, so Acrodont does not take all of it:
 
     ```bash
-    scripts/set-setting.sh mail_max_per_second=14
+    scripts/set-setting.sh mail_max_per_second=5
     ```
 
 13. **The first admin and the first catalog.** Register through the site, then
     confirm and promote yourself (the mail may not arrive while SES is in the
-    sandbox):
+    sandbox). A registration is not an account until it is confirmed, and it
+    is deleted 24 hours after registering: run this within the day, or
+    register again first.
 
     ```bash
     scripts/confirm-user.sh --admin YOUR_NAME
@@ -165,14 +186,19 @@ that commit (a branch's run of the same commit is only the Push tier, which
 does not count). It refuses otherwise; `--skip-ci-check` exists for
 emergencies. In order, it:
 
-1. checks the checkout, the AWS login and account, and that ECS is running what
+1. checks the checkout (clean, with no untracked file where the images are
+   built from), the AWS login and account, and that ECS is running what
    `prod.tfvars` names. If ECS's circuit breaker rolled a release back, the
-   two disagree, and it tells you to run `scripts/rollback.sh` first;
+   two disagree, and it tells you to run `scripts/rollback.sh` first. (If the
+   service already runs the commit being deployed, an apply of it stopped
+   part-way, and this run finishes it.);
 2. refuses any change under `backend/migrations/` that is not an added file
    (see below);
 3. builds and pushes only the images ECR lacks, tagged with the commit;
 4. sets `image_tag`, then runs the **plan gate**: the plan must not delete or
-   replace the database, a bucket, the network, a KMS key or an ECR repository.
+   replace the database, a bucket, the network, a KMS key, an ECR repository,
+   the load balancer or its target group, the certificate, the cluster, the
+   service or the alarm topic.
    The override is `ACRODONT_ALLOW_DESTRUCTIVE_PLAN=yes` plus typing `destroy`;
 5. applies the saved plan;
 6. waits for the rollout. The running task must have the new image **and** the
@@ -182,8 +208,13 @@ emergencies. In order, it:
 
 A docs-only commit deploys nothing. `infra/` changes plan and apply without
 building. The service rolls: the new task serves before the old one drains,
-so a deploy has no gap. A warning means the last nightly CI run (the Main
-tier and the scale suite) failed.
+so a deploy has no gap. A warning about the scheduled run means the last
+nightly CI run (the Main tier and the scale suite) failed, or is more than
+two days old, or does not exist. An old one means the nightly has stopped:
+GitHub disables a repository's scheduled workflows after 60 days without
+activity, and the last green result would otherwise stand for good. Turn it
+back on with `gh workflow enable ci.yml` and start one run
+(`gh workflow run ci.yml --ref main`). The warning does not stop the deploy.
 
 **Migrations are append-only and additive.** Never edit or remove an applied
 migration. Add a numbered file instead.
@@ -200,11 +231,31 @@ offline that long. To retire old builds, raise `min_app_version` with
 `scripts/set-setting.sh`. Devices below it get `426` after their operations
 are applied, and they offer "reload to keep syncing".
 
+A device whose sync request the server itself refuses outright (a `4xx` other
+than `401`, `426` and `429`, with the API's JSON `error` body) shows "Can't
+sync: reload". It keeps everything it has
+not sent, never drops the batch, and asks again every five minutes and after a
+reload. A user who reports it has a request the server will not take: look
+for the `4xx` on `POST /api/sync` in the app's log. A `4xx` from anything in
+front of the app (Nginx's or the load balancer's `408`, a network's sign-in
+page) has no such body and reads "Offline" on the device.
+
 Settings are changed the same way:
 
 ```bash
 scripts/set-setting.sh task_cpu=1024 task_memory=4096
 ```
+
+**`desired_count=2` doubles every rate limit.** The limits are counted in each
+task's memory, not shared, so with two tasks a caller gets each limit twice:
+the login limit becomes twenty failures a minute per username instead of ten
+(and forty logins a minute per username instead of twenty),
+and the same goes for the per-address, search, sync, export and mail limits
+(the hourly mail cap and the registrations a day per address among them),
+for the event streams an account may hold open (16 a task) and for the Argon2
+turns. Terraform refuses more than two tasks. Run two only
+when one cannot carry the load, and go back to one afterwards. (A deploy's
+minute of two tasks has the same effect and is accepted.)
 
 ## Rolling back
 
@@ -224,6 +275,27 @@ release back. Terraform's state still names the failed release, so run
 `scripts/rollback.sh` before any other apply. The stopped tasks and the log
 group say why the release failed.
 
+**Old task definition revisions stay registered.** Each release makes a new
+revision of the `acrodont` task definition, and Terraform leaves the earlier
+ones `ACTIVE` (`skip_destroy`), so the revision the circuit breaker rolls
+back to always exists. The plan still shows the task definition as one to
+add and one to destroy: the destroy only drops the old revision from
+Terraform's state. `scripts/rollback.sh` does not use the old revisions: it
+applies the earlier image tag, which registers a new one. They cost nothing,
+hold no secret (only the names of the SSM parameters), and nothing prunes
+them, nor needs to: one a release is far from any ECS limit. To tidy the
+list, deregister by hand every revision but the one the service runs and the
+one before it:
+
+```bash
+export AWS_PAGER=""
+aws ecs list-task-definitions --family-prefix acrodont --status ACTIVE --sort DESC
+aws ecs deregister-task-definition --task-definition acrodont:REVISION
+```
+
+The ops, backup and drill task definitions are not kept this way: nothing
+rolls back to them. `terraform destroy` leaves the app revisions behind.
+
 ## Running SQL in production
 
 The database has no public address. SQL runs from an ops task inside the VPC:
@@ -241,7 +313,10 @@ RDS keeps and rotates in Secrets Manager. A shell task stops itself after 4
 hours, and leaving the shell does not stop it. ECS Exec sessions are not
 logged.
 
-Granting admin, or confirming an account while SES is in the sandbox:
+Granting admin, or confirming a registration while SES is in the sandbox
+(it makes the account from the username's latest registration, which must be
+less than 24 hours old; it fails, changing nothing, when the username is
+neither an account nor a registration still waiting):
 
 ```bash
 scripts/confirm-user.sh --admin USERNAME
@@ -268,18 +343,21 @@ All alarms go to the `acrodont-alarms` SNS topic and on to `alarm_email`.
 | Alarm | Means | First step |
 |---|---|---|
 | `acrodont-down` | No healthy target for 10 minutes | The service's events and the newest stopped task's reason. A Spot interruption replaces the task within minutes; if Spot capacity cannot place one, `scripts/set-setting.sh use_fargate_spot=false` |
-| `acrodont-api-5xx` | The load balancer answered 5xx for 15 minutes | The log group, `level = ERROR` |
+| `acrodont-api-5xx` | The load balancer itself answered 5xx for 15 minutes: no target to send to, or a dropped connection | The service's events and the target group's health; then the Nginx lines in the log group |
+| `acrodont-app-5xx` | The application answered 5xx for 15 minutes, though `/health` may still pass | The log group, `level = ERROR` |
 | `acrodont-backend-cpu-high` | Over 85% CPU for 15 minutes | Searches or exports? Consider `task_cpu=1024` (and `search_concurrency`) |
 | `acrodont-backend-memory-high` | Over 85% memory for 10 minutes | The in-memory index sizes in `/admin` (hover each Storage) against `task_memory`; raise it |
-| `acrodont-db-cpu-high` | Database over 80% CPU for 15 minutes | Raise `db_instance_class`; the change applies at once with a short restart |
+| `acrodont-db-cpu-high` | Database over 80% CPU for 15 minutes | Raise `db_instance_class`; the change applies at once with a short restart, during which the API answers errors and the task stays up (its health checks allow five minutes) |
 | `acrodont-db-events` (RDS events) | Low storage, failure, or allocation near the autoscaling ceiling | Raise `db_allocated_storage` |
 | `acrodont-no-dump-36h` | No successful dump in 36 hours | The last `backup` log stream; the `acrodont-backup-failed` mail says why |
-| `acrodont-dump-shrank` | A dump at least 30% smaller than the one before | Check the database size first. A truncated run leaves a small object |
-| `acrodont-backup-failed`, `acrodont-drill-failed` | The task exited non-zero | Its log stream, named in the mail |
+| `acrodont-no-drill-7d` | No restore drill has passed in seven days: two in a row failed, or the drill is not being started at all | The newest `drill/` log stream. None in the last four days: the schedule `acrodont-drill` (EventBridge Scheduler: is it enabled, and what do its target's errors say?). Then run the drill by hand (The drill, below). It is in ALARM from the first apply until the first drill passes |
+| `acrodont-dump-shrank` | A finished dump at least 30% smaller than the last finished one | Check the database size first |
+| `acrodont-backup-failed`, `acrodont-drill-failed` | The task exited non-zero, or never started (no image, no secret) | Its log stream, named in the mail; for one that never started, the reason in the mail |
 | `acrodont-deploy-failed` | ECS rolled a release back | `scripts/rollback.sh` (above) |
 | `acrodont-sync-error-rejection` | A sync operation rejected as `error`: a database error the rules did not expect | Find `sync operation failed with a database error` in the logs |
 | `acrodont-ses-bounce-rate`, `-complaint-rate` | Nearing the rate at which SES pauses sending | Who is registering with bad addresses? Bounced addresses are suppressed automatically |
 | `acrodont-mail-failed` | An account mail failed to send | The log line has SES's reason |
+| `acrodont-mail-capped` | More than `MAIL_MAX_PER_HOUR` (200) account mails were asked for in an hour, and the rest are not being sent: registrations past it are not kept, resets past it send nothing | Who is registering? The Nginx lines for `POST /api/auth/register` in the log group, by client address. A script: it is held to 10 registrations a day per address and the cap is doing its work. Real people: the cap is a backend setting (`MAIL_MAX_PER_HOUR`) |
 | Budget, cost anomaly | Spending above 85% of `monthly_budget_usd`, or an anomaly of `anomaly_threshold_usd` or more | Cost Explorer, by service |
 
 The `acrodont-sync` dashboard graphs sync rejections by type and reason. Some
@@ -317,20 +395,53 @@ The domain's registration is extra. `monthly_budget_usd` defaults to 70.
 The dump runs at 03:15 UTC as the `acrodont-backup` task: `scripts/backup.py`
 on the ops image, with the read-only `acrodont_backup` role. It reports
 `Acrodont/Backups` metrics `DumpSucceeded`, `DumpBytes` and `DumpSizeRatio`.
+A run that succeeds writes `daily/YYYY-MM-DD.ok` last, holding the dump's
+size. A run that fails part-way still leaves a (truncated) `.dump` under the
+day's key, locked like any other, but no `.ok`: `restore.py` and the drill
+refuse a dump without its marker, or whose size is not the one it names.
 The backup role can write dumps but read only the daily dump it copies to
 `monthly/`. The drill role can only read. No role may bypass the object lock.
 
 ## Restoring
 
-1. **Restore into a new database, never over the live one.** There are two
-   routes:
-   - **From a nightly dump:** in `scripts/prod-shell.sh`, create an empty
-     database with `acrodont-master-psql -c 'CREATE DATABASE acrodont_restored'`,
-     then run `python3 /opt/acrodont/scripts/restore.py s3://BUCKET/daily/DAY.dump`
-     with `--s3-region`, `--database-url` set to the new database, and
-     `?sslmode=require`.
-   - **From point-in-time recovery:** restore the RDS instance to a new
-     identifier in the console, then run `restore.py --bump-only` against it.
+1. **Restore into a new database on the live instance, never over the live
+   one.** The new database must be **owned by `acrodont_app` and restored as
+   that role**. One the master user makes is one the app role cannot create
+   in (the restore stops at its first statement), and one the master user
+   restores is one the app can neither read nor migrate. Both routes run in
+   `scripts/prod-shell.sh`, whose `DATABASE_URL` is the app role's.
+   - **From a nightly dump** (`BUCKET` is the `backups_bucket` output, `DAY`
+     the dump's date):
+
+     ```bash
+     acrodont-master-psql -c 'CREATE DATABASE acrodont_restored OWNER acrodont_app'
+     NEW_URL=$(python3 -c 'import os, urllib.parse as u
+     print(u.urlsplit(os.environ["DATABASE_URL"])._replace(path="/acrodont_restored").geturl())')
+     python3 /opt/acrodont/scripts/restore.py s3://BUCKET/daily/DAY.dump \
+       --s3-region us-west-2 --database-url "$NEW_URL"
+     ```
+
+   - **From point-in-time recovery:** restore the RDS instance to a new,
+     temporary identifier, **in the `acrodont` DB subnet group and with the
+     `acrodont-db` security group**: without both, nothing in the VPC can
+     reach it. Then copy it into a new database on the live instance, as a
+     dump would be. The temporary instance has the roles and passwords of its
+     restore point, so `DATABASE_URL`'s work on it unless the app password was
+     rotated since. `TEMP_HOST` is its endpoint:
+
+     ```bash
+     acrodont-master-psql -c 'CREATE DATABASE acrodont_restored OWNER acrodont_app'
+     NEW_URL=$(python3 -c 'import os, urllib.parse as u
+     print(u.urlsplit(os.environ["DATABASE_URL"])._replace(path="/acrodont_restored").geturl())')
+     TEMP_URL=$(HOST=TEMP_HOST python3 -c 'import os, urllib.parse as u
+     p = u.urlsplit(os.environ["DATABASE_URL"])
+     print(p._replace(netloc=p.netloc.rsplit("@", 1)[0] + "@" + os.environ["HOST"] + ":5432").geturl())')
+     pg_dump --dbname "$TEMP_URL" --format=custom --file /tmp/pitr.dump
+     python3 /opt/acrodont/scripts/restore.py /tmp/pitr.dump --database-url "$NEW_URL"
+     ```
+
+     Delete the temporary instance once the cutover has held. Terraform never
+     knew it.
 2. **Check it before any cutover.** Restore a copy locally with
    `./scripts/dev.py --restore DUMP`. It is scrubbed (every address replaced,
    every password the dev password) and the sequences are bumped. Then open a
@@ -339,28 +450,63 @@ The backup role can write dumps but read only the daily dump it copies to
 3. **The resync step.** `restore.py` does this every time, and on its own with
    `--bump-only`. It sets every user's `sync_seq` and `sync_floor_seq` to
    `sync_seq + 2^32`. Every device's next sync then answers `resync_required`
-   and rebuilds from the server, after pushing its unsent operations in that
-   same request. It is easy to forget and impossible to skip: without it, a
+   and rebuilds from the server, pushing its unsent operations with that
+   pull. It is easy to forget and impossible to skip: without it, a
    device that synced after the restore point would silently ignore rows it
    should pull.
-4. **Cut over.** Point the `DATABASE_URL` parameter at the restored database.
-   Then run `aws ecs update-service --force-new-deployment` (as
-   `rotate-db-password.sh` does). Tell users what was lost: work pushed after
+4. **Cut over**, from your own machine:
+
+   ```bash
+   scripts/cutover-db.sh acrodont_restored
+   ```
+
+   It first checks, as the app role, that the database is owned by that role
+   and holds the schema and at least one account, and changes nothing
+   otherwise. Then it points **both** `DATABASE_URL` and
+   `BACKUP_DATABASE_URL` at it (repointing the app alone leaves the nightly
+   dump reading the abandoned database and reporting success), restarts the
+   service and checks the site. It says "done" only when the restart is the
+   deployment the service settled on: if it says "the restart did not take",
+   the tasks serving may still be on the old database, so read the service's
+   events, fix the cause and run it again. If it stops anywhere after the
+   question ("STOPPED PART-WAY"), run it again with the same name: it writes
+   nothing that is already written and restarts the service all the same,
+   since until the restart the running tasks hold the old database while the
+   nightly dump reads the new one. Run with the old name, it goes back. Tell users what was lost: work pushed after
    the restore point that lived only on the server. Anything still in a
-   device's outbox is pushed again and survives.
+   device's outbox is pushed again and survives. The old database stays
+   until you drop it.
 
 ## The drill
 
-**Monthly, automatically.** On the 1st at 05:00 UTC, the `acrodont-drill` task
-(`scripts/drill.py`) restores the newest nightly dump into a Postgres started
-inside its own task, never on production. It then checks:
+**Twice a week, automatically.** On Sundays and Wednesdays at 05:00 UTC, the `acrodont-drill` task
+(`scripts/drill.py`) restores the newest finished nightly dump into a Postgres
+started inside its own task, never on production, as the app role into a
+database that role owns, the way step 1 of Restoring does. It then checks:
 - every table the schema-only dump names is present;
 - migrations are recorded;
-- every cascade has its questions;
+- there are users, and every cascade has its questions;
 - the sequence bump forces a resync.
 
 It reports `DrillSucceeded` and `DrillSeconds`. A failure mails
-`acrodont-drill-failed`.
+`acrodont-drill-failed`. A drill that is never started fails nothing and
+mails nothing, so `acrodont-no-drill-7d` alarms when seven days pass with no
+drill that passed. Seven days is the longest a CloudWatch alarm can look
+back, which is why the drill runs twice a week and not once: drills a week
+apart would leave that alarm no margin. Each run is a few minutes of a small
+Fargate task and one download of the dump from the second region: cents a
+month.
+
+To run one by hand:
+
+```bash
+export AWS_PAGER=""
+subnets=$(terraform -chdir=infra output -json task_subnets | jq -r 'join(",")')
+sg=$(terraform -chdir=infra output -raw task_security_group)
+aws ecs run-task --cluster acrodont --task-definition acrodont-drill --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$sg],assignPublicIp=ENABLED}" \
+  --query 'tasks[0].taskArn' --output text
+```
 
 **Quarterly, by hand**, the part a machine cannot do:
 

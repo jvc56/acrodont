@@ -100,7 +100,6 @@ CREATE TABLE users (
     email               CITEXT NOT NULL UNIQUE
                             CHECK (length(email) BETWEEN 3 AND 254),
     password_hash       TEXT NOT NULL,                  -- Argon2 PHC string
-    email_confirmed_at  TIMESTAMPTZ,
     is_admin            BOOLEAN NOT NULL DEFAULT false, -- set only via SQL
     session_generation  INTEGER NOT NULL DEFAULT 0,     -- bumped to revoke all sessions
     sync_seq            BIGINT NOT NULL DEFAULT 0,      -- last sync sequence value issued
@@ -116,18 +115,29 @@ CREATE TABLE users (
                             -- device settings shared with all of the account's
                             -- devices: setting name -> {value, at} (Settings)
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+                            -- when the address was confirmed: a row is made by
+                            -- the confirmation, never before it
     CHECK (sync_floor_seq <= sync_seq)
 );
 
-CREATE TABLE email_confirmations (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    code_hash   BYTEA NOT NULL UNIQUE CHECK (octet_length(code_hash) = 32), -- SHA-256
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at  TIMESTAMPTZ NOT NULL,               -- created_at + 24 hours
-    used_at     TIMESTAMPTZ
+-- A registration whose address is not confirmed yet: no users row exists for
+-- it. Each registration keeps its own username and password hash with its own
+-- code, and confirming a code makes the account from that row's and deletes
+-- the address's other rows. Registering again for the address is another
+-- row, with whatever username and password that request gave (Authentication).
+CREATE TABLE pending_registrations (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username      CITEXT NOT NULL CHECK (username ~ '^[A-Za-z0-9_]{3,32}$'),
+                      -- not unique: an address's rows may share one. While a
+                      -- row's code is valid, no other address may register it
+    email         CITEXT NOT NULL CHECK (length(email) BETWEEN 3 AND 254),
+    password_hash TEXT NOT NULL,                    -- Argon2 PHC string
+    code_hash     BYTEA NOT NULL UNIQUE CHECK (octet_length(code_hash) = 32), -- SHA-256
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at    TIMESTAMPTZ NOT NULL              -- created_at + 24 hours
 );
-CREATE INDEX email_confirmations_user_id ON email_confirmations (user_id);
+CREATE INDEX pending_registrations_email ON pending_registrations (email);
+CREATE INDEX pending_registrations_username ON pending_registrations (username);
 
 CREATE TABLE password_reset_tokens (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

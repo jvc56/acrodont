@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "DELETE FROM users u\n         WHERE (u.username = $1 OR u.email = $2)\n           AND u.email_confirmed_at IS NULL\n           AND NOT EXISTS (SELECT 1 FROM email_confirmations c\n                           WHERE c.user_id = u.id AND c.expires_at > now())",
+  "query": "INSERT INTO pending_registrations (username, email, password_hash, code_hash, expires_at)\n                 VALUES ($1::citext, $2::citext, $3, $4, now() + interval '24 hours')",
   "describe": {
     "columns": [],
     "parameters": {
@@ -16,10 +16,12 @@
             "name": "citext",
             "kind": "Simple"
           }
-        }
+        },
+        "Text",
+        "Bytea"
       ]
     },
     "nullable": []
   },
-  "hash": "8ad3e9b2bfd69f9c0ce980eb04906c2eb824b15776bac7d73f5f96511c1c5344"
+  "hash": "ea35e90bc6028a6e0ffc24bd1bb5bd15693996bbf05146bf5318b9a72b55efc2"
 }

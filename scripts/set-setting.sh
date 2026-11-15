@@ -2,7 +2,7 @@
 # Change settings in prod.tfvars and apply them.
 #
 #   scripts/set-setting.sh KEY=VALUE... [--unset KEY]...
-#   e.g. scripts/set-setting.sh mail_max_per_second=14 task_cpu=2048
+#   e.g. scripts/set-setting.sh mail_max_per_second=5 task_cpu=2048
 #
 # Fetches prod.tfvars from the state bucket, sets each KEY (a variable infra/
 # declares; anything else is refused) to VALUE -- a number, true, false, null,

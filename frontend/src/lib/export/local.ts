@@ -104,6 +104,9 @@ export async function localInput(
 			pick: c.scope === 'cascade' || named
 		});
 	}
+	// The quiz asked for is not on this device (purged by a sync, or a stale
+	// link): the server is asked, and says it has been deleted.
+	if (c.scope === 'quiz' && quizzes.length === 0) return { missing: 'rows' };
 	const questions: ExportQuestion[] = keys
 		.sort((a, b) => a.idx - b.idx)
 		.map((k) => {

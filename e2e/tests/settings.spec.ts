@@ -41,6 +41,8 @@ test('a cascade’s settings: for it alone, for all cascades, or copied from ano
 	// No settings outside a cascade: none in the header, none on the Account page,
 	// and the builder only says where they are.
 	await page.goto('/cascades');
+	// The header is up (its account link), so a Settings link would be too.
+	await expect(page.locator('header a[href="/account"]')).toBeVisible();
 	await expect(page.getByRole('link', { name: /Settings|Preferences/ })).toHaveCount(0);
 	await page.goto('/account');
 	await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible();

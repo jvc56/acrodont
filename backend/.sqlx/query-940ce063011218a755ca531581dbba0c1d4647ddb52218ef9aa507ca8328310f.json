@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
+  "query": "INSERT INTO users (username, email, password_hash) VALUES ($1::citext, $2::citext, $3)\n         ON CONFLICT DO NOTHING RETURNING id",
   "describe": {
     "columns": [
       {
@@ -36,5 +36,5 @@
       false
     ]
   },
-  "hash": "f14c77a90e4a81f0b84576b93645e5ce4b0cd0577433018c9268666a205ec3b8"
+  "hash": "940ce063011218a755ca531581dbba0c1d4647ddb52218ef9aa507ca8328310f"
 }

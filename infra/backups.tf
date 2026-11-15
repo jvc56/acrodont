@@ -1,6 +1,6 @@
 # Backups (PLAN.md § Backups). RDS point-in-time recovery is in rds.tf; this
 # is the nightly dump (scripts/backup.py) into an encrypted, versioned,
-# object-locked bucket in a second region, and the monthly restore drill
+# object-locked bucket in a second region, and the twice-weekly restore drill
 # (scripts/drill.py), which restores the newest dump into a Postgres inside its
 # own task, never touching production. Both run on the ops image.
 # Daily dumps are kept 90 days, monthly dumps a year.
@@ -112,6 +112,16 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
     }
     noncurrent_version_expiration {
       noncurrent_days = 366
+    }
+  }
+  # A backup task killed mid-upload leaves its parts, which no listing shows
+  # and no expiration above reaches: they would be billed for good.
+  rule {
+    id     = "unfinished-uploads"
+    status = "Enabled"
+    filter {}
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
     }
   }
   depends_on = [aws_s3_bucket_versioning.backups]
@@ -272,8 +282,13 @@ locals {
   schedules = {
     # Nightly dump; RDS's own backup window is 07:00.
     backup = { expression = "cron(15 3 * * ? *)", task = aws_ecs_task_definition.backup }
-    # Monthly drill, on the 1st, after that night's dump.
-    drill = { expression = "cron(0 5 1 * ? *)", task = aws_ecs_task_definition.drill }
+    # The drill, Sundays and Wednesdays, after that night's dump. Twice a
+    # week and not once: the acrodont-no-drill-7d alarm (alarms.tf) looks
+    # back seven days, the longest a CloudWatch alarm can, and drills a week
+    # apart would leave it no margin (one that took a minute longer than the
+    # last would alarm). Three or four days apart, it fires only after two
+    # drills in a row did not pass.
+    drill = { expression = "cron(0 5 ? * SUN,WED *)", task = aws_ecs_task_definition.drill }
   }
 }
 
@@ -304,12 +319,15 @@ resource "aws_scheduler_schedule" "tasks" {
   }
 }
 
-# A backup or drill task that exits non-zero mails within minutes, rather than
-# leaving it to the 36-hour staleness alarm (BAK-2).
+# A backup or drill task that exits non-zero, or never starts, mails within
+# minutes, rather than leaving it to the 36-hour staleness alarm (BAK-2) or
+# the seven-day one for the drill. A
+# task that cannot pull its image or read its secret stops with no exit code
+# at all, which "anything-but 0" does not match: hence the second branch.
 resource "aws_cloudwatch_event_rule" "task_failed" {
   for_each    = { backup = "acrodont-backup", drill = "acrodont-drill" }
   name        = "acrodont-${each.key}-failed"
-  description = "The ${each.key} task stopped with a non-zero exit code"
+  description = "The ${each.key} task stopped with a non-zero exit code, or failed to start"
   event_pattern = jsonencode({
     source      = ["aws.ecs"]
     detail-type = ["ECS Task State Change"]
@@ -317,9 +335,20 @@ resource "aws_cloudwatch_event_rule" "task_failed" {
       clusterArn = [aws_ecs_cluster.main.arn]
       group      = ["family:${each.value}"]
       lastStatus = ["STOPPED"]
-      containers = { exitCode = [{ "anything-but" = 0 }] }
+      "$or"      = local.task_failed_any_of
     }
   })
+}
+
+# What makes a stopped task a failed one. A local so that the offline test can
+# pin it (the pattern holds the cluster's ARN, unknown at plan):
+# scripts/lib/ops_fakes.py's task_pattern is the same pattern by hand, and
+# scripts/check-alerts.sh is checked against that copy.
+locals {
+  task_failed_any_of = [
+    { containers = { exitCode = [{ "anything-but" = 0 }] } },
+    { stopCode = ["TaskFailedToStart"] },
+  ]
 }
 
 resource "aws_cloudwatch_event_target" "task_failed" {
@@ -327,8 +356,11 @@ resource "aws_cloudwatch_event_target" "task_failed" {
   rule      = each.value.name
   target_id = "sns"
   arn       = aws_sns_topic.alarms.arn
+  # EventBridge reads every <name> in the template as a placeholder for a key
+  # of input_paths, so the template holds no other angle brackets: one it does
+  # not know may be refused at apply (the offline test checks this).
   input_transformer {
     input_paths    = { task = "$.detail.taskArn", reason = "$.detail.stoppedReason" }
-    input_template = "\"acrodont ${each.key} task FAILED (<task>): <reason>. Its log stream is ${each.key}/${each.key}/<task id> in ${aws_cloudwatch_log_group.app.name}.\""
+    input_template = "\"acrodont ${each.key} task FAILED (<task>): <reason>. Its log stream in ${aws_cloudwatch_log_group.app.name} is ${each.key}/${each.key}/ followed by the task id, the last part of that ARN.\""
   }
 }
