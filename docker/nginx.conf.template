@@ -14,6 +14,10 @@ map $request_uri $acrodont_logged_uri {
 log_format acrodont '$remote_addr - $remote_user [$time_local] "$request_method $acrodont_logged_uri $server_protocol" '
                     '$status $body_bytes_sent "$http_referer" "$http_user_agent"';
 
+# Every export download counts against one limit (the key is the same for
+# all), so their temporary files have a bound: see the export location.
+limit_conn_zone $server_name zone=acrodont_exports:1m;
+
 server {
     listen 80;
     server_name _;
@@ -59,6 +63,46 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_request_buffering off;
         proxy_buffering off;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    # A server export (GET /api/cascades/<id>/export; the token request,
+    # …/export-token, stays under /api/). Buffered, unlike the rest of the API:
+    # the backend formats one export at a time (EXPORT_CONCURRENCY 1) and holds
+    # that permit until its last byte is taken, so read straight through, one
+    # throttled download made every other export wait 50 s and fail. Nginx
+    # takes the file as fast as the backend makes it, into memory and past
+    # that a temporary file, and the client reads it from here at its own
+    # speed.
+    #
+    # The disk is the task's own (Fargate's 20 GiB, shared with the images).
+    # The largest export, a 300,000-question cascade with its definitions, is
+    # tens of megabytes, so no export reaches the 512 MB a temporary file may
+    # hold; sixteen downloads at once, each that large, are 8 GiB. A
+    # seventeenth is answered 503 at once. Should an export ever pass 512 MB,
+    # the rest of it is read at the client's speed again, and the backend
+    # drops a reader that takes nothing for 30 s (backend/src/export/mod.rs).
+    # A client that takes nothing for send_timeout is dropped and its file
+    # removed.
+    location ~ ^/api/cascades/[^/]+/export$ {
+        include /etc/nginx/conf.d/acrodont-headers.inc;
+        gzip off;
+        proxy_pass http://${BACKEND_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering on;
+        proxy_buffers 8 64k;
+        proxy_max_temp_file_size 512m;
+        # Nginx warns each time a response goes to a temporary file, naming
+        # the request with its query string: the export token, which the
+        # access log above leaves out. It is what this location is for.
+        error_log /var/log/nginx/error.log error;
+        limit_conn acrodont_exports 16;
+        limit_conn_status 503;
+        send_timeout 60s;
         proxy_read_timeout 120s;
         proxy_send_timeout 120s;
     }

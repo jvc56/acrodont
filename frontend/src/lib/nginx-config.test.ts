@@ -9,6 +9,10 @@ const conf = readFileSync(resolve(root, 'docker/nginx.conf.template'), 'utf8');
 const headers = readFileSync(resolve(root, 'docker/acrodont-headers.inc'), 'utf8');
 const alb = readFileSync(resolve(root, 'infra/alb.tf'), 'utf8');
 const config = readFileSync(resolve(root, 'backend/src/config.rs'), 'utf8');
+const exportRs = readFileSync(resolve(root, 'backend/src/export/mod.rs'), 'utf8');
+
+/** The location that answers a server export's download. */
+const EXPORT = '~ ^/api/cascades/[^/]+/export$';
 
 /** The directives of one `location … {}` block, without its comments. */
 function location(spec: string): string {
@@ -56,7 +60,7 @@ describe('docker/nginx.conf.template', () => {
 	});
 
 	it('sends the security headers from every location that sets its own', () => {
-		for (const spec of ['/api/', '= /health', '= /service-worker.js', '= /index.html', '/_app/immutable/', '/']) {
+		for (const spec of ['/api/', EXPORT, '= /health', '= /service-worker.js', '= /index.html', '/_app/immutable/', '/']) {
 			expect(location(spec), spec).toContain('include /etc/nginx/conf.d/acrodont-headers.inc;');
 		}
 		for (const h of ['Content-Security-Policy', 'X-Content-Type-Options', 'Referrer-Policy', 'Strict-Transport-Security']) {
@@ -64,6 +68,50 @@ describe('docker/nginx.conf.template', () => {
 		}
 		expect(conf).toMatch(/absolute_redirect off;/);
 		expect(conf).toMatch(/server_tokens off;/);
+	});
+
+	it('buffers an export, so a slow download does not hold the backend\'s only export permit', () => {
+		const exp = location(EXPORT);
+		expect(exp).toMatch(/^\s*proxy_buffering on;/m);
+		// The rest of the API is read straight through (the event stream needs it).
+		const api = location('/api/');
+		expect(api).toMatch(/^\s*proxy_buffering off;/m);
+		// Everything else the API location tells the backend, the export location tells it too.
+		for (const line of api.split('\n').filter((l) => /^\s*proxy_(pass|http_version|set_header)\b/.test(l))) {
+			expect(exp, line.trim()).toContain(line.trim());
+		}
+		expect(exp).toMatch(/^\s*gzip off;/m);
+		// Buffering to a file is logged as a warning that quotes the URL, token and all.
+		expect(exp).toMatch(/^\s*error_log \/var\/log\/nginx\/error\.log error;/m);
+
+		// The download, and nothing else: the token request stays unbuffered under /api/.
+		const re = new RegExp(EXPORT.slice(2));
+		expect(re.test('/api/cascades/0b9c2c5e-6f0f-4d53-9d39-0c1f6a1c3f11/export')).toBe(true);
+		for (const other of [
+			'/api/cascades/0b9c2c5e-6f0f-4d53-9d39-0c1f6a1c3f11/export-token',
+			'/api/cascades/0b9c2c5e-6f0f-4d53-9d39-0c1f6a1c3f11/cards',
+			'/api/cascades/a/b/export',
+			'/api/sync/events'
+		]) {
+			expect(re.test(other), other).toBe(false);
+		}
+	});
+
+	it('bounds the disk buffered exports can take, well inside the task\'s 20 GiB', () => {
+		const exp = location(EXPORT);
+		const fileMb = seconds(exp, /proxy_max_temp_file_size\s+(\d+)m;/);
+		const atOnce = seconds(exp, /limit_conn\s+acrodont_exports\s+(\d+);/);
+		expect(conf).toMatch(/^limit_conn_zone \$server_name zone=acrodont_exports:/m);
+		expect(exp).toMatch(/limit_conn_status 503;/);
+		expect(fileMb * atOnce).toBeLessThanOrEqual(10 * 1024);
+		// Room for the largest export many times over (tens of megabytes).
+		expect(fileMb).toBeGreaterThanOrEqual(256);
+	});
+
+	it('waits for the backend longer than the backend waits for a reader that has stalled', () => {
+		const backendWait = seconds(exportRs, /const EXPORT_SEND_WAIT: std::time::Duration = std::time::Duration::from_secs\((\d+)\);/);
+		expect(backendWait).toBe(30);
+		expect(seconds(location(EXPORT), /proxy_read_timeout\s+(\d+)s;/)).toBeGreaterThan(backendWait);
 	});
 
 	it('accepts an admin upload of ADMIN_UPLOAD_MAX_BYTES', () => {

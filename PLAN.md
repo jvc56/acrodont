@@ -5787,7 +5787,7 @@ startup rather than falling back to a default.
 | `MAX_STORAGE_BYTES_PER_USER` | `10000000` (10 MB) | The [storage limit](#storage-limit): what an account's cascades (the Trash included) and saved searches may hold on the server, in bytes, by the storage formula. Checked inside the creation, Duplicate and save transactions; reported by `/api/auth/me` as `max_storage_bytes`. Must be at least 1. An account's `users.storage_limit_bytes`, set only through SQL, replaces it for that account. There is no limit on how many cascades or saved searches an account has |
 | `SEARCH_TIMEOUT_MS` | `2000` | Production sets 4,000: on half a vCPU a search runs at half a core's speed |
 | `SEARCH_CONCURRENCY` | `2` | Searches running at once per instance, sized to the task's vCPUs. A request waiting longer than `SEARCH_TIMEOUT_MS` for a permit gets `503` with `Retry-After`, never `422` |
-| `EXPORT_CONCURRENCY` | `2` | Server-streamed exports at once per instance (production sets 1). A permit is held for the whole stream and taken before the token is spent; a request waits up to 50 seconds for one, then gets `503` with `Retry-After`. It is what bounds peak memory (the catalog plus this many exports) whatever the number of users |
+| `EXPORT_CONCURRENCY` | `2` | Server-streamed exports at once per instance (production sets 1). A permit is held for the whole stream and taken before the token is spent; a request waits up to 50 seconds for one, then gets `503` with `Retry-After`. The stream's reader in production is Nginx, which buffers an export (see [Deployment and Operations](#deployment-and-operations)), so the permit is held while the file is formatted and not while it downloads. A reader that takes nothing for 30 seconds is dropped and the permit freed: its download ends as a failed one, never as a short file. It is what bounds peak memory (the catalog plus this many exports) whatever the number of users |
 | `TRASH_RETENTION_DAYS` | `30` | Y: how long cleared quizzes and trashed cascades stay in the Trash |
 | `SYNC_RETENTION_DAYS` | `30` | How long operation records and tombstones are kept. A device offline longer resyncs in full on its return; its unsent work still applies |
 | `SYNC_MAX_OPS` | `500` | Operations accepted per sync request; a request carrying more is a `400` |
@@ -5974,6 +5974,20 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
     With `redirect_www` the certificate also names `www.<domain>` and both
     listeners answer that host with a `301` to the bare domain, which is the
     site's one address.
+  - Nginx passes the API straight through, unbuffered, **except a
+    [server export](#exporting-words)'s download**, which it buffers: it takes
+    the file as fast as the backend formats it, into memory and past about
+    half a megabyte a temporary file, and the client reads it from Nginx at its own speed. Read
+    straight through, one throttled download held the only export permit and
+    every other export waited 50 seconds and failed. The disk is the task's
+    own 20 GiB: a temporary file holds at most 512 MB (the largest export, a
+    300,000-question cascade with definitions, is tens of megabytes) and
+    sixteen exports download at once, 8 GiB at the very most; a seventeenth
+    is answered `503`. Nginx drops a client that takes nothing for 60
+    seconds. An export past 512 MB would be read at the client's speed again,
+    where the backend's own rule applies: a reader that takes nothing for 30
+    seconds is dropped. A Vitest test pins the location, its limits and that
+    it matches the download alone.
   - ECS cluster (Container Insights off; ECS Exec sessions never logged), one
     service of **one task** with backend and Nginx containers, at **0.5 vCPU
     and 2 GiB**, on **Fargate Spot** by default (`use_fargate_spot`).
@@ -6803,6 +6817,11 @@ two) and to a name longer than 100 characters, and the
 cascade-wide definition of correct and missed across several active quizzes. A Rust test and a Vitest test
 run the same fixtures, and an [integration test](#integration-tests) checks that
 `GET /api/cascades/:id/export` returns the same bytes for the same request.
+Backend unit tests drive the export's stream with its own reader: one that
+keeps reading gets the whole file; one that takes a chunk and then nothing is
+dropped once a chunk has waited its time, the only permit coming back while it
+still holds the stream, and what it reads afterwards ends in an error and not
+as a whole file; one that goes away frees the permit at once.
 
 ### Integration tests
 
