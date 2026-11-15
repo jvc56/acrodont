@@ -92,6 +92,13 @@ test('updating the app @serial @full', async ({ context }) => {
 		expect(await build(b)).toBe(old);
 		await press(b, 'Space');
 		await expect(b.getByText('2 / 18')).toBeVisible();
+		// The old build's tab gave the sync lock up when the app was updated under
+		// it, so the updated tab leads. Had the old tab kept leading, its answer
+		// just now would have been synced by the old build, answered 426, and the
+		// updated tab would read "Reload to keep syncing" within a second or two.
+		await a.waitForTimeout(3_000);
+		await expect(a.getByRole('button', { name: 'Reload to keep syncing' })).toHaveCount(0);
+		await expect(a.getByText('Synced')).toBeVisible({ timeout: 60_000 });
 	} finally {
 		stackUp([]);
 	}

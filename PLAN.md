@@ -2804,7 +2804,16 @@ that flag is set, which is the one reload the user asked for: the event fires in
 **every** tab the new worker takes over, and the usual handler that reloads on
 it would reload the others on their own initiative, losing a revealed card. Each
 other tab shows "Acrodont was updated in another tab — reload to continue" and
-keeps running. So that it can, the new worker's `activate` deletes the previous
+keeps running, **but stops syncing and gives up the account's sync lock**
+(`tabMaySync`), whether or not the update changed the IndexedDB schema: a tab
+on the old build that went on leading would keep the updated tab from ever
+leading, and after an update the server asked for (`426`) its syncs are
+refused, so the updated tab would read "reload to keep syncing" until the old
+tab was reloaded or closed. A card open in the old tab can still be finished
+there: its answers are queued in the database both tabs read, and the updated
+tab, which now leads, sends them at its next sync, within 30 seconds (the old
+tab no longer asks the leader for one). With no updated tab left open they
+wait until this one is reloaded, as its banner asks. So that it can, the new worker's `activate` deletes the previous
 build's cache only once `clients.matchAll()` finds no page still on that build,
 checking again whenever an old tab reports that it is closing, so a tab left on
 the old build can still load the chunks the card it is on needs: a request for
@@ -5684,7 +5693,8 @@ Modules:
   elected with the Web Locks API (`navigator.locks.request` on a per-user
   lock held for as long as the tab runs as that account and can sync: it is
   given up at a logout, when the account is signed out in another tab, and
-  when a newer build in another tab takes the database); the other tabs read the shared stores and
+  when another tab activates a newer build, whether or not that build takes
+  the database); the other tabs read the shared stores and
   show the leader's status. Where Web Locks is missing, every tab syncs and
   idempotency keeps that correct, at the cost of duplicate rebase work.
 - **`lib/sync/`**: the sync engine (triggers, push, paged pull, rebase, backoff,
@@ -6753,8 +6763,8 @@ in another tab and not keeping the lock; an account's notices staying while
 the tab only stops and restarts syncing for it, and going when it logs out or
 another account starts syncing in the tab; and a sync or a count asked for
 after a logout that removed the account's data not making its database
-again; **a sync asked for and waited for** (`syncAndWait`, `sendPending`): in the leading tab, the cascade's unsent operation sent before the answer and nothing asked when nothing of the cascade is unsent; the wait given up, with the operation still counted unsent, when the sync does not end; in a tab that does not lead, the leader asked on the channel and its answer waited for, and the wait given up when the leader's sync failed or no tab answers; and the leading tab answering another tab's request once its sync has ended (the Export dialog's sentence and Duplicate's call are the pages' own, exercised by no test); the count before a removal reading the outbox in a tab that has stopped syncing, leaving no connection open, making no database that is not there, and answering "not known" for one it cannot read or open in time; and a tab whose database another tab's removal deleted not being told it was updated, and syncing again. (The layout's two lines that call these, at a change of account and
-at the "updated in another tab" state, are not exercised by a test.) A fixture unscoped
+again; **`tabMaySync`** being false once another tab activated a newer build, with the database left as it was, as it is once the database was taken or the account signed out elsewhere, and a tab stopped for it giving the lock to the waiting tab, sending nothing more, and leaving what it writes afterwards in the outbox that tab reads; **a sync asked for and waited for** (`syncAndWait`, `sendPending`): in the leading tab, the cascade's unsent operation sent before the answer and nothing asked when nothing of the cascade is unsent; the wait given up, with the operation still counted unsent, when the sync does not end; in a tab that does not lead, the leader asked on the channel and its answer waited for, and the wait given up when the leader's sync failed or no tab answers; and the leading tab answering another tab's request once its sync has ended (the Export dialog's sentence and Duplicate's call are the pages' own, exercised by no test); the count before a removal reading the outbox in a tab that has stopped syncing, leaving no connection open, making no database that is not there, and answering "not known" for one it cannot read or open in time; and a tab whose database another tab's removal deleted not being told it was updated, and syncing again. (The layout's two lines that call these, at a change of account and
+at the "updated in another tab" state, are not exercised by a unit test; the update journey walks the second.) A fixture unscoped
 database at each earlier version opens at the current one with its rows and
 pointer intact.
 The rebase tests cover: a `finish` rejected `storage_limit` leaving its level
@@ -7582,7 +7592,10 @@ through the ordinary endpoints, so there is still no test-only path.
   to the next card, as after any sync), accept the update in the first tab and
   see only that tab reload, the second keep its revealed card, show that the app
   was updated in another tab, finish that card from the old build's cache, and
-  report the update rather than block the new build's IndexedDB upgrade.
+  report the update rather than block the new build's IndexedDB upgrade; and
+  see the updated tab, three seconds after that answer, not reading **reload to
+  keep syncing** (the old tab gave up the sync lock, so its answer was not
+  synced by the old build and answered `426`) and then **Synced**.
 - **The account forms** (`forms.spec.ts`): registering from the log-in
   page's link, logging in before the address is confirmed, following the
   mail's confirmation link (and a second use of it), a wrong password,

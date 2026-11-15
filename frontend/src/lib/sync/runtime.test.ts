@@ -11,7 +11,7 @@ import { userDbName } from '$lib/local/accounts';
 import { USER_DB_VERSION } from '$lib/local/db';
 import { closeUserDb, countUnsent, userDb } from '$lib/local/open';
 import { getMeta } from '$lib/local/meta';
-import { ensureCascade, keepNoticesFor, refreshPending, sendPending, startSync, stopSync, syncAndWait, syncNow, syncState } from './runtime.svelte';
+import { ensureCascade, keepNoticesFor, refreshPending, sendPending, startSync, stopSync, syncAndWait, syncNow, syncState, tabMaySync } from './runtime.svelte';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -141,6 +141,40 @@ describe('a newer build in another tab takes the database', () => {
 		expect(session.updatedInAnotherTab).toBe(true);
 		expect(syncState.leader).toBe(false);
 		expect(asked).toEqual([]);
+	});
+});
+
+describe('a newer build activated in another tab, the database left as it was', () => {
+	it('a tab may not sync once another tab updated the app, whether or not the update took its database', () => {
+		const tab = { signedOutInAnotherTab: false, updatedInAnotherTab: false };
+		expect(tabMaySync(tab, false)).toBe(true);
+		// The service worker changed under this tab: no schema change, the database still open.
+		expect(tabMaySync(tab, true)).toBe(false);
+		expect(tabMaySync({ ...tab, updatedInAnotherTab: true }, false)).toBe(false);
+		expect(tabMaySync({ ...tab, signedOutInAnotherTab: true }, false)).toBe(false);
+	});
+
+	it('the old build’s tab gives the lock to the updated tab, and what it writes afterwards is in the database the new leader sends from', async () => {
+		session.userId = A;
+		const db = await userDb(A, 'alice');
+		const stop = startSync(A);
+		await vi.waitFor(() => expect(asked).toEqual(['/api/sync']));
+		expect(syncState.leader).toBe(true);
+		const updatedTabLeads = anotherTabWaits(A);
+		await tick();
+		expect(updatedTabLeads()).toBe(false);
+		// What the layout does when `tabMaySync` turns false.
+		stop();
+		await vi.waitFor(() => expect(updatedTabLeads()).toBe(true));
+		expect(syncState.leader).toBe(false);
+		expect(syncState.status).toBe('idle');
+		// The card open in the old tab is finished there: the answer is queued in the shared database.
+		await db.put('outbox', { device_seq: 1, op: { type: 'move_cursor' } } as never);
+		expect(await countUnsent(A)).toBe(1);
+		// And this tab sends nothing more.
+		await syncNow();
+		await tick();
+		expect(asked).toEqual(['/api/sync']);
 	});
 });
 

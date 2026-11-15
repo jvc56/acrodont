@@ -5,7 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { initSession, session } from '$lib/auth/session.svelte';
-	import { keepNoticesFor, startSync } from '$lib/sync/runtime.svelte';
+	import { keepNoticesFor, startSync, tabMaySync } from '$lib/sync/runtime.svelte';
 	import { applyUpdate, updates, watchUpdates } from '$lib/sw/client.svelte';
 	import { askToKeepData, watchOffline } from '$lib/sw/offline.svelte';
 	import InstallTip from '$lib/components/InstallTip.svelte';
@@ -47,11 +47,12 @@
 	});
 
 	// Sync runs while an account is signed in, this tab still belongs to it, and
-	// no newer build has taken its database: a tab that cannot sync must not
-	// hold the lock the tab that can is waiting for.
+	// no newer build has been activated in another tab, whether or not it took
+	// the database: a tab that cannot sync, or that syncs as a build the server
+	// may no longer take, must not hold the lock the updated tab is waiting for.
 	$effect(() => {
 		const id = session.userId;
-		if (!id || session.signedOutInAnotherTab || session.updatedInAnotherTab) return;
+		if (!id || !tabMaySync(session, updates.updatedElsewhere)) return;
 		return startSync(id);
 	});
 

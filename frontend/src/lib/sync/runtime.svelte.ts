@@ -142,6 +142,22 @@ function post(m: Message) {
 	channel?.postMessage(m);
 }
 
+/**
+ * Whether a tab may sync for the account it shows, and so hold the account's
+ * sync lock: not once the account was signed out in another tab, not once a
+ * newer build took its database, and not once another tab activated a newer
+ * build at all (`updatedElsewhere`: the service worker changed under this
+ * tab). A tab on the old build that kept the lock would keep the tab on the
+ * new build from leading: after an update the server asked for, the old tab's
+ * syncs are answered `426`, and the updated tab would go on reading "reload
+ * to keep syncing" until the old tab was reloaded or closed. What the old tab
+ * writes afterwards is in the database both read, and goes out with the new
+ * build's next sync.
+ */
+export function tabMaySync(tab: { signedOutInAnotherTab: boolean; updatedInAnotherTab: boolean }, updatedElsewhere: boolean): boolean {
+	return !tab.signedOutInAnotherTab && !tab.updatedInAnotherTab && !updatedElsewhere;
+}
+
 /** Starts syncing for this account; returns the function that stops it. */
 export function startSync(userId: string): () => void {
 	stopSync();
