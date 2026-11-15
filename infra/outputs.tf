@@ -27,6 +27,12 @@ output "acm_validation_records" {
   }]
 }
 
+# No rua: a report address is published in DNS for anyone to read and to mail,
+# and there is no mailbox meant for DMARC reports. Add one here when there is.
+locals {
+  dmarc_record = "v=DMARC1; p=none"
+}
+
 output "ses_dns_records" {
   description = "DKIM, MAIL FROM and DMARC records for the domain (docs/runbook.md, One-time setup)."
   value = concat(
@@ -36,7 +42,7 @@ output "ses_dns_records" {
     [
       { name = "mail.${var.domain_name}", type = "MX", value = "10 feedback-smtp.${var.region}.amazonses.com" },
       { name = "mail.${var.domain_name}", type = "TXT", value = "v=spf1 include:amazonses.com ~all" },
-      { name = "_dmarc.${var.domain_name}", type = "TXT", value = "v=DMARC1; p=none; rua=mailto:${var.alarm_email}" },
+      { name = "_dmarc.${var.domain_name}", type = "TXT", value = local.dmarc_record },
     ],
   )
 }

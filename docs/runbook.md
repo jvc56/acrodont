@@ -96,7 +96,10 @@ DNS and the GitHub repository.
      list-certificates`, then `aws acm describe-certificate`, under
      `DomainValidationOptions`).
    - `ses_dns_records`: three DKIM CNAMEs, the `mail.` MX and SPF TXT for the
-     MAIL FROM domain, and a `_dmarc` TXT.
+     MAIL FROM domain, and a `_dmarc` TXT. The DMARC record is
+     `v=DMARC1; p=none` with no `rua`: it publishes no address, so no
+     aggregate reports are sent anywhere. Add `rua` in `infra/outputs.tf`
+     when there is a mailbox meant for them.
    - The domain itself: an alias (or CNAME) to `alb_dns_name`; with
      `redirect_www`, another for `www`.
 

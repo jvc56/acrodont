@@ -65,6 +65,10 @@ run "defaults_plan" {
     error_message = "the hourly mail cap being reached raises an alarm from the backend's alarm = \"mail_capped\" log line"
   }
   assert {
+    condition     = local.dmarc_record == "v=DMARC1; p=none"
+    error_message = "the DMARC record publishes no address: no rua until there is a mailbox meant for reports"
+  }
+  assert {
     condition     = length(aws_lb_listener_rule.www) == 0
     error_message = "www is answered only when redirect_www asks for it"
   }
