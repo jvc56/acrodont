@@ -208,6 +208,50 @@ describe('the sync engine', () => {
 		expect(await a.db.count('overlay_quiz_questions')).toBe(5);
 	});
 
+	// PLAN.md § The sync cycle → The fast path: "from each question group's
+	// `min_updated_seq`, folded across every page of the pull". Another device's
+	// grade is the one row of the pull this push did not stamp: the quiz row and
+	// the cascade row were written again by this device's own grade. The fast
+	// path would keep the overlay's quiz row, counted before that grade arrived.
+	it('a question group whose min_updated_seq is below the response’s sequence takes the full path, on whichever page it came', async () => {
+		const { server, a } = await setup();
+		const q = (await a.quiz(Q1))!;
+		const grade = (idx: number, g: 'correct' | 'missed') => ({ type: 'grade' as const, quiz_id: Q1, attempt: 1, attempt_seed: q.shuffle_seed, question_idx: idx, grade: g });
+		// This device answers the last question, then one more that stays queued.
+		await a.apply(grade(4, 'correct'));
+		await a.apply(grade(3, 'correct'));
+		// Another device answers the first.
+		expect(remote(server, [grade(0, 'missed')])[0].status).toBe('applied');
+		const theirs = server.seq;
+		// A row a page: the other device's is on an earlier page than this device's own, which is the last.
+		server.pageRows = 1;
+		const groups: [number[], string, string][] = [];
+		a.tamper = (req, send) => {
+			const r = send(req.ops ? { ...req, ops: req.ops.slice(0, 1) } : req);
+			const body = r.body as SyncResponse;
+			for (const g of body.changes?.quiz_questions ?? []) groups.push([g.question_idx, g.min_updated_seq, body.sync_seq]);
+			return r;
+		};
+		await a.sync();
+		a.tamper = null;
+		// What the pull carried: the other device's row under its own sequence, then this push's.
+		expect(groups).toEqual([
+			[[0], String(theirs), String(theirs + 1)],
+			[[4], String(theirs + 1), String(theirs + 1)]
+		]);
+		expect((await a.outbox()).map((e) => e.op.question_idx)).toEqual([3]);
+		// The full path ran: the overlay was rebuilt on the server's rows, so the
+		// quiz counts the other device's answer with the one still queued.
+		const now = (await a.quiz(Q1))!;
+		expect([now.correct_count, now.missed_count]).toEqual([2, 1]);
+		const ov = (await a.db.get('overlay_quizzes', Q1))!;
+		expect([ov.correct_count, ov.missed_count]).toEqual([2, 1]);
+		await a.sync();
+		expect(await a.db.count('outbox')).toBe(0);
+		const base = (await a.db.get('quizzes', Q1))!;
+		expect([base.correct_count, base.missed_count]).toEqual([2, 1]);
+	});
+
 	// PLAN.md § The sync cycle: "the rebase's fast path … keeps each
 	// acknowledgement's work proportional to its own batch".
 	it('acknowledging a batch reads none of the cascade’s other pending operations or overlay rows', async () => {
@@ -615,6 +659,61 @@ describe('the sync engine', () => {
 		expect((await a.rows(newId)).filter((r) => r.grade === 'correct').length).toBe(2);
 	});
 
+	// PLAN.md § The sync cycle → Applying a pull on the device: a full pull's
+	// pages are written as they come, and the level's quiz row and its graded
+	// rows arrive on different pages. The other device's answer reaches this
+	// device only as a pulled row of a later page: the batch does not hold it.
+	it('a full pull of several pages promotes the level a finish of the batch made, with the grades its later pages carry', async () => {
+		const { server, a } = await setup();
+		await a.play(Q1, 'CCMMM');
+		const { newId } = await a.finish(Q1, '7');
+		await a.play(newId, 'C');
+		const built = (await a.rows(newId)).sort((x, y) => x.position! - y.position!);
+		const level = (await a.quiz(newId))!;
+		server.floor = server.seq + 1;
+		server.pageRows = 1;
+		let pages = 0;
+		let theirs = false;
+		a.tamper = (req, send) => {
+			if (req.page_token) pages++;
+			const r = send(req);
+			// The batch is applied and a full pull asked for. Before it is made,
+			// another device misses the level's last card.
+			if (!theirs && (r.body as SyncResponse).resync_required) {
+				theirs = true;
+				const res = remote(server, [
+					{ type: 'grade', quiz_id: newId, attempt: level.attempt, attempt_seed: level.shuffle_seed, question_idx: built[2].question_idx, grade: 'missed' }
+				]);
+				expect(res[0].status).toBe('applied');
+			}
+			return r;
+		};
+		await a.sync();
+		a.tamper = null;
+		expect(theirs).toBe(true);
+		expect(a.requests.filter((r) => r.cursor === null && !r.page_token)).toHaveLength(2); // the first sync and the full pull
+		// The cascade, two quizzes, their attempts and the graded rows, a page each.
+		expect(pages).toBeGreaterThanOrEqual(5);
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		// The device's own rows are the level's, where it placed them, with the
+		// server's grades: its own answer, and the other device's from a later page.
+		const base = (await a.db.getAllFromIndex('quiz_questions', 'quiz_id', newId)).sort((x, y) => x.position! - y.position!);
+		expect(base.map((r) => [r.question_idx, r.position])).toEqual(built.map((r) => [r.question_idx, r.position]));
+		expect(base.map((r) => r.grade)).toEqual(['correct', null, 'missed']);
+		const q = (await a.db.get('quizzes', newId))!;
+		expect(q.pending).toBeUndefined();
+		expect([q.correct_count, q.missed_count]).toEqual([1, 1]);
+		expect(await a.db.count('overlay_quiz_questions')).toBe(0);
+		// The level is played on from there and finished: nothing is refused.
+		await a.play(newId, 'C', 1);
+		await a.finish(newId, '8');
+		await a.sync();
+		expect(texts(a)).toEqual([]);
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(server.cascades.get(C1)!.sim.quizzes.get(newId)!.state.active).toBe(true);
+	});
+
 	it('resync_required in answer to a full pull is not asked a third time', async () => {
 		const { a } = await setup();
 		await a.play(Q1, 'C');
@@ -702,6 +801,54 @@ describe('the sync engine', () => {
 		expect(await a.db.get('cascades', C1)).toBeUndefined();
 		expect(await a.db.countFromIndex('quiz_questions', 'cascade_id', C1)).toBe(0);
 		expect(await getMeta(a.db, 'opens')).toEqual({});
+	});
+
+	// Answers cannot be given on a cascade this device has purged, so the outbox
+	// never holds them behind the purge by the player's doing; the order is
+	// written here by hand, as a batch limit falling between them would leave it.
+	it('grades queued behind an applied purge_cascade stay in the outbox across its fast path and are dropped, with the notice, when the full path next runs', async () => {
+		const { a } = await setup();
+		await a.play(Q1, 'CC');
+		await a.apply({ type: 'trash_cascade', cascade_id: C1 });
+		await a.apply({ type: 'purge_cascade', cascade_id: C1 });
+		// The two grades, moved behind the purge.
+		const entries = await a.outbox();
+		expect(entries.map((e) => e.op.type)).toEqual(['grade', 'grade', 'trash_cascade', 'purge_cascade']);
+		const last = entries.at(-1)!.device_seq;
+		const tx = a.db.transaction('outbox', 'readwrite');
+		for (const [i, e] of entries.slice(0, 2).entries()) {
+			await tx.store.delete(e.device_seq);
+			await tx.store.put({ ...e, device_seq: last + 1 + i, op: { ...e.op, device_seq: last + 1 + i } });
+		}
+		await tx.done;
+		// The batch ends at the purge.
+		a.tamper = (req, send) => send({ ...req, ops: req.ops!.slice(0, 2) });
+		await a.sync();
+		a.tamper = null;
+		expect((a.requests.at(-1)!.ops as { type: string }[]).map((o) => o.type)).toEqual(['trash_cascade', 'purge_cascade', 'grade', 'grade']);
+		// The purge was applied and its tombstone taken: nothing of the cascade is
+		// left in the base, and the two answers still wait.
+		expect(await a.db.get('cascades', C1)).toBeUndefined();
+		expect(await a.db.countFromIndex('quiz_questions', 'cascade_id', C1)).toBe(0);
+		expect((await a.outbox()).map((e) => e.op.type)).toEqual(['grade', 'grade']);
+		expect(texts(a)).toEqual([]);
+		// The next sync sends them, the server has no such cascade, and the full
+		// path drops them and everything the overlay held of the cascade.
+		await a.sync();
+		expect(a.engine.status).toBe('idle');
+		expect(await a.db.count('outbox')).toBe(0);
+		expect(texts(a)).toEqual([
+			'This cascade was deleted, on another device or by the Trash’s retention period. 2 answers from this device weren’t kept.'
+		]);
+		for (const store of ['overlay_cascades', 'overlay_quizzes', 'overlay_quiz_questions', 'overlay_quiz_attempts', 'cascades', 'quizzes', 'quiz_questions'] as const) {
+			expect([store, await a.db.count(store)]).toEqual([store, 0]);
+		}
+		expect((await getMeta(a.db, 'held'))[C1]).toBeUndefined();
+		// Nothing is left to send.
+		const sent = a.requests.length;
+		await a.sync();
+		expect(a.requests.length).toBe(sent + 1);
+		expect(a.requests.at(-1)!.ops ?? []).toEqual([]);
 	});
 
 	it('a stale grade beside an applied finish with a matching outcome shows the grade’s own sentence', async () => {

@@ -6867,12 +6867,12 @@ graded rows untouched with no fetch, and a `finish_segment` computed as
 and the same for a `finish` the server answered `completed` where the device had built a new level, with the came-out-differently notice and `completed_at` from the pulled row;
 a `finish` acknowledged on its second send, after a lost response, promoting
 its rows with no notice; the fast path taking a batch of applied grades
-without touching the other pending grades' overlay rows or reading the cascade's other pending operations; every base row carrying the sequence of the response that
+without touching the other pending grades' overlay rows or reading the cascade's other pending operations; **the full path being chosen from a question group's `min_updated_seq`**: another device's grade, on a quiz and a cascade whose rows this push stamped again, arriving on an earlier page than this device's own, with one answer still queued, leaves the quiz counting both, where the fast path would have kept the overlay's count from before it; every base row carrying the sequence of the response that
 wrote it, so a full pull deletes the rows an earlier pull wrote and spares those a creation wrote while it was in flight;
 a `restore_quiz` rejected with reason `error` dropping its overlay quiz row and
 showing the could-not-be-restored notice; a batch whose only acknowledged
 operation is an applied `purge_cascade` taking the fast path with its tombstone
-still applied in step 2; a `finish` rejected `stale_attempt` with dropped grades showing both sentences; **two offline finishes in one batch**,
+still applied in step 2; **grades behind an applied `purge_cascade`** (an order the player cannot make, since a purged cascade takes no answers: the test writes it into the outbox) staying in the outbox across that fast path, then being sent, refused `not_found` and dropped with the cascade-was-deleted notice and their count, with no overlay or base row of the cascade left and nothing more to send; a `finish` rejected `stale_attempt` with dropped grades showing both sentences; **two offline finishes in one batch**,
 the first rejected `not_deepest` and the second — with the grades on the level it
 created — rejected `not_found` because that level never reached the server,
 showing **one** notice, the `not_deepest` one, whose count covers both levels'
@@ -6903,7 +6903,7 @@ the cascade as the device sees it, before the change is sent; a first sync
 sending `cursor: null`; a `resync_required` response answered by a
 `cursor: null` pull that sends the same batch again, replacing the base and replaying the rest
 of the outbox with nothing lost — an answer given on the level a finish of the batch made, still queued behind the resent batch, replayed onto the promoted rows — and deleting a quiz the full pull
-did not carry; a `resync_required` answered to a full pull being asked no third time (an engine that went on asking fails the request count, not the test's timeout); an interrupted pull converging on the next
+did not carry; **a full pull of several pages promoting a level**: with a row a page, the level a finish of the batch made takes the device's own rows where the device placed them, with this device's grade and a grade another device gave between the refused batch and the full pull, which only a later page than the quiz row's carries, and is then played on and finished with nothing refused; a `resync_required` answered to a full pull being asked no third time (an engine that went on asking fails the request count, not the test's timeout); an interrupted pull converging on the next
 sync; a `426` acknowledging its operations and applying their pull (the level
 an acknowledged finish made stays, with the answers queued on it), showing **reload to keep syncing**
 rather than a waiting count, keeping the rest of the outbox and the grades that
@@ -6912,10 +6912,9 @@ follow it, and still showing that state from a new engine's first status on the 
 **Not asserted by any test today.** Each of these is behaviour this plan
 states and the code is written to; none has a test whose body would fail if it
 broke, so none should be read as covered: the full path being chosen from a
-pulled question group's `min_updated_seq`, or from a cascade, quiz or attempt
-row's `updated_seq` or a tombstone's `seq`, below the response's `sync_seq`
-(which path ran is not observed by any test); grades queued behind an applied
-`purge_cascade` being dropped when the full path next runs; a page of a pull
+cascade, quiz or attempt row's `updated_seq` or a tombstone's `seq` below the
+response's `sync_seq` (a question group's `min_updated_seq` is tested; for the
+others, which path ran is not observed by any test); a page of a pull
 written while the player is on the quiz changing nothing the player reads until
 the last page; a pending mark surviving the index-list fetch until the grades
 arrive, and a cascade re-entering the window through a pull rather than an
@@ -6944,7 +6943,7 @@ skip of a cascade with pending operations (the window's pass is tested); the
 second and third cascades' order under eviction; `429`s on keys, index-list and
 grades pages, the progress indicator across one, and ten 300,000-question
 cascades draining through a bucket that answers `429` from the 120th request of
-a minute; a multi-page full pull promoting a level, and rows a promotion wrote while a full pull was in flight being spared by it; a full pull sparing the graded rows of a cascade with pending operations that is absent from `question_rows_for`; a `426` state surviving a reload that the service worker answered from its cache (the engine's first status is tested, the worker is not); and the Account page's
+a minute; rows a promotion wrote while a full pull was in flight being spared by it; a full pull sparing the graded rows of a cascade with pending operations that is absent from `question_rows_for`; a `426` state surviving a reload that the service worker answered from its cache (the engine's first status is tested, the worker is not); and the Account page's
 confirmation before a logout that removes data with changes still unsent (the
 count is tested in `runtime.test.ts`; the question is the page's own, and no journey logs out that way).
 `Retry-After`'s length is never timed.
