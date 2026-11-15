@@ -284,7 +284,7 @@ pub struct ParsedWord {
 }
 
 /// A definitions upload against the lexicon's stored words (PLAN.md §
-/// Immutability and deletion → Replacing definitions and leave values): the file is a lexicon
+/// Immutability and deletion → Replacing definitions, playabilities and leave values): the file is a lexicon
 /// file holding exactly the stored words with their stored playabilities, so
 /// only definitions can differ. Returns the stored words in their stored
 /// order with the file's definitions, and how many definitions changed.
@@ -305,7 +305,10 @@ pub fn replace_definitions(
         if w.playability.to_bits() != stored[i].1.to_bits() {
             errors.push(
                 Some(w.line),
-                format!("{:?} has playability {} here and {} in the lexicon; only definitions can change", w.word, w.playability, stored[i].1),
+                format!(
+                    "{:?} has playability {} here and {} in the lexicon; only definitions can change here, and playabilities are replaced at Replace playability",
+                    w.word, w.playability, stored[i].1
+                ),
             );
             continue;
         }
@@ -329,6 +332,62 @@ pub fn replace_definitions(
                 changed += 1;
             }
             (word, playability, new)
+        })
+        .collect();
+    Ok((out, changed))
+}
+
+/// A playability upload against the lexicon's stored words (PLAN.md §
+/// Immutability and deletion → Replacing definitions, playabilities and leave
+/// values): the mirror of [`replace_definitions`]. The file is a lexicon file
+/// holding exactly the stored words with their stored definitions, so only
+/// playabilities can differ. Returns the stored words in their stored order
+/// with the file's playabilities, and how many playabilities changed.
+pub fn replace_playabilities(
+    stored: Vec<(String, f64, String)>,
+    parsed: Vec<ParsedWord>,
+) -> Result<(Vec<(String, f64, String)>, usize), UploadErrors> {
+    let mut errors = UploadErrors::default();
+    let by_word: HashMap<&str, usize> = stored.iter().enumerate().map(|(i, w)| (w.0.as_str(), i)).collect();
+    let mut new_playability: Vec<Option<f64>> = vec![None; stored.len()];
+    let mut in_file = vec![false; stored.len()];
+    for w in parsed {
+        let Some(&i) = by_word.get(w.word.as_str()) else {
+            errors.push(Some(w.line), format!("{:?} is not a word of this lexicon", w.word));
+            continue;
+        };
+        in_file[i] = true;
+        if w.definition != stored[i].2 {
+            errors.push(
+                Some(w.line),
+                format!(
+                    "{:?} has a definition here that is not its definition in the lexicon; only playabilities can change here, and definitions are replaced at Replace definitions",
+                    w.word
+                ),
+            );
+            continue;
+        }
+        new_playability[i] = Some(w.playability);
+    }
+    for (i, there) in in_file.iter().enumerate() {
+        if !there {
+            errors.push(None, format!("the lexicon's word {:?} is missing from the file", stored[i].0));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    let mut changed = 0;
+    let out = stored
+        .into_iter()
+        .zip(new_playability)
+        .map(|((word, old, definition), new)| {
+            let new = new.expect("every stored word has a playability in the file");
+            // By bits, as the definitions upload compares them and as the ranks order them (`-0` sorts below `0`).
+            if new.to_bits() != old.to_bits() {
+                changed += 1;
+            }
+            (word, new, definition)
         })
         .collect();
     Ok((out, changed))
@@ -435,7 +494,7 @@ pub struct ParsedLeave {
 }
 
 /// A values upload against a leave value set's stored leaves (PLAN.md §
-/// Replacing definitions and leave values): the file is a leave values file
+/// Replacing definitions, playabilities and leave values): the file is a leave values file
 /// holding exactly the stored leaves, so only values can differ. Returns the
 /// stored leaves in their stored order with the file's values, and how many
 /// values changed.

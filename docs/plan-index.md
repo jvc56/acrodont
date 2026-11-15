@@ -8,104 +8,104 @@ are not headings).
 
 | Heading | Lines |
 |---|---|
-| # Acrodont — Project Plan | 1–8117 |
-|   ## Overview | 3–72 |
-|   ## Glossary | 73–91 |
-|   ## Cascade Rules | 92–629 |
-|     ### The Source quiz | 145–194 |
-|     ### Quiz options | 195–260 |
-|     ### Progression: Ladder or Drill | 261–300 |
-|     ### Segments | 301–384 |
-|     ### Trash, restore and purge | 385–456 |
-|     ### Storage limit | 457–629 |
-|   ## User Experience | 630–1718 |
-|     ### Accounts | 632–639 |
-|     ### Settings | 640–752 |
-|       #### One cascade, or all of them | 692–720 |
-|       #### This device, or all of them | 721–752 |
-|     ### Creating a cascade | 753–863 |
-|     ### Cascades page | 864–918 |
-|     ### Trash | 919–974 |
-|     ### Taking a quiz | 975–1542 |
-|       #### Desktop layout | 987–1190 |
-|       #### The three actions | 1191–1243 |
-|       #### Answers | 1244–1308 |
-|       #### Typed mode (Anagram quizzes only) | 1309–1406 |
-|       #### Controls | 1407–1472 |
-|       #### Touch zones | 1473–1536 |
-|       #### Saving progress | 1537–1542 |
-|     ### Finishing a quiz | 1543–1574 |
-|     ### Exporting words | 1575–1718 |
-|   ## Admin | 1719–2003 |
-|     ### Uploads | 1733–1746 |
-|     ### File formats | 1747–1862 |
-|       #### Letter distribution file | 1771–1818 |
-|       #### Lexicon file | 1819–1839 |
-|       #### Leave values file | 1840–1862 |
-|     ### Upload limits | 1863–1877 |
-|     ### Immutability and deletion | 1878–1983 |
-|       #### Replacing definitions and leave values | 1908–1983 |
-|     ### Loading changes into running servers | 1984–2003 |
-|   ## Tiles | 2004–2067 |
-|   ## Filters | 2068–2350 |
-|     ### Groups | 2087–2147 |
-|     ### Pattern syntax | 2148–2173 |
-|     ### Filter reference | 2174–2272 |
-|     ### Probability and probability order | 2273–2292 |
-|     ### Filter applicability by quiz type | 2293–2350 |
-|   ## Architecture | 2351–2425 |
-|     ### Tech Stack | 2378–2405 |
-|     ### Repository layout | 2406–2425 |
-|   ## Catalog Indexes | 2426–2485 |
-|     ### Derived attributes | 2428–2485 |
-|   ## Search Engine | 2486–2608 |
-|   ## Cascades | 2609–2773 |
-|     ### Questions are stored once per cascade | 2611–2633 |
-|     ### Deterministic shuffles | 2634–2671 |
-|     ### Rule implementation | 2672–2728 |
-|     ### Working at 300,000 questions | 2729–2773 |
-|   ## Offline and Sync | 2774–4101 |
-|     ### Principles | 2776–2787 |
-|     ### What needs a connection | 2788–2799 |
-|     ### On the device | 2800–3262 |
-|     ### Operations | 3263–3371 |
-|     ### The sync cycle | 3372–3874 |
-|       #### Telling the other devices | 3832–3874 |
-|     ### Conflicts | 3875–3963 |
-|     ### Authentication while offline | 3964–4101 |
-|   ## Schema | 4102–5115 |
-|     ### Purge task | 5057–5115 |
-|   ## Authentication | 5116–5491 |
-|   ## API | 5492–5715 |
-|     ### Auth and account | 5519–5539 |
-|     ### Catalog and search | 5540–5604 |
-|     ### Cascades and sync | 5605–5696 |
-|     ### Admin | 5697–5715 |
-|   ## Frontend | 5716–5953 |
-|   ## Configuration | 5954–6012 |
-|   ## Development | 6013–6143 |
-|     ### One command | 6015–6098 |
-|     ### How it is put together | 6099–6119 |
-|     ### Day to day | 6120–6143 |
-|   ## Deployment and Operations | 6144–6354 |
-|   ## Backups | 6355–6467 |
-|     ### What is backed up | 6361–6384 |
-|     ### Alarms | 6385–6400 |
-|     ### Restoring | 6401–6434 |
-|     ### The drill | 6435–6459 |
-|     ### Locally | 6460–6467 |
-|   ## Testing | 6468–8082 |
-|     ### The fixture catalog | 6484–6500 |
-|     ### Contract fixtures | 6501–6607 |
-|     ### Unit tests | 6608–7010 |
-|     ### Integration tests | 7011–7515 |
-|     ### End-to-end tests | 7516–7897 |
-|       #### What the tests reuse | 7523–7620 |
-|       #### The journeys | 7621–7897 |
-|     ### Scale tests | 7898–8013 |
-|     ### Zyzzyva parity | 8014–8033 |
-|     ### Running the tests | 8034–8082 |
-|   ## Delivery Phases | 8083–8117 |
+| # Acrodont — Project Plan | 1–8235 |
+|   ## Overview | 3–74 |
+|   ## Glossary | 75–93 |
+|   ## Cascade Rules | 94–631 |
+|     ### The Source quiz | 147–196 |
+|     ### Quiz options | 197–262 |
+|     ### Progression: Ladder or Drill | 263–302 |
+|     ### Segments | 303–386 |
+|     ### Trash, restore and purge | 387–458 |
+|     ### Storage limit | 459–631 |
+|   ## User Experience | 632–1720 |
+|     ### Accounts | 634–641 |
+|     ### Settings | 642–754 |
+|       #### One cascade, or all of them | 694–722 |
+|       #### This device, or all of them | 723–754 |
+|     ### Creating a cascade | 755–865 |
+|     ### Cascades page | 866–920 |
+|     ### Trash | 921–976 |
+|     ### Taking a quiz | 977–1544 |
+|       #### Desktop layout | 989–1192 |
+|       #### The three actions | 1193–1245 |
+|       #### Answers | 1246–1310 |
+|       #### Typed mode (Anagram quizzes only) | 1311–1408 |
+|       #### Controls | 1409–1474 |
+|       #### Touch zones | 1475–1538 |
+|       #### Saving progress | 1539–1544 |
+|     ### Finishing a quiz | 1545–1576 |
+|     ### Exporting words | 1577–1720 |
+|   ## Admin | 1721–2066 |
+|     ### Uploads | 1735–1748 |
+|     ### File formats | 1749–1864 |
+|       #### Letter distribution file | 1773–1820 |
+|       #### Lexicon file | 1821–1841 |
+|       #### Leave values file | 1842–1864 |
+|     ### Upload limits | 1865–1879 |
+|     ### Immutability and deletion | 1880–2044 |
+|       #### Replacing definitions, playabilities and leave values | 1913–2044 |
+|     ### Loading changes into running servers | 2045–2066 |
+|   ## Tiles | 2067–2130 |
+|   ## Filters | 2131–2413 |
+|     ### Groups | 2150–2210 |
+|     ### Pattern syntax | 2211–2236 |
+|     ### Filter reference | 2237–2335 |
+|     ### Probability and probability order | 2336–2355 |
+|     ### Filter applicability by quiz type | 2356–2413 |
+|   ## Architecture | 2414–2488 |
+|     ### Tech Stack | 2441–2468 |
+|     ### Repository layout | 2469–2488 |
+|   ## Catalog Indexes | 2489–2554 |
+|     ### Derived attributes | 2491–2554 |
+|   ## Search Engine | 2555–2677 |
+|   ## Cascades | 2678–2842 |
+|     ### Questions are stored once per cascade | 2680–2702 |
+|     ### Deterministic shuffles | 2703–2740 |
+|     ### Rule implementation | 2741–2797 |
+|     ### Working at 300,000 questions | 2798–2842 |
+|   ## Offline and Sync | 2843–4170 |
+|     ### Principles | 2845–2856 |
+|     ### What needs a connection | 2857–2868 |
+|     ### On the device | 2869–3331 |
+|     ### Operations | 3332–3440 |
+|     ### The sync cycle | 3441–3943 |
+|       #### Telling the other devices | 3901–3943 |
+|     ### Conflicts | 3944–4032 |
+|     ### Authentication while offline | 4033–4170 |
+|   ## Schema | 4171–5194 |
+|     ### Purge task | 5136–5194 |
+|   ## Authentication | 5195–5570 |
+|   ## API | 5571–5795 |
+|     ### Auth and account | 5598–5618 |
+|     ### Catalog and search | 5619–5683 |
+|     ### Cascades and sync | 5684–5775 |
+|     ### Admin | 5776–5795 |
+|   ## Frontend | 5796–6034 |
+|   ## Configuration | 6035–6093 |
+|   ## Development | 6094–6224 |
+|     ### One command | 6096–6179 |
+|     ### How it is put together | 6180–6200 |
+|     ### Day to day | 6201–6224 |
+|   ## Deployment and Operations | 6225–6435 |
+|   ## Backups | 6436–6548 |
+|     ### What is backed up | 6442–6465 |
+|     ### Alarms | 6466–6481 |
+|     ### Restoring | 6482–6515 |
+|     ### The drill | 6516–6540 |
+|     ### Locally | 6541–6548 |
+|   ## Testing | 6549–8200 |
+|     ### The fixture catalog | 6565–6581 |
+|     ### Contract fixtures | 6582–6688 |
+|     ### Unit tests | 6689–7100 |
+|     ### Integration tests | 7101–7628 |
+|     ### End-to-end tests | 7629–8015 |
+|       #### What the tests reuse | 7636–7733 |
+|       #### The journeys | 7734–8015 |
+|     ### Scale tests | 8016–8131 |
+|     ### Zyzzyva parity | 8132–8151 |
+|     ### Running the tests | 8152–8200 |
+|   ## Delivery Phases | 8201–8235 |
 
 Notable anchors inside long sections:
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE lexicons SET definitions_revision = definitions_revision + 1\n         WHERE id = $1 AND definitions_revision = $2 RETURNING definitions_revision",
+  "query": "UPDATE lexicons SET definitions_revision = definitions_revision + 1\n         WHERE id = $1 AND definitions_revision = $2 AND playability_revision = $3 RETURNING definitions_revision",
   "describe": {
     "columns": [
       {
@@ -18,6 +18,7 @@
     "parameters": {
       "Left": [
         "Int2",
+        "Int4",
         "Int4"
       ]
     },
@@ -25,5 +26,5 @@
       false
     ]
   },
-  "hash": "41cbd6127eb78b8238681e4bab3596d986795d0a619a72d4db5e6b88f2a803cc"
+  "hash": "a202aa642941eae4f4758094f9ffdfea8c80b93fe22ad18fd1f3ce2cc3895d04"
 }

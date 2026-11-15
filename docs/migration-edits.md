@@ -170,3 +170,22 @@ before the first deploy freezes the file.
 registration, and `scripts/scrub.sql` empties the new table.
 
 A database made by the earlier file no longer matches: `./scripts/dev.py --reset`.
+
+## 2026-11-15: a lexicon's playabilities can be replaced
+
+Nothing is deployed, so the edit is in place.
+
+- `lexicons` gains `playability_revision INTEGER NOT NULL DEFAULT 1 CHECK
+  (playability_revision >= 1)`, beside `definitions_revision`. An admin upload
+  can now replace a lexicon's playabilities (PLAN.md § Replacing definitions,
+  playabilities and leave values), which lifts the rule the 2026-11-13 entry
+  above records; words and leaves stay immutable. Each replacement raises the
+  revision. No cascade row carries it: an instance compares it, with
+  `definitions_revision`, against the revisions its index was read at and
+  builds the index again when either is newer, and a replacement of either
+  part applies only while both are the ones it read, because the words are
+  one stored text.
+- The comment on `lexicon_words` says so.
+
+A database made by the earlier file no longer matches: `./scripts/dev.py --reset`
+(and `make sqlx-db` for the compile-check database).
