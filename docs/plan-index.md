@@ -8,7 +8,7 @@ are not headings).
 
 | Heading | Lines |
 |---|---|
-| # Acrodont — Project Plan | 1–8026 |
+| # Acrodont — Project Plan | 1–8027 |
 |   ## Overview | 3–72 |
 |   ## Glossary | 73–91 |
 |   ## Cascade Rules | 92–629 |
@@ -81,31 +81,31 @@ are not headings).
 |     ### Catalog and search | 5492–5556 |
 |     ### Cascades and sync | 5557–5648 |
 |     ### Admin | 5649–5667 |
-|   ## Frontend | 5668–5896 |
-|   ## Configuration | 5897–5955 |
-|   ## Development | 5956–6086 |
-|     ### One command | 5958–6041 |
-|     ### How it is put together | 6042–6062 |
-|     ### Day to day | 6063–6086 |
-|   ## Deployment and Operations | 6087–6297 |
-|   ## Backups | 6298–6410 |
-|     ### What is backed up | 6304–6327 |
-|     ### Alarms | 6328–6343 |
-|     ### Restoring | 6344–6377 |
-|     ### The drill | 6378–6402 |
-|     ### Locally | 6403–6410 |
-|   ## Testing | 6411–7991 |
-|     ### The fixture catalog | 6427–6443 |
-|     ### Contract fixtures | 6444–6550 |
-|     ### Unit tests | 6551–6954 |
-|     ### Integration tests | 6955–7452 |
-|     ### End-to-end tests | 7453–7806 |
-|       #### What the tests reuse | 7460–7530 |
-|       #### The journeys | 7531–7806 |
-|     ### Scale tests | 7807–7922 |
-|     ### Zyzzyva parity | 7923–7942 |
-|     ### Running the tests | 7943–7991 |
-|   ## Delivery Phases | 7992–8026 |
+|   ## Frontend | 5668–5897 |
+|   ## Configuration | 5898–5956 |
+|   ## Development | 5957–6087 |
+|     ### One command | 5959–6042 |
+|     ### How it is put together | 6043–6063 |
+|     ### Day to day | 6064–6087 |
+|   ## Deployment and Operations | 6088–6298 |
+|   ## Backups | 6299–6411 |
+|     ### What is backed up | 6305–6328 |
+|     ### Alarms | 6329–6344 |
+|     ### Restoring | 6345–6378 |
+|     ### The drill | 6379–6403 |
+|     ### Locally | 6404–6411 |
+|   ## Testing | 6412–7992 |
+|     ### The fixture catalog | 6428–6444 |
+|     ### Contract fixtures | 6445–6551 |
+|     ### Unit tests | 6552–6955 |
+|     ### Integration tests | 6956–7453 |
+|     ### End-to-end tests | 7454–7807 |
+|       #### What the tests reuse | 7461–7531 |
+|       #### The journeys | 7532–7807 |
+|     ### Scale tests | 7808–7923 |
+|     ### Zyzzyva parity | 7924–7943 |
+|     ### Running the tests | 7944–7992 |
+|   ## Delivery Phases | 7993–8027 |
 
 Notable anchors inside long sections:
 
