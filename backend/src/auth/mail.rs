@@ -183,7 +183,7 @@ fn lifetime(kind: &MailKind) -> Option<std::time::Duration> {
 }
 
 /// SES refuses sends above the account's rate (1 a second in the sandbox,
-/// usually 14 after), so a burst of registrations, a club signing up together,
+/// usually 14 after, shared with birdtest: production sets 5), so a burst of registrations, a club signing up together,
 /// lost mail when sent at once (birdtest). Messages wait in a bounded queue,
 /// an hour's worth, drained at `MAIL_MAX_PER_SECOND` by one task; each send
 /// times out at 30 s; a message whose link has expired while queued is

@@ -163,7 +163,7 @@ variable "export_concurrency" {
 }
 
 variable "mail_max_per_second" {
-  description = "MAIL_MAX_PER_SECOND: the SES account's maximum send rate. 1 in the sandbox; raise it (usually 14) once production access is granted."
+  description = "MAIL_MAX_PER_SECOND: how fast mail is sent to SES. 1 in the sandbox; 5 once production access is granted. The SES account's own rate (usually 14) is shared with birdtest, so this stays below it."
   type        = number
   default     = 1
   validation {

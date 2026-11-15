@@ -146,10 +146,11 @@ DNS and the GitHub repository.
     "Transactional"; mention the suppression list and the bounce and complaint
     alarms). It took birdtest about a day. **Don't announce the site until it is
     granted.** Until then, confirmation mail reaches no one else. Once granted,
-    raise the send rate to the account's rate, usually 14:
+    raise the send rate to 5 a second. The account's rate (usually 14) is
+    shared with birdtest, so Acrodont does not take all of it:
 
     ```bash
-    scripts/set-setting.sh mail_max_per_second=14
+    scripts/set-setting.sh mail_max_per_second=5
     ```
 
 13. **The first admin and the first catalog.** Register through the site, then

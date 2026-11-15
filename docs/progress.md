@@ -601,7 +601,7 @@ the authoritative sequence; in short:
 4. `scripts/init-db-roles.sh`, then `scripts/deploy.sh`, then
    `scripts/set-setting.sh desired_count=1` and pin `azs`.
 5. `scripts/check-alerts.sh`.
-6. SES production access, then `mail_max_per_second=14`; don't announce
+6. SES production access, then `mail_max_per_second=5`; don't announce
    before it is granted.
 7. The first admin (`scripts/confirm-user.sh --admin`) and the catalog upload
    at /admin, checking index sizes against `task_memory` (2 GiB).

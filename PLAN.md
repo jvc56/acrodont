@@ -5634,7 +5634,7 @@ startup rather than falling back to a default.
 | `SECURE_COOKIES` | `false` | `true` in any TLS deployment |
 | `MAIL_BACKEND` | `console` | `console`, `ses` or `file`. `file` is the console backend plus one JSON file per message in `MAIL_OUTBOX_DIR`, named for its recipient, which `scripts/stack.py` and the end-to-end tests read instead of the log; every local stack uses it |
 | `MAIL_OUTBOX_DIR` | — | Required with `MAIL_BACKEND=file` |
-| `MAIL_MAX_PER_SECOND` | `1` | With `ses`: messages wait in a bounded queue (an hour's worth) drained at this rate, the SES account's maximum send rate (1 in the sandbox, usually 14 after), since SES refuses a faster burst. Each send times out at 30 s; a message whose link expired while queued is dropped; every failure is logged with `alarm = "mail_failed"` |
+| `MAIL_MAX_PER_SECOND` | `1` | With `ses`: messages wait in a bounded queue (an hour's worth) drained at this rate, since SES refuses a burst faster than the account's maximum send rate (1 in the sandbox, usually 14 after). Production sets 5, not 14: the SES account and its rate are shared with birdtest. Each send times out at 30 s; a message whose link expired while queued is dropped; every failure is logged with `alarm = "mail_failed"` |
 | `MAIL_FROM` | `no-reply@acrodont.local` | |
 | `PUBLIC_URL` | `http://localhost:5173` | Base URL for email links |
 | `MAX_QUIZ_QUESTIONS` | `300000` | May be lowered; a value above 300,000 fails startup. Lowering it bounds **new** values only: cascades and quizzes already holding a larger segment size keep working and are never rewritten, and the forms clamp what they prefill (see [Quiz options](#quiz-options)) |
