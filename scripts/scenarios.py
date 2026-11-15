@@ -245,9 +245,9 @@ def limits(s: Seeder) -> None:
 
     Each filler is the broadest search whose cascade, by the preview's
     `storage_bytes`, still fits under the limit. On CSW24 a handful fill the
-    default 10 MB. The fixture catalog's cascades are a few tens of KB, so
+    default 10 MB. The fixture catalog's cascades are a few KB, so
     there run it on a stack with a lowered limit:
-    `./scripts/dev.py --fixtures --env MAX_STORAGE_BYTES_PER_USER=1000000 --scenario limits`.
+    `./scripts/dev.py --fixtures --env MAX_STORAGE_BYTES_PER_USER=100000 --scenario limits`.
     """
     status, me = s.http.json("GET", "/api/auth/me")
     if status != 200:
@@ -280,7 +280,7 @@ def limits(s: Seeder) -> None:
         made += 1
     status, me = s.http.json("GET", "/api/auth/me")
     stack.log(f"scenario limits: stopped at {int(me['storage_bytes']):,} of {limit:,} bytes; for the warning, "
-              "lower the limit: --env MAX_STORAGE_BYTES_PER_USER=1000000")
+              "lower the limit: --env MAX_STORAGE_BYTES_PER_USER=100000")
 
 
 def big(s: Seeder) -> None:
@@ -316,11 +316,11 @@ def saved_searches(s: Seeder) -> None:
 
 SCENARIOS: Dict[str, Scenario] = {s.name: s for s in [
     Scenario("studying", "a cascade part way down its ladder: Level 1 finished with misses, Level 2 half graded", studying),
-    Scenario("finished", "a cascade whose Source quiz finished with no misses (the completion screen)", finished),
+    Scenario("finished", "a cascade whose Source quiz finished with no misses, on the server (it opens on its next pass)", finished),
     Scenario("segments", "a cascade in segments of five, the first finished with a miss, the second started", segments),
-    Scenario("typed", "typed answers on (a preference, for every Anagram cascade) and a cascade to try them", typed),
+    Scenario("typed", "an Anagram cascade whose answer mode is typed", typed),
     Scenario("trash", "a cascade in the Trash", trash),
-    Scenario("limits", "cascades up to the storage warning (90% of MAX_STORAGE_BYTES_PER_USER; on the fixture catalog with --env MAX_STORAGE_BYTES_PER_USER=1000000)", limits),
+    Scenario("limits", "cascades up to the storage warning (90% of MAX_STORAGE_BYTES_PER_USER; on the fixture catalog with --env MAX_STORAGE_BYTES_PER_USER=100000)", limits),
     Scenario("big", "one cascade near MAX_QUIZ_QUESTIONS from the licensed catalog (CSW24 by default)", big),
     Scenario("saved-searches", "three saved searches in the builder's Load dialog", saved_searches),
 ]}
