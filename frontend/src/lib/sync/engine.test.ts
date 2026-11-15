@@ -1464,6 +1464,21 @@ describe('operations held for a level the server built from another set', () => 
 		expect(texts(a)).toEqual([AGAIN]);
 	});
 
+	it('a change of a level’s options made for a level this device has not downloaded is replayed, not held: it reads no question row', async () => {
+		const { server, a } = await setup();
+		const b = await second(server, false);
+		expect(await b.db.countFromIndex('quiz_questions', 'quiz_id', Q1)).toBe(0);
+		await b.apply({ type: 'set_quiz_options', quiz_id: Q1, require_alphabetical: true });
+		// Another device answers a card; B's next pull carries it, with B's own change still unsent.
+		await a.play(Q1, 'C');
+		await a.sync();
+		b.tamper = (req, send) => send({ ...req, ops: [] });
+		await b.sync();
+		expect(await b.db.count('outbox')).toBe(1);
+		expect(await getMeta(b.db, 'held')).toEqual({});
+		expect((await b.quiz(Q1))!.require_alphabetical).toBe(true);
+	});
+
 	it('an engine stopped by a change of account replays nothing; they wait in that account’s database', async () => {
 		const { server, a, l2 } = await scene();
 		await lists(a, server);

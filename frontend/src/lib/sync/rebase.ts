@@ -509,12 +509,20 @@ async function awaitsList(tx: RwTx, quizId: string): Promise<boolean> {
 }
 
 /**
+ * The operations that read a quiz's question rows, and so cannot be judged
+ * while they are missing. A cursor move or a change of a level's options
+ * reads only the quiz row: one made from the ladder for a level this device
+ * has not downloaded is applied as before.
+ */
+const READS_ROWS = new Set(['grade', 'finish', 'finish_segment']);
+
+/**
  * Step 4: one cascade's pending operations applied to the overlay again, in
  * `device_seq` order, with the same rules. One the rules refuse leaves the
  * outbox and is `settled` as rejected.
  *
- * The first operation that names a quiz whose rows are still to come
- * (`awaitsList`) is held back, and so is every operation of the cascade after
+ * The first answer, finish or run finish (READS_ROWS) on a quiz whose rows are
+ * still to come (`awaitsList`) is held back, and so is every operation of the cascade after
  * it, whatever it names: each stays in the outbox, untouched and out of the
  * overlay, and is neither applied nor refused here. Held from that point on
  * and not one by one, the operations are applied later in the order they were
@@ -528,7 +536,7 @@ async function replay(tx: RwTx, entries: OutboxEntry[], ctx: RebaseCtx, settled:
 	const waits = new Map<string, boolean>();
 	for (const e of entries) {
 		const quiz = e.op.quiz_id as string | undefined;
-		if (quiz) {
+		if (quiz && READS_ROWS.has(e.op.type)) {
 			if (!waits.has(quiz)) waits.set(quiz, await awaitsList(tx, quiz));
 			if (waits.get(quiz)) return quiz;
 		}
