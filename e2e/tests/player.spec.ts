@@ -109,8 +109,8 @@ test('the question stays put at the top, the menu hides, and display settings ap
 		await expect(dialog.getByRole('region', { name })).toBeVisible();
 	}
 	await expect(dialog.getByRole('region')).toHaveCount(4);
-	// Where a change applies is said once at the top.
-	await expect(dialog.locator('[data-places-intro]')).toHaveText(/^A change applies to this cascade on this device\./);
+	// What the switches under each setting do is said once at the top.
+	await expect(dialog.locator('[data-places-intro]')).toHaveText(/^Under each setting, two switches say where its value applies/);
 	// The controls are here too, with their reset.
 	const controls = dialog.getByRole('region', { name: 'Controls' });
 	await expect(controls.locator('#controls')).toBeVisible();

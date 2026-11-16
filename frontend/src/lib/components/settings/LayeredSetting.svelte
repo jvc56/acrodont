@@ -1,14 +1,12 @@
 <script lang="ts">
 	// One setting that can be set in any of the four places (PLAN.md § Settings
-	// → Where a setting applies): its row, with the place its value comes from
-	// under its name, then the offer after a change and the 2×2 of places when
-	// the chip is pressed. The control is the caller's; it calls
-	// `settings.change`, which saves for this cascade on this device.
+	// → Where a setting applies): its row, with the two switches that say where
+	// its value applies under its name. The control is the caller's; it calls
+	// `settings.change`, which saves in the place the switches show.
 	import type { Snippet } from 'svelte';
 	import SettingRow from '$lib/components/SettingRow.svelte';
 	import type { SettingKey } from '$lib/settings/layers';
-	import PlaceChip from './PlaceChip.svelte';
-	import PlaceDetails from './PlaceDetails.svelte';
+	import PlaceSwitches from './PlaceSwitches.svelte';
 
 	let {
 		key,
@@ -19,10 +17,9 @@
 	}: { key: SettingKey; label: string; for: string; info?: string | null; children: Snippet } = $props();
 </script>
 
-<div class="space-y-1.5" data-setting={key}>
+<div data-setting={key}>
 	<SettingRow {label} for={forId} {info}>
-		{#snippet under()}<PlaceChip {key} {label} />{/snippet}
+		{#snippet under()}<PlaceSwitches {key} {label} />{/snippet}
 		{@render children()}
 	</SettingRow>
-	<PlaceDetails {key} {label} />
 </div>

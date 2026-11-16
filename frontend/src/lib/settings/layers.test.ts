@@ -4,7 +4,7 @@
 // passed over.
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_BINDINGS } from '$lib/player/bindings';
-import { emptyLayers, narrowerThan, resolve, resolveAll, settingText, widerThan, type Layers } from './layers';
+import { emptyLayers, narrowerThan, placeAt, PLACES, resolve, resolveAll, settingText, sidesOf, type Layers } from './layers';
 
 const layers = (l: Partial<Layers>): Layers => ({ ...emptyLayers(), ...l });
 
@@ -54,7 +54,14 @@ describe('where a setting applies', () => {
 		expect(settingText('question_font', 'system-ui')).toBe('System');
 		expect(settingText('bindings', DEFAULT_BINDINGS)).toBe('The defaults');
 		expect(narrowerThan('device')).toEqual(['both', 'cascade']);
-		expect(widerThan('both')).toEqual(['cascade', 'device', 'all']);
-		expect(widerThan('all')).toEqual([]);
+		expect(narrowerThan('both')).toEqual([]);
+	});
+
+	it('names each place by its two switches: which cascades, and which devices', () => {
+		expect(sidesOf('both')).toEqual({ cascades: 'this', devices: 'this' });
+		expect(sidesOf('cascade')).toEqual({ cascades: 'this', devices: 'all' });
+		expect(sidesOf('device')).toEqual({ cascades: 'all', devices: 'this' });
+		expect(sidesOf('all')).toEqual({ cascades: 'all', devices: 'all' });
+		for (const p of PLACES) expect(placeAt(sidesOf(p))).toBe(p);
 	});
 });

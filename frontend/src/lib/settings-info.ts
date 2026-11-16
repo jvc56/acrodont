@@ -4,7 +4,7 @@
 /** Where settings apply, said once at the top of Settings and beside each group's heading. */
 export const SCOPE = {
 	places:
-		'A change applies to this cascade on this device. Under each setting is where its value comes from; after a change you can use it for this cascade on every device, for every cascade on this device, or everywhere.',
+		'Under each setting, two switches say where its value applies: this cascade or all cascades, on this device or all devices. A setting not yet changed starts at this cascade on this device; a change is saved where its switches point, and switching one moves the value.',
 	cascade:
 		'This cascade’s name, and its rules: the clear threshold and the options of its levels. They decide how a pass is judged, so they are the same on every device. After you change one you can optionally use it for every cascade too.',
 	answers:

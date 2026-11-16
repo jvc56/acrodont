@@ -784,24 +784,29 @@ Where each place is kept:
   carries them, and they are outside the [storage limit](#storage-limit)), and
   reads no meaning into a value.
 
-**A change in Settings applies to this cascade on this device**, the
-narrowest place, at once. Under each setting's name a chip says where its value
-comes from now ("This cascade on this device", "This cascade", "This device",
-"Everywhere" or "Default", beside a small 2×2 with that place's cell filled).
-After a change the row says "✓ Saved for this cascade on this device · Use it
-for:" and offers each wider place as a button: **This cascade, every device**,
-**This device, every cascade**, **Everywhere**. Moving the value there sets it
-there and **takes it out of every narrower place**, which would otherwise still
-win here; the row then says where it is now ("✓ Now used for every cascade on
-this device") and what it replaced ("Replaced this cascade's 30 px"), and
-offers the places wider still. The offer stays until the dialog closes.
+**Under each setting's name, two switches say where its value applies**:
+"For [this cascade | all cascades] on [this device | all devices]", the four
+places as the two questions they answer. The pressed halves show the place
+the value comes from. A setting no place holds a value for (its default) has
+its switches **start at this cascade on this device**, the narrowest place,
+and they then show where a change will go; they are never greyed out or
+disabled. **A change is saved in the place the switches show**, at once, so a
+setting set everywhere is changed everywhere.
 
-Pressing the chip opens the setting's **2×2 of places** under its row: the
-value each place holds or "Not set", numbered in the order they are read, the
-one in use marked, the default named, and **Clear** for each place that holds
-one, which takes it out (the next place holding one is then used). The
-controls are one setting, the whole list of bindings, with one chip and one
-offer under the Controls heading; **Reset controls to defaults** is a change
+Pressing the other half of a switch **moves the value** to the place the two
+switches now name: it is set there first, so it stays in use throughout, then
+taken out of the place it came from and of **every place narrower than the new
+one**, which would otherwise still win here. A value taken out that differed
+is named under the row until the dialog closes ("Replaced this cascade's
+30 px"). With no value, pressing a switch moves nothing: it only points the
+next change elsewhere, until the dialog closes. **Reset**, beside the switches
+while a place holds a value, takes it out of that place; the next place
+holding one is then used and the switches show it, or, with none, the default,
+with the switches left where they were. There is no offer after a change and
+no table of the places.
+
+The controls are one setting, the whole list of bindings, with one pair of
+switches under the Controls heading; **Reset controls to defaults** is a change
 like any other. The player's menu's Hide status bar and Show status bar are
 changes too.
 
@@ -6002,10 +6007,9 @@ Components:
     through the settings store like any other (`lib/settings/store.svelte`).
     Escape in the capture box cancels the capture and goes no further, so it
     does not close Settings.
-  - **`LayeredSetting`**, **`PlaceChip`**, **`PlaceDetails`** and
-    **`PlaceGlyph`**: a setting's row with where its value comes from under its
-    name, the offer of the wider places after a change, and its 2×2 of places
-    with Clear (see [Where a setting applies](#where-a-setting-applies)).
+  - **`LayeredSetting`** and **`PlaceSwitches`**: a setting's row with its two
+    switches under its name, which cascades and which devices, and Reset (see
+    [Where a setting applies](#where-a-setting-applies)).
   - **`ApplyWider`**: the line under a cascade rule just changed: "✓ Saved
     for this cascade", then "Also use for: all N cascades", which runs
     `applyToAll` and then says "✓ Used for all N cascades" (see
@@ -8067,24 +8071,23 @@ through the ordinary endpoints, so there is still no test-only path.
   and see "✓ Saved for this cascade · Also use for: all 2 cascades", with no
   offer for new cascades; leave it untaken and see the other cascade keep 80%.
   Change it again and take the offer, and see both cascades at the new value.
-  Turn off Show hooks and see "✓ Saved for this cascade on this device" with
-  the three wider places offered; move it to "This cascade, every device" and
-  see its source read "This cascade". Make the first cascade typed for every
-  device the same way, then, from the second, **Copy settings** from the first
+  See Show hooks's switches at "this cascade" and "this device"; turn it off,
+  then press "all devices" and see it held by the cascade itself. Make the
+  first cascade typed for every device the same way, then, from the second, **Copy settings** from the first
   and see "✓ Copied 2 settings from “Alpha”.", hooks off and the typed input;
   copying again says "✓ “Alpha” already has the same settings."
 - **A setting in four places** (`settings.spec.ts`): set the question size on
-  one cascade and see the other keep the default; set it on the other and
-  move it to "This device, every cascade", and see the first keep its
-  narrower value, which its 2×2 marks in use; Clear it there and see this
-  device's value show through; set a new value and move it to "Everywhere",
-  and see "Replaced this device's 48 px", and a second browser show it after
-  its first sync; Clear it there, and see both go back to the default.
+  one cascade and see the other keep the default; on the other, point its
+  switches at "all cascades" first, set it, and see it saved for this device;
+  see the first keep its narrower value; Reset it there and see this device's
+  value show through, the switches with it; press "all devices" and see it
+  everywhere, then set a value there and see a second browser show it after
+  its first sync; Reset it there, and see both go back to the default.
 - **What the Settings dialog holds** (`player.spec.ts`): the player menu's
   links are Acrodont and Account (no Cascades, New cascade or Trash); the
   dialog has no index of its sections and four sections, This Cascade,
-  Answers, Display and Controls, under a line saying a change applies to this
-  cascade on this device, with the controls and their **Reset controls to
+  Answers, Display and Controls, under a line saying what the switches under
+  each setting do, with the controls and their **Reset controls to
   defaults** button in Controls.
 - **Every setting explains itself** (`misc.spec.ts`): a setting's explanation
   is hidden until its ⓘ ("About this setting") is hovered, goes when the

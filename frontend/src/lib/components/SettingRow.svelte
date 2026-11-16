@@ -21,13 +21,13 @@
 		for: string;
 		/** What the setting does, behind an ⓘ beside its name. */
 		info?: string | null;
-		/** Under the name: where the setting's value comes from (settings/PlaceChip). */
+		/** Under the name: where the setting's value applies (settings/PlaceSwitches). */
 		under?: Snippet;
 		children: Snippet;
 	} = $props();
 </script>
 
-<!-- With a chip under the name, the control sits on the name's line, not centred on both. -->
+<!-- With switches under the name, the control sits on the name's line, not centred on both. -->
 <div class="row" class:under={!!under}>
 	<div class="min-w-0">
 		<div class="flex items-center gap-1">

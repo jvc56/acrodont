@@ -507,7 +507,7 @@
 			: null;
 		cascadeError = null;
 		offers = {};
-		settings.resetOffers();
+		settings.resetRows();
 		levelSaved = 0;
 		copied = null;
 		copyFrom = '';

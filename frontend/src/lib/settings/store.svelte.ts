@@ -1,9 +1,9 @@
 // The settings of the open cascade on this device (PLAN.md § Settings → Where
 // a setting applies): what each of the four places holds, the value each
-// setting takes from them, and the Settings dialog's state for each setting
-// changed while it is open. A change made in Settings applies to this cascade
-// on this device, the narrowest place, and the row then offers to move it to
-// a wider one; any place's value can be taken out from the row's 2×2.
+// setting takes from them, and where each row's two switches point. A row's
+// switches show the place its value comes from, or, while it has none, where
+// a change will go: this cascade on this device until they are switched. A
+// change is saved in the place they show; switching one moves the value.
 import { untrack } from 'svelte';
 import type { UserDb } from '$lib/local/db';
 import type { CascadeRow } from '$lib/local/rows';
@@ -11,6 +11,7 @@ import {
 	emptyLayers,
 	narrowerThan,
 	PLACE_NAMES,
+	PLACES,
 	resolve,
 	resolveAll,
 	sameValue,
@@ -30,28 +31,20 @@ export interface SettingsHooks {
 	afterChange: (keys: SettingKey[]) => Promise<void> | void;
 }
 
-/** The offer under a setting changed while Settings is open. */
-export interface Offer {
-	/** Where the value now is. */
-	place: Place;
-	/** What moving it there replaced in the narrower places, as the offer says it. */
-	replaced: string[];
-	/** A new number for each change, so a second change starts a fresh offer. */
-	serial: number;
-}
+/** Where a row's switches start while nothing is set: this cascade on this device. */
+export const START: Place = 'both';
 
 class SettingsState {
 	layers = $state<Layers>(emptyLayers());
 	/** Every setting's value: the first place holding one, else the default. */
 	value = $derived<Settings>(resolveAll(this.layers));
-	/** The offers under the settings changed since Settings opened. */
-	offers = $state<Partial<Record<SettingKey, Offer>>>({});
-	/** The setting whose 2×2 of places is open, if any. */
-	expanded = $state<SettingKey | null>(null);
+	/** Where the switches of a row with no value point, once switched; START otherwise. */
+	targets = $state<Partial<Record<SettingKey, Place>>>({});
+	/** What a move took out of the narrower places, said under the row until Settings closes. */
+	replaced = $state<Partial<Record<SettingKey, string>>>({});
 	#db: UserDb | null = null;
 	#cascade: Pick<CascadeRow, 'id' | 'settings'> | null = null;
 	#hooks: SettingsHooks | null = null;
-	#serial = 0;
 
 	/** Reads every place for `cascade` (null: the device's and the account's only). */
 	async open(db: UserDb, cascade: Pick<CascadeRow, 'id' | 'settings'> | null, hooks: SettingsHooks | null = null) {
@@ -85,48 +78,61 @@ class SettingsState {
 		return valueIn(this.layers, place, key);
 	}
 
-	/** Settings opened: no offers yet, no 2×2 open. */
-	resetOffers() {
-		this.offers = {};
-		this.expanded = null;
+	/** Where a row's switches point: the place its value comes from, or where a change will go. */
+	placeOf(key: SettingKey): Place {
+		const from = this.sourceOf(key);
+		return from === 'default' ? (this.targets[key] ?? START) : from;
 	}
 
-	/** A change from Settings (or the player's menu): this cascade on this device. */
+	/** Settings opened: every row's switches start where its value is, or at START. */
+	resetRows() {
+		this.targets = {};
+		this.replaced = {};
+	}
+
+	/** A change from Settings: saved in the place the row's switches show. */
 	async change<K extends SettingKey>(key: K, value: Settings[K]) {
-		const place: Place = this.#cascade ? 'both' : 'device';
-		if (!(await this.#write(place, { [key]: value }, [key]))) return;
-		this.offers = { ...this.offers, [key]: { place, replaced: [], serial: ++this.#serial } };
+		await this.#write(this.placeOf(key), { [key]: value }, [key]);
 	}
 
 	/**
-	 * Moves the value in use to `place`: it is set there, and taken out of
-	 * every narrower place, which would otherwise still win here.
+	 * A switch pressed: the row now points at `place`. A value in use moves
+	 * there: it is set there, then taken out of the place it came from and of
+	 * every place narrower than `place`, which would otherwise still win here.
+	 * With no value, the next change goes there.
 	 */
 	async moveTo(key: SettingKey, place: Place) {
+		const from = this.sourceOf(key);
+		this.targets = { ...this.targets, [key]: place };
+		if (from === 'default' || from === place) return;
 		const value = this.value[key];
-		const from = this.offers[key]?.place;
-		const changes: Record<string, Record<string, unknown>> = { [place]: { [key]: value } };
+		const out = new Set<Place>([from]);
 		const replaced: string[] = [];
 		for (const p of narrowerThan(place)) {
+			if (p === from || !Object.prototype.hasOwnProperty.call(this.layers[p], key)) continue;
+			out.add(p);
 			const held = this.heldIn(p, key);
-			if (held === undefined) continue;
-			changes[p] = { [key]: null };
-			if (p !== from && !sameValue(held, value)) replaced.push(`${PLACE_NAMES[p].toLowerCase()}’s ${settingText(key, held as never)}`);
+			if (held !== undefined && !sameValue(held, value)) replaced.push(`${PLACE_NAMES[p].toLowerCase()}’s ${settingText(key, held as never)}`);
 		}
-		// The wider place first: the value stays in use throughout.
-		for (const p of [place, ...narrowerThan(place)]) {
-			if (changes[p] && !(await this.#write(p as Place, changes[p], [key]))) return;
+		// The new place first: the value stays in use throughout.
+		if (!(await this.#write(place, { [key]: value }, [key]))) return;
+		for (const p of PLACES) {
+			if (out.has(p) && !(await this.#write(p, { [key]: null }, [key]))) return;
 		}
-		this.offers = { ...this.offers, [key]: { place, replaced, serial: ++this.#serial } };
+		this.replaced = { ...this.replaced, [key]: replaced.length ? `Replaced ${replaced.join(' and ')}` : undefined };
 	}
 
-	/** Takes a setting out of one place; the next place holding one, or the default, is used. */
-	async clearIn(key: SettingKey, place: Place) {
-		if (!Object.prototype.hasOwnProperty.call(this.layers[place], key)) return;
-		await this.#write(place, { [key]: null }, [key]);
-		const rest = { ...this.offers };
-		delete rest[key];
-		this.offers = rest;
+	/**
+	 * Reset: takes the value out of the place it comes from. The next place
+	 * holding one is used, and the switches show it; with none, the default,
+	 * and the switches stay where they were.
+	 */
+	async reset(key: SettingKey) {
+		const from = this.sourceOf(key);
+		if (from === 'default') return;
+		this.targets = { ...this.targets, [key]: from };
+		this.replaced = { ...this.replaced, [key]: undefined };
+		await this.#write(from, { [key]: null }, [key]);
 	}
 
 	async #write(place: Place, changes: Record<string, unknown>, keys: SettingKey[]): Promise<boolean> {

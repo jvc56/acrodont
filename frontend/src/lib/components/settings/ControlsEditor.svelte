@@ -4,8 +4,8 @@
 	// cancels and cannot be bound; a stroke moves from another action with a
 	// notice; every action keeps one binding; Reset to defaults. The whole list
 	// is one setting, which can be set in any of four places like every other
-	// (lib/settings/layers): a change, or a reset, saves for this cascade on
-	// this device and offers to move it wider.
+	// (lib/settings/layers): a change, or a reset, saves in the place its two
+	// switches show, at the top.
 	/** What a punctuation key shows where the browser has no keyboard layout map (Firefox). */
 	const PUNCTUATION: Record<string, string> = {
 		Comma: ',',
@@ -23,8 +23,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { confirmAction } from '$lib/confirm.svelte';
 	import { settings } from '$lib/settings/store.svelte';
-	import PlaceChip from './PlaceChip.svelte';
-	import PlaceDetails from './PlaceDetails.svelte';
+	import PlaceSwitches from './PlaceSwitches.svelte';
 	import { bind, DEFAULT_BINDINGS, keyStroke, mayNotReceive, mouseStroke, unbind, wheelStroke, type Action, type Binding, type Stroke } from '$lib/player/bindings';
 
 	// The caller opens `settings` for the cascade first.
@@ -85,7 +84,7 @@
 </script>
 
 <div id="controls" class="grid gap-4 text-sm" data-setting="bindings">
-	<div><PlaceChip key="bindings" label="Controls" /></div>
+	<div><PlaceSwitches key="bindings" label="Controls" /></div>
 	{#each ACTIONS as a (a.action)}
 		<div>
 			<p class="font-medium">{a.label}</p>
@@ -130,11 +129,10 @@
 		onclick={async () => {
 			const ok = await confirmAction({
 				title: 'Reset the controls to their defaults?',
-				body: 'Every binding you added or removed is replaced by the defaults, for this cascade on this device. You can then use the defaults more widely.',
+				body: 'Every binding you added or removed is replaced by the defaults, where the controls are set (the switches above).',
 				action: 'Reset to defaults'
 			});
 			if (ok) await save(DEFAULT_BINDINGS);
 		}}>Reset controls to defaults</Button
 	>
-	<PlaceDetails key="bindings" label="Controls" />
 </div>

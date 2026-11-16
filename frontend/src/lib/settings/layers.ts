@@ -203,7 +203,7 @@ export function settingText<K extends SettingKey>(key: K, v: Settings[K]): strin
 	return DEFINITIONS[key].text(v);
 }
 
-/** Each place's name, as a row's source and the 2×2 say it. */
+/** Each place's name, as what a move replaced names it. */
 export const PLACE_NAMES: Record<Place | 'default', string> = {
 	both: 'This cascade on this device',
 	cascade: 'This cascade',
@@ -212,27 +212,24 @@ export const PLACE_NAMES: Record<Place | 'default', string> = {
 	default: 'Default'
 };
 
-/** The places a change made here can be moved to, as the offer under it names them. */
-export const WIDER_NAMES: Record<Exclude<Place, 'both'>, string> = {
-	cascade: 'This cascade, every device',
-	device: 'This device, every cascade',
-	all: 'Everywhere'
-};
+/** One side of a place: this cascade or every cascade, this device or every device. */
+export type Side = 'this' | 'all';
+/** A place as its two switches show it. */
+export interface Sides {
+	cascades: Side;
+	devices: Side;
+}
 
-/** What the offer says once a change is in a place. */
-export const SAVED_IN: Record<Place, string> = {
-	both: 'Saved for this cascade on this device',
-	cascade: 'Now used for this cascade on every device',
-	device: 'Now used for every cascade on this device',
-	all: 'Now used everywhere'
-};
+export function sidesOf(place: Place): Sides {
+	return { cascades: place === 'both' || place === 'cascade' ? 'this' : 'all', devices: place === 'both' || place === 'device' ? 'this' : 'all' };
+}
+
+export function placeAt({ cascades, devices }: Sides): Place {
+	if (cascades === 'this') return devices === 'this' ? 'both' : 'cascade';
+	return devices === 'this' ? 'device' : 'all';
+}
 
 /** The places narrower than `place`: the ones read before it, whose values hide its own. */
 export function narrowerThan(place: Place): Place[] {
 	return PLACES.slice(0, PLACES.indexOf(place));
-}
-
-/** The places wider than `place`, nearest first. */
-export function widerThan(place: Place): Exclude<Place, 'both'>[] {
-	return PLACES.slice(PLACES.indexOf(place) + 1) as Exclude<Place, 'both'>[];
 }

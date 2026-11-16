@@ -6,9 +6,8 @@
 	// in px, em or ms, committed when the field loses focus or on Enter, so a
 	// half-typed number is never applied; each control sits at the right of its
 	// row like every other setting. Like every setting, each can be set in any
-	// of four places (lib/settings/layers): a change saves for this cascade on
-	// this device and offers to move it wider. The caller opens `settings` for
-	// the cascade first.
+	// of four places (lib/settings/layers): a change saves in the place the two
+	// switches under its name show. The caller opens `settings` for the cascade first.
 	import { INFO } from '$lib/settings-info';
 	import TileText from '$lib/components/TileText.svelte';
 	import LayeredSetting from '$lib/components/settings/LayeredSetting.svelte';
