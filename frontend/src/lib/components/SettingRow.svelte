@@ -27,7 +27,8 @@
 	} = $props();
 </script>
 
-<div class="row">
+<!-- With a chip under the name, the control sits on the name's line, not centred on both. -->
+<div class="row" class:under={!!under}>
 	<div class="min-w-0">
 		<div class="flex items-center gap-1">
 			<label for={forId} class="text-sm">{label}</label>
@@ -35,7 +36,7 @@
 		</div>
 		{#if under}<div class="mt-1">{@render under()}</div>{/if}
 	</div>
-	<div class="flex shrink-0 items-center gap-2 text-sm">{@render children()}</div>
+	<div class="flex min-h-5 shrink-0 items-center gap-2 text-sm">{@render children()}</div>
 </div>
 
 <style>
@@ -58,6 +59,15 @@
 			align-items: center;
 			justify-content: space-between;
 			gap: 1rem;
+		}
+	}
+	.row.under:has(:global(input[type='checkbox'])),
+	.row.under:has(:global([role='checkbox'])) {
+		align-items: flex-start;
+	}
+	@media (min-width: 640px) {
+		.row.under {
+			align-items: flex-start;
 		}
 	}
 </style>

@@ -16,7 +16,8 @@
 	type="button"
 	class="inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground {open ? 'border-sky-500 text-foreground' : ''}"
 	aria-expanded={open}
-	aria-label={`${label}: from ${PLACE_NAMES[from].toLowerCase()}. Show where it is set`}
+	aria-label={`Set for: ${PLACE_NAMES[from]}. Show every place`}
+	title={`Where ${label} is set`}
 	data-source={from}
 	onclick={() => (settings.expanded = open ? null : key)}
 >

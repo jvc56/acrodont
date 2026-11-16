@@ -9,7 +9,7 @@
 	// control settings, each set in any of four places (lib/settings/layers);
 	// banners, the completion screen, and a trashed cascade's Restore.
 	import { INFO, SCOPE, SECTION } from '$lib/settings-info';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, ApiError } from '$lib/api';
@@ -148,6 +148,12 @@
 	);
 	/** The menu beside the quiz: hidden whenever a cascade opens, shown for this visit by ☰. */
 	let menuOpen = $state(false);
+	// A change of layout (a resize, the buttons setting) hides it too: the desktop's
+	// panel would come back as a phone's sheet over the quiz.
+	$effect(() => {
+		void desktop;
+		untrack(() => (menuOpen = false));
+	});
 	let cascadeOptions = $state<QuizOptions | null>(null);
 	let atLimit = $state(false);
 	let cascadeError = $state<string | null>(null);

@@ -53,7 +53,7 @@
 				type="button"
 				class="shrink-0 text-muted-foreground underline underline-offset-2 hover:text-foreground disabled:opacity-50"
 				disabled={busy}
-				aria-label={`Clear ${label} for ${PLACE_NAMES[p].toLowerCase()}`}
+				aria-label={`Clear: ${PLACE_NAMES[p]}`}
 				onclick={() => run(() => settings.clearIn(key, p))}>Clear</button
 			>
 		{/if}
