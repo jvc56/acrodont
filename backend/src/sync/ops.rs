@@ -10,7 +10,8 @@ use uuid::Uuid;
 use super::{Effects, IncomingOp};
 use crate::cards;
 use crate::cascade::order::{from_i64, questions_hash, to_i64};
-use crate::cascade::rows::{AnswerMode, Origin, Progression, QuizStatus};
+use crate::cascade::rows::{Origin, Progression, QuizStatus};
+use crate::cascade::settings;
 use crate::cascade::rules::{self, CascadeState, FinishResult, Grade, NewQuiz, Opts, QuizState, Reason, SegmentResult};
 use crate::storage;
 
@@ -818,43 +819,28 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         None => None,
         Some(v) => Some(rules::check_clear_threshold(v.as_i64().ok_or(Reason::Invalid)?)?),
     };
-    // Flashcard or typed, the cascade's alone like the threshold.
-    let answer_mode: Option<AnswerMode> = match op.body.get("answer_mode") {
-        None => None,
-        Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| OpError::Rejected(Reason::Invalid))?),
-    };
-    // What a card shows and what a reveal marks (PLAN.md § Settings), the cascade's alone too.
-    let flag = |k: &str| match op.body.get(k) {
-        None => Ok(None),
-        Some(v) => v.as_bool().map(Some).ok_or(OpError::Rejected(Reason::Invalid)),
-    };
-    let show_definitions = flag("show_definitions")?;
-    let show_hooks = flag("show_hooks")?;
-    let reveal_correct = flag("reveal_correct")?;
-    let show_found_count = flag("show_found_count")?;
-    let show_probability = flag("show_probability")?;
-    let definition_column = flag("definition_column")?;
-    let leave_value_decimals = match op.body.get("leave_value_decimals") {
-        None => None,
-        Some(v) => Some(v.as_i64().filter(|n| (0..=3).contains(n)).ok_or(Reason::Invalid)? as i16),
-    };
+    // The cascade's own settings (PLAN.md § Settings → Where a setting applies):
+    // its `settings` object, null taking a value away.
+    let changes = settings::changes_of(&op.body)?;
     let at = clamp(ctx, at);
     if !options_win(ctx, op, c.options_device_id, c.options_seq, c.options_changed_at, at) {
         return Err(OpError::Rejected(Reason::Stale));
     }
+    let merged = match &changes {
+        None => None,
+        Some(ch) => {
+            let current = sqlx::query_scalar!(r#"SELECT settings::text AS "settings!" FROM cascades WHERE id = $1"#, id)
+                .fetch_one(&mut *conn)
+                .await?;
+            Some(settings::merge(&current, ch)?)
+        }
+    };
     sqlx::query!(
         "UPDATE cascades SET segment_size = coalesce($2, segment_size), progression = coalesce($3, progression),
                              require_alphabetical = coalesce($4, require_alphabetical), options_changed_at = $5,
                              options_seq = $6, options_device_id = $7, updated_seq = $6,
                              clear_threshold = coalesce($8, clear_threshold),
-                             answer_mode = coalesce($9, answer_mode),
-                             show_definitions = coalesce($10, show_definitions),
-                             show_hooks = coalesce($11, show_hooks),
-                             reveal_correct = coalesce($12, reveal_correct),
-                             leave_value_decimals = coalesce($13, leave_value_decimals),
-                             show_found_count = coalesce($14, show_found_count),
-                             show_probability = coalesce($15, show_probability),
-                             definition_column = coalesce($16, definition_column)
+                             settings = coalesce($9::text::jsonb, settings)
          WHERE id = $1",
         id,
         f.segment_size.map(|s| s as i32),
@@ -864,14 +850,7 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         ctx.seq,
         ctx.device,
         threshold.map(|t| t as i16),
-        answer_mode as Option<AnswerMode>,
-        show_definitions,
-        show_hooks,
-        reveal_correct,
-        leave_value_decimals,
-        show_found_count,
-        show_probability,
-        definition_column,
+        merged,
     )
     .execute(conn)
     .await?;

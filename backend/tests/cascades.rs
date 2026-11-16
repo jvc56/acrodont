@@ -136,15 +136,20 @@ async fn every_combination_of_quiz_options(pool: sqlx::PgPool) {
             }
         }
     }
-    // Answer mode is the cascade's own, as the request gives it, and required like the options.
-    for mode in ["flashcard", "typed"] {
+    // An answer mode in the request becomes the cascade's own setting when it is
+    // typed; flashcard, or none, leaves the cascade without one.
+    for (mode, settings) in [(Some("typed"), json!({ "answer_mode": "typed" })), (Some("flashcard"), json!({})), (None, json!({}))] {
         let mut b = body("EN-FIX", "anagram", sevens());
-        b["answer_mode"] = json!(mode);
-        assert_eq!(c.post("/api/cascades", b).await.json()["cascade"]["answer_mode"], mode);
+        match mode {
+            Some(m) => b["answer_mode"] = json!(m),
+            None => {
+                b.as_object_mut().unwrap().remove("answer_mode");
+            }
+        }
+        let r = c.post("/api/cascades", b).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+        assert_eq!(r.json()["cascade"]["settings"], settings);
     }
-    let mut b = body("EN-FIX", "anagram", sevens());
-    b.as_object_mut().unwrap().remove("answer_mode");
-    assert_eq!(c.post("/api/cascades", b).await.status, StatusCode::BAD_REQUEST);
     // The threshold and the three options are required; a bad value is a field error.
     let mut b = body("EN-FIX", "anagram", sevens());
     b["segment_size"] = json!(4);
@@ -218,33 +223,22 @@ async fn duplicate_copies_the_spec_threshold_options_and_settings(pool: sqlx::Pg
     b["progression"] = json!("drill");
     let r = c.post("/api/cascades", b.clone()).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
-    // A new cascade's settings take their defaults.
+    // A new cascade has no settings of its own.
     let o = r.json()["cascade"].clone();
-    assert_eq!(
-        (&o["show_definitions"], &o["show_hooks"], &o["reveal_correct"], &o["leave_value_decimals"]),
-        (&json!(true), &json!(true), &json!(true), &json!(0)),
-    );
-    sqlx::query(
-        "UPDATE cascades SET show_definitions = false, show_hooks = false, reveal_correct = false,
-                             leave_value_decimals = 3, show_probability = true, definition_column = false",
-    )
-    .execute(app.db())
-    .await
-    .unwrap();
+    assert_eq!(o["settings"], json!({}));
+    let own = json!({ "show_definitions": false, "reveal_correct": false, "leave_value_decimals": 3,
+                      "show_probability": true, "question_size_px": 48 });
+    sqlx::query("UPDATE cascades SET settings = $1::text::jsonb")
+        .bind(own.to_string())
+        .execute(app.db())
+        .await
+        .unwrap();
     let so = json!({ "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
                      "at": "2026-01-01T00:00:00Z" });
     let r = c.post(&format!("/api/cascades/{}/duplicate", b["id"].as_str().unwrap()), so).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
     let n = r.json()["cascade"].clone();
-    assert_eq!(
-        (&n["show_definitions"], &n["show_hooks"], &n["reveal_correct"], &n["leave_value_decimals"]),
-        (&json!(false), &json!(false), &json!(false), &json!(3)),
-    );
-    assert_eq!(
-        (&n["show_probability"], &n["definition_column"]),
-        (&json!(true), &json!(false)),
-        "Duplicate copies the probability and definition column settings too"
-    );
+    assert_eq!(n["settings"], own, "Duplicate copies the cascade's own settings");
     assert_eq!(n["name"], "Blank leaves (2)", "the original's name with the next free number");
     assert_eq!(n["clear_threshold"], 90);
     assert_eq!(n["segment_size"], 5);

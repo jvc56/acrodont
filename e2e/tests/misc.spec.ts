@@ -136,10 +136,10 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	const [ta, area] = [await box(page.locator('[data-answer]').filter({ hasText: /^\W*TA\W*$/ })), (await page.locator('[data-fit-area]').first().boundingBox())!];
 	expect(Math.abs(ta.x + ta.width / 2 - (area.x + area.width / 2))).toBeLessThan(3);
 
-	// The two sections of Settings carry no "Synced" / "Not synced" badge.
+	// The sections of Settings carry no "Synced" / "Not synced" badge.
 	await openPlayerSettings(page);
 	const dialog = page.getByRole('dialog', { name: 'Settings' });
-	await expect(dialog.getByRole('heading', { name: 'Device Settings' })).toBeVisible();
+	await expect(dialog.getByRole('heading', { name: 'Display' })).toBeVisible();
 	await expect(dialog.getByText('Not synced', { exact: true })).toHaveCount(0);
 	await expect(dialog.getByText('Synced', { exact: true })).toHaveCount(0);
 	await dialog.getByRole('button', { name: 'Close' }).click();

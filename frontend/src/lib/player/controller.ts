@@ -11,7 +11,7 @@
 // gone still grades, and a typed card falls back to flashcard mode.
 import { applyLocally, APPLY_STORES, quizState, type LocalResult, type NewOp } from '$lib/local/apply';
 import type { UserDb } from '$lib/local/db';
-import type { CascadeRow, QuestionRow, QuizRow, WordHooks } from '$lib/local/rows';
+import type { AnswerMode, CascadeRow, QuestionRow, QuizRow, WordHooks } from '$lib/local/rows';
 import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
 import { nextBoundary, Rejected, runIndicator, type Grade } from '$lib/cascade/rules';
@@ -74,6 +74,12 @@ export interface PlayerOptions {
 	fetchAhead?: (cascadeId: string, idx: number[]) => Promise<void>;
 	/** Fetches the cascade's tile distribution the device lacks, for typed mode (online only). */
 	fetchDistribution?: (cascadeId: string) => Promise<void>;
+	/**
+	 * The answer mode and reveal grade this device uses for the cascade, from
+	 * whichever place holds them (lib/settings/layers). Without it, the
+	 * cascade's own settings, else flashcards marked correct.
+	 */
+	answer?: () => { answer_mode: AnswerMode; reveal_correct: boolean };
 	seed?: () => string;
 	uuid?: () => string;
 }
@@ -138,6 +144,7 @@ export class Player {
 	private listeners = new Set<(v: PlayerView) => void>();
 	private readonly seed: () => string;
 	private readonly uuid: () => string;
+	private readonly answer: () => { answer_mode: AnswerMode; reveal_correct: boolean };
 
 	constructor(
 		private readonly db: UserDb,
@@ -146,6 +153,12 @@ export class Player {
 	) {
 		this.seed = opts.seed ?? randomSeed;
 		this.uuid = opts.uuid ?? (() => crypto.randomUUID());
+		this.answer =
+			opts.answer ??
+			(() => {
+				const own = this.v.cascade?.settings ?? {};
+				return { answer_mode: own.answer_mode === 'typed' ? 'typed' : 'flashcard', reveal_correct: own.reveal_correct !== false };
+			});
 	}
 
 	subscribe(fn: (v: PlayerView) => void): () => void {
@@ -318,7 +331,7 @@ export class Player {
 		}
 		// Typed mode splits words with the cascade's tiles: a cascade played card by
 		// card may not have them yet, so they are fetched now, as the card is.
-		if (!this.dist && this.v.cascade?.quiz_type === 'anagram' && this.v.cascade.answer_mode === 'typed') {
+		if (!this.dist && this.v.cascade?.quiz_type === 'anagram' && this.answer().answer_mode === 'typed') {
 			await this.ensureDistribution(this.v.cascade);
 			if (!this.dist && this.opts.fetchDistribution) {
 				this.v.fetchingCard = true;
@@ -340,7 +353,7 @@ export class Player {
 	/** Shows the card at `pos` from what is in hand: no IndexedDB, so it costs one redraw. */
 	private present(pos: number, idx: number, key: string | null, answer: unknown | null, word: WordHooks | null) {
 		const saved = this.rows.get(idx)?.grade ?? null;
-		const typedWanted = this.v.cascade!.quiz_type === 'anagram' && this.v.cascade!.answer_mode === 'typed';
+		const typedWanted = this.v.cascade!.quiz_type === 'anagram' && this.answer().answer_mode === 'typed';
 		this.v.distributionMissing = typedWanted && !this.dist;
 		// A card with no answer, or no distribution to split typed text, falls back to flashcard mode.
 		const typed = typedWanted && answer !== null && this.dist && key && saved === null ? emptyTyped() : null;
@@ -589,7 +602,7 @@ export class Player {
 
 	/** The grade a shown answer starts with: the cascade's setting's (correct unless set otherwise). */
 	private revealGrade(card: Card): Grade {
-		const base: Grade = this.v.cascade?.reveal_correct === false ? 'missed' : 'correct';
+		const base: Grade = this.answer().reveal_correct === false ? 'missed' : 'correct';
 		return card.toggled ? (base === 'correct' ? 'missed' : 'correct') : base;
 	}
 

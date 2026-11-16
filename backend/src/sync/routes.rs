@@ -28,18 +28,9 @@ use crate::extract::ApiJson;
 
 pub const MAX_INDEX_PAGE: i64 = 50_000;
 
-/// The `set_cascade_options` fields a `set_quiz_options` never carries.
-const CASCADE_ONLY_FIELDS: [&str; 9] = [
-    "clear_threshold",
-    "answer_mode",
-    "show_definitions",
-    "show_hooks",
-    "reveal_correct",
-    "show_found_count",
-    "show_probability",
-    "definition_column",
-    "leave_value_decimals",
-];
+/// The `set_cascade_options` fields a `set_quiz_options` never carries: the
+/// clear threshold and the cascade's own settings.
+const CASCADE_ONLY_FIELDS: [&str; 2] = ["clear_threshold", "settings"];
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -74,23 +65,10 @@ struct Request {
     device_settings: Option<Value>,
 }
 
-/// At most this many shared device settings per account, each name this long.
-const MAX_SHARED_SETTINGS: usize = 64;
-const MAX_SHARED_NAME: usize = 40;
-/// At most this many bytes of shared device settings in one request, and
-/// held by one account.
-const MAX_SHARED_BYTES: usize = 16 * 1024;
-
-/// Whether any text in `v` holds a NUL, which Postgres stores in neither
-/// text nor jsonb: the merge below would fail on it instead of refusing it.
-fn has_nul(v: &Value) -> bool {
-    match v {
-        Value::String(s) => s.contains('\0'),
-        Value::Array(a) => a.iter().any(has_nul),
-        Value::Object(m) => m.iter().any(|(k, e)| k.contains('\0') || has_nul(e)),
-        _ => false,
-    }
-}
+// The account's shared settings (the "Everywhere" place) have the same bounds
+// as a cascade's own: at most this many per account, each name this long, and
+// this many bytes of them in one request and held by one account.
+use crate::cascade::settings::{has_nul, valid_name, MAX_BYTES as MAX_SHARED_BYTES, MAX_SETTINGS as MAX_SHARED_SETTINGS};
 
 /// A request's shared device settings (PLAN.md § Settings → This device, or
 /// all of them): an object of setting name to `{value, at}`, the time it was
@@ -111,7 +89,7 @@ fn parse_device_settings(v: Option<&Value>, now: DateTime<Utc>) -> ApiResult<Opt
     }
     let mut out = serde_json::Map::new();
     for (k, e) in m {
-        if k.is_empty() || k.len() > MAX_SHARED_NAME || !k.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+        if !valid_name(k) {
             return Err(bad("device_settings names a setting it cannot"));
         }
         let at = e
@@ -232,8 +210,7 @@ fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Reques
             let target = if op_type == "set_cascade_options" { "cascade_id" } else { "quiz_id" };
             for k in m.keys() {
                 let allowed = ["id", "device_seq", "seen_seq", "at", "type", target, "segment_size", "progression", "require_alphabetical"];
-                // The clear threshold, answer mode and display settings are the
-                // cascade's alone, never a quiz's.
+                // The clear threshold and the cascade's own settings are never a quiz's.
                 let cascade_only = op_type == "set_cascade_options"
                     && CASCADE_ONLY_FIELDS.contains(&k.as_str());
                 if !allowed.contains(&k.as_str()) && !cascade_only {

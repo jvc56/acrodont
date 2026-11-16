@@ -18,6 +18,11 @@ import type { AnyTx, RwTx } from '$lib/local/view';
 import { ANSWER_STORAGE_SOFT_LIMIT_BYTES, ROW_STORAGE_BUDGET } from './config';
 import { policy, type Policy } from './policy';
 import { withPositions } from './rebase';
+import type { AnswerSettings } from '$lib/settings/layers';
+import { settingsFor } from '$lib/settings/places';
+
+/** A cascade with the answer settings this device uses for it, which decide its cards' extras. */
+type Settled = CascadeRow & Pick<AnswerSettings, 'show_definitions' | 'show_hooks' | 'show_probability'>;
 
 /** Page sizes: the endpoints' own limits. */
 export const INDEX_PAGE = 50_000;
@@ -80,12 +85,12 @@ export type WireCard = { idx: number; key: string; answer: unknown; word?: WordH
  * hooks, and always a Definition cascade's, whose answer shows its word with
  * hooks above the definition.
  */
-export function wantsHooks(c: Pick<CascadeRow, 'quiz_type' | 'show_hooks'> & Partial<Pick<CascadeRow, 'show_probability'>>): boolean {
+export function wantsHooks(c: Pick<CascadeRow, 'quiz_type'> & Pick<AnswerSettings, 'show_hooks'> & Partial<Pick<AnswerSettings, 'show_probability'>>): boolean {
 	return c.quiz_type === 'definition' || (c.quiz_type === 'anagram' && (c.show_hooks !== false || c.show_probability === true));
 }
 
 /** Whether a cascade's cards are fetched with definitions: an Anagram cascade's when its setting asks. */
-export function wantsDefinitions(c: Pick<CascadeRow, 'quiz_type' | 'show_definitions'>): boolean {
+export function wantsDefinitions(c: Pick<CascadeRow, 'quiz_type'> & Pick<AnswerSettings, 'show_definitions'>): boolean {
 	return c.quiz_type === 'anagram' && c.show_definitions !== false;
 }
 
@@ -94,7 +99,7 @@ export function wantsDefinitions(c: Pick<CascadeRow, 'quiz_type' | 'show_definit
  * (PLAN.md § Immutability and deletion): a Definition cascade's answers, and
  * an Anagram cascade's when its setting asks for them.
  */
-export function holdsDefinitions(c: Pick<CascadeRow, 'quiz_type' | 'show_definitions'>): boolean {
+export function holdsDefinitions(c: Pick<CascadeRow, 'quiz_type'> & Pick<AnswerSettings, 'show_definitions'>): boolean {
 	return c.quiz_type === 'definition' || wantsDefinitions(c);
 }
 
@@ -105,7 +110,7 @@ export function holdsDefinitions(c: Pick<CascadeRow, 'quiz_type' | 'show_definit
  * Cards fetched at an older revision are fetched again.
  */
 export function answerRevision(
-	c: Pick<CascadeRow, 'quiz_type' | 'show_definitions' | 'definitions_revision' | 'leave_values_revision'>
+	c: Pick<CascadeRow, 'quiz_type' | 'definitions_revision' | 'leave_values_revision'> & Pick<AnswerSettings, 'show_definitions'>
 ): number | null {
 	if (c.quiz_type === 'leave_value') return c.leave_values_revision ?? 1;
 	return holdsDefinitions(c) ? (c.definitions_revision ?? 1) : null;
@@ -564,14 +569,22 @@ export class DownloadManager {
 		}
 	}
 
-	/** The cascade as the device sees it, a setting changed a moment ago and not yet sent included. */
-	private async cascadeView(cascadeId: string): Promise<CascadeRow | undefined> {
+	/**
+	 * The cascade as the device sees it, a setting changed a moment ago and not
+	 * yet sent included, with the answer settings this device uses for it,
+	 * from whichever place holds them (lib/settings/layers): they say which
+	 * extras its cards are fetched with.
+	 */
+	private async cascadeView(cascadeId: string): Promise<Settled | undefined> {
 		const tx = this.db.transaction(['cascades', 'overlay_cascades']);
-		return view.cascade(tx as unknown as AnyTx, cascadeId);
+		const c = await view.cascade(tx as unknown as AnyTx, cascadeId);
+		if (!c) return undefined;
+		const s = await settingsFor(this.db, c);
+		return { ...c, show_definitions: s.show_definitions, show_hooks: s.show_hooks, show_probability: s.show_probability };
 	}
 
 	/** The card pages a cascade lacks, with the extras its settings ask for. */
-	private async cardRanges(c: CascadeRow): Promise<{ froms: number[]; hooks: boolean; definitions: boolean }> {
+	private async cardRanges(c: Settled): Promise<{ froms: number[]; hooks: boolean; definitions: boolean }> {
 		const hooks = wantsHooks(c);
 		const definitions = wantsDefinitions(c);
 		// Cards record which extras they hold; a setting asking for more refetches them.
@@ -665,7 +678,7 @@ export class DownloadManager {
 
 	/** `background`: a download pass, which lets a player action go first between chunks. */
 	private async writeCards(
-		c: CascadeRow,
+		c: Settled,
 		all: WireCard[],
 		hooks: boolean,
 		definitions: boolean,

@@ -327,19 +327,19 @@ async fn options_against_a_finish(pool: sqlx::PgPool) {
     assert_eq!(one(&mut b, o).await, "not_active");
 }
 
-/// Answer mode is the cascade's alone: `set_cascade_options` carries it and the
-/// other device pulls it; `set_quiz_options` cannot.
+/// A cascade's own settings are the cascade's alone: `set_cascade_options`
+/// carries them and the other device pulls them; `set_quiz_options` cannot.
 #[sqlx::test]
-async fn answer_mode_is_the_cascades(pool: sqlx::PgPool) {
+async fn own_settings_are_the_cascades(pool: sqlx::PgPool) {
     let app = app(pool).await;
     let (mut a, mut b, s) = two(&app, Setup::new(5)).await;
-    let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "answer_mode": "typed" }));
+    let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "answer_mode": "typed" } }));
     assert_eq!(one(&mut a, o).await, "applied");
     let (_, pages) = b.sync_all(vec![]).await;
-    assert_eq!(rows(&pages, "cascades")[0]["answer_mode"], "typed");
-    let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "answer_mode": "spoken" }));
+    assert_eq!(rows(&pages, "cascades")[0]["settings"], json!({ "answer_mode": "typed" }));
+    let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "answer_mode": "spoken" } }));
     assert_eq!(one(&mut a, o).await, "invalid");
-    let o = a.op("set_quiz_options", json!({ "quiz_id": s.source_id, "answer_mode": "typed" }));
+    let o = a.op("set_quiz_options", json!({ "quiz_id": s.source_id, "settings": { "answer_mode": "typed" } }));
     assert_eq!(a.sync(vec![o]).await.status, StatusCode::BAD_REQUEST);
 }
 

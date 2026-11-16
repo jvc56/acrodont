@@ -56,14 +56,7 @@ async function seed(db: UserDb, s: Setup) {
 		id: s.cascade_id,
 		name: 'test',
 		quiz_type: 'anagram',
-		answer_mode: 'flashcard',
-		show_definitions: true,
-		show_hooks: true,
-		reveal_correct: true,
-		show_found_count: false,
-		show_probability: false,
-		definition_column: true,
-		leave_value_decimals: 1,
+		settings: { leave_value_decimals: 1 },
 		storage_bytes: 0,
 		lexicon: 'EN-FIX',
 		letter_distribution: 'english',
@@ -461,19 +454,27 @@ describe('the per-user database', () => {
 });
 
 describe("a cascade's settings", () => {
-	it('set_cascade_options carries what an answer shows and how a reveal grades, each checked', async () => {
+	it('set_cascade_options sets and clears the cascade\'s own settings, each checked as the server checks it', async () => {
 		const db = await freshDb();
 		await seed(db, { cascade_id: 'c1', source_id: 'q1', count: 5, seed: 1n });
-		await applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', show_definitions: false, show_hooks: false });
-		await applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', reveal_correct: false, leave_value_decimals: 3 });
-		const tx = db.transaction(APPLY_STORES) as unknown as RwTx;
-		const c = (await view.cascade(tx, 'c1'))!;
-		expect([c.show_definitions, c.show_hooks, c.reveal_correct, c.leave_value_decimals]).toEqual([false, false, false, 3]);
-		for (const bad of [{ leave_value_decimals: 4 }, { leave_value_decimals: 1.5 }, { show_hooks: 'yes' }, { reveal_correct: null }]) {
-			await expect(applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', ...bad } as NewOp)).rejects.toMatchObject({
+		await applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', settings: { show_definitions: false, show_hooks: false } });
+		await applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', settings: { reveal_correct: false, leave_value_decimals: 3, show_hooks: null } });
+		const read = async () => (await view.cascade(db.transaction(APPLY_STORES) as unknown as RwTx, 'c1'))!.settings;
+		expect(await read()).toEqual({ show_definitions: false, reveal_correct: false, leave_value_decimals: 3 });
+		const bad = [
+			{ leave_value_decimals: 4 },
+			{ leave_value_decimals: 1.5 },
+			{ show_hooks: 'yes' },
+			{ 'Bad-Name': 1 },
+			{ question_font: 'a\u0000b' },
+			{ bindings: 'x'.repeat(17 * 1024) }
+		];
+		for (const settings of bad) {
+			await expect(applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', settings } as NewOp)).rejects.toMatchObject({
 				reason: 'invalid'
 			});
 		}
+		expect(await read()).toEqual({ show_definitions: false, reveal_correct: false, leave_value_decimals: 3 });
 	});
 });
 

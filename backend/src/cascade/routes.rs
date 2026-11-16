@@ -61,7 +61,9 @@ pub struct CreateBody {
     segment_size: i64,
     progression: Progression,
     require_alphabetical: bool,
-    answer_mode: AnswerMode,
+    /// Optional: typed makes the new cascade's own `answer_mode` setting; flashcard, or none, leaves it unset.
+    #[serde(default)]
+    answer_mode: Option<AnswerMode>,
     filters: Value,
 }
 
@@ -91,23 +93,11 @@ struct NewCascade {
     segment_size: i32,
     progression: Progression,
     require_alphabetical: bool,
-    answer_mode: AnswerMode,
-    /// Duplicate copies the original's; a new cascade takes the column defaults.
-    display: Option<Display>,
+    /// The cascade's own settings (PLAN.md § Settings → Where a setting
+    /// applies), as JSON text: Duplicate copies the original's.
+    settings: String,
     /// Duplicate copies the original's spec; creation stores the request's tree.
     copy_of_spec: Option<Uuid>,
-}
-
-/// What a card shows and what a reveal marks (PLAN.md § Settings): the
-/// cascade's own, set by `set_cascade_options`.
-struct Display {
-    show_definitions: bool,
-    show_hooks: bool,
-    reveal_correct: bool,
-    show_found_count: bool,
-    show_probability: bool,
-    definition_column: bool,
-    leave_value_decimals: i16,
 }
 
 /// A cascade's name: 1–200 characters, none of them NUL.
@@ -264,9 +254,9 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     let inserted = sqlx::query!(
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, leave_set_id, spec_id, clear_threshold,
                                segment_size, progression, require_alphabetical, options_changed_at, options_seq,
-                               options_device_id, question_count, depth, peak_depth, updated_seq, answer_mode,
+                               options_device_id, question_count, depth, peak_depth, updated_seq, settings,
                                storage_bytes, question_keys)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, 1, $13, $16, $17, $18)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, 1, $13, $16::text::jsonb, $17, $18)",
         n.id,
         user.id,
         n.name,
@@ -282,7 +272,7 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
         seq,
         n.device_id,
         count_q,
-        n.answer_mode as AnswerMode,
+        n.settings,
         needed,
         question_keys,
     )
@@ -297,23 +287,6 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
         Err(e) => return Err(e.into()),
     }
     storage::add_to_user(&mut tx, user.id, needed).await?;
-    if let Some(d) = &n.display {
-        sqlx::query!(
-            "UPDATE cascades SET show_definitions = $2, show_hooks = $3, reveal_correct = $4, leave_value_decimals = $5,
-                                 show_found_count = $6, show_probability = $7, definition_column = $8
-             WHERE id = $1",
-            n.id,
-            d.show_definitions,
-            d.show_hooks,
-            d.reveal_correct,
-            d.leave_value_decimals,
-            d.show_found_count,
-            d.show_probability,
-            d.definition_column,
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
     // The Source quiz takes a copy of the cascade's options.
     let inserted = sqlx::query!(
         "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, segment_size, progression,
@@ -378,8 +351,10 @@ async fn create(
         segment_size: b.segment_size as i32,
         progression: b.progression,
         require_alphabetical: b.require_alphabetical,
-        answer_mode: b.answer_mode,
-        display: None,
+        settings: match b.answer_mode {
+            Some(AnswerMode::Typed) => r#"{"answer_mode":"typed"}"#.to_owned(),
+            _ => "{}".to_owned(),
+        },
         copy_of_spec: None,
     };
     store(&state, &user, n, p).await
@@ -387,7 +362,7 @@ async fn create(
 
 /// A new cascade named after the original with the next free number
 /// ([`numbered_name`]), a private copy of the same filters, and
-/// the same threshold, quiz options, answer mode and display settings. Subject
+/// the same threshold, quiz options and own settings. Subject
 /// to the storage limit.
 async fn duplicate(
     State(state): State<AppState>,
@@ -402,9 +377,7 @@ async fn duplicate(
     let mut conn = state.db.acquire().await?;
     let row = sqlx::query!(
         r#"SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS "progression: Progression",
-                  c.require_alphabetical, c.answer_mode AS "answer_mode: AnswerMode", c.show_definitions,
-                  c.show_hooks, c.reveal_correct, c.show_found_count, c.show_probability, c.definition_column,
-                  c.leave_value_decimals, l.name AS lexicon
+                  c.require_alphabetical, c.settings::text AS "settings!", l.name AS lexicon
            FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2"#,
         original,
         user.id
@@ -426,16 +399,7 @@ async fn duplicate(
         segment_size: row.segment_size,
         progression: row.progression,
         require_alphabetical: row.require_alphabetical,
-        answer_mode: row.answer_mode,
-        display: Some(Display {
-            show_definitions: row.show_definitions,
-            show_hooks: row.show_hooks,
-            reveal_correct: row.reveal_correct,
-            show_found_count: row.show_found_count,
-            show_probability: row.show_probability,
-            definition_column: row.definition_column,
-            leave_value_decimals: row.leave_value_decimals,
-        }),
+        settings: row.settings,
         copy_of_spec: Some(row.spec_id),
     };
     store(&state, &user, n, p).await

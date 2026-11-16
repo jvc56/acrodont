@@ -514,9 +514,25 @@ describe('the download manager', () => {
 		await b.sync();
 		expect((await b.db.get('cards', [C1, 0]))!.definitions).toBe(false);
 		// Still pending in the outbox: the download reads the cascade as the device sees it.
-		await applyLocally(b.db, { type: 'set_cascade_options', cascade_id: C1, show_definitions: true });
+		await applyLocally(b.db, { type: 'set_cascade_options', cascade_id: C1, settings: { show_definitions: true } });
 		await b.dl.run();
 		expect(b.calls.some((c) => c.kind === 'cards' && c.definitions)).toBe(true);
+		expect((await b.db.get('cards', [C1, 0]))!.definitions).toBe(true);
+	});
+
+	it('cards follow the answer settings this device resolves for the cascade, a device-only place included', async () => {
+		const server = new FakeServer();
+		server.create({ id: C1, source_id: Q1, count: 3 });
+		const b = await Dev.make(server);
+		// Off on this device for this cascade alone: the cascade's own value says nothing.
+		await b.db.put('meta', { [C1]: { show_definitions: false } }, 'cascade_device_settings');
+		await b.open(C1);
+		await b.sync();
+		expect((await b.db.get('cards', [C1, 0]))!.definitions).toBe(false);
+		// On again for every cascade on this device; the narrower place taken out: refetched with them.
+		await b.db.put('meta', {}, 'cascade_device_settings');
+		await b.db.put('meta', { show_definitions: true }, 'device_settings');
+		await b.dl.run();
 		expect((await b.db.get('cards', [C1, 0]))!.definitions).toBe(true);
 	});
 

@@ -7,3 +7,4 @@ pub mod sim;
 mod vectors;
 pub mod routes;
 pub mod rows;
+pub mod settings;

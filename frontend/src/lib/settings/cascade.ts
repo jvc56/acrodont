@@ -1,41 +1,26 @@
-// A cascade's settings (PLAN.md § Settings): everything about how one cascade
-// is studied, saved with it and synced. A change applies to that cascade
-// alone; the player then offers to use the same value for every cascade, and
-// can copy all of another cascade's settings at once. Neither is a new kind of
-// change: each is the ordinary `set_cascade_options` for each cascade that
-// differs, so it works offline and syncs like any other. Every new cascade
-// starts with CASCADE_SETTING_DEFAULTS.
+// A cascade's rules (PLAN.md § Settings → A cascade's rules): its clear
+// threshold and the options of the levels it makes from now on, which decide
+// how a pass is judged and so are always the cascade's, on every device. A
+// change applies to that cascade alone; the player then offers to use the same
+// value for every cascade, and can copy another cascade's rules and own
+// settings at once. Neither is a new kind of change: each is the ordinary
+// `set_cascade_options` for each cascade that differs, so it works offline and
+// syncs like any other. Every new cascade starts with CASCADE_SETTING_DEFAULTS.
 import { allCascades } from '$lib/cascades/summary';
 import { applyLocally, type NewOp } from '$lib/local/apply';
 import type { UserDb } from '$lib/local/db';
 import type { CascadeRow, QuizType } from '$lib/local/rows';
+import { sameValue } from './layers';
+import { cascadePlace } from './places';
 
-export const CASCADE_SETTINGS = [
-	'clear_threshold',
-	'answer_mode',
-	'show_definitions',
-	'show_hooks',
-	'reveal_correct',
-	'show_found_count',
-	'show_probability',
-	'definition_column',
-	'leave_value_decimals',
-	'segment_size',
-	'progression',
-	'require_alphabetical'
-] as const;
+export const CASCADE_SETTINGS = ['clear_threshold', 'segment_size', 'progression', 'require_alphabetical'] as const;
 
 export type CascadeSetting = (typeof CASCADE_SETTINGS)[number];
 export type CascadeSettings = Partial<Pick<CascadeRow, CascadeSetting>>;
 
-/** The settings that mean something for one kind of cascade only; the others apply to every kind. */
+/** The rules that mean something for one kind of cascade only; the others apply to every kind. */
 const ONLY_FOR: Partial<Record<CascadeSetting, QuizType>> = {
-	answer_mode: 'anagram',
-	show_definitions: 'anagram',
-	show_hooks: 'anagram',
-	show_found_count: 'anagram',
-	require_alphabetical: 'anagram',
-	leave_value_decimals: 'leave_value'
+	require_alphabetical: 'anagram'
 };
 
 /** Whether a setting means something for a cascade of this kind. */
@@ -83,15 +68,23 @@ export async function copySources(db: UserDb, c: CascadeRow): Promise<CascadeRow
 }
 
 /**
- * Gives `to` every setting of `from` that applies to both, in one change;
- * returns how many settings differed. The caller syncs.
+ * Gives `to` every rule of `from` that applies to both, and the same own
+ * settings (the "This cascade" place) as `from`, in one change; returns how
+ * many differed. The caller syncs.
  */
 export async function copySettings(db: UserDb, from: CascadeRow, to: CascadeRow): Promise<number> {
 	const fields = Object.fromEntries(
 		CASCADE_SETTINGS.filter((k) => appliesTo(k, from.quiz_type)).map((k) => [k, from[k]])
 	) as CascadeSettings;
-	const diff = differing(to, fields);
-	const n = Object.keys(diff).length;
+	const diff: Record<string, unknown> = differing(to, fields);
+	const mine = cascadePlace(to);
+	const theirs = cascadePlace(from);
+	const own: Record<string, unknown> = {};
+	for (const k of new Set([...Object.keys(mine), ...Object.keys(theirs)])) {
+		if (!sameValue(mine[k], theirs[k])) own[k] = k in theirs ? theirs[k] : null;
+	}
+	const n = Object.keys(diff).length + Object.keys(own).length;
+	if (Object.keys(own).length) diff.settings = own;
 	if (n) await applyLocally(db, { type: 'set_cascade_options', cascade_id: to.id, ...diff } as NewOp);
 	return n;
 }

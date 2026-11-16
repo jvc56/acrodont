@@ -164,9 +164,10 @@ export const AEINRST_WORDS = ['ANESTRI', 'ANTSIER', 'NASTIER', 'RATINES', 'RETAI
 export const lengths = (min: number, max: number) => ({ op: 'and', children: [{ type: 'length', negated: false, min, max }] });
 
 /**
- * Changes a cascade's settings on the server, as another device would, with a
- * `set_cascade_options` through the sync endpoint. Used on a cascade made with
- * `apiCascade` before this device has seen it, so it downloads with them.
+ * Sets a cascade's own settings (the "This cascade" place) on the server, as
+ * another device would, with a `set_cascade_options` through the sync
+ * endpoint. Used on a cascade made with `apiCascade` before this device has
+ * seen it, so it downloads with them.
  */
 export async function apiSettings(page: Page, path: string, fields: Record<string, unknown>) {
 	const csrf = (await page.context().cookies()).find((c) => c.name === 'acrodont_csrf')!.value;
@@ -186,7 +187,7 @@ export async function apiSettings(page: Page, path: string, fields: Record<strin
 					at: new Date().toISOString(),
 					type: 'set_cascade_options',
 					cascade_id: path.split('/').pop(),
-					...fields
+					settings: fields
 				}
 			]
 		}

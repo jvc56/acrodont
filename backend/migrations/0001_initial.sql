@@ -12,8 +12,6 @@ CREATE TYPE quiz_type AS ENUM ('anagram', 'definition', 'leave_value');
 
 CREATE TYPE grade AS ENUM ('correct', 'missed');
 
-CREATE TYPE anagram_answer_mode AS ENUM ('flashcard', 'typed');
-
 -- 'cleared' means finished and in the Trash, whether or not the score met the
 -- clear threshold (see Progression).
 CREATE TYPE quiz_status AS ENUM ('active', 'cleared');
@@ -112,8 +110,9 @@ CREATE TABLE users (
                             -- for this account
     device_settings     JSONB NOT NULL DEFAULT '{}'::jsonb
                             CHECK (jsonb_typeof(device_settings) = 'object'),
-                            -- device settings shared with all of the account's
-                            -- devices: setting name -> {value, at} (Settings)
+                            -- the account's settings, the "Everywhere" place:
+                            -- setting name -> {value, at}, a null value taking
+                            -- one out (Where a setting applies)
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
                             -- when the address was confirmed: a row is made by
                             -- the confirmation, never before it
@@ -435,17 +434,12 @@ CREATE TABLE cascades (
                                  -- ceil(question_count / S) bound on chain quizzes
     progression          quiz_progression NOT NULL DEFAULT 'ladder',
     require_alphabetical BOOLEAN NOT NULL DEFAULT false,
-    answer_mode          anagram_answer_mode NOT NULL DEFAULT 'flashcard',
-                                 -- the cascade's own, never a quiz's (Typed mode)
-    show_definitions     BOOLEAN NOT NULL DEFAULT true,  -- Anagram: each anagram's definition on reveal
-    show_hooks           BOOLEAN NOT NULL DEFAULT true,  -- Anagram: hooks on reveal
-    reveal_correct       BOOLEAN NOT NULL DEFAULT true,  -- a reveal marks the card correct
-                                 -- (false: missed) until toggled
-    show_found_count     BOOLEAN NOT NULL DEFAULT false, -- Anagram: typed mode's "3 of 9 found"
-    show_probability     BOOLEAN NOT NULL DEFAULT false, -- each word's probability order on reveal
-    definition_column    BOOLEAN NOT NULL DEFAULT true,  -- a definition beside its word (false: beneath it)
-    leave_value_decimals SMALLINT NOT NULL DEFAULT 0    -- Leave Value: decimal places shown
-                             CHECK (leave_value_decimals BETWEEN 0 AND 3),
+    settings             JSONB NOT NULL DEFAULT '{}'::jsonb
+                             CHECK (jsonb_typeof(settings) = 'object'),
+                                 -- the cascade's own settings, the "This cascade"
+                                 -- place: setting name to value, for every device;
+                                 -- one it does not name falls through to the
+                                 -- device's and the account's (Where a setting applies)
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
                              -- set_cascade_options; an older operation is rejected whole
     options_seq          BIGINT NOT NULL,            -- sync sequence of that change, for seen_seq

@@ -450,13 +450,13 @@ describe('the sync engine', () => {
 	it("a stale-rejected change to a cascade's settings reverts it; the other device's stands", async () => {
 		const { server, a } = await setup();
 		const b = await second(server);
-		await a.apply({ type: 'set_cascade_options', cascade_id: C1, show_hooks: false });
-		await b.apply({ type: 'set_cascade_options', cascade_id: C1, leave_value_decimals: 3 });
+		await a.apply({ type: 'set_cascade_options', cascade_id: C1, settings: { show_hooks: false } });
+		await b.apply({ type: 'set_cascade_options', cascade_id: C1, settings: { leave_value_decimals: 3 } });
 		await b.sync();
 		// A's change is older and unseen: stale; the cascade reverts to the server's row.
 		await a.sync();
 		const c = (await a.db.get('cascades', C1))!;
-		expect([c.show_hooks, c.leave_value_decimals]).toEqual([true, 3]);
+		expect(c.settings).toEqual({ leave_value_decimals: 3 });
 		expect(await a.db.get('overlay_cascades', C1)).toBeUndefined();
 	});
 

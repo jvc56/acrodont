@@ -1,24 +1,29 @@
-// What each setting does, written under its name (SettingRow), and where each of the
-// two groups of settings applies (PLAN.md § Settings), in one place.
+// What each setting does, behind an ⓘ beside its name (SettingRow), and where
+// settings apply (PLAN.md § Settings → Where a setting applies), in one place.
 
-/** Where a group of settings applies, said once above the group in a cascade's Settings. */
+/** Where settings apply, said once at the top of Settings and beside each group's heading. */
 export const SCOPE = {
+	places:
+		'A change applies to this cascade on this device. Under each setting is where its value comes from; after a change you can use it for this cascade on every device, for every cascade on this device, or everywhere.',
 	cascade:
-		'Saved with this cascade and synced to your other devices. Your other cascades keep their settings. After you change a setting you can optionally apply the change for every cascade too.',
-	device:
-		'Saved on this device, for every cascade you study here. Your other devices keep their settings. After you change a setting you can optionally apply the change for all your devices too.'
+		'This cascade’s name, and its rules: the clear threshold and the options of its levels. They decide how a pass is judged, so they are the same on every device. After you change one you can optionally use it for every cascade too.',
+	answers:
+		'What a revealed answer shows and how a reveal grades it. Each can be set for this cascade on this device, this cascade, this device, or everywhere; the first of those that has a value is used.',
+	display:
+		'How the player looks and responds. Each can be set for this cascade on this device, this cascade, this device, or everywhere; the first of those that has a value is used.'
 } as const;
 
 /** What each part of a cascade's Settings is for, behind an ⓘ beside its heading. */
 export const SECTION = {
 	level: 'These options belong to the level you are studying. Changes apply to this quiz only, from the current card.',
 	new_levels: 'Each new level this cascade makes from your misses starts with these. Levels it already has keep their own.',
-	copy: 'Gives this cascade every setting above that the other one has too. The level you are studying keeps its own options.',
-	controls: 'The keys, mouse buttons and wheel directions for each action.'
+	copy: 'Gives this cascade the other one’s rules, and the same settings of its own (the ones set for “This cascade”). The level you are studying keeps its own options.',
+	controls:
+		'The keys, mouse buttons and wheel directions for each action. They are one setting, which can be set for this cascade on this device, this cascade, this device, or everywhere.'
 } as const;
 
 export const INFO = {
-	// A cascade's settings (synced)
+	// A cascade's rules and answer settings
 	leave_value_decimals:
 		'How many decimal places leave values show, rounded half away from zero: at one place, 1.25 shows as 1.3 and −8.35 as −8.4.',
 	show_definitions: 'Shows each anagram’s definition under it when the answer is revealed.',
@@ -45,7 +50,7 @@ export const INFO = {
 	progression:
 		'What a pass below the clear threshold does. Ladder: keep the quiz and go down a level with the misses; come back up to clear it. Drill: replace the quiz with its misses and keep going until nothing is missed.',
 	alphabetical: 'In typed mode, each anagram must be entered after the ones before it in alphabetical order. One typed out of order marks the card missed at once.',
-	// This device's display
+	// Display
 	font: 'The typeface. Inter is bundled and works offline; the others use what this device has.',
 	size: 'The text size in pixels.',
 	spacing: 'Extra space between letters, in em (a fraction of the text size). 0 is the font’s normal spacing.',

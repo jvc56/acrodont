@@ -23,8 +23,8 @@
 	import TileText from '$lib/components/TileText.svelte';
 	import { definitionLines, splitTag, unbroken } from '$lib/cascade/definition';
 	import { leaveValueText } from '$lib/cascade/leave';
-	import { textStyle } from '$lib/player/display.svelte';
-	import type { CascadeRow } from '$lib/local/rows';
+	import { textStyle } from '$lib/player/display';
+	import type { AnswerSettings } from '$lib/settings/layers';
 
 	interface Word {
 		word: string;
@@ -55,8 +55,8 @@
 	}: {
 		quizType: string;
 		answer: unknown;
-		/** The cascade's settings for what an answer shows. */
-		settings: Pick<CascadeRow, 'show_definitions' | 'show_hooks' | 'leave_value_decimals'> & Partial<Pick<CascadeRow, 'show_probability' | 'definition_column'>>;
+		/** What an answer shows, as this device resolves it for the cascade (lib/settings/layers). */
+		settings: Pick<AnswerSettings, 'show_definitions' | 'show_hooks' | 'leave_value_decimals'> & Partial<Pick<AnswerSettings, 'show_probability' | 'definition_column'>>;
 		/** Words found in typed mode; the others are highlighted. */
 		found?: string[] | null;
 		/** Any font name the device has. */

@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE cascades SET segment_size = coalesce($2, segment_size), progression = coalesce($3, progression),\n                             require_alphabetical = coalesce($4, require_alphabetical), options_changed_at = $5,\n                             options_seq = $6, options_device_id = $7, updated_seq = $6,\n                             clear_threshold = coalesce($8, clear_threshold),\n                             settings = coalesce($9::text::jsonb, settings)\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        {
+          "Custom": {
+            "name": "quiz_progression",
+            "kind": {
+              "Enum": [
+                "ladder",
+                "drill"
+              ]
+            }
+          }
+        },
+        "Bool",
+        "Timestamptz",
+        "Int8",
+        "Uuid",
+        "Int2",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0e4db2674a8f0f90c29f748da14ff361ee7c654ca1189415f1c277c5ee22b6fb"
+}

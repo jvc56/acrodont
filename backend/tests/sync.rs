@@ -406,26 +406,28 @@ async fn out_of_range_values_are_invalid_never_error(pool: sqlx::PgPool) {
         d.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 300001 })),
         d.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 1 })),
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "progression": "spiral" })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "leave_value_decimals": 4 })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "leave_value_decimals": -1 })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "leave_value_decimals": "2" })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "leave_value_decimals": 1.5 })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "show_definitions": "no" })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "show_hooks": 0 })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "reveal_correct": "missed" })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "answer_mode": "spoken" })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 4 } })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": -1 } })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": "2" } })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 1.5 } })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "show_definitions": "no" } })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": 0 } })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "reveal_correct": "missed" } })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "answer_mode": "spoken" } })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "Bad-Name": 1 } })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "question_font": "a\u{0}b" } })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "bindings": "x".repeat(17 * 1024) } })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": "show_hooks" })),
     ];
     let r = d.sync(ops).await;
     for x in r.json()["results"].as_array().unwrap() {
         assert_eq!(x["reason"], "invalid", "{x}");
     }
-    let (seg, decimals, defs, hooks, reveal): (i32, i16, bool, bool, bool) = sqlx::query_as(
-        "SELECT segment_size, leave_value_decimals, show_definitions, show_hooks, reveal_correct FROM cascades",
-    )
-    .fetch_one(app.db())
-    .await
-    .unwrap();
-    assert_eq!((seg, decimals, defs, hooks, reveal), (0, 0, true, true, true));
+    let (seg, settings): (i32, String) = sqlx::query_as("SELECT segment_size, settings::text FROM cascades")
+        .fetch_one(app.db())
+        .await
+        .unwrap();
+    assert_eq!((seg, settings.as_str()), (0, "{}"));
     let errors: i64 = sqlx::query_scalar("SELECT count(*) FROM sync_operations WHERE reason = 'error'").fetch_one(app.db()).await.unwrap();
     assert_eq!(errors, 0);
     // The schema refuses such a row directly.
@@ -663,20 +665,24 @@ async fn latest_wins_whole(pool: sqlx::PgPool) {
     let oa = a.op_at("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 5 }), t0);
     assert_eq!(result(&a.sync(vec![oa]).await, 0)["status"], "applied");
     // The cascade's settings likewise: one rule for everything set_cascade_options carries.
-    let pb = b.op_at("set_cascade_options", json!({ "cascade_id": s.cascade_id, "show_hooks": false }), t0 + Duration::seconds(5));
+    let pb = b.op_at("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": false } }), t0 + Duration::seconds(5));
     assert_eq!(result(&b.sync(vec![pb]).await, 0)["status"], "applied");
-    let mut stale = a.op_at("set_cascade_options", json!({ "cascade_id": s.cascade_id, "leave_value_decimals": 2 }), t0 + Duration::seconds(4));
+    let mut stale = a.op_at(
+        "set_cascade_options",
+        json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 2 } }),
+        t0 + Duration::seconds(4),
+    );
     stale["seen_seq"] = json!(0);
     assert_eq!(result(&a.sync(vec![stale]).await, 0)["reason"], "stale");
-    let decimals: i16 = sqlx::query_scalar("SELECT leave_value_decimals FROM cascades").fetch_one(app.db()).await.unwrap();
-    assert_eq!(decimals, 0, "the stale change lost whole");
+    let settings: String = sqlx::query_scalar("SELECT settings::text FROM cascades").fetch_one(app.db()).await.unwrap();
+    assert_eq!(settings, r#"{"show_hooks": false}"#, "the stale change lost whole");
     // Two changes from one device with a clock a day ahead, in one batch: both applied.
     let mut fast = b.sibling(&app);
     fast.skew = Duration::days(1);
     let o1 = fast.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 5 }));
     let o2 = fast.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 6 }));
-    let p1 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "reveal_correct": false }));
-    let p2 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "leave_value_decimals": 3 }));
+    let p1 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "reveal_correct": false } }));
+    let p2 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 3 } }));
     let r = fast.sync(vec![o1, o2, p1, p2]).await;
     for i in 0..4 {
         assert_eq!(result(&r, i)["status"], "applied", "{i}");
@@ -877,10 +883,10 @@ async fn the_clear_threshold_changes_for_the_pass_in_progress(pool: sqlx::PgPool
     assert_eq!((thr, seg), (50, 0), "the threshold alone changed");
 }
 
-/// A cascade's settings (PLAN.md § Settings): `show_definitions`,
-/// `show_hooks`, `reveal_correct`, `show_found_count` and `leave_value_decimals` start at their
-/// defaults, are set by `set_cascade_options`, any subset at a time, and pull
-/// back on the cascade's row; a quiz's options operation carrying one is a 400.
+/// A cascade's own settings (PLAN.md § Settings → Where a setting applies):
+/// a new cascade has none; `set_cascade_options` sets and clears them, any
+/// subset at a time, null taking one away; they pull back on the cascade's
+/// row; and a quiz's options operation carrying them is a 400.
 #[sqlx::test]
 async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
     let app = app(pool).await;
@@ -888,53 +894,40 @@ async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
     let s = cascade(&app, &mut d, Setup::new(5)).await;
     let mut other = d.sibling(&app);
     let (_, pages) = other.sync_all(vec![]).await;
-    let c = &rows(&pages, "cascades")[0];
-    assert_eq!(
-        (&c["show_definitions"], &c["show_hooks"], &c["reveal_correct"], &c["leave_value_decimals"]),
-        (&json!(true), &json!(true), &json!(true), &json!(0)),
-    );
-    assert_eq!(c["definition_column"], json!(true), "a definition starts beside its word");
-    assert_eq!(c["show_found_count"], json!(false), "the found count is off until asked for");
-    assert_eq!(c["show_probability"], json!(false), "and so is the probability order");
+    assert_eq!(rows(&pages, "cascades")[0]["settings"], json!({}));
     let o = d.op(
         "set_cascade_options",
-        json!({ "cascade_id": s.cascade_id, "show_definitions": false, "show_hooks": false,
-                "reveal_correct": false, "leave_value_decimals": 3, "show_found_count": true,
-                "show_probability": true, "definition_column": false }),
+        json!({ "cascade_id": s.cascade_id, "settings": { "show_definitions": false, "show_hooks": false,
+                "leave_value_decimals": 3, "question_size_px": 48, "bindings": [{ "action": "previous" }] } }),
     );
     assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
-    // One field alone leaves the others as they are.
-    let o = d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "show_hooks": true }));
+    // One setting alone leaves the others as they are; null takes one away.
+    let o = d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": true, "show_definitions": null } }));
     assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
     let (_, pages) = other.sync_all(vec![]).await;
-    let c = &rows(&pages, "cascades")[0];
     assert_eq!(
-        (&c["show_definitions"], &c["show_hooks"], &c["reveal_correct"], &c["leave_value_decimals"]),
-        (&json!(false), &json!(true), &json!(false), &json!(3)),
+        rows(&pages, "cascades")[0]["settings"],
+        json!({ "show_hooks": true, "leave_value_decimals": 3, "question_size_px": 48, "bindings": [{ "action": "previous" }] })
     );
-    assert_eq!((&c["show_found_count"], &c["show_probability"], &c["definition_column"]), (&json!(true), &json!(true), &json!(false)));
     // Out of range or the wrong type: invalid, and nothing changes.
     let bad: Vec<Value> = [json!({ "leave_value_decimals": 4 }), json!({ "leave_value_decimals": "1" }), json!({ "show_hooks": "true" })]
         .into_iter()
-        .map(|mut f| {
-            f["cascade_id"] = json!(s.cascade_id);
-            d.op("set_cascade_options", f)
-        })
+        .map(|f| d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": f })))
         .collect();
     let r = d.sync(bad).await;
     for x in r.json()["results"].as_array().unwrap() {
         assert_eq!(x["reason"], "invalid", "{x}");
     }
-    let decimals: i16 = sqlx::query_scalar("SELECT leave_value_decimals FROM cascades").fetch_one(app.db()).await.unwrap();
-    assert_eq!(decimals, 3);
-    // The settings are the cascade's alone: a quiz's options operation naming one is refused whole.
-    for field in ["show_definitions", "show_hooks", "reveal_correct", "show_found_count", "show_probability", "definition_column", "leave_value_decimals"] {
-        let mut f = json!({ "quiz_id": s.source_id });
-        f[field] = if field == "leave_value_decimals" { json!(2) } else { json!(false) };
-        let o = d.op("set_quiz_options", f);
-        let body = json!({ "device_id": d.id, "app_version": 1, "cursor": d.cursor, "question_rows_for": [], "ops": [o] });
-        assert_eq!(d.raw_sync(body).await.status, StatusCode::BAD_REQUEST, "{field}");
-    }
+    let decimals: Value = sqlx::query_scalar::<_, String>("SELECT settings::text FROM cascades")
+        .fetch_one(app.db())
+        .await
+        .map(|t| serde_json::from_str::<Value>(&t).unwrap()["leave_value_decimals"].clone())
+        .unwrap();
+    assert_eq!(decimals, json!(3));
+    // The settings are the cascade's alone: a quiz's options operation carrying them is refused whole.
+    let o = d.op("set_quiz_options", json!({ "quiz_id": s.source_id, "settings": { "show_hooks": false } }));
+    let body = json!({ "device_id": d.id, "app_version": 1, "cursor": d.cursor, "question_rows_for": [], "ops": [o] });
+    assert_eq!(d.raw_sync(body).await.status, StatusCode::BAD_REQUEST);
 }
 
 
@@ -1032,7 +1025,7 @@ async fn other_devices_hear_of_a_change_at_once(pool: sqlx::PgPool) {
     let (_, mut bobs) = bob.client.open_stream(&format!("/api/sync/events?user={bob_user}&device={}", bob.id)).await;
     let short = std::time::Duration::from_millis(700);
 
-    let o = d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "show_hooks": false }));
+    let o = d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": false } }));
     assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
     let heard = next_event(&mut theirs, std::time::Duration::from_secs(5)).await.expect("the other device hears of it");
     // With data: EventSource drops an event without any.

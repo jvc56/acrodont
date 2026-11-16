@@ -13,6 +13,7 @@
 		label,
 		for: forId,
 		info = null,
+		under = undefined,
 		children
 	}: {
 		label: string;
@@ -20,6 +21,8 @@
 		for: string;
 		/** What the setting does, behind an ⓘ beside its name. */
 		info?: string | null;
+		/** Under the name: where the setting's value comes from (settings/PlaceChip). */
+		under?: Snippet;
 		children: Snippet;
 	} = $props();
 </script>
@@ -30,6 +33,7 @@
 			<label for={forId} class="text-sm">{label}</label>
 			{#if info}<InfoTip text={info} />{/if}
 		</div>
+		{#if under}<div class="mt-1">{@render under()}</div>{/if}
 	</div>
 	<div class="flex shrink-0 items-center gap-2 text-sm">{@render children()}</div>
 </div>

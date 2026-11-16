@@ -6,6 +6,7 @@
 // (PLAN.md § The sync cycle). The server itself is tested in backend/tests.
 import { finishesRefused, levelBytes, STORAGE_COSTS } from '$lib/cascades/storage';
 import { questionsHash, toI64, fromI64 } from '$lib/cascade/order';
+import { mergeCascadeSettings } from '$lib/cascade/settings';
 import { Rejected, type Grade, type Progression } from '$lib/cascade/rules';
 import { positionsOf, SimCascade, type Op, type SimQuiz } from '$lib/cascade/sim';
 import type { QuestionGroup, Reply, SyncRequest, SyncResult, Tombstone, WireRow } from '../protocol';
@@ -56,9 +57,8 @@ interface CascadeEntry {
 	options_at: string;
 	options_seq: number;
 	options_device: string;
-	answer_mode: 'flashcard' | 'typed';
-	/** The per-cascade settings the cascade rules never read. */
-	settings: { show_definitions: boolean; show_hooks: boolean; reveal_correct: boolean; show_found_count: boolean; show_probability: boolean; definition_column: boolean; leave_value_decimals: number };
+	/** The cascade's own settings, which the cascade rules never read. */
+	settings: Record<string, unknown>;
 	quizzes: Map<string, QuizMeta>;
 }
 
@@ -111,8 +111,7 @@ export class FakeServer {
 			options_at: T0,
 			options_seq: seq,
 			options_device: 'server',
-			answer_mode: 'flashcard',
-			settings: { show_definitions: true, show_hooks: true, reveal_correct: true, show_found_count: false, show_probability: false, definition_column: true, leave_value_decimals: 0 },
+			settings: {},
 			quizzes: new Map()
 		};
 		this.cascades.set(c.id, e);
@@ -137,8 +136,7 @@ export class FakeServer {
 			segment_size: s.opts.segment_size,
 			progression: s.opts.progression,
 			require_alphabetical: s.opts.require_alphabetical,
-			answer_mode: e.answer_mode,
-			...e.settings,
+			settings: e.settings,
 			// The server's count, from the same per-row costs: the questions and each level's rows.
 			storage_bytes: String(
 				STORAGE_COSTS.cascade_row +
@@ -202,7 +200,7 @@ export class FakeServer {
 	/** Stamps every row an operation changed with `seq`. */
 	private track(e: CascadeEntry, seq: number, at: string, device: string, only?: string) {
 		// The cascade row changes with its rules state, the Trash, and the settings the rules never read.
-		const snap = JSON.stringify({ ...e.sim.state, t: e.trashed_at, m: e.answer_mode, s: e.settings });
+		const snap = JSON.stringify({ ...e.sim.state, t: e.trashed_at, s: e.settings });
 		if (snap !== e.snapshot) {
 			e.snapshot = snap;
 			e.updated_seq = seq;
@@ -335,15 +333,14 @@ export class FakeServer {
 		// they refuse keeps their reason; this stand-in checks it first, which
 		// differs only for a finish refused twice over.
 		if (type === 'finish' && finishesRefused(this.storage().used, this.storageLimit)) throw new Rejected('storage_limit');
+		// The cascade's own settings, checked before anything changes, as the server's are.
+		const settings = type === 'set_cascade_options' && w.settings !== undefined ? mergeCascadeSettings(e.settings, w.settings) : null;
 		const before = new Set(e.sim.quizzes.keys());
 		const r = e.sim.apply(op as unknown as Op);
 		if (type === 'trash_cascade') e.trashed_at = at;
 		if (type === 'restore_cascade' || (type === 'restore_quiz' && !e.sim.state.trashed)) e.trashed_at = null;
 		if (type === 'set_cascade_options') {
-			if (w.answer_mode !== undefined) e.answer_mode = w.answer_mode as 'flashcard' | 'typed';
-			for (const k of Object.keys(e.settings) as (keyof CascadeEntry['settings'])[]) {
-				if (w[k] !== undefined) (e.settings as Record<string, unknown>)[k] = w[k];
-			}
+			if (settings) e.settings = settings;
 			e.options_at = at;
 			e.options_seq = seq;
 			e.options_device = device;

@@ -3,11 +3,11 @@
 	// for a fine pointer at least 900 px wide, a hideable menu on the left, the
 	// quiz area with the question at the top, and a status bar along the bottom;
 	// tap zones otherwise. The three actions from mouse, wheel, keys and taps;
-	// typed mode; the Settings dialog, which holds every setting there is, in
-	// two groups: this cascade's (synced; a change offers to be used for every
-	// cascade too, and another cascade's can be copied) and this device's
-	// (its display and controls, never synced); banners, the completion
-	// screen, and a trashed cascade's Restore.
+	// typed mode; the Settings dialog, which holds every setting there is: this
+	// cascade's rules (synced; a change offers to be used for every cascade too,
+	// and another cascade's can be copied), then the answer, display and
+	// control settings, each set in any of four places (lib/settings/layers);
+	// banners, the completion screen, and a trashed cascade's Restore.
 	import { INFO, SCOPE, SECTION } from '$lib/settings-info';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -27,8 +27,10 @@
 	import SettingRow from '$lib/components/SettingRow.svelte';
 	import InfoTip from '$lib/components/InfoTip.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { display, textStyle } from '$lib/player/display.svelte';
-	import { controls } from '$lib/player/controls.svelte';
+	import { textStyle } from '$lib/player/display';
+	import { settings } from '$lib/settings/store.svelte';
+	import type { SettingKey } from '$lib/settings/layers';
+	import LayeredSetting from '$lib/components/settings/LayeredSetting.svelte';
 	import { applyOrRefuse, CHANGE_REFUSED, type NewOp } from '$lib/local/apply';
 	import { storeCreated, storeRenamed, type Created } from '$lib/local/created';
 	import type { UserDb } from '$lib/local/db';
@@ -44,10 +46,10 @@
 		type Widening
 	} from '$lib/settings/cascade';
 	import { userDb } from '$lib/local/open';
-	import type { AnswerMode, AttemptRow, CascadeRow } from '$lib/local/rows';
+	import type { AttemptRow, CascadeRow } from '$lib/local/rows';
 	import type { RwTx } from '$lib/local/view';
 	import { PLAYER_LOCK } from '$lib/sync/downloads';
-	import { afterLocalWrite, ensureCascade, fetchAhead, fetchCard, fetchDistribution, playerActs, sendPending, syncState } from '$lib/sync/runtime.svelte';
+	import { afterLocalWrite, downloadInBackground, ensureCascade, fetchAhead, fetchCard, fetchDistribution, playerActs, sendPending, syncState } from '$lib/sync/runtime.svelte';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import PanelBottomCloseIcon from '@lucide/svelte/icons/panel-bottom-close';
 	import PanelBottomOpenIcon from '@lucide/svelte/icons/panel-bottom-open';
@@ -86,8 +88,8 @@
 	let quizOptions = $state<QuizOptions | null>(null);
 	let maxQuiz = $state(300_000);
 
-	// The repeat guard is a setting on this device (display.repeat_guard_ms), read on every press.
-	const actions = new Debounce(() => display.value.repeat_guard_ms);
+	// The repeat guard is a setting (repeat_guard_ms), read on every press.
+	const actions = new Debounce(() => settings.value.repeat_guard_ms);
 	const wheel = new Debounce(150);
 
 	let rows = $derived<LevelRow[]>(v?.cascade ? levelRows(v.quizzes, v.cascade.depth, attempts) : []);
@@ -97,11 +99,12 @@
 	let segment = $derived(v?.bar?.segment ?? null);
 	/** The position the Level row shows: the card shown, or the waiting level's cursor while its segment is drilled. */
 	let levelPos = $derived(!levelQuiz ? 0 : v?.bar && !v.bar.played ? levelQuiz.cursor : (v?.card?.pos ?? levelQuiz.cursor));
-	let dsp = $derived(display.value);
+	/** Every setting's value for this cascade on this device, from whichever place holds it. */
+	let dsp = $derived(settings.value);
 /** Typed mode's "3 of 9 found", when the cascade's setting asks for it and the card is still being typed. */
 	let foundCount = $derived.by(() => {
 		const card = v?.card;
-		if (!v?.cascade?.show_found_count || !card?.typed || card.revealed || !player) return null;
+		if (!dsp.show_found_count || !card?.typed || card.revealed || !player) return null;
 		return `${card.typed.found.length} of ${player.words(card).length} found`;
 	});
 	/** How far through the pass the current card is, for the status bar's line. */
@@ -182,8 +185,11 @@
 			const max = (await getMeta(d, 'server')).max_quiz_questions;
 			if (cancelled) return;
 			maxQuiz = max;
-			await display.load(d);
-			await controls.load(d);
+			// Every place's settings for this cascade; its own come with its row (setCascade below).
+			await settings.open(d, { id, settings: {} }, {
+				writeCascade: (changes) => write({ type: 'set_cascade_options', cascade_id: id, settings: changes }),
+				afterChange: settingsChanged
+			});
 			if (cancelled) return;
 			// Navigating to the player is an open (§ Downloads).
 			const tx = d.transaction(['meta'], 'readwrite');
@@ -198,7 +204,8 @@
 			}
 			syncState.openCascade = id;
 			const p = new Player(d, id, {
-ensure: (cid, progress) => ensureCascade(d, cid, progress),
+				ensure: (cid, progress) => ensureCascade(d, cid, progress),
+				answer: () => ({ answer_mode: settings.value.answer_mode, reveal_correct: settings.value.reveal_correct }),
 				fetchCard: (cid, idx, ahead) => fetchCard(d, cid, idx, ahead),
 				fetchAhead: (cid, idx) => fetchAhead(d, cid, idx),
 				fetchDistribution: (cid) => fetchDistribution(d, cid),
@@ -290,7 +297,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		// Text fields outside the quiz area keep their keys.
 		if (!inTyped && t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
 		if (inTyped && inputOwns(e)) return;
-		const a = actionFor(controls.value, keyStroke(e));
+		const a = actionFor(dsp.bindings, keyStroke(e));
 		if (!a) return;
 		e.preventDefault();
 		// A key held down is one press: its repeats would show and grade cards unseen.
@@ -311,7 +318,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		const s = mouseStroke(e);
 		if (!s) return;
 		e.preventDefault();
-		const a = actionFor(controls.value, s);
+		const a = actionFor(dsp.bindings, s);
 		if (!a) return;
 		// Before the reveal, Show / Next from the mouse only focuses the typed input,
 		// even while it has the focus: a click never gives a typed card up.
@@ -326,7 +333,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	function onWheel(e: WheelEvent) {
 		const s = wheelStroke(e);
 		if (!s) return;
-		const a = actionFor(controls.value, s);
+		const a = actionFor(dsp.bindings, s);
 		if (!a) return; // an unbound direction scrolls as usual
 		e.preventDefault();
 		if (wheel.pass(s.code, performance.now())) void act(a);
@@ -438,25 +445,34 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	}
 
 	/**
-	 * Changes this cascade's settings, for it alone, then offers to use the same
-	 * values for every cascade (§ Settings → One cascade, or all of them).
-	 * `key` names the offer: one per setting, or one for the new levels' options.
+	 * Changes this cascade's rules, for it alone, then offers to use the same
+	 * values for every cascade (§ Settings → A cascade's rules). `key` names the
+	 * offer: the threshold, or the new levels' options.
 	 */
 	async function setCascade(fields: CascadeSettings, key: string = Object.keys(fields)[0]) {
 		const c = v?.cascade;
 		if (!c || !Object.keys(fields).length) return;
-		// Definitions, hooks or probability orders change what an answer holds: the cards in memory go first.
-		if (fields.show_definitions !== undefined || fields.show_hooks !== undefined || fields.show_probability !== undefined) player?.settingsChanged();
 		if (!(await write({ type: 'set_cascade_options', cascade_id: c.id, ...fields } as NewOp))) return;
-		// Switching mode mid-card resets its typed entries.
-		if (fields.answer_mode !== undefined) await player?.modeChanged();
 		await offer(key, fields);
 	}
 
-	/** Flashcard or typed, for this cascade alone. */
-	async function setAnswerMode(mode: AnswerMode) {
-		if (!v?.cascade || mode === v.cascade.answer_mode) return;
-		await setCascade({ answer_mode: mode });
+	/** The cascade's own settings as the player now has them: a sync or another tab may have changed them. */
+	$effect(() => settings.setCascade(v?.cascade ?? null));
+
+	/**
+	 * After a setting changed in any place (§ Settings → Where a setting
+	 * applies): the change syncs if it is the cascade's or the account's, and
+	 * the player shows it. Definitions, hooks or probability orders change what
+	 * an answer holds: the cards in memory go, and a download pass fetches the
+	 * extras the cards lack. A new answer mode resets the card's typed entries.
+	 */
+	async function settingsChanged(keys: SettingKey[]) {
+		afterLocalWrite();
+		if (keys.some((k) => k === 'show_definitions' || k === 'show_hooks' || k === 'show_probability')) {
+			player?.settingsChanged();
+			downloadInBackground();
+		}
+		if (keys.includes('answer_mode')) await player?.modeChanged();
 	}
 
 	/** Settings: what is read fresh each time it opens, then the dialog. */
@@ -469,6 +485,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 			: null;
 		cascadeError = null;
 		offers = {};
+		settings.resetOffers();
 		levelSaved = 0;
 		copied = null;
 		copyFrom = '';
@@ -716,7 +733,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 						<AnswerView
 							quizType={v.cascade!.quiz_type}
 							answer={card.answer}
-							settings={v.cascade!}
+							settings={dsp}
 							found={card.typed?.found ?? null}
 							font={dsp.answer_font}
 							size={dsp.answer_size_px}
@@ -731,7 +748,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 					<AnswerView
 						quizType={v.cascade!.quiz_type}
 						answer={card.answer}
-						settings={v.cascade!}
+						settings={dsp}
 						typing={card.typed.found}
 						entered={lastFound}
 						font={dsp.answer_font}
@@ -886,14 +903,14 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 			{#if dsp.status_bar_hidden}
 				<button
 					class="mt-0.5 shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-					onclick={() => display.set({ status_bar_hidden: false })}
+					onclick={() => settings.change('status_bar_hidden', false)}
 					aria-label="Show status bar"
 					title="Show status bar"><PanelBottomOpenIcon class="size-4" /></button
 				>
 			{:else}
 				<button
 					class="mt-0.5 shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-					onclick={() => display.set({ status_bar_hidden: true })}
+					onclick={() => settings.change('status_bar_hidden', true)}
 					aria-label="Hide status bar"
 					title="Hide status bar"><PanelBottomCloseIcon class="size-4" /></button
 				>
@@ -991,7 +1008,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	</div>
 {:else}
 	<!-- A phone or tablet: the quiz, then typed mode's input, then the status bar, as on the
-	     desktop. The three actions are tap zones (display.mobile_buttons): by default three
+	     desktop. The three actions are tap zones (the mobile_buttons setting): by default three
 	     columns, Previous, Toggle and Show / Next, each tapped anywhere in its third of the quiz
 	     area, with its label at the bottom; or the question, then three rows of buttons
 	     under it, Previous, Toggle and Show / Next, the last nearest the thumb. ☰ opens
@@ -1012,7 +1029,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 						{@render question()}
 					</div>
 					<!-- Show / Next at the bottom, nearest the thumb; in landscape the rows stand at
-					     the bottom of a column on the right. Each row is display.mobile_row_px tall. -->
+					     the bottom of a column on the right. Each row is mobile_row_px tall. -->
 					<div class="flex shrink-0 flex-col text-muted-foreground {landscape ? 'w-2/5 justify-end' : ''}" data-zone="rows">
 						<button class="shrink-0 active:bg-muted/60" style={`height: ${dsp.mobile_row_px}px`} onclick={() => act('previous')}>↶ Previous</button>
 						<button class="shrink-0 active:bg-muted/60" style={`height: ${dsp.mobile_row_px}px`} onclick={() => act('toggle_grade')}>✓ ⇄ ✗ Toggle</button>
@@ -1073,13 +1090,19 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 {/snippet}
 
 {#snippet scopeHead(id: string, title: string, text: string)}
-	<!-- Each of the two sections opens with a bar of its own, so they read as separate. -->
+	<!-- Each section opens with a bar of its own, so they read as separate. -->
 	<div class="-mx-6 space-y-1 border-y bg-muted/60 px-6 py-3">
 		<div class="flex flex-wrap items-center gap-2">
 			<h3 {id} class="text-lg font-semibold tracking-tight">{title}</h3>
 			<InfoTip {text} label="About these settings" />
 		</div>
 	</div>
+{/snippet}
+
+{#snippet flag(key: 'show_definitions' | 'show_hooks' | 'show_found_count' | 'show_probability' | 'definition_column', label: string, id: string, info: string)}
+	<LayeredSetting {key} {label} for={id} {info}>
+		<input {id} type="checkbox" checked={dsp[key]} onchange={(e) => settings.change(key, e.currentTarget.checked)} />
+	</LayeredSetting>
 {/snippet}
 
 {#snippet subHead(id: string, title: string, text: string | null = null)}
@@ -1091,9 +1114,11 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 
 {#if settingsOpen}
 	<div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" role="presentation" onclick={() => (settingsOpen = false)}>
-		<!-- Every setting there is, in one place, in its two groups: this cascade's
-		     and this device's. Each group says above its settings where they apply
-		     (SCOPE), and each setting is saved as soon as it is changed. -->
+		<!-- Every setting there is, in one place: this cascade's rules, which are
+		     always its own, then the answer, display and control settings, each of
+		     which says under its name where its value comes from and can be set in
+		     any of four places (§ Settings → Where a setting applies). Each setting
+		     is saved as soon as it is changed. -->
 		<div
 			class="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-lg border bg-background shadow-lg"
 			role="dialog"
@@ -1109,11 +1134,12 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 				</div>
 			</div>
 			<div class="space-y-10 overflow-y-auto px-6 pb-6">
+				<p class="pt-4 text-sm text-muted-foreground" data-places-intro>{SCOPE.places}</p>
 				{#if v?.cascade && v.quiz}
 					{@const c = v.cascade}
 					{@const q = v.quiz}
 					<section class="space-y-4" aria-labelledby="settings-cascade">
-						{@render scopeHead('settings-cascade', 'Cascade Settings', SCOPE.cascade)}
+						{@render scopeHead('settings-cascade', 'This Cascade', SCOPE.cascade)}
 						<SettingRow label="Name" info={INFO.cascade_name} for="cascade-name">
 							<input
 								id="cascade-name"
@@ -1146,85 +1172,6 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 							/>
 						</SettingRow>
 						{@render widen('clear_threshold')}
-						{#if c.quiz_type === 'anagram'}
-							<!-- Typing answers is for anagram quizzes only, and each cascade keeps its own mode. -->
-							<SettingRow label="Answer mode" info={INFO.answer_mode} for="player-mode">
-								<select id="player-mode" class="rounded border bg-background px-2 py-1" value={c.answer_mode} onchange={(e) => setAnswerMode(e.currentTarget.value as AnswerMode)}>
-									<option value="flashcard">Flashcard</option>
-									<option value="typed">Typed</option>
-								</select>
-							</SettingRow>
-							{@render widen('answer_mode')}
-						{/if}
-						<SettingRow label="When an answer is revealed, mark it" info={INFO.reveal_correct} for="cascade-reveal">
-							<select
-								id="cascade-reveal"
-								class="rounded border bg-background px-2 py-1"
-								value={c.reveal_correct === false ? 'missed' : 'correct'}
-								onchange={(e) => setCascade({ reveal_correct: e.currentTarget.value === 'correct' })}
-							>
-								<option value="correct">Correct</option>
-								<option value="missed">Missed</option>
-							</select>
-						</SettingRow>
-						{@render widen('reveal_correct')}
-						{#if c.quiz_type === 'anagram'}
-							<SettingRow label="Show definitions" info={INFO.show_definitions} for="cascade-definitions">
-								<input
-									id="cascade-definitions"
-									type="checkbox"
-									checked={c.show_definitions !== false}
-									onchange={(e) => setCascade({ show_definitions: e.currentTarget.checked })}
-								/>
-							</SettingRow>
-							{@render widen('show_definitions')}
-							<SettingRow label="Show hooks" info={INFO.show_hooks} for="cascade-hooks">
-								<input id="cascade-hooks" type="checkbox" checked={c.show_hooks !== false} onchange={(e) => setCascade({ show_hooks: e.currentTarget.checked })} />
-							</SettingRow>
-							{@render widen('show_hooks')}
-							<SettingRow label="Show how many anagrams are found in typed mode" info={INFO.found_count} for="cascade-found-count">
-								<input
-									id="cascade-found-count"
-									type="checkbox"
-									checked={c.show_found_count === true}
-									onchange={(e) => setCascade({ show_found_count: e.currentTarget.checked })}
-								/>
-							</SettingRow>
-							{@render widen('show_found_count')}
-						{/if}
-						{#if c.quiz_type !== 'leave_value'}
-							<SettingRow label="Show each word’s probability order" info={INFO.show_probability} for="cascade-probability">
-								<input
-									id="cascade-probability"
-									type="checkbox"
-									checked={c.show_probability === true}
-									onchange={(e) => setCascade({ show_probability: e.currentTarget.checked })}
-								/>
-							</SettingRow>
-							{@render widen('show_probability')}
-							<SettingRow label="Definitions in their own column" info={INFO.definition_column} for="cascade-definition-column">
-								<input
-									id="cascade-definition-column"
-									type="checkbox"
-									checked={c.definition_column !== false}
-									onchange={(e) => setCascade({ definition_column: e.currentTarget.checked })}
-								/>
-							</SettingRow>
-							{@render widen('definition_column')}
-						{/if}
-						{#if c.quiz_type === 'leave_value'}
-							<SettingRow label="Round leave values to (decimal places)" info={INFO.leave_value_decimals} for="cascade-decimals">
-								<select
-									id="cascade-decimals"
-									class="rounded border bg-background px-2 py-1"
-									value={String(c.leave_value_decimals ?? 0)}
-									onchange={(e) => setCascade({ leave_value_decimals: Number(e.currentTarget.value) })}
-								>
-									{#each [0, 1, 2, 3] as d (d)}<option value={String(d)}>{d}</option>{/each}
-								</select>
-							</SettingRow>
-							{@render widen('leave_value_decimals')}
-						{/if}
 						{#key formKey}
 							{#if quizOptions}
 								<div class="space-y-3" role="group" aria-labelledby="settings-level">
@@ -1293,10 +1240,64 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 						</div>
 					</section>
 				{/if}
-				<section class="space-y-4" aria-labelledby="settings-device">
-					{@render scopeHead('settings-device', 'Device Settings', SCOPE.device)}
+				{#if v?.cascade}
+					{@const c = v.cascade}
+					<section class="space-y-4" aria-labelledby="settings-answers">
+						{@render scopeHead('settings-answers', 'Answers', SCOPE.answers)}
+						{#if c.quiz_type === 'anagram'}
+							<!-- Typing answers is for anagram quizzes only. -->
+							<LayeredSetting key="answer_mode" label="Answer mode" info={INFO.answer_mode} for="player-mode">
+								<select
+									id="player-mode"
+									class="rounded border bg-background px-2 py-1"
+									value={dsp.answer_mode}
+									onchange={(e) => settings.change('answer_mode', e.currentTarget.value === 'typed' ? 'typed' : 'flashcard')}
+								>
+									<option value="flashcard">Flashcard</option>
+									<option value="typed">Typed</option>
+								</select>
+							</LayeredSetting>
+						{/if}
+						<LayeredSetting key="reveal_correct" label="When an answer is revealed, mark it" info={INFO.reveal_correct} for="cascade-reveal">
+							<select
+								id="cascade-reveal"
+								class="rounded border bg-background px-2 py-1"
+								value={dsp.reveal_correct ? 'correct' : 'missed'}
+								onchange={(e) => settings.change('reveal_correct', e.currentTarget.value === 'correct')}
+							>
+								<option value="correct">Correct</option>
+								<option value="missed">Missed</option>
+							</select>
+						</LayeredSetting>
+						{#if c.quiz_type === 'anagram'}
+							{@render flag('show_definitions', 'Show definitions', 'cascade-definitions', INFO.show_definitions)}
+							{@render flag('show_hooks', 'Show hooks', 'cascade-hooks', INFO.show_hooks)}
+							{@render flag('show_found_count', 'Show how many anagrams are found in typed mode', 'cascade-found-count', INFO.found_count)}
+						{/if}
+						{#if c.quiz_type !== 'leave_value'}
+							{@render flag('show_probability', 'Show each word’s probability order', 'cascade-probability', INFO.show_probability)}
+							{@render flag('definition_column', 'Definitions in their own column', 'cascade-definition-column', INFO.definition_column)}
+						{/if}
+						{#if c.quiz_type === 'leave_value'}
+							<LayeredSetting key="leave_value_decimals" label="Round leave values to (decimal places)" info={INFO.leave_value_decimals} for="cascade-decimals">
+								<select
+									id="cascade-decimals"
+									class="rounded border bg-background px-2 py-1"
+									value={String(dsp.leave_value_decimals)}
+									onchange={(e) => settings.change('leave_value_decimals', Number(e.currentTarget.value))}
+								>
+									{#each [0, 1, 2, 3] as d (d)}<option value={String(d)}>{d}</option>{/each}
+								</select>
+							</LayeredSetting>
+						{/if}
+					</section>
+				{/if}
+				<section class="space-y-4" aria-labelledby="settings-display">
+					{@render scopeHead('settings-display', 'Display', SCOPE.display)}
 					<DisplaySettings />
-					{@render subHead('settings-controls', 'Controls', SECTION.controls)}
+				</section>
+				<section class="space-y-4" aria-labelledby="settings-controls">
+					{@render scopeHead('settings-controls', 'Controls', SECTION.controls)}
 					<ControlsEditor />
 				</section>
 			</div>

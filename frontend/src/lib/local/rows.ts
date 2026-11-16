@@ -23,22 +23,12 @@ export interface CascadeRow {
 	segment_size: number;
 	progression: Progression;
 	require_alphabetical: boolean;
-	/** Flashcard or typed, the cascade's own (an Anagram cascade's; inert in the others). */
-	answer_mode: AnswerMode;
-	/** An Anagram cascade's: each anagram's definition shows with the answer. */
-	show_definitions: boolean;
-	/** An Anagram cascade's: each anagram's hooks and inner hooks show with the answer. */
-	show_hooks: boolean;
-	/** Whether showing an answer marks it correct (else missed) until toggled. */
-	reveal_correct: boolean;
-	/** An Anagram cascade's: typed mode's "3 of 9 found" shows in the status bar (off by default: it hints). */
-	show_found_count: boolean;
-	/** Each word's probability order shows before its front hooks (off by default). */
-	show_probability: boolean;
-	/** A word's definition sits in a column of its own after the back hooks (the default), not centred under the word. */
-	definition_column: boolean;
-	/** A Leave Value cascade's: the decimal places leave values are rounded to, 0 to 3. */
-	leave_value_decimals: number;
+	/**
+	 * The cascade's own settings, the "This cascade" place (PLAN.md § Settings →
+	 * Where a setting applies): setting name to value, for every device. One it
+	 * does not name falls through to this device's places and the account's.
+	 */
+	settings: Record<string, unknown>;
 	/** What the cascade holds on the server, in bytes, as the server last counted it (PLAN.md § Storage limit). */
 	storage_bytes: number;
 	options_changed_at: string;
@@ -58,20 +48,15 @@ export interface CascadeRow {
 	deleted?: boolean;
 }
 
-/** The per-cascade settings every new cascade starts with (PLAN.md § Settings). */
+/**
+ * The rules every new cascade starts with (PLAN.md § Settings): its clear
+ * threshold and the options of its new levels. It has no settings of its own.
+ */
 export const CASCADE_SETTING_DEFAULTS = {
 	clear_threshold: 90,
 	segment_size: 0,
 	progression: 'ladder',
-	require_alphabetical: false,
-	answer_mode: 'flashcard',
-	show_definitions: true,
-	show_hooks: true,
-	reveal_correct: true,
-	show_found_count: false,
-	show_probability: false,
-	definition_column: true,
-	leave_value_decimals: 0
+	require_alphabetical: false
 } as const satisfies Partial<CascadeRow>;
 
 export interface QuizRow {

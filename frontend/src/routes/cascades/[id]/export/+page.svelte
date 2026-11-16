@@ -22,6 +22,7 @@
 	import * as view from '$lib/local/view';
 	import type { RwTx } from '$lib/local/view';
 	import { DownloadManager } from '$lib/sync/downloads';
+	import { settingsFor } from '$lib/settings/places';
 	import { downloadManager, ensureCascade, sendPending, syncState } from '$lib/sync/runtime.svelte';
 
 	const id = $derived(page.params.id as string);
@@ -68,7 +69,8 @@
 				scope: quiz ? 'quiz' : 'cascade',
 				quiz_id: quiz ?? undefined,
 				lines: cascade?.quiz_type === 'anagram' ? 'answers' : 'questions',
-				decimals: cascade?.leave_value_decimals ?? 0
+				// The decimal places the player shows this cascade with on this device.
+				decimals: cascade ? (await settingsFor(d, cascade)).leave_value_decimals : 0
 			};
 			await recount();
 		})();

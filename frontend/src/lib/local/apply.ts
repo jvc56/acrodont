@@ -6,6 +6,7 @@
 // IndexedDB transaction, so two tabs can never mint the same sequence; the
 // rebase replays the outbox through `applyOp` alone.
 import { questionsHash, shuffle } from '$lib/cascade/order';
+import { mergeCascadeSettings } from '$lib/cascade/settings';
 import {
 	checkAttempt,
 	checkDeepest,
@@ -30,7 +31,7 @@ import {
 } from '$lib/cascade/rules';
 import type { StoreName, UserDb } from './db';
 import { readMeta, recordOpen, writeMeta } from './meta';
-import type { AnswerMode, AttemptRow, CascadeRow, OutboxEntry, QuestionRow, QuizRow, WireOp } from './rows';
+import type { AttemptRow, CascadeRow, OutboxEntry, QuestionRow, QuizRow, WireOp } from './rows';
 import { touchesOf } from './rows';
 import * as view from './view';
 import type { RwTx } from './view';
@@ -81,15 +82,8 @@ export type NewOp =
 			require_alphabetical?: boolean;
 			/** The cascade's alone: every finish reads it, the quiz in progress included. */
 			clear_threshold?: number;
-			/** The cascade's alone: flashcard or typed. */
-			answer_mode?: AnswerMode;
-			show_definitions?: boolean;
-			show_hooks?: boolean;
-			reveal_correct?: boolean;
-			show_found_count?: boolean;
-			show_probability?: boolean;
-			definition_column?: boolean;
-			leave_value_decimals?: number;
+			/** Changes to the cascade's own settings (the "This cascade" place): a value, or null to take one out. */
+			settings?: Record<string, unknown>;
 	  }
 	| {
 			type: 'set_quiz_options';
@@ -499,20 +493,7 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 			if (op.clear_threshold !== undefined) next.clear_threshold = checkClearThreshold(op.clear_threshold as number);
 			if (op.progression !== undefined) next.progression = op.progression as Progression;
 			if (op.require_alphabetical !== undefined) next.require_alphabetical = op.require_alphabetical as boolean;
-			if (op.answer_mode !== undefined) {
-				if (op.answer_mode !== 'flashcard' && op.answer_mode !== 'typed') throw new Rejected('invalid');
-				next.answer_mode = op.answer_mode;
-			}
-			for (const f of ['show_definitions', 'show_hooks', 'reveal_correct', 'show_found_count', 'show_probability', 'definition_column'] as const) {
-				if (op[f] === undefined) continue;
-				if (typeof op[f] !== 'boolean') throw new Rejected('invalid');
-				next[f] = op[f];
-			}
-			if (op.leave_value_decimals !== undefined) {
-				const d = op.leave_value_decimals;
-				if (typeof d !== 'number' || !Number.isInteger(d) || d < 0 || d > 3) throw new Rejected('invalid');
-				next.leave_value_decimals = d;
-			}
+			if (op.settings !== undefined) next.settings = mergeCascadeSettings(c.settings ?? {}, op.settings);
 			await putCascade(tx, next);
 			return { cascade_id: c.id };
 		}

@@ -2,9 +2,10 @@
 	// Controls (PLAN.md § Controls): any number of bindings per action, captured
 	// by pressing a key, clicking or scrolling inside a capture box; Escape
 	// cancels and cannot be bound; a stroke moves from another action with a
-	// notice; every action keeps one binding; Reset to defaults. Saved on this
-	// device (lib/player/controls); after a change, or a reset, it offers to use
-	// this device's controls for all of the account's devices (lib/settings/device).
+	// notice; every action keeps one binding; Reset to defaults. The whole list
+	// is one setting, which can be set in any of four places like every other
+	// (lib/settings/layers): a change, or a reset, saves for this cascade on
+	// this device and offers to move it wider.
 	/** What a punctuation key shows where the browser has no keyboard layout map (Firefox). */
 	const PUNCTUATION: Record<string, string> = {
 		Comma: ',',
@@ -20,14 +21,14 @@
 		Backslash: '\\'
 	};
 	import { Button } from '$lib/components/ui/button';
-	import ApplyWider from '$lib/components/settings/ApplyWider.svelte';
-	import { afterLocalWrite } from '$lib/sync/runtime.svelte';
 	import { confirmAction } from '$lib/confirm.svelte';
-	import { controls } from '$lib/player/controls.svelte';
+	import { settings } from '$lib/settings/store.svelte';
+	import PlaceChip from './PlaceChip.svelte';
+	import PlaceDetails from './PlaceDetails.svelte';
 	import { bind, DEFAULT_BINDINGS, keyStroke, mayNotReceive, mouseStroke, unbind, wheelStroke, type Action, type Binding, type Stroke } from '$lib/player/bindings';
 
-	// The caller loads `controls` for the signed-in user first.
-	const bindings = $derived(controls.value);
+	// The caller opens `settings` for the cascade first.
+	const bindings = $derived(settings.value.bindings);
 
 	const ACTIONS: { action: Action; label: string }[] = [
 		{ action: 'show_next', label: 'Show / Next' },
@@ -53,25 +54,9 @@
 		return mods ? `${mods}+${base}` : base;
 	}
 
-	/** The offer after the last change: what was done, keyed by the change so a second one starts afresh. */
-	let offer = $state<{ saved: string; serial: number } | null>(null);
-
-	async function save(next: Binding[], saved = 'Saved on this device') {
-		await controls.set(next);
-		offer = { saved, serial: (offer?.serial ?? 0) + 1 };
+	async function save(next: Binding[]) {
+		await settings.change('bindings', next.map((b) => ({ ...b })));
 	}
-
-	const everyDevice = [
-		{
-			key: 'devices',
-			label: 'all your devices',
-			done: 'Used for all your devices',
-			run: async () => {
-				await controls.share();
-				afterLocalWrite();
-			}
-		}
-	];
 
 	async function captured(s: Stroke | null) {
 		if (!capturing || !s) return;
@@ -99,7 +84,8 @@
 	}
 </script>
 
-<div id="controls" class="grid gap-4 text-sm">
+<div id="controls" class="grid gap-4 text-sm" data-setting="bindings">
+	<div><PlaceChip key="bindings" label="Controls" /></div>
 	{#each ACTIONS as a (a.action)}
 		<div>
 			<p class="font-medium">{a.label}</p>
@@ -144,13 +130,11 @@
 		onclick={async () => {
 			const ok = await confirmAction({
 				title: 'Reset the controls to their defaults?',
-				body: 'Every binding you added or removed on this device is replaced by the defaults. Your other devices keep their own, unless you then use the defaults for them too.',
+				body: 'Every binding you added or removed is replaced by the defaults, for this cascade on this device. You can then use the defaults more widely.',
 				action: 'Reset to defaults'
 			});
-			if (ok) await save(DEFAULT_BINDINGS, 'Reset on this device');
+			if (ok) await save(DEFAULT_BINDINGS);
 		}}>Reset controls to defaults</Button
 	>
-	{#if offer}
-		{#key offer.serial}<ApplyWider saved={offer.saved} offers={everyDevice} />{/key}
-	{/if}
+	<PlaceDetails key="bindings" label="Controls" />
 </div>
