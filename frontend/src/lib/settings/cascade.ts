@@ -9,49 +9,29 @@
 import { allCascades } from '$lib/cascades/summary';
 import { applyLocally, type NewOp } from '$lib/local/apply';
 import type { UserDb } from '$lib/local/db';
-import type { CascadeRow, QuizType } from '$lib/local/rows';
+import type { CascadeRow } from '$lib/local/rows';
 import { sameValue } from './layers';
 import { cascadePlace } from './places';
 
-export const CASCADE_SETTINGS = ['clear_threshold', 'segment_size', 'progression', 'require_alphabetical'] as const;
+export const CASCADE_SETTINGS = ['clear_threshold', 'segment_size', 'progression'] as const;
 
 export type CascadeSetting = (typeof CASCADE_SETTINGS)[number];
 export type CascadeSettings = Partial<Pick<CascadeRow, CascadeSetting>>;
 
-/** The rules that mean something for one kind of cascade only; the others apply to every kind. */
-const ONLY_FOR: Partial<Record<CascadeSetting, QuizType>> = {
-	require_alphabetical: 'anagram'
-};
-
-/** Whether a setting means something for a cascade of this kind. */
-export function appliesTo(setting: CascadeSetting, quizType: QuizType): boolean {
-	const only = ONLY_FOR[setting];
-	return !only || only === quizType;
+/** The cascades a change can reach: those not in the Trash. */
+export async function reachable(db: UserDb): Promise<CascadeRow[]> {
+	return (await allCascades(db)).filter((c) => c.trashed_at === null);
 }
 
-/** The kind of cascade every one of these settings applies to, if they are for one kind only. */
-export function kindOf(fields: CascadeSettings): QuizType | null {
-	for (const k of Object.keys(fields) as CascadeSetting[]) if (ONLY_FOR[k]) return ONLY_FOR[k]!;
-	return null;
-}
-
-/** The cascades a change can reach: those not in the Trash, of the kind the settings are for. */
-export async function reachable(db: UserDb, fields: CascadeSettings): Promise<CascadeRow[]> {
-	const kind = kindOf(fields);
-	return (await allCascades(db)).filter((c) => c.trashed_at === null && (!kind || c.quiz_type === kind));
-}
-
-/** Of `fields`, those that apply to `c` and differ from what it has. */
+/** Of `fields`, those that differ from what `c` has. */
 function differing(c: CascadeRow, fields: CascadeSettings): CascadeSettings {
-	return Object.fromEntries(
-		Object.entries(fields).filter(([k, v]) => v !== undefined && appliesTo(k as CascadeSetting, c.quiz_type) && c[k as CascadeSetting] !== v)
-	);
+	return Object.fromEntries(Object.entries(fields).filter(([k, v]) => v !== undefined && c[k as CascadeSetting] !== v));
 }
 
 /** Gives every reachable cascade these values; returns how many changed. The caller syncs (`afterLocalWrite`). */
 export async function applyToAll(db: UserDb, fields: CascadeSettings): Promise<number> {
 	let changed = 0;
-	for (const c of await reachable(db, fields)) {
+	for (const c of await reachable(db)) {
 		const diff = differing(c, fields);
 		if (!Object.keys(diff).length) continue;
 		await applyLocally(db, { type: 'set_cascade_options', cascade_id: c.id, ...diff } as NewOp);
@@ -68,14 +48,12 @@ export async function copySources(db: UserDb, c: CascadeRow): Promise<CascadeRow
 }
 
 /**
- * Gives `to` every rule of `from` that applies to both, and the same own
+ * Gives `to` every rule of `from`, and the same own
  * settings (the "This cascade" place) as `from`, in one change; returns how
  * many differed. The caller syncs.
  */
 export async function copySettings(db: UserDb, from: CascadeRow, to: CascadeRow): Promise<number> {
-	const fields = Object.fromEntries(
-		CASCADE_SETTINGS.filter((k) => appliesTo(k, from.quiz_type)).map((k) => [k, from[k]])
-	) as CascadeSettings;
+	const fields = Object.fromEntries(CASCADE_SETTINGS.map((k) => [k, from[k]])) as CascadeSettings;
 	const diff: Record<string, unknown> = differing(to, fields);
 	const mine = cascadePlace(to);
 	const theirs = cascadePlace(from);

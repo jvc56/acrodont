@@ -92,7 +92,6 @@ pub struct CascadeRow {
     pub clear_threshold: i16,
     pub segment_size: i32,
     pub progression: Progression,
-    pub require_alphabetical: bool,
     /// The cascade's own settings (PLAN.md § Settings → Where a setting
     /// applies): setting name to value, for every device. A setting it does
     /// not name falls through to the device's and the account's. Read as text
@@ -132,7 +131,6 @@ pub struct QuizRow {
     pub segment_chain: bool,
     pub segment_size: i32,
     pub progression: Progression,
-    pub require_alphabetical: bool,
     pub options_changed_at: DateTime<Utc>,
     #[serde(with = "seq_text")]
     pub options_seq: i64,
@@ -161,7 +159,7 @@ pub struct QuizRow {
 pub const CASCADE_SELECT: &str = r#"
     SELECT c.id, c.name, c.quiz_type, l.name AS lexicon, d.name AS letter_distribution,
            l.definitions_revision, ls.values_revision AS leave_values_revision,
-           c.clear_threshold, c.segment_size, c.progression, c.require_alphabetical, c.settings::text AS settings,
+           c.clear_threshold, c.segment_size, c.progression, c.settings::text AS settings,
            c.options_changed_at, c.options_seq, c.options_device_id, c.question_count, c.depth,
            c.peak_depth, c.attempts_since_completion, c.created_at, c.last_activity_at,
            c.completed_at, c.trashed_at, c.storage_bytes, c.updated_seq
@@ -173,7 +171,7 @@ pub const CASCADE_SELECT: &str = r#"
 pub const QUIZ_SELECT: &str = r#"
     SELECT q.id, q.cascade_id, q.level, q.origin, q.origin_quiz_id, q.origin_attempt,
            q.origin_segment_end, q.status, q.segment_chain, q.segment_size, q.progression,
-           q.require_alphabetical, q.options_changed_at, q.options_seq, q.options_device_id,
+           q.options_changed_at, q.options_seq, q.options_device_id,
            q.attempt, q.shuffle_seed, q.questions_hash, q.question_count, q.correct_count,
            q.missed_count, q.cursor, q.cursor_moved_at, q.cursor_device_id, q.run_start,
            q.created_at, q.created_seq, q.last_activity_at, q.cleared_at, q.updated_seq

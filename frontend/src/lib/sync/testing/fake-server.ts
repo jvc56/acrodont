@@ -98,7 +98,7 @@ export class FakeServer {
 
 	create(c: NewCascade): { cascade: WireRow; source_quiz: WireRow; sync_seq: string } {
 		const seq = ++this.seq;
-		const opts = { segment_size: c.segment_size ?? 0, progression: c.progression ?? 'ladder', require_alphabetical: false };
+		const opts = { segment_size: c.segment_size ?? 0, progression: c.progression ?? 'ladder' };
 		const sim = new SimCascade(c.threshold ?? 80, opts, c.count, c.source_id, c.seed ?? 0x8000_0000_0000_1234n);
 		const e: CascadeEntry = {
 			id: c.id,
@@ -135,7 +135,6 @@ export class FakeServer {
 			clear_threshold: s.clear_threshold,
 			segment_size: s.opts.segment_size,
 			progression: s.opts.progression,
-			require_alphabetical: s.opts.require_alphabetical,
 			settings: e.settings,
 			// The server's count, from the same per-row costs: the questions and each level's rows.
 			storage_bytes: String(
@@ -175,7 +174,6 @@ export class FakeServer {
 			segment_chain: q.state.segment_chain,
 			segment_size: q.state.opts.segment_size,
 			progression: q.state.opts.progression,
-			require_alphabetical: q.state.opts.require_alphabetical,
 			options_changed_at: m.options_at,
 			options_seq: String(m.options_seq),
 			options_device_id: m.options_device,

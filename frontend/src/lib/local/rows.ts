@@ -22,7 +22,6 @@ export interface CascadeRow {
 	clear_threshold: number;
 	segment_size: number;
 	progression: Progression;
-	require_alphabetical: boolean;
 	/**
 	 * The cascade's own settings, the "This cascade" place (PLAN.md § Settings →
 	 * Where a setting applies): setting name to value, for every device. One it
@@ -55,8 +54,7 @@ export interface CascadeRow {
 export const CASCADE_SETTING_DEFAULTS = {
 	clear_threshold: 90,
 	segment_size: 0,
-	progression: 'ladder',
-	require_alphabetical: false
+	progression: 'ladder'
 } as const satisfies Partial<CascadeRow>;
 
 export interface QuizRow {
@@ -71,7 +69,6 @@ export interface QuizRow {
 	segment_chain: boolean;
 	segment_size: number;
 	progression: Progression;
-	require_alphabetical: boolean;
 	options_changed_at: string;
 	options_seq: number;
 	options_device_id: string;

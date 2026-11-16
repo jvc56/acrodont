@@ -155,7 +155,7 @@ fn cascade_body(filters: Value) -> Value {
     json!({
         "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
         "at": "2026-01-01T00:00:00Z", "name": format!("Scale {}", Uuid::new_v4().simple()), "lexicon": "SCALE", "quiz_type": "anagram",
-        "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false, "answer_mode": "flashcard",
+        "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "answer_mode": "flashcard",
         "filters": filters,
     })
 }
@@ -541,9 +541,9 @@ async fn add_levels(app: &TestApp, s: &Setup, n2: i32, n3: i32) {
         let id = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, origin_quiz_id, origin_attempt, segment_size,
-                                  progression, require_alphabetical, options_changed_at, options_seq, options_device_id,
+                                  progression, options_changed_at, options_seq, options_device_id,
                                   shuffle_seed, questions_hash, question_count, created_seq, updated_seq)
-             SELECT $1, cascade_id, user_id, $2, 'descent', id, 1, segment_size, progression, require_alphabetical,
+             SELECT $1, cascade_id, user_id, $2, 'descent', id, 1, segment_size, progression,
                     options_changed_at, options_seq, options_device_id, 7, 0, $3, created_seq, updated_seq
              FROM quizzes WHERE id = $4",
         )

@@ -60,7 +60,6 @@ pub struct CreateBody {
     clear_threshold: i64,
     segment_size: i64,
     progression: Progression,
-    require_alphabetical: bool,
     /// Optional: typed makes the new cascade's own `answer_mode` setting; flashcard, or none, leaves it unset.
     #[serde(default)]
     answer_mode: Option<AnswerMode>,
@@ -92,7 +91,6 @@ struct NewCascade {
     clear_threshold: i16,
     segment_size: i32,
     progression: Progression,
-    require_alphabetical: bool,
     /// The cascade's own settings (PLAN.md § Settings → Where a setting
     /// applies), as JSON text: Duplicate copies the original's.
     settings: String,
@@ -253,10 +251,10 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     let leave_set_id = if p.quiz_type.is_leave() { p.leaves.as_ref().map(|s| s.id) } else { None };
     let inserted = sqlx::query!(
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, leave_set_id, spec_id, clear_threshold,
-                               segment_size, progression, require_alphabetical, options_changed_at, options_seq,
+                               segment_size, progression, options_changed_at, options_seq,
                                options_device_id, question_count, depth, peak_depth, updated_seq, settings,
                                storage_bytes, question_keys)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, 1, $13, $16::text::jsonb, $17, $18)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 1, 1, $12, $15::text::jsonb, $16, $17)",
         n.id,
         user.id,
         n.name,
@@ -267,7 +265,6 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
         n.clear_threshold,
         n.segment_size,
         n.progression as Progression,
-        n.require_alphabetical,
         at,
         seq,
         n.device_id,
@@ -290,15 +287,14 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
     // The Source quiz takes a copy of the cascade's options.
     let inserted = sqlx::query!(
         "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, segment_size, progression,
-                              require_alphabetical, options_changed_at, options_seq, options_device_id,
+                              options_changed_at, options_seq, options_device_id,
                               shuffle_seed, questions_hash, question_count, created_seq, updated_seq)
-         VALUES ($1, $2, $3, 1, 'source', $4, $5, $6, $7, $8, $9, $10, $11, $12, $8, $8)",
+         VALUES ($1, $2, $3, 1, 'source', $4, $5, $6, $7, $8, $9, $10, $11, $7, $7)",
         n.source_quiz_id,
         n.id,
         user.id,
         n.segment_size,
         n.progression as Progression,
-        n.require_alphabetical,
         at,
         seq,
         n.device_id,
@@ -350,7 +346,6 @@ async fn create(
         clear_threshold: b.clear_threshold as i16,
         segment_size: b.segment_size as i32,
         progression: b.progression,
-        require_alphabetical: b.require_alphabetical,
         settings: match b.answer_mode {
             Some(AnswerMode::Typed) => r#"{"answer_mode":"typed"}"#.to_owned(),
             _ => "{}".to_owned(),
@@ -377,7 +372,7 @@ async fn duplicate(
     let mut conn = state.db.acquire().await?;
     let row = sqlx::query!(
         r#"SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS "progression: Progression",
-                  c.require_alphabetical, c.settings::text AS "settings!", l.name AS lexicon
+                  c.settings::text AS "settings!", l.name AS lexicon
            FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2"#,
         original,
         user.id
@@ -398,7 +393,6 @@ async fn duplicate(
         clear_threshold: row.clear_threshold,
         segment_size: row.segment_size,
         progression: row.progression,
-        require_alphabetical: row.require_alphabetical,
         settings: row.settings,
         copy_of_spec: Some(row.spec_id),
     };

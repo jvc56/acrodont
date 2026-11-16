@@ -93,7 +93,6 @@ impl Reason {
 pub struct Opts {
     pub segment_size: u32,
     pub progression: Progression,
-    pub require_alphabetical: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,7 +200,7 @@ pub struct Restored {
 /// which is Drill with no segments for life.
 pub fn new_quiz_opts(c: &CascadeState, chain: bool) -> Opts {
     if chain {
-        Opts { segment_size: 0, progression: Progression::Drill, require_alphabetical: c.opts.require_alphabetical }
+        Opts { segment_size: 0, progression: Progression::Drill }
     } else {
         c.opts
     }
@@ -317,8 +316,7 @@ pub fn check_segment_past_cursor(q: &QuizState, end: u32) -> Result<(), Reason> 
     Ok(())
 }
 
-/// Option values: segment size 0 or 5 to the cap; progression and
-/// alphabetical order are typed already.
+/// Option values: segment size 0 or 5 to the cap; progression is typed already.
 pub fn check_segment_size(size: i64, cap: u32) -> Result<u32, Reason> {
     if size == 0 || (5..=i64::from(cap)).contains(&size) {
         Ok(size as u32)
@@ -432,16 +430,12 @@ pub fn finish_segment(c: &mut CascadeState, q: &QuizState, run_misses: Vec<u32>,
 }
 
 /// Restoring a cleared quiz: the new deepest level, attempt + 1, shuffled
-/// with the seed unmodified, options copied afresh from the cascade (only
-/// alphabetical order for a chain). A trashed cascade comes back with it.
+/// with the seed unmodified, options copied afresh from the cascade (a chain
+/// keeps its own). A trashed cascade comes back with it.
 pub fn restore_quiz(c: &mut CascadeState, q: &QuizState, seed: u64) -> Restored {
     let cascade_restored = c.trashed;
     c.trashed = false;
     push_depth(c);
-    let opts = if q.segment_chain {
-        Opts { require_alphabetical: c.opts.require_alphabetical, ..q.opts }
-    } else {
-        c.opts
-    };
+    let opts = if q.segment_chain { q.opts } else { c.opts };
     Restored { level: c.depth, attempt: q.attempt + 1, seed, opts, cascade_restored }
 }

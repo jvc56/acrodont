@@ -40,8 +40,7 @@ describe('the shared random sequences', () => {
 				s.clear_threshold as number,
 				{
 					segment_size: s.segment_size as number,
-					progression: s.progression as Progression,
-					require_alphabetical: s.require_alphabetical as boolean
+					progression: s.progression as Progression
 				},
 				s.question_count as number,
 				s.source_quiz_id as string,

@@ -34,6 +34,8 @@ export interface Settings {
 	show_hooks: boolean;
 	/** Typed mode's "3 of 9 found" in the status bar. */
 	show_found_count: boolean;
+	/** Typed mode: each anagram must be typed after the ones before it alphabetically. */
+	require_alphabetical: boolean;
 	show_probability: boolean;
 	/** A definition in a column of its own beside its word, or centred under it. */
 	definition_column: boolean;
@@ -88,6 +90,7 @@ export type AnswerSettings = Pick<
 	| 'show_definitions'
 	| 'show_hooks'
 	| 'show_found_count'
+	| 'require_alphabetical'
 	| 'show_probability'
 	| 'definition_column'
 	| 'leave_value_decimals'
@@ -129,6 +132,7 @@ export const DEFINITIONS: { [K in SettingKey]: Definition<Settings[K]> } = {
 	show_definitions: flag(true),
 	show_hooks: flag(true),
 	show_found_count: flag(false),
+	require_alphabetical: flag(false),
 	show_probability: flag(false),
 	definition_column: flag(true),
 	leave_value_decimals: {

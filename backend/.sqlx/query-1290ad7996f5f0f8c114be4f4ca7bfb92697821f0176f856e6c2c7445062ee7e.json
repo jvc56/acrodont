@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT q.cascade_id, q.level, q.origin AS \"origin: Origin\", q.segment_chain, q.segment_size,\n                  q.progression AS \"progression: Progression\", q.require_alphabetical, q.attempt, q.shuffle_seed,\n                  q.question_count, q.correct_count, q.missed_count, q.cursor, q.cursor_device_id,\n                  q.cursor_moved_at, q.run_start, q.status AS \"status: QuizStatus\", q.updated_seq, q.options_seq,\n                  q.options_device_id, q.options_changed_at,\n                  c.clear_threshold, c.segment_size AS c_segment_size, c.progression AS \"c_progression: Progression\",\n                  c.require_alphabetical AS c_require_alphabetical, c.depth, c.peak_depth,\n                  c.attempts_since_completion, c.trashed_at IS NOT NULL AS \"trashed!\"\n           FROM quizzes q JOIN cascades c ON c.id = q.cascade_id\n           WHERE q.id = $1 AND q.user_id = $2",
+  "query": "SELECT q.cascade_id, q.level, q.origin AS \"origin: Origin\", q.segment_chain, q.segment_size,\n                  q.progression AS \"progression: Progression\", q.attempt, q.shuffle_seed,\n                  q.question_count, q.correct_count, q.missed_count, q.cursor, q.cursor_device_id,\n                  q.cursor_moved_at, q.run_start, q.status AS \"status: QuizStatus\", q.updated_seq, q.options_seq,\n                  q.options_device_id, q.options_changed_at,\n                  c.clear_threshold, c.segment_size AS c_segment_size, c.progression AS \"c_progression: Progression\",\n                  c.depth, c.peak_depth,\n                  c.attempts_since_completion, c.trashed_at IS NOT NULL AS \"trashed!\"\n           FROM quizzes q JOIN cascades c ON c.id = q.cascade_id\n           WHERE q.id = $1 AND q.user_id = $2",
   "describe": {
     "columns": [
       {
@@ -94,17 +94,6 @@
       },
       {
         "ordinal": 6,
-        "name": "require_alphabetical",
-        "type_info": "Bool",
-        "origin": {
-          "Table": {
-            "table": "quizzes",
-            "name": "require_alphabetical"
-          }
-        }
-      },
-      {
-        "ordinal": 7,
         "name": "attempt",
         "type_info": "Int4",
         "origin": {
@@ -115,7 +104,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "shuffle_seed",
         "type_info": "Int8",
         "origin": {
@@ -126,7 +115,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "question_count",
         "type_info": "Int4",
         "origin": {
@@ -137,7 +126,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 9,
         "name": "correct_count",
         "type_info": "Int4",
         "origin": {
@@ -148,7 +137,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 10,
         "name": "missed_count",
         "type_info": "Int4",
         "origin": {
@@ -159,7 +148,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 11,
         "name": "cursor",
         "type_info": "Int4",
         "origin": {
@@ -170,7 +159,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 12,
         "name": "cursor_device_id",
         "type_info": "Uuid",
         "origin": {
@@ -181,7 +170,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 13,
         "name": "cursor_moved_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -192,7 +181,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 14,
         "name": "run_start",
         "type_info": "Int4",
         "origin": {
@@ -203,7 +192,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 15,
         "name": "status: QuizStatus",
         "type_info": {
           "Custom": {
@@ -224,7 +213,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 16,
         "name": "updated_seq",
         "type_info": "Int8",
         "origin": {
@@ -235,7 +224,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 17,
         "name": "options_seq",
         "type_info": "Int8",
         "origin": {
@@ -246,7 +235,7 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 18,
         "name": "options_device_id",
         "type_info": "Uuid",
         "origin": {
@@ -257,7 +246,7 @@
         }
       },
       {
-        "ordinal": 20,
+        "ordinal": 19,
         "name": "options_changed_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -268,7 +257,7 @@
         }
       },
       {
-        "ordinal": 21,
+        "ordinal": 20,
         "name": "clear_threshold",
         "type_info": "Int2",
         "origin": {
@@ -279,7 +268,7 @@
         }
       },
       {
-        "ordinal": 22,
+        "ordinal": 21,
         "name": "c_segment_size",
         "type_info": "Int4",
         "origin": {
@@ -290,7 +279,7 @@
         }
       },
       {
-        "ordinal": 23,
+        "ordinal": 22,
         "name": "c_progression: Progression",
         "type_info": {
           "Custom": {
@@ -311,18 +300,7 @@
         }
       },
       {
-        "ordinal": 24,
-        "name": "c_require_alphabetical",
-        "type_info": "Bool",
-        "origin": {
-          "Table": {
-            "table": "cascades",
-            "name": "require_alphabetical"
-          }
-        }
-      },
-      {
-        "ordinal": 25,
+        "ordinal": 23,
         "name": "depth",
         "type_info": "Int4",
         "origin": {
@@ -333,7 +311,7 @@
         }
       },
       {
-        "ordinal": 26,
+        "ordinal": 24,
         "name": "peak_depth",
         "type_info": "Int4",
         "origin": {
@@ -344,7 +322,7 @@
         }
       },
       {
-        "ordinal": 27,
+        "ordinal": 25,
         "name": "attempts_since_completion",
         "type_info": "Int4",
         "origin": {
@@ -355,7 +333,7 @@
         }
       },
       {
-        "ordinal": 28,
+        "ordinal": 26,
         "name": "trashed!",
         "type_info": "Bool",
         "origin": "Expression"
@@ -380,10 +358,8 @@
       false,
       false,
       false,
-      false,
       true,
       true,
-      false,
       false,
       false,
       false,
@@ -399,5 +375,5 @@
       null
     ]
   },
-  "hash": "c71f96c3254acc93167f1101729238fb765d753e1ec9afd61700564899c6c13c"
+  "hash": "1290ad7996f5f0f8c114be4f4ca7bfb92697821f0176f856e6c2c7445062ee7e"
 }

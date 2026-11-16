@@ -57,7 +57,6 @@ export type Op =
 			type: 'set_cascade_options';
 			segment_size?: number;
 			progression?: Progression;
-			require_alphabetical?: boolean;
 			/** The cascade's alone: every finish reads it, the quiz in progress included. */
 			clear_threshold?: number;
 	  }
@@ -66,7 +65,6 @@ export type Op =
 			quiz: string;
 			segment_size?: number;
 			progression?: Progression;
-			require_alphabetical?: boolean;
 	  };
 
 export interface Applied {
@@ -314,7 +312,6 @@ export class SimCascade {
 				if (threshold !== undefined) this.state.clear_threshold = threshold;
 				if (size !== undefined) this.state.opts.segment_size = size;
 				if (op.progression !== undefined) this.state.opts.progression = op.progression;
-				if (op.require_alphabetical !== undefined) this.state.opts.require_alphabetical = op.require_alphabetical;
 				return {};
 			}
 			case 'set_quiz_options': {
@@ -323,7 +320,6 @@ export class SimCascade {
 				checkQuizOptionFields(q.state, op.progression !== undefined, op.segment_size !== undefined);
 				if (size !== undefined) q.state.opts.segment_size = size;
 				if (op.progression !== undefined) q.state.opts.progression = op.progression;
-				if (op.require_alphabetical !== undefined) q.state.opts.require_alphabetical = op.require_alphabetical;
 				return {};
 			}
 		}

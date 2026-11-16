@@ -26,7 +26,7 @@ def seed_of(n):
 
 
 class Vector:
-    def __init__(self, name, covers, count=10, threshold=80, opts=(0, "ladder", False), source_seed=None):
+    def __init__(self, name, covers, count=10, threshold=80, opts=(0, "ladder"), source_seed=None):
         self.name = name
         self.covers = covers
         self.ids = 1
@@ -37,7 +37,6 @@ class Vector:
             "clear_threshold": threshold,
             "segment_size": opts[0],
             "progression": opts[1],
-            "require_alphabetical": opts[2],
             "source_quiz_id": self.source,
             "source_seed": str(seed),
         }
@@ -176,7 +175,7 @@ def scenarios():
     out.append(v)
 
     v = Vector("source quiz under drill", [SRC, PROG, "the Source quiz descends under Drill too"],
-               opts=(0, "drill", False))
+               opts=(0, "drill"))
     v.play(v.source, "CMMMMMMMMM")  # 10%: descends, Level 2 on Drill
     l2, _ = v.finish(v.source)
     v.play(l2, "CCCCCMMMM")  # 5 of 9 below 80%: replaced under Drill
@@ -188,7 +187,7 @@ def scenarios():
     out.append(v)
 
     # -- Drill progression ---------------------------------------------------------
-    v = Vector("drill outcomes", [PROG], opts=(0, "drill", False))
+    v = Vector("drill outcomes", [PROG], opts=(0, "drill"))
     v.play(v.source, "CCMMMMMMMM")
     l2, _ = v.finish(v.source)
     v.play(l2, "MMMMMMMM")  # nothing correct: reset in place
@@ -242,7 +241,7 @@ def scenarios():
     out.append(v)
 
     # -- Segments --------------------------------------------------------------------
-    v = Vector("segments: boundaries, continued and drilled runs", [SEG], count=22, opts=(5, "ladder", False))
+    v = Vector("segments: boundaries, continued and drilled runs", [SEG], count=22, opts=(5, "ladder"))
     v.play(v.source, "CCCCC")  # a run with no misses creates nothing
     v.finish_segment(v.source, 5)
     v.play(v.source, "CCMCM")
@@ -259,7 +258,7 @@ def scenarios():
     v.finish(v.source)
     out.append(v)
 
-    v = Vector("segment descent in a drill cascade", [SEG, PROG], count=10, opts=(5, "drill", False))
+    v = Vector("segment descent in a drill cascade", [SEG, PROG], count=10, opts=(5, "drill"))
     v.play(v.source, "CCCCM")
     chain, _ = v.finish_segment(v.source, 5)
     v.play(chain, "C")
@@ -268,7 +267,7 @@ def scenarios():
     v.finish(v.source)
     out.append(v)
 
-    v = Vector("segments off or too large", [SEG, "next_boundary None"], count=10, opts=(10, "ladder", False))
+    v = Vector("segments off or too large", [SEG, "next_boundary None"], count=10, opts=(10, "ladder"))
     v.finish_segment(v.source, 5, expect="bad_segment")
     v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 0})
     v.finish_segment(v.source, 5, expect="bad_segment")
@@ -284,7 +283,7 @@ def scenarios():
     v.op({"type": "set_cascade_options", "segment_size": 300000})
     out.append(v)
 
-    v = Vector("run numbering after a size change", [SEG, "How a run is numbered"], count=250, opts=(100, "ladder", False))
+    v = Vector("run numbering after a size change", [SEG, "How a run is numbered"], count=250, opts=(100, "ladder"))
     v.play(v.source, "C" * 99 + "M")
     chain, _ = v.finish_segment(v.source, 100)
     v.play(chain, "C")
@@ -307,7 +306,7 @@ def scenarios():
     v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 50})  # run 1 of 5 · 201 of 250
     out.append(v)
 
-    v = Vector("the ceil(question_count / S) bound", [OPTS, SEG], count=40, opts=(5, "ladder", False))
+    v = Vector("the ceil(question_count / S) bound", [OPTS, SEG], count=40, opts=(5, "ladder"))
     for r in range(8):
         v.play(v.source, "CCCCM", checkpoint=False)
         if r < 7:
@@ -317,7 +316,7 @@ def scenarios():
     last, _ = v.finish(v.source)  # the last run's miss descends with the whole attempt's misses
     out.append(v)
 
-    v = Vector("size changes after a descent", [SEG, "run starts"], count=100, opts=(20, "ladder", False))
+    v = Vector("size changes after a descent", [SEG, "run starts"], count=100, opts=(20, "ladder"))
     v.play(v.source, "C" * 19 + "M")
     chain, _ = v.finish_segment(v.source, 20)
     v.play(chain, "C")
@@ -332,7 +331,7 @@ def scenarios():
     v.finish_segment(v.source, 45)
     out.append(v)
 
-    v = Vector("a one-question run", [OPTS, "run starts"], count=300, opts=(7, "ladder", False))
+    v = Vector("a one-question run", [OPTS, "run starts"], count=300, opts=(7, "ladder"))
     for _ in range(17):
         v.play(v.source, "C" * 7, checkpoint=False)
         v.finish_segment(v.source, v.quiz(v.source).cursor + 1, expect="applied")
@@ -341,7 +340,7 @@ def scenarios():
     v.finish_segment(v.source, 120)
     out.append(v)
 
-    v = Vector("previous never crosses a run boundary", [SEG, "run starts"], count=20, opts=(5, "ladder", False))
+    v = Vector("previous never crosses a run boundary", [SEG, "run starts"], count=20, opts=(5, "ladder"))
     v.play(v.source, "CCCCC")
     v.finish_segment(v.source, 5)
     v.op({"type": "move_cursor", "quiz": v.source, "attempt": 1, "attempt_seed": str(v.quiz(v.source).seed),
@@ -356,10 +355,10 @@ def scenarios():
 
     # -- Options ----------------------------------------------------------------------
     v = Vector("options are copied, never referenced", [OPTS])
-    v.op({"type": "set_cascade_options", "progression": "drill", "require_alphabetical": True})
+    v.op({"type": "set_cascade_options", "progression": "drill"})
     v.play(v.source, "CCCCCMMMMM")
     l2, _ = v.finish(v.source)  # the new quiz takes the cascade's options
-    v.op({"type": "set_quiz_options", "quiz": l2, "require_alphabetical": False})  # touches nothing else
+    v.op({"type": "set_quiz_options", "quiz": l2, "progression": "ladder"})  # touches nothing else
     v.op({"type": "set_cascade_options", "segment_size": 5})  # touches no existing quiz
     v.op({"type": "set_quiz_options", "quiz": v.source, "progression": "drill"}, expect="invalid")
     out.append(v)
@@ -381,12 +380,11 @@ def scenarios():
     v.op({"type": "set_cascade_options", "clear_threshold": 50}, expect="trashed")
     out.append(v)
 
-    v = Vector("a chain stays drill through replacements", [OPTS, SEG], count=10, opts=(5, "ladder", False))
+    v = Vector("a chain stays drill through replacements", [OPTS, SEG], count=10, opts=(5, "ladder"))
     v.play(v.source, "CMMMM")
     chain, _ = v.finish_segment(v.source, 5)
     v.op({"type": "set_quiz_options", "quiz": chain, "progression": "ladder"}, expect="invalid")
     v.op({"type": "set_quiz_options", "quiz": chain, "segment_size": 5}, expect="invalid")
-    v.op({"type": "set_quiz_options", "quiz": chain, "require_alphabetical": True})
     v.play(chain, "CMMM")
     c2, _ = v.finish(chain)
     v.play(c2, "CMM")
@@ -401,7 +399,7 @@ def scenarios():
     l2b, _ = v.finish(l2)
     out.append(v)
 
-    v = Vector("switched to ladder in a drill cascade", [OPTS, PROG], opts=(0, "drill", False))
+    v = Vector("switched to ladder in a drill cascade", [OPTS, PROG], opts=(0, "drill"))
     v.play(v.source, "CCCCCMMMMM")
     l2, _ = v.finish(v.source)
     v.op({"type": "set_quiz_options", "quiz": l2, "progression": "ladder"})
@@ -420,7 +418,7 @@ def scenarios():
     out.append(v)
 
     # -- Restore details -------------------------------------------------------------
-    v = Vector("restores take the cascade's current options", [TRASH, OPTS], count=10, opts=(0, "ladder", False))
+    v = Vector("restores take the cascade's current options", [TRASH, OPTS], count=10, opts=(0, "ladder"))
     v.play(v.source, "CCCCCCCCMM")
     l2, _ = v.finish(v.source)
     v.play(l2, "CC")
@@ -429,7 +427,7 @@ def scenarios():
     v.op({"type": "restore_quiz", "quiz": l2, "shuffle_seed": v.next_seed()})  # takes the new options
     out.append(v)
 
-    v = Vector("restore on top of a chain", [TRASH, SEG], count=20, opts=(5, "ladder", False))
+    v = Vector("restore on top of a chain", [TRASH, SEG], count=20, opts=(5, "ladder"))
     v.play(v.source, "CCCCM")
     chain, _ = v.finish_segment(v.source, 5)
     v.play(chain, "C")
@@ -468,7 +466,7 @@ def scenarios():
     out.append(v)
 
     # -- Completion counts --------------------------------------------------------
-    v = Vector("completion counts", [SRC, "Completion counts"], count=10, opts=(5, "ladder", False))
+    v = Vector("completion counts", [SRC, "Completion counts"], count=10, opts=(5, "ladder"))
     v.play(v.source, "CCCCM")  # a segmented Source quiz
     chain, _ = v.finish_segment(v.source, 5)
     v.play(chain, "C")
@@ -500,7 +498,7 @@ def scenarios():
 
     # -- Check order (PQ-013) -------------------------------------------------------
     v = Vector("the attempt and a duplicate run come before the depth", [OPS, "PLAN.md § Conflicts", "PQ-013"],
-               count=10, opts=(5, "ladder", False))
+               count=10, opts=(5, "ladder"))
     v.play(v.source, "CCCCM")
     chain, _ = v.finish_segment(v.source, 5)
     v.finish_segment(v.source, 5, expect="duplicate_segment")  # not the deepest, but a duplicate
@@ -528,7 +526,8 @@ def random_sequences(n_seqs=40, n_steps=160):
         rng = ref.splitmix64(0xD1CE + s)
         pick = lambda n: next(rng) % n  # noqa: E731
         count = 5 + pick(40)
-        opts = ([0, 0, 5, 7, 10, 100][pick(6)], ["ladder", "drill"][pick(2)], bool(pick(2)))
+        opts = ([0, 0, 5, 7, 10, 100][pick(6)], ["ladder", "drill"][pick(2)])
+        pick(2)  # once alphabetical order, now an answer setting: still drawn, so the sequences stay the same
         v = Vector(f"random sequence {s}", ["PLAN.md § Unit tests → Property tests"], count=count,
                    threshold=[1, 50, 80, 100][pick(4)], opts=opts)
         for step in range(n_steps):

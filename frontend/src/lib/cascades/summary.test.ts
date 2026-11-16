@@ -52,8 +52,8 @@ async function grade(db: UserDb, quizId: string, marks: string) {
 
 describe('the Cascades and Trash pages', () => {
 	it('summarise options and the ladder', () => {
-		expect(optionsSummary({ segment_size: 40, progression: 'drill', require_alphabetical: false })).toBe('segments of 40 · drill');
-		expect(optionsSummary({ segment_size: 0, progression: 'ladder', require_alphabetical: false })).toBe('');
+		expect(optionsSummary({ segment_size: 40, progression: 'drill' })).toBe('segments of 40 · drill');
+		expect(optionsSummary({ segment_size: 0, progression: 'ladder' })).toBe('');
 	});
 
 	it('show Available offline, not the download label, for a cascade opened inside the window', async () => {

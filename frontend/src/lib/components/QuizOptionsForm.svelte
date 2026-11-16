@@ -1,5 +1,5 @@
 <script lang="ts">
-	// Segment size, progression and alphabetical order, each explained behind
+	// Segment size and progression, each explained behind
 	// its ⓘ (PLAN.md § Quiz options, § Frontend → QuizOptionsForm), for
 	// the level being studied and for the levels a cascade makes from now on,
 	// both in a cascade's Settings. Each option is a row with its control on the
@@ -18,7 +18,6 @@
 		maxQuizQuestions = 300_000,
 		segmentChain = false,
 		source = false,
-		showAlphabetical = true,
 		idPrefix = '',
 		onchange = () => undefined
 	}: {
@@ -28,7 +27,6 @@
 		maxQuizQuestions?: number;
 		segmentChain?: boolean;
 		source?: boolean;
-		showAlphabetical?: boolean;
 		/** Keeps the controls' ids apart when two forms share a page. */
 		idPrefix?: string;
 		onchange?: (options: QuizOptions) => void;
@@ -107,17 +105,5 @@
 				</select>
 			</SettingRow>
 		{/if}
-	{/if}
-	{#if showAlphabetical}
-		<SettingRow label="Typed answers must be in alphabetical order" info={INFO.alphabetical} for={`${idPrefix}alphabetical`}>
-			<Checkbox
-				id={`${idPrefix}alphabetical`}
-				checked={options.require_alphabetical}
-				onCheckedChange={(v) => {
-					options.require_alphabetical = v === true;
-					onchange(options);
-				}}
-			/>
-		</SettingRow>
 	{/if}
 </div>

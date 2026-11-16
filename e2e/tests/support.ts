@@ -126,7 +126,6 @@ export async function apiCascade(
 		filters: unknown;
 		segment_size?: number;
 		progression?: string;
-		alphabetical?: boolean;
 		answer_mode?: 'flashcard' | 'typed';
 	}
 ): Promise<string> {
@@ -146,7 +145,6 @@ export async function apiCascade(
 			clear_threshold: 80,
 			segment_size: o.segment_size ?? 0,
 			progression: o.progression ?? 'ladder',
-			require_alphabetical: o.alphabetical ?? false,
 			answer_mode: o.answer_mode ?? 'flashcard',
 			filters: o.filters
 		}

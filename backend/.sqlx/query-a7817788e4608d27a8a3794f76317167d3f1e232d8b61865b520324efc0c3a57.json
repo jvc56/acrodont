@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE quizzes SET segment_size = coalesce($2, segment_size), progression = coalesce($3, progression),\n                            options_changed_at = $4, options_seq = $5, options_device_id = $6, updated_seq = $5\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        {
+          "Custom": {
+            "name": "quiz_progression",
+            "kind": {
+              "Enum": [
+                "ladder",
+                "drill"
+              ]
+            }
+          }
+        },
+        "Timestamptz",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a7817788e4608d27a8a3794f76317167d3f1e232d8b61865b520324efc0c3a57"
+}

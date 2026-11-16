@@ -433,7 +433,6 @@ CREATE TABLE cascades (
                                  -- one-question run. See Quiz options for the
                                  -- ceil(question_count / S) bound on chain quizzes
     progression          quiz_progression NOT NULL DEFAULT 'ladder',
-    require_alphabetical BOOLEAN NOT NULL DEFAULT false,
     settings             JSONB NOT NULL DEFAULT '{}'::jsonb
                              CHECK (jsonb_typeof(settings) = 'object'),
                                  -- the cascade's own settings, the "This cascade"
@@ -509,7 +508,6 @@ CREATE TABLE quizzes (
     segment_size         INTEGER NOT NULL DEFAULT 0
                              CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 300000),
     progression          quiz_progression NOT NULL DEFAULT 'ladder',
-    require_alphabetical BOOLEAN NOT NULL DEFAULT false,
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
                              -- set_quiz_options; an older operation is rejected whole
     options_seq          BIGINT NOT NULL,            -- sync sequence of that change, for seen_seq

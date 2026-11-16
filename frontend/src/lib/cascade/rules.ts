@@ -38,7 +38,6 @@ export class Rejected extends Error {
 export interface Opts {
 	segment_size: number;
 	progression: Progression;
-	require_alphabetical: boolean;
 }
 
 export interface CascadeState {
@@ -102,9 +101,7 @@ export interface Restored {
 
 /** A created quiz's options: the cascade's, except a chain: Drill, no segments. */
 export function newQuizOpts(c: CascadeState, chain: boolean): Opts {
-	return chain
-		? { segment_size: 0, progression: 'drill', require_alphabetical: c.opts.require_alphabetical }
-		: { ...c.opts };
+	return chain ? { segment_size: 0, progression: 'drill' } : { ...c.opts };
 }
 
 export function effectiveSegmentSize(q: QuizState): number {
@@ -270,6 +267,6 @@ export function restoreQuiz(c: CascadeState, q: QuizState, seed: bigint): Restor
 	const cascadeRestored = c.trashed;
 	c.trashed = false;
 	pushDepth(c);
-	const opts = q.segment_chain ? { ...q.opts, require_alphabetical: c.opts.require_alphabetical } : { ...c.opts };
+	const opts = q.segment_chain ? { ...q.opts } : { ...c.opts };
 	return { level: c.depth, attempt: q.attempt + 1, seed, opts, cascade_restored: cascadeRestored };
 }

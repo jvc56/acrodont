@@ -96,12 +96,12 @@ pub struct Loaded {
 pub async fn load_quiz(conn: &mut PgConnection, user: Uuid, quiz_id: Uuid) -> Result<Loaded, OpError> {
     let r = sqlx::query!(
         r#"SELECT q.cascade_id, q.level, q.origin AS "origin: Origin", q.segment_chain, q.segment_size,
-                  q.progression AS "progression: Progression", q.require_alphabetical, q.attempt, q.shuffle_seed,
+                  q.progression AS "progression: Progression", q.attempt, q.shuffle_seed,
                   q.question_count, q.correct_count, q.missed_count, q.cursor, q.cursor_device_id,
                   q.cursor_moved_at, q.run_start, q.status AS "status: QuizStatus", q.updated_seq, q.options_seq,
                   q.options_device_id, q.options_changed_at,
                   c.clear_threshold, c.segment_size AS c_segment_size, c.progression AS "c_progression: Progression",
-                  c.require_alphabetical AS c_require_alphabetical, c.depth, c.peak_depth,
+                  c.depth, c.peak_depth,
                   c.attempts_since_completion, c.trashed_at IS NOT NULL AS "trashed!"
            FROM quizzes q JOIN cascades c ON c.id = q.cascade_id
            WHERE q.id = $1 AND q.user_id = $2"#,
@@ -118,7 +118,7 @@ pub async fn load_quiz(conn: &mut PgConnection, user: Uuid, quiz_id: Uuid) -> Re
             level: r.level as u32,
             origin: r.origin,
             segment_chain: r.segment_chain,
-            opts: Opts { segment_size: r.segment_size as u32, progression: r.progression, require_alphabetical: r.require_alphabetical },
+            opts: Opts { segment_size: r.segment_size as u32, progression: r.progression },
             attempt: r.attempt as u32,
             seed: from_i64(r.shuffle_seed),
             question_count: r.question_count as u32,
@@ -128,11 +128,7 @@ pub async fn load_quiz(conn: &mut PgConnection, user: Uuid, quiz_id: Uuid) -> Re
         },
         cascade: CascadeState {
             clear_threshold: r.clear_threshold as u32,
-            opts: Opts {
-                segment_size: r.c_segment_size as u32,
-                progression: r.c_progression,
-                require_alphabetical: r.c_require_alphabetical,
-            },
+            opts: Opts { segment_size: r.c_segment_size as u32, progression: r.c_progression },
             depth: r.depth as u32,
             peak_depth: r.peak_depth as u32,
             attempts_since_completion: r.attempts_since_completion as u32,
@@ -247,12 +243,12 @@ async fn insert_quiz(
     let hash = questions_hash(&n.questions);
     sqlx::query!(
         "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, origin_quiz_id, origin_attempt,
-                              origin_segment_end, segment_chain, segment_size, progression, require_alphabetical,
+                              origin_segment_end, segment_chain, segment_size, progression,
                               options_changed_at, options_seq, options_device_id, shuffle_seed, questions_hash,
                               question_count, cursor_moved_at, cursor_device_id, created_seq, last_activity_at,
                               updated_seq)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $13, $15, $14,
-                 greatest(now(), $13), $14)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $12, $14, $13,
+                 greatest(now(), $12), $13)",
         id,
         cascade,
         ctx.user,
@@ -264,7 +260,6 @@ async fn insert_quiz(
         n.segment_chain,
         n.opts.segment_size as i32,
         n.opts.progression as Progression,
-        n.opts.require_alphabetical,
         at,
         ctx.seq,
         ctx.device,
@@ -605,14 +600,13 @@ async fn restore_quiz(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> Op
     let qs = reset_quiz(conn, ctx, quiz, r.attempt, r.seed, at).await?;
     sqlx::query!(
         "UPDATE quizzes SET status = 'active', cleared_at = NULL, level = $2, segment_size = $3, progression = $4,
-                            require_alphabetical = $5, options_changed_at = $6, options_seq = $7,
-                            options_device_id = $8, last_activity_at = greatest(last_activity_at, $6)
+                            options_changed_at = $5, options_seq = $6,
+                            options_device_id = $7, last_activity_at = greatest(last_activity_at, $5)
          WHERE id = $1",
         quiz,
         r.level as i32,
         r.opts.segment_size as i32,
         r.opts.progression as Progression,
-        r.opts.require_alphabetical,
         at,
         ctx.seq,
         ctx.device,
@@ -779,7 +773,6 @@ async fn purge_cascade(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> O
 struct OptionFields {
     segment_size: Option<u32>,
     progression: Option<Progression>,
-    require_alphabetical: Option<bool>,
 }
 
 /// The carried option fields, every value in range or `invalid`.
@@ -792,11 +785,7 @@ fn option_fields(op: &IncomingOp, cap: u32) -> Result<OptionFields, OpError> {
         None => None,
         Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| OpError::Rejected(Reason::Invalid))?),
     };
-    let require_alphabetical = match op.body.get("require_alphabetical") {
-        None => None,
-        Some(v) => Some(v.as_bool().ok_or(Reason::Invalid)?),
-    };
-    Ok(OptionFields { segment_size, progression, require_alphabetical })
+    Ok(OptionFields { segment_size, progression })
 }
 
 /// Latest wins whole: this device's own change, or one made after seeing
@@ -837,15 +826,13 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
     };
     sqlx::query!(
         "UPDATE cascades SET segment_size = coalesce($2, segment_size), progression = coalesce($3, progression),
-                             require_alphabetical = coalesce($4, require_alphabetical), options_changed_at = $5,
-                             options_seq = $6, options_device_id = $7, updated_seq = $6,
-                             clear_threshold = coalesce($8, clear_threshold),
-                             settings = coalesce($9::text::jsonb, settings)
+                             options_changed_at = $4, options_seq = $5, options_device_id = $6, updated_seq = $5,
+                             clear_threshold = coalesce($7, clear_threshold),
+                             settings = coalesce($8::text::jsonb, settings)
          WHERE id = $1",
         id,
         f.segment_size.map(|s| s as i32),
         f.progression as Option<Progression>,
-        f.require_alphabetical,
         at,
         ctx.seq,
         ctx.device,
@@ -870,13 +857,11 @@ async fn set_quiz_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -
     }
     sqlx::query!(
         "UPDATE quizzes SET segment_size = coalesce($2, segment_size), progression = coalesce($3, progression),
-                            require_alphabetical = coalesce($4, require_alphabetical), options_changed_at = $5,
-                            options_seq = $6, options_device_id = $7, updated_seq = $6
+                            options_changed_at = $4, options_seq = $5, options_device_id = $6, updated_seq = $5
          WHERE id = $1",
         quiz,
         f.segment_size.map(|s| s as i32),
         f.progression as Option<Progression>,
-        f.require_alphabetical,
         at,
         ctx.seq,
         ctx.device,

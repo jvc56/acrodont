@@ -319,10 +319,10 @@ async fn options_against_a_finish(pool: sqlx::PgPool) {
     let (_, l2) = play_and_finish(&app, &mut a, s.source_id, "CCCCM").await;
     b.sync(vec![]).await;
     // Reset (the Source quiz descended): the change applies to the reset quiz.
-    let o = b.op("set_quiz_options", json!({ "quiz_id": s.source_id, "require_alphabetical": true }));
+    let o = b.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 5 }));
     assert_eq!(one(&mut b, o).await, "applied");
     // Cleared: rejected.
-    let o = b.op("set_quiz_options", json!({ "quiz_id": l2, "require_alphabetical": true }));
+    let o = b.op("set_quiz_options", json!({ "quiz_id": l2, "segment_size": 5 }));
     play_and_finish(&app, &mut a, l2, "C").await;
     assert_eq!(one(&mut b, o).await, "not_active");
 }
@@ -425,12 +425,12 @@ async fn cursor_moves_on_two_devices(pool: sqlx::PgPool) {
     assert_eq!(quiz_now(&app, s.source_id).await.cursor, 5);
     // An options change by a device that had seen the options but not a later
     // cursor move on the same quiz applies (options_seq, not the quiz's seq).
-    let o = a.op("set_quiz_options", json!({ "quiz_id": s.source_id, "require_alphabetical": true }));
+    let o = a.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 5 }));
     a.sync(vec![o]).await;
     b.sync(vec![]).await;
     let m = mv(&mut a, 7, Utc::now());
     a.sync(vec![m]).await;
-    let o = b.op_at("set_quiz_options", json!({ "quiz_id": s.source_id, "require_alphabetical": false }), now - Duration::hours(1));
+    let o = b.op_at("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 0 }), now - Duration::hours(1));
     assert_eq!(one(&mut b, o).await, "applied");
 }
 

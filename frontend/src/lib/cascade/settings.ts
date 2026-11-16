@@ -24,7 +24,7 @@ const hasNul = (v: unknown): boolean =>
 				? Object.entries(v).some(([k, e]) => k.includes('\0') || hasNul(e))
 				: false;
 
-const FLAGS = new Set(['show_definitions', 'show_hooks', 'reveal_correct', 'show_found_count', 'show_probability', 'definition_column']);
+const FLAGS = new Set(['show_definitions', 'show_hooks', 'reveal_correct', 'show_found_count', 'require_alphabetical', 'show_probability', 'definition_column']);
 
 /** One change to a setting: null takes it out; a value the server knows must be in its range. */
 export function checkSetting(name: string, v: unknown) {

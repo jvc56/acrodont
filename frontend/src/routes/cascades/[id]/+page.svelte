@@ -40,7 +40,6 @@
 		applyToAll,
 		copySettings,
 		copySources,
-		kindOf,
 		reachable,
 		type CascadeSettings,
 		type Widening
@@ -225,7 +224,11 @@
 				// cascade's row to the settings: its own settings are taken from the player first.
 				answer: () => {
 					settings.setCascade(p.v.cascade);
-					return { answer_mode: settings.value.answer_mode, reveal_correct: settings.value.reveal_correct };
+					return {
+						answer_mode: settings.value.answer_mode,
+						reveal_correct: settings.value.reveal_correct,
+						require_alphabetical: settings.value.require_alphabetical
+					};
 				},
 				fetchCard: (cid, idx, ahead) => fetchCard(d, cid, idx, ahead),
 				fetchAhead: (cid, idx) => fetchAhead(d, cid, idx),
@@ -500,11 +503,9 @@
 	/** Settings: what is read fresh each time it opens, then the dialog. */
 	async function openSettings() {
 		const q = v?.quiz;
-		quizOptions = q ? { segment_size: q.segment_size, progression: q.progression, require_alphabetical: q.require_alphabetical } : null;
+		quizOptions = q ? { segment_size: q.segment_size, progression: q.progression } : null;
 		const c = v?.cascade;
-		cascadeOptions = c
-			? { segment_size: clampPrefill(c.segment_size, maxQuiz), progression: c.progression, require_alphabetical: c.require_alphabetical }
-			: null;
+		cascadeOptions = c ? { segment_size: clampPrefill(c.segment_size, maxQuiz), progression: c.progression } : null;
 		cascadeError = null;
 		offers = {};
 		settings.resetRows();
@@ -527,7 +528,6 @@
 		const op: Record<string, unknown> = { type: 'set_quiz_options', quiz_id: q.id };
 		if (o.segment_size !== q.segment_size) op.segment_size = o.segment_size;
 		if (o.progression !== q.progression) op.progression = o.progression;
-		if (o.require_alphabetical !== q.require_alphabetical) op.require_alphabetical = o.require_alphabetical;
 		if (Object.keys(op).length <= 2) return;
 		if (await write(op as unknown as NewOp)) levelSaved++;
 	}
@@ -539,28 +539,25 @@
 		const fields: CascadeSettings = {};
 		if (o.segment_size !== c.segment_size) fields.segment_size = o.segment_size;
 		if (o.progression !== c.progression) fields.progression = o.progression;
-		if (o.require_alphabetical !== c.require_alphabetical) fields.require_alphabetical = o.require_alphabetical;
 		await setCascade(fields, 'levels');
 	}
 
 	/** After a change to this cascade alone, the offer to use it for every cascade. */
 	async function offer(key: string, fields: CascadeSettings) {
 		if (!db || !Object.keys(fields).length) return;
-		const reach = (await reachable(db, fields)).length;
+		const reach = (await reachable(db)).length;
 		offers = { ...offers, [key]: { fields, reach, serial: ++offerSerial } };
 	}
 
-	/** "all 12 cascades" (or anagram cascades, for a setting only they have), when there are others. */
+	/** "all 12 cascades", when there are others. */
 	function widenings(o: Offer): Widening[] {
 		const d = db;
 		if (!d || o.reach < 2) return [];
-		const only = kindOf(o.fields);
-		const kind = only ? `${{ anagram: 'anagram', leave_value: 'leave value', definition: 'definition' }[only]} cascades` : 'cascades';
 		return [
 			{
 				key: 'all',
-				label: `all ${o.reach} ${kind}`,
-				done: `Used for all ${o.reach} ${kind}`,
+				label: `all ${o.reach} cascades`,
+				done: `Used for all ${o.reach} cascades`,
 				run: async () => {
 					await applyToAll(d, o.fields);
 					afterLocalWrite();
@@ -601,7 +598,7 @@
 		await player?.modeChanged();
 		// The forms show what the cascade has now.
 		cascadeOptions = v?.cascade
-			? { segment_size: clampPrefill(v.cascade.segment_size, maxQuiz), progression: v.cascade.progression, require_alphabetical: v.cascade.require_alphabetical }
+			? { segment_size: clampPrefill(v.cascade.segment_size, maxQuiz), progression: v.cascade.progression }
 			: cascadeOptions;
 		offers = {};
 		formKey++;
@@ -882,7 +879,7 @@
 				</div>
 			{/if}
 			<div class="mx-auto max-w-sm space-y-1">
-				{#if v.quiz?.require_alphabetical && typed.found.length}
+				{#if dsp.require_alphabetical && typed.found.length}
 					<p class="text-center text-xs text-muted-foreground">after <TileText text={typed.found.at(-1) ?? ''} /></p>
 				{/if}
 				<input
@@ -1146,7 +1143,7 @@
 {/snippet}
 
 {#snippet flag(
-	key: 'show_definitions' | 'show_hooks' | 'show_found_count' | 'show_probability' | 'definition_column' | 'hooks_on_question',
+	key: 'show_definitions' | 'show_hooks' | 'show_found_count' | 'require_alphabetical' | 'show_probability' | 'definition_column' | 'hooks_on_question',
 	label: string,
 	id: string,
 	info: string
@@ -1234,7 +1231,6 @@
 										maxQuizQuestions={maxQuiz}
 										segmentChain={q.segment_chain}
 										source={q.origin === 'source'}
-										showAlphabetical={c.quiz_type === 'anagram'}
 										onchange={saveQuizOptions}
 									/>
 									{#if levelSaved}
@@ -1256,7 +1252,6 @@
 										idPrefix="cascade-"
 										questionCount={c.question_count}
 										maxQuizQuestions={maxQuiz}
-										showAlphabetical={c.quiz_type === 'anagram'}
 										onchange={saveCascadeOptions}
 									/>
 									{@render widen('levels')}
@@ -1324,6 +1319,7 @@
 							{@render flag('show_definitions', 'Show definitions', 'cascade-definitions', INFO.show_definitions)}
 							{@render flag('show_hooks', 'Show hooks', 'cascade-hooks', INFO.show_hooks)}
 							{@render flag('show_found_count', 'Show how many anagrams are found in typed mode', 'cascade-found-count', INFO.found_count)}
+							{@render flag('require_alphabetical', 'Typed answers must be in alphabetical order', 'cascade-alphabetical', INFO.alphabetical)}
 						{/if}
 						{#if c.quiz_type !== 'leave_value'}
 							{@render flag('show_probability', 'Show each word’s probability order', 'cascade-probability', INFO.show_probability)}

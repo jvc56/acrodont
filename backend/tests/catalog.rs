@@ -1210,7 +1210,7 @@ async fn api_cascade(c: &mut Client<'_>, quiz_type: &str, name: &str) -> String 
             json!({
                 "id": uuid::Uuid::new_v4(), "source_quiz_id": uuid::Uuid::new_v4(), "device_id": uuid::Uuid::new_v4(),
                 "at": "2026-01-01T00:00:00Z", "name": name, "lexicon": "EN-FIX", "quiz_type": quiz_type,
-                "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false,
+                "clear_threshold": 80, "segment_size": 0, "progression": "ladder",
                 "answer_mode": "flashcard",
                 "filters": { "op": "and", "children": [{ "type": "length", "negated": false, "min": 2, "max": 2 }] },
             }),
@@ -1329,7 +1329,7 @@ async fn leave_values_are_replaced_whole_and_no_leaf_added_or_dropped(pool: sqlx
             json!({
                 "id": uuid::Uuid::new_v4(), "source_quiz_id": uuid::Uuid::new_v4(), "device_id": uuid::Uuid::new_v4(),
                 "at": "2026-01-01T00:00:00Z", "name": "Good leaves", "lexicon": "EN-FIX", "quiz_type": "leave_value",
-                "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false,
+                "clear_threshold": 80, "segment_size": 0, "progression": "ladder",
                 "answer_mode": "flashcard",
                 "filters": { "op": "and", "children": [{ "type": "leave_value", "negated": false, "min": 30.0, "max": null }] },
             }),
@@ -1406,7 +1406,7 @@ async fn cascade_of(c: &mut Client<'_>, name: &str, rows: Value) -> (String, Val
             json!({
                 "id": uuid::Uuid::new_v4(), "source_quiz_id": uuid::Uuid::new_v4(), "device_id": uuid::Uuid::new_v4(),
                 "at": "2026-01-01T00:00:00Z", "name": name, "lexicon": "EN-FIX", "quiz_type": "anagram",
-                "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false,
+                "clear_threshold": 80, "segment_size": 0, "progression": "ladder",
                 "answer_mode": "flashcard", "filters": { "op": "and", "children": rows },
             }),
         )

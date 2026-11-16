@@ -75,11 +75,11 @@ export interface PlayerOptions {
 	/** Fetches the cascade's tile distribution the device lacks, for typed mode (online only). */
 	fetchDistribution?: (cascadeId: string) => Promise<void>;
 	/**
-	 * The answer mode and reveal grade this device uses for the cascade, from
-	 * whichever place holds them (lib/settings/layers). Without it, the
-	 * cascade's own settings, else flashcards marked correct.
+	 * The answer mode, reveal grade and typed order this device uses for the
+	 * cascade, from whichever place holds them (lib/settings/layers). Without
+	 * it, the cascade's own settings, else flashcards marked correct, in any order.
 	 */
-	answer?: () => { answer_mode: AnswerMode; reveal_correct: boolean };
+	answer?: () => { answer_mode: AnswerMode; reveal_correct: boolean; require_alphabetical: boolean };
 	seed?: () => string;
 	uuid?: () => string;
 }
@@ -144,7 +144,7 @@ export class Player {
 	private listeners = new Set<(v: PlayerView) => void>();
 	private readonly seed: () => string;
 	private readonly uuid: () => string;
-	private readonly answer: () => { answer_mode: AnswerMode; reveal_correct: boolean };
+	private readonly answer: NonNullable<PlayerOptions['answer']>;
 
 	constructor(
 		private readonly db: UserDb,
@@ -157,7 +157,11 @@ export class Player {
 			opts.answer ??
 			(() => {
 				const own = this.v.cascade?.settings ?? {};
-				return { answer_mode: own.answer_mode === 'typed' ? 'typed' : 'flashcard', reveal_correct: own.reveal_correct !== false };
+				return {
+					answer_mode: own.answer_mode === 'typed' ? 'typed' : 'flashcard',
+					reveal_correct: own.reveal_correct !== false,
+					require_alphabetical: own.require_alphabetical === true
+				};
 			});
 	}
 
@@ -794,7 +798,7 @@ export class Player {
 			words,
 			this.dist.parseMagpie(card.key, true),
 			this.dist,
-			this.v.quiz!.require_alphabetical
+			this.answer().require_alphabetical
 		);
 		if (result.kind === 'empty') {
 			await this.showNext();

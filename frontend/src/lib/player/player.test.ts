@@ -44,7 +44,7 @@ async function cascade(
 	} = {}
 ) {
 	const idx = Array.from({ length: count }, (_, i) => i);
-	const opts = { segment_size: o.segment_size ?? 0, progression: 'ladder', require_alphabetical: false };
+	const opts = { segment_size: o.segment_size ?? 0, progression: 'ladder' };
 	await storeCreated(db, {
 		cascade: {
 			id: C, name: 'x', quiz_type: o.quiz_type ?? 'anagram', lexicon: 'EN', letter_distribution: 'english', clear_threshold: 80, ...opts,
@@ -80,10 +80,10 @@ async function putDistribution() {
 	await db.put('distributions', { name: 'english', tiles });
 }
 
-/** The cascade made typed, as the player's settings would. */
-async function makeTyped() {
+/** The cascade made typed, as the player's settings would, with any other answer settings. */
+async function makeTyped(more: Record<string, unknown> = {}) {
 	const c = (await db.get('cascades', C))!;
-	await db.put('cascades', { ...c, settings: { ...c.settings, answer_mode: 'typed' } });
+	await db.put('cascades', { ...c, settings: { ...c.settings, answer_mode: 'typed', ...more } });
 }
 
 function player() {
@@ -489,7 +489,7 @@ describe('the player', () => {
 
 	it('the answer mode the page resolves for this device decides over the cascade\'s own', async () => {
 		await cascade(2, { answer_mode: 'typed' });
-		const p = new Player(db, C, { ensure: async () => undefined, seed: () => '777', answer: () => ({ answer_mode: 'flashcard', reveal_correct: false }) });
+		const p = new Player(db, C, { ensure: async () => undefined, seed: () => '777', answer: () => ({ answer_mode: 'flashcard', reveal_correct: false, require_alphabetical: false }) });
 		await p.load();
 		expect(p.v.card!.typed).toBeNull();
 		await p.showNext();
@@ -507,9 +507,7 @@ describe('the player', () => {
 
 	it('typed mode with alphabetical order: an entry that skips an earlier answer misses the card at once', async () => {
 		await cascade(2);
-		const q = (await db.get('quizzes', Q))!;
-		await db.put('quizzes', { ...q, require_alphabetical: true });
-		await makeTyped();
+		await makeTyped({ require_alphabetical: true });
 		const p = player();
 		await p.load();
 		// BA skips AB: out of order, and the card is missed there and then.
@@ -519,9 +517,7 @@ describe('the player', () => {
 
 	it('typed mode with alphabetical order: answers in order are found', async () => {
 		await cascade(2);
-		const q = (await db.get('quizzes', Q))!;
-		await db.put('quizzes', { ...q, require_alphabetical: true });
-		await makeTyped();
+		await makeTyped({ require_alphabetical: true });
 		const p = player();
 		await p.load();
 		expect((await p.enter('AB'))!.kind).toBe('found');

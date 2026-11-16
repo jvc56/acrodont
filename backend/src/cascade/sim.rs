@@ -59,11 +59,10 @@ pub enum Op {
     SetCascadeOptions {
         segment_size: Option<i64>,
         progression: Option<Progression>,
-        require_alphabetical: Option<bool>,
         /// The cascade's alone: every finish reads it, the quiz in progress included.
         clear_threshold: Option<i64>,
     },
-    SetQuizOptions { quiz: Uuid, segment_size: Option<i64>, progression: Option<Progression>, require_alphabetical: Option<bool> },
+    SetQuizOptions { quiz: Uuid, segment_size: Option<i64>, progression: Option<Progression> },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -346,7 +345,7 @@ impl SimCascade {
                 self.quizzes.clear();
                 Ok(Applied::default())
             }
-            Op::SetCascadeOptions { segment_size, progression, require_alphabetical, clear_threshold } => {
+            Op::SetCascadeOptions { segment_size, progression, clear_threshold } => {
                 if self.purged {
                     return Err(Reason::NotFound);
                 }
@@ -365,12 +364,9 @@ impl SimCascade {
                 if let Some(p) = progression {
                     o.progression = *p;
                 }
-                if let Some(a) = require_alphabetical {
-                    o.require_alphabetical = *a;
-                }
                 Ok(Applied::default())
             }
-            Op::SetQuizOptions { quiz, segment_size, progression, require_alphabetical } => {
+            Op::SetQuizOptions { quiz, segment_size, progression } => {
                 let q = self.live(*quiz)?;
                 let size = segment_size.map(|s| rules::check_segment_size(s, self.max_quiz_questions)).transpose()?;
                 rules::check_quiz_option_fields(&q.state, progression.is_some(), segment_size.is_some())?;
@@ -380,9 +376,6 @@ impl SimCascade {
                 }
                 if let Some(p) = progression {
                     o.progression = *p;
-                }
-                if let Some(a) = require_alphabetical {
-                    o.require_alphabetical = *a;
                 }
                 Ok(Applied::default())
             }

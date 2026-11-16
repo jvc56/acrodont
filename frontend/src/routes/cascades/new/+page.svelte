@@ -166,7 +166,6 @@
 			clear_threshold: CASCADE_SETTING_DEFAULTS.clear_threshold,
 			segment_size: CASCADE_SETTING_DEFAULTS.segment_size,
 			progression: CASCADE_SETTING_DEFAULTS.progression,
-			require_alphabetical: CASCADE_SETTING_DEFAULTS.require_alphabetical,
 			filters: wire.tree
 		};
 		try {

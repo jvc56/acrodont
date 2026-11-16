@@ -28,11 +28,10 @@ export interface CascadeSummary {
 }
 
 /** `segments of 40 · drill`, or nothing when every option is at its default. */
-export function optionsSummary(o: { segment_size: number; progression: string; require_alphabetical: boolean }): string {
+export function optionsSummary(o: { segment_size: number; progression: string }): string {
 	const parts: string[] = [];
 	if (o.segment_size > 0) parts.push(`segments of ${o.segment_size}`);
 	if (o.progression === 'drill') parts.push('drill');
-	if (o.require_alphabetical) parts.push('alphabetical');
 	return parts.join(' · ');
 }
 

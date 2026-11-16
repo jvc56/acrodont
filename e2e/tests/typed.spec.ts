@@ -126,9 +126,11 @@ test('typed mode', async ({ page }) => {
 test('alphabetical order in typed mode', async ({ page }) => {
 	test.setTimeout(180_000);
 	await newUser(page, 'alpha');
-	const ordered = await apiCascade(page, { name: 'Ordered', filters: AEINRST, alphabetical: true });
+	const ordered = await apiCascade(page, { name: 'Ordered', filters: AEINRST });
 	await open(page, ordered);
 	await playerSetting(page, 'Answer mode', 'typed');
+	// One answer setting, not a level's option: it applies to the card in progress at once.
+	await playerSetting(page, 'Typed answers must be in alphabetical order', true);
 	// In order: correct, once Enter on an empty input finishes it.
 	for (const w of AEINRST_WORDS) await type(page, w);
 	await type(page, '');
@@ -142,7 +144,7 @@ test('alphabetical order in typed mode', async ({ page }) => {
 	await expect(page.getByText('Out of order: NASTIER')).toBeVisible();
 	await expect(page.getByLabel('Type an answer')).toHaveCount(0);
 	await next(page, false);
-	// With the option off, the same sequence grades correct. This cascade is made typed: each keeps its own mode.
+	// With the setting off, the same sequence grades correct. This cascade is made typed: each keeps its own settings.
 	const plain = await apiCascade(page, { name: 'Plain', filters: AEINRST, answer_mode: 'typed' });
 	await open(page, plain);
 	for (const w of ['NASTIER', 'ANTSIER', 'RATINES', 'ANESTRI', 'RETAINS', 'RETINAS', 'RETSINA', 'STAINER', 'STEARIN']) await type(page, w);

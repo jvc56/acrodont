@@ -1650,7 +1650,7 @@ describe('operations held for a level the server built from another set', () => 
 		const { server, a } = await setup();
 		const b = await second(server, false);
 		expect(await b.db.countFromIndex('quiz_questions', 'quiz_id', Q1)).toBe(0);
-		await b.apply({ type: 'set_quiz_options', quiz_id: Q1, require_alphabetical: true });
+		await b.apply({ type: 'set_quiz_options', quiz_id: Q1, segment_size: 5 });
 		// Another device answers a card; B's next pull carries it, with B's own change still unsent.
 		await a.play(Q1, 'C');
 		await a.sync();
@@ -1658,7 +1658,7 @@ describe('operations held for a level the server built from another set', () => 
 		await b.sync();
 		expect(await b.db.count('outbox')).toBe(1);
 		expect(await getMeta(b.db, 'held')).toEqual({});
-		expect((await b.quiz(Q1))!.require_alphabetical).toBe(true);
+		expect((await b.quiz(Q1))!.segment_size).toBe(5);
 	});
 
 	it('an engine stopped by a change of account replays nothing; they wait in that account’s database', async () => {

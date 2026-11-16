@@ -203,6 +203,10 @@ with this change, so the edit is in place rather than a second migration.
   `anagram_answer_mode` type went with its column.
 - The comment on `users.device_settings` says it is now the "Everywhere"
   place, where a null value takes a setting out.
+- `cascades` and `quizzes` lose `require_alphabetical`. Typed answers in
+  alphabetical order is now an answer setting like the others, held in the
+  four places, not a quiz option: the server never judged by it, and
+  `set_cascade_options` and `set_quiz_options` no longer carry it.
 
 A database made by the earlier file no longer matches: `./scripts/dev.py --reset`
 (and `make sqlx-db` for the compile-check database), and the production

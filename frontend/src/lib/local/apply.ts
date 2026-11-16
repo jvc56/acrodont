@@ -79,7 +79,6 @@ export type NewOp =
 			cascade_id: string;
 			segment_size?: number;
 			progression?: Progression;
-			require_alphabetical?: boolean;
 			/** The cascade's alone: every finish reads it, the quiz in progress included. */
 			clear_threshold?: number;
 			/** Changes to the cascade's own settings (the "This cascade" place): a value, or null to take one out. */
@@ -90,7 +89,6 @@ export type NewOp =
 			quiz_id: string;
 			segment_size?: number;
 			progression?: Progression;
-			require_alphabetical?: boolean;
 	  };
 
 export const APPLY_STORES: StoreName[] = [...view.VIEW_STORES, 'meta', 'outbox'];
@@ -99,8 +97,8 @@ export const APPLY_STORES: StoreName[] = [...view.VIEW_STORES, 'meta', 'outbox']
 // Rows ↔ rule state
 // ---------------------------------------------------------------------------
 
-function optsOf(r: { segment_size: number; progression: Progression; require_alphabetical: boolean }): Opts {
-	return { segment_size: r.segment_size, progression: r.progression, require_alphabetical: r.require_alphabetical };
+function optsOf(r: { segment_size: number; progression: Progression }): Opts {
+	return { segment_size: r.segment_size, progression: r.progression };
 }
 
 export function cascadeState(c: CascadeRow): CascadeState {
@@ -492,7 +490,6 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 			if (op.segment_size !== undefined) next.segment_size = checkSegmentSize(op.segment_size as number, ctx.max_quiz_questions);
 			if (op.clear_threshold !== undefined) next.clear_threshold = checkClearThreshold(op.clear_threshold as number);
 			if (op.progression !== undefined) next.progression = op.progression as Progression;
-			if (op.require_alphabetical !== undefined) next.require_alphabetical = op.require_alphabetical as boolean;
 			if (op.settings !== undefined) next.settings = mergeCascadeSettings(c.settings ?? {}, op.settings);
 			await putCascade(tx, next);
 			return { cascade_id: c.id };
@@ -507,7 +504,6 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 			const next = { ...q, options_changed_at: at, options_device_id: ctx.device_id };
 			if (size !== undefined) next.segment_size = size;
 			if (op.progression !== undefined) next.progression = op.progression as Progression;
-			if (op.require_alphabetical !== undefined) next.require_alphabetical = op.require_alphabetical as boolean;
 			await putQuiz(tx, next);
 			return { cascade_id: c.id };
 		}

@@ -38,7 +38,6 @@ fn op_of(o: &Value) -> Op {
     let aseed = || u64s(&o["attempt_seed"]);
     let opt_prog = || o.get("progression").map(prog);
     let opt_size = || o.get("segment_size").map(|v| v.as_i64().unwrap());
-    let opt_alpha = || o.get("require_alphabetical").map(|v| v.as_bool().unwrap());
     match o["type"].as_str().unwrap() {
         "grade" => Op::Grade {
             quiz: q(),
@@ -71,10 +70,9 @@ fn op_of(o: &Value) -> Op {
         "set_cascade_options" => Op::SetCascadeOptions {
             segment_size: opt_size(),
             progression: opt_prog(),
-            require_alphabetical: opt_alpha(),
             clear_threshold: o.get("clear_threshold").map(|v| v.as_i64().unwrap()),
         },
-        "set_quiz_options" => Op::SetQuizOptions { quiz: q(), segment_size: opt_size(), progression: opt_prog(), require_alphabetical: opt_alpha() },
+        "set_quiz_options" => Op::SetQuizOptions { quiz: q(), segment_size: opt_size(), progression: opt_prog() },
         t => panic!("unknown op {t}"),
     }
 }
@@ -114,7 +112,6 @@ fn snapshot(c: &SimCascade) -> Value {
                 "segment_chain": s.segment_chain,
                 "segment_size": s.opts.segment_size,
                 "progression": prog_str(s.opts.progression),
-                "require_alphabetical": s.opts.require_alphabetical,
                 "attempt": s.attempt,
                 "shuffle_seed": s.seed.to_string(),
                 "question_count": s.question_count,
@@ -140,7 +137,6 @@ fn snapshot(c: &SimCascade) -> Value {
             "purged": c.purged,
             "segment_size": c.state.opts.segment_size,
             "progression": prog_str(c.state.opts.progression),
-            "require_alphabetical": c.state.opts.require_alphabetical,
         },
         "quizzes": quizzes,
     })
@@ -156,11 +152,7 @@ fn every_rule_vector() {
         let s = &v["setup"];
         let mut c = SimCascade::new(
             s["clear_threshold"].as_u64().unwrap() as u32,
-            Opts {
-                segment_size: s["segment_size"].as_u64().unwrap() as u32,
-                progression: prog(&s["progression"]),
-                require_alphabetical: s["require_alphabetical"].as_bool().unwrap(),
-            },
+            Opts { segment_size: s["segment_size"].as_u64().unwrap() as u32, progression: prog(&s["progression"]) },
             s["question_count"].as_u64().unwrap() as u32,
             uuid(&s["source_quiz_id"]),
             u64s(&s["source_seed"]),
@@ -290,11 +282,7 @@ fn the_shared_random_sequences() {
         let s = &v["setup"];
         let mut c = SimCascade::new(
             s["clear_threshold"].as_u64().unwrap() as u32,
-            Opts {
-                segment_size: s["segment_size"].as_u64().unwrap() as u32,
-                progression: prog(&s["progression"]),
-                require_alphabetical: s["require_alphabetical"].as_bool().unwrap(),
-            },
+            Opts { segment_size: s["segment_size"].as_u64().unwrap() as u32, progression: prog(&s["progression"]) },
             s["question_count"].as_u64().unwrap() as u32,
             uuid(&s["source_quiz_id"]),
             u64s(&s["source_seed"]),
@@ -327,11 +315,7 @@ mod props {
     /// operations from the current state, and checks the invariants after each.
     fn drive(choices: &[u32], count: u32, size: u32, drill: bool) {
         let source = Uuid::from_u128(1);
-        let opts = Opts {
-            segment_size: size,
-            progression: if drill { Progression::Drill } else { Progression::Ladder },
-            require_alphabetical: false,
-        };
+        let opts = Opts { segment_size: size, progression: if drill { Progression::Drill } else { Progression::Ladder } };
         let mut c = SimCascade::new(80, opts, count, source, 0x1234_5678_9ABC_DEF0);
         let mut next_id = 2u128;
         for (k, &ch) in choices.iter().enumerate() {
@@ -359,7 +343,7 @@ mod props {
                 }
                 6 => {
                     let Some(q) = c.deepest().cloned() else { continue };
-                    Op::SetQuizOptions { quiz: q.id, segment_size: Some([0, 5, 6, 130_000][(ch as usize / 10) % 4]), progression: None, require_alphabetical: None }
+                    Op::SetQuizOptions { quiz: q.id, segment_size: Some([0, 5, 6, 130_000][(ch as usize / 10) % 4]), progression: None }
                 }
                 7 => {
                     let cleared: Vec<Uuid> = c.quizzes.values().filter(|q| !q.state.active).map(|q| q.id).collect();
@@ -372,7 +356,6 @@ mod props {
                 _ => Op::SetCascadeOptions {
                     segment_size: Some([0, 5, 9][(ch as usize / 10) % 3]),
                     progression: None,
-                    require_alphabetical: None,
                     clear_threshold: [None, Some(1), Some(60), Some(100), Some(0)][(ch as usize / 30) % 5],
                 },
             };

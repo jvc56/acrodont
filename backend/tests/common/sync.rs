@@ -170,7 +170,6 @@ pub struct Setup {
     pub threshold: i16,
     pub segment_size: i32,
     pub progression: &'static str,
-    pub require_alphabetical: bool,
     pub source_seed: u64,
     pub cascade_id: Uuid,
     pub source_id: Uuid,
@@ -183,7 +182,6 @@ impl Setup {
             threshold: 80,
             segment_size: 0,
             progression: "ladder",
-            require_alphabetical: false,
             source_seed: 0x8000_0000_0000_1234,
             cascade_id: Uuid::new_v4(),
             source_id: Uuid::new_v4(),
@@ -214,11 +212,11 @@ pub async fn insert_cascade(app: &TestApp, user: Uuid, s: &Setup) {
     let device = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO cascades (id, user_id, name, quiz_type, lexicon_id, spec_id, clear_threshold, segment_size,
-                               progression, require_alphabetical, options_changed_at, options_seq, options_device_id,
+                               progression, options_changed_at, options_seq, options_device_id,
                                question_count, depth, updated_seq, storage_bytes, question_keys)
-         VALUES ($1, $2, 'test ' || gen_random_uuid(), 'anagram', $3, $4, $5, $6, $7::quiz_progression, $8, now() - interval '1 day', $9, $10,
-                 $11, 1, $9, 0, (SELECT string_agg(format('K%s', lpad(g::text, 6, '0')) || E'\n', '' ORDER BY g)
-                                 FROM generate_series(0, $11 - 1) AS g))",
+         VALUES ($1, $2, 'test ' || gen_random_uuid(), 'anagram', $3, $4, $5, $6, $7::quiz_progression, now() - interval '1 day', $8, $9,
+                 $10, 1, $8, 0, (SELECT string_agg(format('K%s', lpad(g::text, 6, '0')) || E'\n', '' ORDER BY g)
+                                 FROM generate_series(0, $10 - 1) AS g))",
     )
     .bind(s.cascade_id)
     .bind(user)
@@ -227,7 +225,6 @@ pub async fn insert_cascade(app: &TestApp, user: Uuid, s: &Setup) {
     .bind(s.threshold)
     .bind(s.segment_size)
     .bind(s.progression)
-    .bind(s.require_alphabetical)
     .bind(seq)
     .bind(device)
     .bind(s.count)
@@ -236,17 +233,16 @@ pub async fn insert_cascade(app: &TestApp, user: Uuid, s: &Setup) {
     .unwrap();
     let all: Vec<u32> = (0..s.count as u32).collect();
     sqlx::query(
-        "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, segment_size, progression, require_alphabetical,
+        "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, segment_size, progression,
                               options_changed_at, options_seq, options_device_id, shuffle_seed, questions_hash,
                               question_count, created_seq, updated_seq)
-         VALUES ($1, $2, $3, 1, 'source', $4, $5::quiz_progression, $6, now() - interval '1 day', $7, $8, $9, $10, $11, $7, $7)",
+         VALUES ($1, $2, $3, 1, 'source', $4, $5::quiz_progression, now() - interval '1 day', $6, $7, $8, $9, $10, $6, $6)",
     )
     .bind(s.source_id)
     .bind(s.cascade_id)
     .bind(user)
     .bind(s.segment_size)
     .bind(s.progression)
-    .bind(s.require_alphabetical)
     .bind(seq)
     .bind(device)
     .bind(to_i64(s.source_seed))

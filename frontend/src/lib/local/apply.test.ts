@@ -40,7 +40,6 @@ interface Setup {
 	threshold?: number;
 	segment_size?: number;
 	progression?: Progression;
-	require_alphabetical?: boolean;
 	seed: bigint;
 }
 
@@ -49,8 +48,7 @@ async function seed(db: UserDb, s: Setup) {
 	const t = '2026-01-01T00:00:00.000Z';
 	const opts = {
 		segment_size: s.segment_size ?? 0,
-		progression: s.progression ?? ('ladder' as Progression),
-		require_alphabetical: s.require_alphabetical ?? false
+		progression: s.progression ?? ('ladder' as Progression)
 	};
 	const c: CascadeRow = {
 		id: s.cascade_id,
@@ -126,7 +124,7 @@ function quizState(q: QuizRow): QuizState {
 		level: q.level,
 		origin: q.origin,
 		segment_chain: q.segment_chain,
-		opts: { segment_size: q.segment_size, progression: q.progression, require_alphabetical: q.require_alphabetical },
+		opts: { segment_size: q.segment_size, progression: q.progression },
 		attempt: q.attempt,
 		seed: BigInt(q.shuffle_seed),
 		question_count: q.question_count,
@@ -162,7 +160,6 @@ async function snapshot(db: UserDb, cascadeId: string, completions: number) {
 			segment_chain: q.segment_chain,
 			segment_size: q.segment_size,
 			progression: q.progression,
-			require_alphabetical: q.require_alphabetical,
 			attempt: q.attempt,
 			shuffle_seed: q.shuffle_seed,
 			question_count: q.question_count,
@@ -186,8 +183,7 @@ async function snapshot(db: UserDb, cascadeId: string, completions: number) {
 				trashed: c.trashed_at !== null,
 				purged: false,
 				segment_size: c.segment_size,
-				progression: c.progression,
-				require_alphabetical: c.require_alphabetical
+				progression: c.progression
 			}
 		: null;
 	return { cascade, quizzes };
@@ -216,7 +212,6 @@ describe('applyLocally against the rule vectors', () => {
 				threshold: s.clear_threshold as number,
 				segment_size: s.segment_size as number,
 				progression: s.progression as Progression,
-				require_alphabetical: s.require_alphabetical as boolean,
 				seed: BigInt(s.source_seed as string)
 			});
 			let completions = 0;

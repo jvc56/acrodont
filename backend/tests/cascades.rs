@@ -22,7 +22,7 @@ fn body(lexicon: &str, quiz_type: &str, filters: Value) -> Value {
     json!({
         "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
         "at": "2026-01-01T00:00:00Z", "name": format!("A cascade {}", Uuid::new_v4().simple()), "lexicon": lexicon, "quiz_type": quiz_type,
-        "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "require_alphabetical": false, "answer_mode": "flashcard",
+        "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "answer_mode": "flashcard",
         "filters": filters,
     })
 }
@@ -120,19 +120,16 @@ async fn every_combination_of_quiz_options(pool: sqlx::PgPool) {
     let mut c = app.seed_fixture_catalog("root").await;
     for seg in [0, 5, 40] {
         for prog in ["ladder", "drill"] {
-            for alpha in [false, true] {
-                let mut b = body("EN-FIX", "anagram", sevens());
-                b["segment_size"] = json!(seg);
-                b["progression"] = json!(prog);
-                b["require_alphabetical"] = json!(alpha);
-                let r = c.post("/api/cascades", b).await;
-                assert_eq!(r.status, StatusCode::CREATED);
-                let j = r.json();
-                for row in [&j["cascade"], &j["source_quiz"]] {
-                    assert_eq!(row["segment_size"], seg);
-                    assert_eq!(row["progression"], prog);
-                    assert_eq!(row["require_alphabetical"], alpha);
-                }
+            let mut b = body("EN-FIX", "anagram", sevens());
+            b["segment_size"] = json!(seg);
+            b["progression"] = json!(prog);
+            let r = c.post("/api/cascades", b).await;
+            assert_eq!(r.status, StatusCode::CREATED);
+            let j = r.json();
+            for row in [&j["cascade"], &j["source_quiz"]] {
+                assert_eq!(row["segment_size"], seg);
+                assert_eq!(row["progression"], prog);
+                assert!(row.get("require_alphabetical").is_none());
             }
         }
     }

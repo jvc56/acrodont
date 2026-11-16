@@ -88,7 +88,7 @@ class Quiz:
         self.origin_segment_end = origin_segment_end
         self.status = "active"
         self.segment_chain = chain
-        self.segment_size, self.progression, self.require_alphabetical = opts
+        self.segment_size, self.progression = opts
         if chain:
             # A segment chain is Drill for life and never segmented.
             self.segment_size, self.progression = 0, "drill"
@@ -148,7 +148,7 @@ class Quiz:
 class Cascade:
     def __init__(self, threshold, opts, count, source_id, source_seed):
         self.threshold = threshold
-        self.segment_size, self.progression, self.require_alphabetical = opts
+        self.segment_size, self.progression = opts
         self.depth = 1
         self.peak_depth = 1
         self.attempts_since_completion = 0
@@ -160,7 +160,7 @@ class Cascade:
         self.quizzes[source_id] = Quiz(source_id, 1, "source", range(count), source_seed, self.opts())
 
     def opts(self):
-        return (self.segment_size, self.progression, self.require_alphabetical)
+        return (self.segment_size, self.progression)
 
     def active_at(self, level):
         for q in self.quizzes.values():
@@ -192,7 +192,7 @@ class Cascade:
             raise Rejected("invalid")
 
     def new_quiz(self, qid, level, origin, idx, seed, chain, **origin_fields):
-        opts = (0, "drill", self.require_alphabetical) if chain else self.opts()
+        opts = (0, "drill") if chain else self.opts()
         q = Quiz(qid, level, origin, idx, seed, opts, chain=chain, **origin_fields)
         self.quizzes[qid] = q
         return q
@@ -345,11 +345,9 @@ class Cascade:
         self.push_depth()
         q.level = self.depth
         q.reset(int(op["shuffle_seed"]))
-        # Options copied afresh from the cascade; a chain takes only alphabetical order.
-        if q.segment_chain:
-            q.require_alphabetical = self.require_alphabetical
-        else:
-            q.segment_size, q.progression, q.require_alphabetical = self.opts()
+        # Options copied afresh from the cascade; a chain keeps its own.
+        if not q.segment_chain:
+            q.segment_size, q.progression = self.opts()
         return {"new_quiz_question_count": len(q.idx), "new_quiz_questions_hash": str(questions_hash(q.idx))}
 
     def op_trash_cascade(self, op):
@@ -397,8 +395,6 @@ class Cascade:
                 raise Rejected("invalid")
         if "progression" in op and op["progression"] not in ("ladder", "drill"):
             raise Rejected("invalid")
-        if "require_alphabetical" in op and not isinstance(op["require_alphabetical"], bool):
-            raise Rejected("invalid")
 
     def op_set_cascade_options(self, op):
         if self.purged:
@@ -413,7 +409,7 @@ class Cascade:
             if isinstance(t, bool) or not isinstance(t, int) or not (1 <= t <= 100):
                 raise Rejected("invalid")
             self.threshold = t
-        for k in ("segment_size", "progression", "require_alphabetical"):
+        for k in ("segment_size", "progression"):
             if k in op:
                 setattr(self, k, op[k])
         return {}
@@ -425,7 +421,7 @@ class Cascade:
             raise Rejected("invalid")
         if q.origin == "source" and "progression" in op:
             raise Rejected("invalid")
-        for k in ("segment_size", "progression", "require_alphabetical"):
+        for k in ("segment_size", "progression"):
             if k in op:
                 setattr(q, k, op[k])
         return {}
@@ -446,7 +442,6 @@ class Cascade:
                 "segment_chain": q.segment_chain,
                 "segment_size": q.segment_size,
                 "progression": q.progression,
-                "require_alphabetical": q.require_alphabetical,
                 "attempt": q.attempt,
                 "shuffle_seed": str(q.seed),
                 "question_count": len(q.idx),
@@ -470,7 +465,6 @@ class Cascade:
                 "purged": self.purged,
                 "segment_size": self.segment_size,
                 "progression": self.progression,
-                "require_alphabetical": self.require_alphabetical,
             },
             "quizzes": quizzes,
         }

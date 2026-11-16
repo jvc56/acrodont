@@ -44,7 +44,7 @@ pub fn check(name: &str, v: &Value) -> Result<(), Reason> {
     let ok = match name {
         "answer_mode" => matches!(v.as_str(), Some("flashcard" | "typed")),
         "show_definitions" | "show_hooks" | "reveal_correct" | "show_found_count" | "show_probability"
-        | "definition_column" => v.is_boolean(),
+        | "definition_column" | "require_alphabetical" => v.is_boolean(),
         "leave_value_decimals" => v.as_i64().is_some_and(|n| (0..=3).contains(&n)),
         _ => true,
     };
@@ -91,6 +91,9 @@ mod tests {
         assert!(check("answer_mode", &json!("typed")).is_ok());
         assert!(check("answer_mode", &json!("spoken")).is_err());
         assert!(check("show_hooks", &json!(1)).is_err());
+        // Typed answers in alphabetical order: an answer setting like the others, a boolean.
+        assert!(check("require_alphabetical", &json!(true)).is_ok());
+        assert!(check("require_alphabetical", &json!("yes")).is_err());
         assert!(check("leave_value_decimals", &json!(4)).is_err());
         assert!(check("leave_value_decimals", &json!(null)).is_ok());
         assert!(check("question_font", &json!("serif")).is_ok());

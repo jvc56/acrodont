@@ -15,7 +15,6 @@ function quiz(o: Partial<QuizRow> & { id: string; level: number; question_count:
 		segment_chain: false,
 		segment_size: 0,
 		progression: 'ladder',
-		require_alphabetical: false,
 		attempt: 1,
 		correct_count: 0,
 		missed_count: 0,

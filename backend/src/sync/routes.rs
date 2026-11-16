@@ -209,7 +209,7 @@ fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Reques
         if op_type == "set_cascade_options" || op_type == "set_quiz_options" {
             let target = if op_type == "set_cascade_options" { "cascade_id" } else { "quiz_id" };
             for k in m.keys() {
-                let allowed = ["id", "device_seq", "seen_seq", "at", "type", target, "segment_size", "progression", "require_alphabetical"];
+                let allowed = ["id", "device_seq", "seen_seq", "at", "type", target, "segment_size", "progression"];
                 // The clear threshold and the cascade's own settings are never a quiz's.
                 let cascade_only = op_type == "set_cascade_options"
                     && CASCADE_ONLY_FIELDS.contains(&k.as_str());

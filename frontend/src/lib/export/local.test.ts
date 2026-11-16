@@ -25,7 +25,7 @@ async function setup(quizType = 'anagram', count = 3) {
 	db = await openUserDb('u');
 	await initMeta(db, 'u', 'u');
 	const idx = Array.from({ length: count }, (_, i) => i);
-	const opts = { segment_size: 0, progression: 'ladder', require_alphabetical: false };
+	const opts = { segment_size: 0, progression: 'ladder' };
 	await storeCreated(db, {
 		cascade: {
 			id: C, name: 'Sevens', quiz_type: quizType, lexicon: 'EN', letter_distribution: 'english', clear_threshold: 80, ...opts,

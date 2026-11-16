@@ -27,7 +27,7 @@ async function deepCascade(levels: number) {
 	const db: UserDb = await openUserDb('u');
 	await initMeta(db, 'u', 'u');
 	const idx = Array.from({ length: levels }, (_, i) => i);
-	const opts = { segment_size: 0, progression: 'ladder', require_alphabetical: false };
+	const opts = { segment_size: 0, progression: 'ladder' };
 	await storeCreated(db, {
 		cascade: {
 			id: C, name: 'x', quiz_type: 'anagram', lexicon: 'EN', letter_distribution: 'english', clear_threshold: 100, ...opts,

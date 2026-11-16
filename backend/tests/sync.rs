@@ -475,10 +475,9 @@ async fn chain_and_source_options(pool: sqlx::PgPool) {
     ops.push(d.op("set_quiz_options", json!({ "quiz_id": chain, "progression": "ladder" })));
     ops.push(d.op("set_quiz_options", json!({ "quiz_id": chain, "segment_size": 5 })));
     ops.push(d.op("set_quiz_options", json!({ "quiz_id": s.source_id, "progression": "drill" })));
-    ops.push(d.op("set_quiz_options", json!({ "quiz_id": chain, "require_alphabetical": true })));
     let r = d.sync(ops).await;
     let reasons: Vec<Value> = r.json()["results"].as_array().unwrap()[6..].iter().map(|x| x["reason"].clone()).collect();
-    assert_eq!(reasons, [json!("invalid"), json!("invalid"), json!("invalid"), Value::Null]);
+    assert_eq!(reasons, [json!("invalid"), json!("invalid"), json!("invalid")]);
 }
 
 /// finish_segment refusals, and the race for one boundary.
@@ -827,7 +826,7 @@ async fn an_options_change_right_after_creation_from_a_slow_clock(pool: sqlx::Pg
         .post("/api/cascades", json!({
             "id": id, "source_quiz_id": Uuid::new_v4(), "device_id": d.id, "at": at, "name": format!("A cascade {}", Uuid::new_v4().simple()),
             "lexicon": "EN-FIX", "quiz_type": "anagram", "clear_threshold": 80, "segment_size": 0,
-            "progression": "ladder", "require_alphabetical": false, "answer_mode": "flashcard",
+            "progression": "ladder", "answer_mode": "flashcard",
             "filters": { "op": "and", "children": [{ "type": "length", "negated": false, "min": 7, "max": 7 }] },
         }))
         .await;
@@ -867,6 +866,14 @@ async fn the_clear_threshold_changes_for_the_pass_in_progress(pool: sqlx::PgPool
     let o = d.op("set_quiz_options", json!({ "quiz_id": l2, "clear_threshold": 50 }));
     let body = json!({ "device_id": d.id, "app_version": 1, "cursor": d.cursor, "question_rows_for": [], "ops": [o] });
     assert_eq!(d.raw_sync(body).await.status, StatusCode::BAD_REQUEST);
+    // Alphabetical order is an answer setting, not an option: neither op carries it.
+    for o in [
+        d.op("set_quiz_options", json!({ "quiz_id": l2, "require_alphabetical": true })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "require_alphabetical": true })),
+    ] {
+        let body = json!({ "device_id": d.id, "app_version": 1, "cursor": d.cursor, "question_rows_for": [], "ops": [o] });
+        assert_eq!(d.raw_sync(body).await.status, StatusCode::BAD_REQUEST);
+    }
     // Level 2 half right, then the threshold lowered to 50 mid-pass: the finish clears it.
     let mut ops = grades(&app, &mut d, l2, 0, "CM").await;
     ops.push(d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "clear_threshold": 50 })));
