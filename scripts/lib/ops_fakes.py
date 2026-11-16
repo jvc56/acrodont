@@ -35,6 +35,7 @@ FAKE_CURL_FAIL, FAKE_SNS_PENDING,
 FAKE_DRILL_ALARM ("missing": no acrodont-no-drill-7d; "silent": it has no action), FAKE_RDS_SUB_STATUS (active),
 FAKE_RULE_BROKEN (a rule whose pattern matches every ECS event),
 FAKE_SETTLE_POLLS (describe-services calls that still show two deployments),
+FAKE_DRAINING_POLLS (list-tasks calls that still show a stopping task draining),
 FAKE_UPDATE_SERVICE_FAIL, FAKE_RESTART_ROLLBACK (a restart's deployment is
 rolled back: the service settles on another),
 FAKE_TF_VERSION (1.16.5), FAKE_BUILD_FAIL.
@@ -227,6 +228,19 @@ def ecs(op, pos, opt, q):
                 {"id": dep, "status": "PRIMARY", "rolloutState": "IN_PROGRESS", "taskDefinition": TD_ARN}]}}))
         else:
             out(opt["--service"])
+    elif op == "list-tasks":
+        # The service's tasks, as --output text prints their ARNs: one while
+        # the desired count is above 0; and, for FAKE_DRAINING_POLLS calls,
+        # a task told to stop that is still draining (lastStatus RUNNING).
+        desired = int(read(path("ecs", "desired"), "1").strip())
+        arns = []
+        if opt.get("--desired-status") == "STOPPED":
+            if count("draining_polls") <= int(os.environ.get("FAKE_DRAINING_POLLS", "0")):
+                write(path("tasks", "900.json"), json.dumps({"status": "RUNNING", "exit": None}))
+                arns.append("arn:aws:ecs:us-east-1:123456789012:task/acrodont/task900")
+        elif desired > 0:
+            arns.append("arn:aws:ecs:us-east-1:123456789012:task/acrodont/task901")
+        out("\t".join(arns))
     elif op == "run-task":
         run_task(opt)
     elif op == "describe-tasks":
