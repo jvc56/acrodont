@@ -235,6 +235,32 @@ migration. Add a numbered file instead.
 - The backend runs its migrator with `ignore_missing`, so the previous image
   starts on the newer schema. That is what makes a rollback possible.
 
+**Before launch only: a release that edited `0001_initial.sql` in place**
+(each edit is logged in `docs/migration-edits.md`) cannot go on the database
+the earlier file made, because sqlx refuses a migration whose checksum changed.
+Deploy it with an empty database:
+
+```bash
+scripts/deploy.sh --reset-database
+```
+
+It deletes every account and everything the app has stored, for good. Never
+use it once real users have accounts. After the usual checks it names the
+edited migrations and asks for `reset` to be typed. Then it builds the images
+while the old release still serves, stops the service (desired count 0, so
+no task of the old release migrates the empty database with its own file),
+and drops and makes again the `public` schema as the app role, in one
+transaction. The roles and their grants are untouched. The plan gate and the
+apply follow, and the apply starts the service again at `prod.tfvars`'
+`desired_count`; the new backend migrates the empty database as it starts.
+The site is down from the stop until the new release is healthy. If the
+apply does not go through, the service stays stopped on the empty database:
+run the same command again. Afterwards, every browser that used the site
+holds the old accounts' data: log out on the Account page with "Remove this
+account's data from this device" on, or clear the site's data in the browser,
+and register again. `scripts/rollback.sh` refuses
+every release from before the reset, since their `0001_initial.sql` differs.
+
 **Sync compatibility.** A sync API change must stay compatible with the
 previous app version for at least `SYNC_RETENTION_DAYS` (30). Devices can be
 offline that long. To retire old builds, raise `min_app_version` with
