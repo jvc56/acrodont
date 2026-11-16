@@ -65,3 +65,20 @@ export async function storeCreated(
 		onProgress?.(end / n);
 	}
 }
+
+/**
+ * A cascade the server has just renamed (`POST /api/cascades/:id/name`),
+ * renamed here too, at once, wherever this device holds it: the base, an
+ * overlay of changes not yet synced, and a pull's staging. Only the name is
+ * written, so a setting changed here and not yet sent is kept. A name is the
+ * server's alone (no operation carries one), and the next pull brings the
+ * same row anyway.
+ */
+export async function storeRenamed(db: UserDb, id: string, name: string) {
+	const tx = db.transaction(['cascades', 'overlay_cascades', 'staging_cascades'], 'readwrite');
+	for (const store of ['cascades', 'overlay_cascades', 'staging_cascades'] as const) {
+		const row = await tx.objectStore(store).get(id);
+		if (row && !row.deleted) await tx.objectStore(store).put({ ...row, name });
+	}
+	await tx.done;
+}

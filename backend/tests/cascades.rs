@@ -659,3 +659,74 @@ async fn an_account_s_cascades_each_have_their_own_name(pool: sqlx::PgPool) {
         .await;
     assert!(dup.is_err_and(|e| matches!(&e, sqlx::Error::Database(d) if d.constraint() == Some("cascades_user_id_name_key"))));
 }
+
+/// "`POST /api/cascades/:id/name` renames one of the account's cascades: the
+/// same name again changes nothing, a name another cascade has is a field
+/// error, another account's cascade is not found, and the account's other
+/// devices pull the new name."
+#[sqlx::test]
+async fn rename_checks_the_name_and_reaches_the_other_devices(pool: sqlx::PgPool) {
+    let app = TestApp::new(pool).await;
+    let mut c = app.seed_fixture_catalog("root").await;
+    let mut a = body("EN-FIX", "anagram", sevens());
+    a["name"] = json!("Sevens");
+    assert_eq!(c.post("/api/cascades", a.clone()).await.status, StatusCode::CREATED);
+    let mut other = body("EN-FIX", "anagram", sevens());
+    other["name"] = json!("Taken");
+    assert_eq!(c.post("/api/cascades", other).await.status, StatusCode::CREATED);
+    let id = a["id"].as_str().unwrap().to_owned();
+    let path = format!("/api/cascades/{id}/name");
+    let device = Uuid::new_v4();
+
+    // Another device of the same account, up to date before the rename.
+    let mut c2 = Client::new(&app, "203.0.113.2");
+    c2.cookies = c.cookies.clone();
+    c2.user_id = c.user_id;
+    let mut phone = common::sync::Device::new(c2);
+    phone.sync_all(vec![]).await;
+
+    let r = c.post(&path, json!({ "name": "Sevens to study", "device_id": device })).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["cascade"]["name"], "Sevens to study");
+    assert_eq!(r.json()["cascade"]["id"], json!(id));
+    assert!(r.json()["sync_seq"].is_string());
+
+    // The other device pulls the new name.
+    let (_, pages) = phone.sync_all(vec![]).await;
+    let pulled = common::sync::rows(&pages, "cascades");
+    let row = pulled.iter().find(|r| r["id"] == json!(id)).expect("the renamed cascade is pulled");
+    assert_eq!(row["name"], "Sevens to study");
+
+    // The same name again: the row, unchanged, and nothing for a device to pull.
+    let r = c.post(&path, json!({ "name": "Sevens to study", "device_id": device })).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.json().get("sync_seq").is_none());
+    let (_, pages) = phone.sync_all(vec![]).await;
+    assert!(common::sync::rows(&pages, "cascades").is_empty());
+
+    // A name the account's other cascade has.
+    let r = c.post(&path, json!({ "name": "Taken", "device_id": device })).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let e = &r.json()["errors"][0];
+    assert_eq!(e["field"], "name");
+    assert!(e["message"].as_str().unwrap().starts_with("You already have a cascade named “Taken”."), "{e}");
+
+    // No name, and a name too long.
+    for bad in [String::new(), "x".repeat(201)] {
+        let r = c.post(&path, json!({ "name": bad, "device_id": device })).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST);
+        assert_eq!(r.json()["errors"][0]["field"], "name");
+    }
+    let name: String = sqlx::query_scalar("SELECT name FROM cascades WHERE id = $1::uuid")
+        .bind(&id)
+        .fetch_one(app.db())
+        .await
+        .unwrap();
+    assert_eq!(name, "Sevens to study", "a refused rename changes nothing");
+
+    // Another account's cascade, and one that does not exist.
+    let mut bob = app.signed_in("bob").await;
+    assert_eq!(bob.post(&path, json!({ "name": "Mine", "device_id": device })).await.status, StatusCode::NOT_FOUND);
+    let missing = format!("/api/cascades/{}/name", Uuid::new_v4());
+    assert_eq!(c.post(&missing, json!({ "name": "Mine", "device_id": device })).await.status, StatusCode::NOT_FOUND);
+}

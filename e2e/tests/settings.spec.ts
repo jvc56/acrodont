@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { AEINRST, apiCascade, newUser, openPlayerSettings } from './support';
+import { AEINRST, apiCascade, createCascade, login, newUser, openPlayerSettings } from './support';
 
 // PLAN.md § Settings: two kinds only, a cascade's and this device's, both in
 // the cascade's Settings in the player and nowhere else. A change to a
@@ -102,4 +102,51 @@ test('a cascade’s settings: for it alone, for all cascades, or copied from ano
 	await cascadeSettings(page).getByLabel('Cascade to copy from').selectOption({ label: 'Alpha' });
 	await cascadeSettings(page).getByRole('button', { name: 'Copy settings' }).click();
 	await expect(cascadeSettings(page).getByText('✓ “Alpha” already has the same settings.')).toBeVisible();
+});
+
+// PLAN.md § Settings → Name: a cascade is renamed in its Settings, online
+// only. A name another cascade has is refused under the field, as is a
+// rename with no connection; a rename shows at once on this device and
+// reaches the account's other device with no reload.
+test('renaming a cascade, refused for a taken name and offline, reaches the other device', async ({ browser, baseURL }) => {
+	test.setTimeout(180_000);
+	const a = await browser.newContext({ baseURL });
+	const b = await browser.newContext({ baseURL });
+	const pa = await a.newPage();
+	const pb = await b.newPage();
+	const { username } = await newUser(pa, 'ren');
+	await apiCascade(pa, { name: 'Already mine', filters: AEINRST });
+	await createCascade(pa, { name: 'Rename me' });
+	await expect(pa.getByText('1 / 18')).toBeVisible({ timeout: 30_000 });
+	await login(pb, username);
+	await expect(pb.getByText('Rename me', { exact: true })).toBeVisible({ timeout: 30_000 });
+
+	await openPlayerSettings(pa);
+	const here = cascadeSettings(pa);
+	const box = here.getByLabel('Name', { exact: true });
+	await expect(box).toHaveValue('Rename me');
+	// Another cascade's name, the server's refusal under the field.
+	await box.fill('Already mine');
+	await box.press('Enter');
+	await expect(here.getByText(/^You already have a cascade named “Already mine”\./)).toBeVisible({ timeout: 15_000 });
+	// No connection: nothing is sent.
+	await a.setOffline(true);
+	await box.fill('Offline name');
+	await box.press('Enter');
+	await expect(here.getByText('Renaming a cascade needs a connection.')).toBeVisible();
+	await a.setOffline(false);
+	// Renamed.
+	await box.fill('  Renamed sevens  ');
+	await box.press('Enter');
+	await expect(here.getByText('✓ Renamed')).toBeVisible({ timeout: 15_000 });
+	await expect(box).toHaveValue('Renamed sevens');
+	await closeSettings(pa);
+	await pa.goto('/cascades');
+	await expect(pa.getByText('Renamed sevens', { exact: true })).toBeVisible({ timeout: 15_000 });
+	await expect(pa.getByText('Rename me', { exact: true })).toHaveCount(0);
+	// The other device, left open on its Cascades page.
+	await expect(pb.getByText('Renamed sevens', { exact: true })).toBeVisible({ timeout: 30_000 });
+	await expect(pb.getByText('Rename me', { exact: true })).toHaveCount(0);
+	await a.close();
+	await b.close();
 });
