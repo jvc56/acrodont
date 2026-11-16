@@ -3,8 +3,7 @@
 // read the shared stores, show the leader's status, and ask it to sync after
 // their own writes. A 401 shows "Log in to sync" and studying continues.
 import { session } from '$lib/auth/session.svelte';
-import { controls } from '$lib/player/controls.svelte';
-import { display } from '$lib/player/display.svelte';
+import { settings } from '$lib/settings/store.svelte';
 import { hasPending } from '$lib/local/apply';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';
@@ -119,9 +118,11 @@ async function applyHeld(db: UserDb, cascadeId: string) {
 /**
  * A download pass now rather than after the next sync: in the leader tab its
  * own manager's (once more if one already running began before this cascade
- * was wanted), elsewhere the leader's, after a sync.
+ * was wanted), elsewhere the leader's, after a sync. A setting changed in one
+ * of this device's own places asks for one too: the cards may now want
+ * definitions or hooks they were fetched without.
  */
-function downloadInBackground() {
+export function downloadInBackground() {
 	const dm = downloads;
 	if (!dm) {
 		post({ kind: 'kick' });
@@ -153,9 +154,9 @@ let noticesOf: string | null = null;
 // is in the database, which the new build now holds and sends from.
 onUpdatedElsewhere(() => stopSync());
 
+/** The account's settings changed (the "Everywhere" place): an open player reads its places again. */
 function reloadDeviceSettings() {
-	void display.reload();
-	void controls.reload();
+	void settings.reload();
 }
 
 type Message =
@@ -249,7 +250,7 @@ export function startSync(userId: string): () => void {
 							.catch(() => undefined)
 							.then(() => passDone(dm));
 				},
-				// A shared display setting or the controls changed: an open player
+				// The account's settings (the "Everywhere" place) changed: an open player
 				// shows them, in this tab and in every other.
 				onDeviceSettings: () => {
 					reloadDeviceSettings();

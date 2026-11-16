@@ -257,7 +257,8 @@ async fn old_and_future_timestamps(pool: sqlx::PgPool) {
     assert!(finished <= limit && limit - finished < Duration::minutes(1), "{finished}");
 }
 
-/// "restoring a segment-chain quiz in a Ladder cascade keeps it on Drill with no segments".
+/// "restoring a segment-chain quiz in a Ladder cascade keeps it a chain": Drill
+/// with no segments, whatever the cascade's options, which no quiz copies.
 #[sqlx::test]
 async fn a_restored_chain_quiz_stays_a_chain(pool: sqlx::PgPool) {
     let app = app_with(pool, &[]).await;
@@ -274,13 +275,12 @@ async fn a_restored_chain_quiz_stays_a_chain(pool: sqlx::PgPool) {
     assert_eq!(r["outcome"], "cleared");
     let r = d.op("restore_quiz", json!({ "quiz_id": chain, "shuffle_seed": "4" }));
     assert_eq!(one(&mut d, r).await, "applied");
-    let (prog, seg, is_chain): (String, i32, bool) =
-        sqlx::query_as("SELECT progression::text, segment_size, segment_chain FROM quizzes WHERE id = $1")
-            .bind(chain)
-            .fetch_one(app.db())
-            .await
-            .unwrap();
-    assert_eq!((prog.as_str(), seg, is_chain), ("drill", 0, true));
+    let is_chain: bool = sqlx::query_scalar("SELECT segment_chain FROM quizzes WHERE id = $1")
+        .bind(chain)
+        .fetch_one(app.db())
+        .await
+        .unwrap();
+    assert!(is_chain);
 }
 
 /// Two accounts with cleared quizzes past retention, in the order the purge

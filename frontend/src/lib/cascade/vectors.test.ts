@@ -28,7 +28,7 @@ function snapshot(c: SimCascade) {
 			let cor = 0,
 				mis = 0;
 			for (const g of q.grades.values()) (g === 'correct' ? cor++ : mis++);
-			const ri = s.active ? runIndicator(s) : null;
+			const ri = s.active ? runIndicator(c.state.opts, s) : null;
 			return {
 				id: q.id,
 				level: s.level,
@@ -38,9 +38,6 @@ function snapshot(c: SimCascade) {
 				origin_attempt: q.origin_attempt,
 				origin_segment_end: q.origin_segment_end,
 				segment_chain: s.segment_chain,
-				segment_size: s.opts.segment_size,
-				progression: s.opts.progression,
-				require_alphabetical: s.opts.require_alphabetical,
 				attempt: s.attempt,
 				shuffle_seed: s.seed.toString(),
 				question_count: s.question_count,
@@ -50,7 +47,7 @@ function snapshot(c: SimCascade) {
 				missed: mis,
 				cursor: s.cursor,
 				run_start: s.run_start,
-				next_boundary: s.active ? nextBoundary(s) : null,
+				next_boundary: s.active ? nextBoundary(c.state.opts, s) : null,
 				run_indicator: ri ? runIndicatorText(ri) : null
 			};
 		});
@@ -64,8 +61,7 @@ function snapshot(c: SimCascade) {
 			trashed: c.state.trashed,
 			purged: c.purged,
 			segment_size: c.state.opts.segment_size,
-			progression: c.state.opts.progression,
-			require_alphabetical: c.state.opts.require_alphabetical
+			progression: c.state.opts.progression
 		},
 		quizzes
 	};
@@ -79,8 +75,7 @@ describe('the rule vectors', () => {
 				s.clear_threshold as number,
 				{
 					segment_size: s.segment_size as number,
-					progression: s.progression as Progression,
-					require_alphabetical: s.require_alphabetical as boolean
+					progression: s.progression as Progression
 				},
 				s.question_count as number,
 				s.source_quiz_id as string,

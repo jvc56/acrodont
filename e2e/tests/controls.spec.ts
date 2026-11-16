@@ -30,8 +30,12 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await page.waitForTimeout(150);
 
 	// Left click shows and advances, right click toggles, middle click goes back.
-	await area(page).click({ position: { x: 200, y: 300 } });
+	// A button acts as it goes down: the answer is shown before it comes back up.
+	const box = (await area(page).boundingBox())!;
+	await page.mouse.move(box.x + 200, box.y + 300);
+	await page.mouse.down();
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
+	await page.mouse.up();
 	await page.waitForTimeout(150);
 	await area(page).click({ button: 'right', position: { x: 200, y: 300 } });
 	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
@@ -62,7 +66,7 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await at(page, 2);
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 
-	// Rebind Toggle grade to the wheel and to Shift+T in Settings' Device Settings
+	// Rebind Toggle grade to the wheel and to Shift+T in Settings' Controls
 	// section, in place of right click and M; X stays bound for the typed-mode check below.
 	await openPlayerSettings(page);
 	const toggle = section(page, 'Toggle grade');
@@ -119,8 +123,8 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await page.keyboard.press('Shift+KeyT');
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 
-	// Controls belong to this device: a second browser keeps the defaults, and
-	// they survive a reload here.
+	// A change saves for this cascade on this device: a second browser keeps the
+	// defaults, and they survive a reload here.
 	await page.goto('/cascades');
 	await expect(page.getByText('Synced')).toBeVisible({ timeout: 30_000 });
 	const other = await browser.newContext({ baseURL });

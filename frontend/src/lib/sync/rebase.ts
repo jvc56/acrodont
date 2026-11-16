@@ -38,7 +38,7 @@ const REBASE_STORES: StoreName[] = [...BASE, ...STAGING, ...OVERLAY, 'outbox', '
  * cascade row, so the fast path can clear by key (`clearTouched`); any other
  * acknowledged type falls back to reading the cascade's whole overlay.
  */
-const KEYED = new Set(['grade', 'move_cursor', 'set_quiz_options']);
+const KEYED = new Set(['grade', 'move_cursor']);
 
 // ---------------------------------------------------------------------------
 // Deletions

@@ -1,48 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { clampSetting, cleanFont, defaultDisplay, fontStack, normalizeDisplay, textStyle } from './display.svelte';
+import { clampSetting, cleanFont, fontStack, textStyle } from './display';
 
 describe('display settings', () => {
-	it('answers match the question by default, near the top, with a thick border and no repeat guard', () => {
-		const d = defaultDisplay();
-		expect(d.answer_font).toBe(d.question_font);
-		expect(d.answer_size_px).toBe(d.question_size_px);
-		expect([d.question_spacing, d.answer_spacing]).toEqual([0, 0]);
-		expect([d.question_top_px, d.border_px, d.repeat_guard_ms]).toEqual([8, 10, 0]);
-		expect(d.status_bar_hidden).toBe(false);
-		// The sync status shows; a definition's column is as wide as the room there is; hooks are 27 px.
-		expect([d.sync_status_hidden, d.definition_width_px, d.hook_size_px]).toEqual([false, 0, 27]);
-		// A value saved before these existed takes the defaults; a chosen one is kept.
-		const kept = normalizeDisplay({ definition_width_px: 320, hook_size_px: 18, sync_status_hidden: true });
-		expect([kept.sync_status_hidden, kept.definition_width_px, kept.hook_size_px]).toEqual([true, 320, 18]);
-		// Columns on a phone; rows, when chosen, 64 px each.
-		expect([d.mobile_buttons, d.mobile_row_px]).toEqual(['columns', 64]);
-		// A missed answer shows its red border; a correct one shows none.
-		expect([d.border_correct, d.border_missed]).toEqual([false, true]);
-	});
-
-	it('takes any number within bounds, clamps the rest, and defaults what is not a number', () => {
-		expect(normalizeDisplay(undefined)).toEqual(defaultDisplay());
-		const d = normalizeDisplay({ question_size_px: 41, answer_spacing: 0.13, question_top_px: 0, border_px: 22, repeat_guard_ms: 35 });
-		expect([d.question_size_px, d.answer_spacing, d.question_top_px, d.border_px, d.repeat_guard_ms]).toEqual([41, 0.13, 0, 22, 35]);
+	it('clamps a number to its bounds and step, and defaults what is not a number', () => {
 		expect(clampSetting('size_px', 1000)).toBe(200);
 		expect(clampSetting('border_px', -3)).toBe(0);
 		expect(clampSetting('repeat_guard_ms', 'abc')).toBe(0);
 		expect(clampSetting('spacing_em', '0.1')).toBe(0.1);
-		expect([normalizeDisplay({ mobile_row_px: 90 }).mobile_row_px, clampSetting('mobile_row_px', 5)]).toEqual([90, 32]);
-	});
-
-	it("follows the repeat guard's new default, and keeps a value the user chose", () => {
-		// Saved before version 2 with the old default, 50: now 0.
-		expect(normalizeDisplay({ repeat_guard_ms: 50 }).repeat_guard_ms).toBe(0);
-		// A value other than the old default was chosen: kept.
-		expect(normalizeDisplay({ repeat_guard_ms: 80 }).repeat_guard_ms).toBe(80);
-		// Saved under version 2: kept, 50 included.
-		expect(normalizeDisplay({ repeat_guard_ms: 50, version: 2 }).repeat_guard_ms).toBe(50);
-	});
-
-	it("reads the earlier builds' presets: font keys, rem sizes, the rem position", () => {
-		const d = normalizeDisplay({ question_font: 'mono', answer_font: 'serif', question_size: 3, question_top: 2 } as never);
-		expect([d.question_font, d.answer_font, d.question_size_px, d.question_top_px]).toEqual(['monospace', 'serif', 48, 40]);
+		expect(clampSetting('mobile_row_px', 5)).toBe(32);
 	});
 
 	it('keeps the typeface to the ones offered', () => {

@@ -69,7 +69,7 @@ pub struct IncomingOp {
     pub body: Value,
 }
 
-pub const OP_TYPES: [&str; 11] = [
+pub const OP_TYPES: [&str; 10] = [
     "grade",
     "move_cursor",
     "finish",
@@ -80,7 +80,6 @@ pub const OP_TYPES: [&str; 11] = [
     "purge_quiz",
     "purge_cascade",
     "set_cascade_options",
-    "set_quiz_options",
 ];
 
 /// Whether a database error is transient: the whole request is answered

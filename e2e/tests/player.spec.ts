@@ -96,27 +96,30 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	await expect(page.getByRole('navigation', { name: 'Player menu' })).toHaveCount(0);
 	await page.getByRole('button', { name: 'Show menu' }).click();
 
-	// Settings is the one dialog: the menu has no Levels, and the ladder is in its Cascade Settings,
-	// apart from the Device Settings, each saying where it applies. There are no other kinds, and no index of them.
+	// Settings is the one dialog: the menu has no Levels, and the ladder is in This Cascade, with
+	// the cascade's rules, apart from the answer, display and control settings, each section saying
+	// where it applies. There is no index of them.
 	const menu = page.getByRole('navigation', { name: 'Player menu' });
 	await expect(menu.getByRole('link')).toHaveText(['Acrodont', 'Account']);
 	await expect(menu.getByRole('button', { name: 'Levels' })).toHaveCount(0);
 	await menu.getByRole('button', { name: 'Settings' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Settings' });
 	await expect(dialog.getByRole('navigation')).toHaveCount(0);
-	for (const name of ['Cascade Settings', 'Device Settings']) {
+	for (const name of ['This Cascade', 'Answers', 'Display', 'Controls']) {
 		await expect(dialog.getByRole('region', { name })).toBeVisible();
 	}
-	await expect(dialog.getByRole('region')).toHaveCount(2);
-	// This device's controls are here too, and their reset says it is theirs alone.
-	const device = dialog.getByRole('region', { name: 'Device Settings' });
-	await expect(device.locator('#controls')).toBeVisible();
-	await expect(device.getByRole('button', { name: 'Reset controls to defaults' })).toBeVisible();
-	const levels = dialog.getByRole('region', { name: 'Cascade Settings' });
+	await expect(dialog.getByRole('region')).toHaveCount(4);
+	// What the switches under each setting do is said once at the top.
+	await expect(dialog.locator('[data-places-intro]')).toHaveText(/^Under each setting, two switches say where its value applies/);
+	// The controls are here too, with their reset.
+	const controls = dialog.getByRole('region', { name: 'Controls' });
+	await expect(controls.locator('#controls')).toBeVisible();
+	await expect(controls.getByRole('button', { name: 'Reset controls to defaults' })).toBeVisible();
+	const levels = dialog.getByRole('region', { name: 'This Cascade' });
 	// Each section says where it applies, behind the ⓘ beside its heading.
-	await expect(levels.getByText(/Your other cascades keep their settings/)).toHaveCount(0);
-	await expect(levels.locator('[data-info*="Your other cascades keep their settings. After you change a setting you can optionally apply the change for every cascade too."]')).toBeVisible();
-	await expect(device.locator('[data-info*="Your other devices keep their settings. After you change a setting you can optionally apply the change for all your devices too."]')).toBeVisible();
+	await expect(levels.getByText(/They decide how a pass is judged/)).toHaveCount(0);
+	await expect(levels.locator('[data-info*="They decide how a pass is judged, so they are the same on every device."]')).toBeVisible();
+	await expect(dialog.getByRole('region', { name: 'Display' }).locator('[data-info*="the first of those that has a value is used"]')).toBeVisible();
 	await expect(levels.getByRole('table', { name: 'Ladder' })).toBeVisible();
 	await expect(levels.getByRole('columnheader')).toHaveText(['Level', 'Questions', 'Pass', 'Last pass', 'Status', 'Actions']);
 	// The clear threshold changes there, for the pass in progress too; out of range is put back.

@@ -23,7 +23,6 @@ function invariants(c: SimCascade) {
 		const s = q.state;
 		expect(q.questions.every((i) => i < source.state.question_count)).toBe(true);
 		expect(s.run_start <= s.cursor && s.cursor < s.question_count).toBe(true);
-		if (s.segment_chain) expect([s.opts.segment_size, s.opts.progression]).toEqual([0, 'drill']);
 		if (s.origin === 'segment') {
 			const key = `${q.origin_quiz_id}/${q.origin_attempt}/${q.origin_segment_end}`;
 			expect(runs.has(key)).toBe(false);
@@ -40,8 +39,7 @@ describe('the shared random sequences', () => {
 				s.clear_threshold as number,
 				{
 					segment_size: s.segment_size as number,
-					progression: s.progression as Progression,
-					require_alphabetical: s.require_alphabetical as boolean
+					progression: s.progression as Progression
 				},
 				s.question_count as number,
 				s.source_quiz_id as string,

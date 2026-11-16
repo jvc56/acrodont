@@ -13,7 +13,7 @@ import rules from '../../../../contract-fixtures/cascade/rules.json';
 import { questionsHash, shuffle } from '$lib/cascade/order';
 import { nextBoundary, Rejected, runIndicator, runIndicatorText, type Progression, type QuizState } from '$lib/cascade/rules';
 import { userDbName } from './accounts';
-import { applyLocally, applyOrRefuse, APPLY_STORES, CHANGE_REFUSED, type NewOp } from './apply';
+import { applyLocally, applyOrRefuse, APPLY_STORES, CHANGE_REFUSED, optsOf, type NewOp } from './apply';
 import { openUserDb, upgradeFrom, USER_DB_VERSION, type UserDb } from './db';
 import { getMeta, initMeta } from './meta';
 import { CASCADE_SETTING_DEFAULTS, type CascadeRow, type QuestionRow, type QuizRow } from './rows';
@@ -40,7 +40,6 @@ interface Setup {
 	threshold?: number;
 	segment_size?: number;
 	progression?: Progression;
-	require_alphabetical?: boolean;
 	seed: bigint;
 }
 
@@ -49,21 +48,13 @@ async function seed(db: UserDb, s: Setup) {
 	const t = '2026-01-01T00:00:00.000Z';
 	const opts = {
 		segment_size: s.segment_size ?? 0,
-		progression: s.progression ?? ('ladder' as Progression),
-		require_alphabetical: s.require_alphabetical ?? false
+		progression: s.progression ?? ('ladder' as Progression)
 	};
 	const c: CascadeRow = {
 		id: s.cascade_id,
 		name: 'test',
 		quiz_type: 'anagram',
-		answer_mode: 'flashcard',
-		show_definitions: true,
-		show_hooks: true,
-		reveal_correct: true,
-		show_found_count: false,
-		show_probability: false,
-		definition_column: true,
-		leave_value_decimals: 1,
+		settings: { leave_value_decimals: 1 },
 		storage_bytes: 0,
 		lexicon: 'EN-FIX',
 		letter_distribution: 'english',
@@ -94,10 +85,6 @@ async function seed(db: UserDb, s: Setup) {
 		origin_segment_end: null,
 		status: 'active',
 		segment_chain: false,
-		...opts,
-		options_changed_at: t,
-		options_seq: 1,
-		options_device_id: 'd',
 		attempt: 1,
 		shuffle_seed: s.seed.toString(),
 		questions_hash: questionsHash(idx).toString(),
@@ -133,7 +120,6 @@ function quizState(q: QuizRow): QuizState {
 		level: q.level,
 		origin: q.origin,
 		segment_chain: q.segment_chain,
-		opts: { segment_size: q.segment_size, progression: q.progression, require_alphabetical: q.require_alphabetical },
 		attempt: q.attempt,
 		seed: BigInt(q.shuffle_seed),
 		question_count: q.question_count,
@@ -151,7 +137,8 @@ async function snapshot(db: UserDb, cascadeId: string, completions: number) {
 	for (const q of (await view.quizzesOf(tx, cascadeId)).sort((a, b) => (a.id < b.id ? -1 : 1))) {
 		const rows = await view.questionsOf(tx, q.id);
 		const s = quizState(q);
-		const ri = s.active ? runIndicator(s) : null;
+		const o = optsOf(c!);
+		const ri = s.active ? runIndicator(o, s) : null;
 		const questions = rows.map((r) => r.question_idx);
 		// Invariants: counters match grades; positions come from the seed.
 		expect(q.correct_count).toBe(rows.filter((r) => r.grade === 'correct').length);
@@ -167,9 +154,6 @@ async function snapshot(db: UserDb, cascadeId: string, completions: number) {
 			origin_attempt: q.origin_attempt,
 			origin_segment_end: q.origin_segment_end,
 			segment_chain: q.segment_chain,
-			segment_size: q.segment_size,
-			progression: q.progression,
-			require_alphabetical: q.require_alphabetical,
 			attempt: q.attempt,
 			shuffle_seed: q.shuffle_seed,
 			question_count: q.question_count,
@@ -179,7 +163,7 @@ async function snapshot(db: UserDb, cascadeId: string, completions: number) {
 			missed: q.missed_count,
 			cursor: q.cursor,
 			run_start: q.run_start,
-			next_boundary: s.active ? nextBoundary(s) : null,
+			next_boundary: s.active ? nextBoundary(o, s) : null,
 			run_indicator: ri ? runIndicatorText(ri) : null
 		});
 	}
@@ -193,8 +177,7 @@ async function snapshot(db: UserDb, cascadeId: string, completions: number) {
 				trashed: c.trashed_at !== null,
 				purged: false,
 				segment_size: c.segment_size,
-				progression: c.progression,
-				require_alphabetical: c.require_alphabetical
+				progression: c.progression
 			}
 		: null;
 	return { cascade, quizzes };
@@ -223,7 +206,6 @@ describe('applyLocally against the rule vectors', () => {
 				threshold: s.clear_threshold as number,
 				segment_size: s.segment_size as number,
 				progression: s.progression as Progression,
-				require_alphabetical: s.require_alphabetical as boolean,
 				seed: BigInt(s.source_seed as string)
 			});
 			let completions = 0;
@@ -461,19 +443,27 @@ describe('the per-user database', () => {
 });
 
 describe("a cascade's settings", () => {
-	it('set_cascade_options carries what an answer shows and how a reveal grades, each checked', async () => {
+	it('set_cascade_options sets and clears the cascade\'s own settings, each checked as the server checks it', async () => {
 		const db = await freshDb();
 		await seed(db, { cascade_id: 'c1', source_id: 'q1', count: 5, seed: 1n });
-		await applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', show_definitions: false, show_hooks: false });
-		await applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', reveal_correct: false, leave_value_decimals: 3 });
-		const tx = db.transaction(APPLY_STORES) as unknown as RwTx;
-		const c = (await view.cascade(tx, 'c1'))!;
-		expect([c.show_definitions, c.show_hooks, c.reveal_correct, c.leave_value_decimals]).toEqual([false, false, false, 3]);
-		for (const bad of [{ leave_value_decimals: 4 }, { leave_value_decimals: 1.5 }, { show_hooks: 'yes' }, { reveal_correct: null }]) {
-			await expect(applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', ...bad } as NewOp)).rejects.toMatchObject({
+		await applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', settings: { show_definitions: false, show_hooks: false } });
+		await applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', settings: { reveal_correct: false, leave_value_decimals: 3, show_hooks: null } });
+		const read = async () => (await view.cascade(db.transaction(APPLY_STORES) as unknown as RwTx, 'c1'))!.settings;
+		expect(await read()).toEqual({ show_definitions: false, reveal_correct: false, leave_value_decimals: 3 });
+		const bad = [
+			{ leave_value_decimals: 4 },
+			{ leave_value_decimals: 1.5 },
+			{ show_hooks: 'yes' },
+			{ 'Bad-Name': 1 },
+			{ question_font: 'a\u0000b' },
+			{ bindings: 'x'.repeat(17 * 1024) }
+		];
+		for (const settings of bad) {
+			await expect(applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', settings } as NewOp)).rejects.toMatchObject({
 				reason: 'invalid'
 			});
 		}
+		expect(await read()).toEqual({ show_definitions: false, reveal_correct: false, leave_value_decimals: 3 });
 	});
 });
 

@@ -9,7 +9,8 @@
 	// the word instead (and a narrow screen always does). The word is in the
 	// middle of the row whatever sits either side; each hook column is as wide
 	// as its widest hooks and no wider; the definition takes the room that is
-	// left, up to this device's limit. The probability order and the hooks,
+	// left, up to the definition width setting, which also limits a definition
+	// under its word. The probability order and the hooks,
 	// smaller than the word, are centred on it, not sat on its baseline, and
 	// the word and the definition are centred on each other however many
 	// lines the definition wraps to; a short part of
@@ -23,8 +24,8 @@
 	import TileText from '$lib/components/TileText.svelte';
 	import { definitionLines, splitTag, unbroken } from '$lib/cascade/definition';
 	import { leaveValueText } from '$lib/cascade/leave';
-	import { textStyle } from '$lib/player/display.svelte';
-	import type { CascadeRow } from '$lib/local/rows';
+	import { textStyle } from '$lib/player/display';
+	import type { AnswerSettings } from '$lib/settings/layers';
 
 	interface Word {
 		word: string;
@@ -55,8 +56,8 @@
 	}: {
 		quizType: string;
 		answer: unknown;
-		/** The cascade's settings for what an answer shows. */
-		settings: Pick<CascadeRow, 'show_definitions' | 'show_hooks' | 'leave_value_decimals'> & Partial<Pick<CascadeRow, 'show_probability' | 'definition_column'>>;
+		/** What an answer shows, as this device resolves it for the cascade (lib/settings/layers). */
+		settings: Pick<AnswerSettings, 'show_definitions' | 'show_hooks' | 'leave_value_decimals'> & Partial<Pick<AnswerSettings, 'show_probability' | 'definition_column'>>;
 		/** Words found in typed mode; the others are highlighted. */
 		found?: string[] | null;
 		/** Any font name the device has. */
@@ -73,7 +74,7 @@
 		typing?: string[] | null;
 		/** Typed mode: the word found most recently, which `typing` (kept in tile order) cannot say. */
 		entered?: string | null;
-		/** This device's choice: the definition column's greatest width in px; 0 is all the room there is. */
+		/** The greatest width of a definition, in px, in its column or under its word; 0 is all the room it has. */
 		definitionWidth?: number;
 		/** This device's choice: the size of the hooks and the probability order, in px. */
 		hookSize?: number;
@@ -85,7 +86,7 @@
 	);
 	let answerStyle = $derived(fitted(textStyle(font, size, spacing)));
 	let hookStyle = $derived(`font-size: calc(${hookSize}px * var(--fit, 1));`);
-	/** The definition column's limit, for the rows' stylesheet. */
+	/** This device's limit on a definition's width, in its column or under its word, for the rows' stylesheet. */
 	let rowVars = $derived(definitionWidth > 0 ? `--definition-width: ${definitionWidth}px;` : '');
 
 	let all = $derived(Array.isArray(answer) ? (answer as Word[]) : []);
@@ -180,7 +181,7 @@
 			{@render row(word, true, [word], String(answer), false)}
 		</div>
 	{:else}
-		<p class="mx-auto max-w-2xl text-center" style={definitionStyle}>
+		<p class="mx-auto text-center" style={`${definitionStyle} max-width: ${definitionWidth > 0 ? `${definitionWidth}px` : 'none'};`} data-definition>
 			{@render lines(String(answer))}
 		</p>
 	{/if}
@@ -217,10 +218,11 @@
 		grid-column: 3;
 		justify-self: start;
 	}
+	/* As wide as the limit (definition_width_px), or the whole row without one. */
 	.definition {
 		grid-column: 1 / -1;
 		justify-self: center;
-		max-width: 42rem;
+		max-width: var(--definition-width, none);
 		text-align: center;
 	}
 	.line {

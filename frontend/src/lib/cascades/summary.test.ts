@@ -52,8 +52,8 @@ async function grade(db: UserDb, quizId: string, marks: string) {
 
 describe('the Cascades and Trash pages', () => {
 	it('summarise options and the ladder', () => {
-		expect(optionsSummary({ segment_size: 40, progression: 'drill', require_alphabetical: false })).toBe('segments of 40 · drill');
-		expect(optionsSummary({ segment_size: 0, progression: 'ladder', require_alphabetical: false })).toBe('');
+		expect(optionsSummary({ segment_size: 40, progression: 'drill' })).toBe('segments of 40 · drill');
+		expect(optionsSummary({ segment_size: 0, progression: 'ladder' })).toBe('');
 	});
 
 	it('show Available offline, not the download label, for a cascade opened inside the window', async () => {
@@ -111,7 +111,7 @@ describe('the Cascades and Trash pages', () => {
 		const { db, engine } = await device(server, () => new Date());
 		await engine.sync();
 		await db.put('meta', { trash_retention_days: 30, max_quiz_questions: 100 }, 'server');
-		await expect(applyLocally(db, { type: 'set_quiz_options', quiz_id: Q, segment_size: 101 })).rejects.toMatchObject({ reason: 'invalid' });
-		await applyLocally(db, { type: 'set_quiz_options', quiz_id: Q, segment_size: 100 });
+		await expect(applyLocally(db, { type: 'set_cascade_options', cascade_id: C, segment_size: 101 })).rejects.toMatchObject({ reason: 'invalid' });
+		await applyLocally(db, { type: 'set_cascade_options', cascade_id: C, segment_size: 100 });
 	});
 });

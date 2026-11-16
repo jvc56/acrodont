@@ -1,8 +1,9 @@
 // Controls (PLAN.md § Taking a quiz → Controls, Typed mode → Protecting
 // typing). Strokes are keys by physical position (`KeyboardEvent.code`),
 // mouse buttons or wheel directions, each with an exact set of modifiers.
-// Controls are a setting of this device, never synced: what suits a laptop's
-// keyboard and mouse is wrong on another machine (lib/player/controls).
+// The whole list is one setting, set in any of four places like every other
+// (lib/settings/layers): what suits a laptop's keyboard and mouse is often
+// wrong on another machine, so it is most often set for This device.
 
 export interface Binding {
 	action: 'show_next' | 'toggle_grade' | 'previous';
@@ -44,10 +45,10 @@ export const DEFAULT_BINDINGS: Binding[] = [
 ];
 
 /**
- * The most bindings a device holds, over its three actions. Shared with all
- * devices, the list travels as one setting, and an account's shared settings
- * may take 16 KB in all (a request carrying more is a 400 for the whole
- * sync): 64 bindings are under 8 KB.
+ * The most bindings a list holds, over its three actions. Set for a cascade
+ * or everywhere, the list travels as one setting, and a cascade's own
+ * settings, or the account's, may take 16 KB in all: 64 bindings are under
+ * 8 KB.
  */
 export const MAX_BINDINGS = 64;
 

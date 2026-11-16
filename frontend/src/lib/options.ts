@@ -3,7 +3,6 @@
 export interface QuizOptions {
 	segment_size: number;
 	progression: 'ladder' | 'drill';
-	require_alphabetical: boolean;
 }
 
 export const MIN_SEGMENT = 5;
@@ -25,4 +24,4 @@ export function chainBound(questionCount: number, size: number): number {
 	return size > 0 && size < questionCount ? Math.ceil(questionCount / size) : 0;
 }
 
-export const DEFAULT_OPTIONS: QuizOptions = { segment_size: 0, progression: 'ladder', require_alphabetical: false };
+export const DEFAULT_OPTIONS: QuizOptions = { segment_size: 0, progression: 'ladder' };

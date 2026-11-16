@@ -162,12 +162,10 @@
 			name,
 			lexicon,
 			quiz_type: quizType,
-			// Every new cascade starts with the same settings; they are changed in its Settings (§ Settings).
+			// Every new cascade starts with the same rules and no settings of its own; both are changed in its Settings (§ Settings).
 			clear_threshold: CASCADE_SETTING_DEFAULTS.clear_threshold,
 			segment_size: CASCADE_SETTING_DEFAULTS.segment_size,
 			progression: CASCADE_SETTING_DEFAULTS.progression,
-			require_alphabetical: CASCADE_SETTING_DEFAULTS.require_alphabetical,
-			answer_mode: CASCADE_SETTING_DEFAULTS.answer_mode,
 			filters: wire.tree
 		};
 		try {

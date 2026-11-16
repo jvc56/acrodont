@@ -44,14 +44,17 @@ async function cascade(
 	} = {}
 ) {
 	const idx = Array.from({ length: count }, (_, i) => i);
-	const opts = { segment_size: o.segment_size ?? 0, progression: 'ladder', require_alphabetical: false };
+	const opts = { segment_size: o.segment_size ?? 0, progression: 'ladder' };
 	await storeCreated(db, {
 		cascade: {
 			id: C, name: 'x', quiz_type: o.quiz_type ?? 'anagram', lexicon: 'EN', letter_distribution: 'english', clear_threshold: 80, ...opts,
 			options_changed_at: T0, options_seq: '1', options_device_id: 'd', question_count: count, depth: 1, peak_depth: 1,
 			attempts_since_completion: 0, created_at: T0, last_activity_at: T0, completed_at: null, trashed_at: null, updated_seq: '1',
-			answer_mode: o.answer_mode ?? 'flashcard', show_definitions: true, show_hooks: true,
-			reveal_correct: o.reveal_correct ?? true, leave_value_decimals: 1
+			settings: {
+				...(o.answer_mode ? { answer_mode: o.answer_mode } : {}),
+				...(o.reveal_correct === false ? { reveal_correct: false } : {}),
+				leave_value_decimals: 1
+			}
 		},
 		source_quiz: {
 			id: Q, cascade_id: C, level: 1, origin: 'source', origin_quiz_id: null, origin_attempt: null, origin_segment_end: null,
@@ -77,10 +80,10 @@ async function putDistribution() {
 	await db.put('distributions', { name: 'english', tiles });
 }
 
-/** The cascade made typed, as the player's settings would. */
-async function makeTyped() {
+/** The cascade made typed, as the player's settings would, with any other answer settings. */
+async function makeTyped(more: Record<string, unknown> = {}) {
 	const c = (await db.get('cascades', C))!;
-	await db.put('cascades', { ...c, answer_mode: 'typed' });
+	await db.put('cascades', { ...c, settings: { ...c.settings, answer_mode: 'typed', ...more } });
 }
 
 function player() {
@@ -473,12 +476,24 @@ describe('the player', () => {
 		expect(q.v.card!.typed).toBeNull();
 	});
 
-	it('set_cascade_options carries the answer mode, and nothing but flashcard or typed', async () => {
+	it('set_cascade_options carries the answer mode in the cascade\'s own settings, and nothing but flashcard or typed', async () => {
 		await cascade(2);
-		await applyLocally(db, { type: 'set_cascade_options', cascade_id: C, answer_mode: 'typed' });
-		const read = async () => (await view.cascade(db.transaction(view.VIEW_STORES) as never, C))!.answer_mode;
-		expect(await read()).toBe('typed');
-		await expect(applyLocally(db, { type: 'set_cascade_options', cascade_id: C, answer_mode: 'spoken' as never })).rejects.toThrow();
+		await applyLocally(db, { type: 'set_cascade_options', cascade_id: C, settings: { answer_mode: 'typed' } });
+		const read = async () => (await view.cascade(db.transaction(view.VIEW_STORES) as never, C))!.settings;
+		expect(await read()).toEqual({ leave_value_decimals: 1, answer_mode: 'typed' });
+		await expect(applyLocally(db, { type: 'set_cascade_options', cascade_id: C, settings: { answer_mode: 'spoken' } })).rejects.toThrow();
+		// Null takes it out again.
+		await applyLocally(db, { type: 'set_cascade_options', cascade_id: C, settings: { answer_mode: null } });
+		expect(await read()).toEqual({ leave_value_decimals: 1 });
+	});
+
+	it('the answer mode the page resolves for this device decides over the cascade\'s own', async () => {
+		await cascade(2, { answer_mode: 'typed' });
+		const p = new Player(db, C, { ensure: async () => undefined, seed: () => '777', answer: () => ({ answer_mode: 'flashcard', reveal_correct: false, require_alphabetical: false }) });
+		await p.load();
+		expect(p.v.card!.typed).toBeNull();
+		await p.showNext();
+		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'missed']);
 	});
 
 	it('typed mode is for anagram quizzes only', async () => {
@@ -492,9 +507,7 @@ describe('the player', () => {
 
 	it('typed mode with alphabetical order: an entry that skips an earlier answer misses the card at once', async () => {
 		await cascade(2);
-		const q = (await db.get('quizzes', Q))!;
-		await db.put('quizzes', { ...q, require_alphabetical: true });
-		await makeTyped();
+		await makeTyped({ require_alphabetical: true });
 		const p = player();
 		await p.load();
 		// BA skips AB: out of order, and the card is missed there and then.
@@ -504,9 +517,7 @@ describe('the player', () => {
 
 	it('typed mode with alphabetical order: answers in order are found', async () => {
 		await cascade(2);
-		const q = (await db.get('quizzes', Q))!;
-		await db.put('quizzes', { ...q, require_alphabetical: true });
-		await makeTyped();
+		await makeTyped({ require_alphabetical: true });
 		const p = player();
 		await p.load();
 		expect((await p.enter('AB'))!.kind).toBe('found');

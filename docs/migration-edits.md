@@ -189,3 +189,31 @@ Nothing is deployed, so the edit is in place.
 
 A database made by the earlier file no longer matches: `./scripts/dev.py --reset`
 (and `make sqlx-db` for the compile-check database).
+
+## 2026-11-16: a setting can be set in four places
+
+Production was deployed for testing only, and its owner resets its database
+with this change, so the edit is in place rather than a second migration.
+
+- `cascades` loses the eight display columns (`answer_mode`,
+  `show_definitions`, `show_hooks`, `reveal_correct`, `show_found_count`,
+  `show_probability`, `definition_column`, `leave_value_decimals`) and gains
+  `settings JSONB NOT NULL DEFAULT '{}'`, the cascade's own settings: the
+  "This cascade" place of PLAN.md § Settings → Where a setting applies. The
+  `anagram_answer_mode` type went with its column.
+- The comment on `users.device_settings` says it is now the "Everywhere"
+  place, where a null value takes a setting out.
+- `cascades` and `quizzes` lose `require_alphabetical`. Typed answers in
+  alphabetical order is now an answer setting like the others, held in the
+  four places, not a quiz option: the server never judged by it, and
+  `set_cascade_options` and `set_quiz_options` no longer carry it.
+- `quizzes` loses its copy of the quiz options (`segment_size`,
+  `progression`) and the latest-wins clock that went with them
+  (`options_changed_at`, `options_seq`, `options_device_id`). Every level
+  now reads its cascade's options, as it already read the clear threshold,
+  so a change reaches the level in progress too. `set_quiz_options` is no
+  longer an operation, and `sync_op_type` loses it.
+
+A database made by the earlier file no longer matches: `./scripts/dev.py --reset`
+(and `make sqlx-db` for the compile-check database), and the production
+database is reset.

@@ -32,20 +32,20 @@ fn wire_op(dev: &mut Device<'_>, op: &Value, cascade: Uuid) -> Value {
 }
 
 async fn db_state(app: &TestApp, cascade: Uuid) -> Value {
-    let c: Option<(i32, i32, i32, bool, bool, i32, String, bool)> = sqlx::query_as(
+    let c: Option<(i32, i32, i32, bool, bool, i32, String)> = sqlx::query_as(
         "SELECT depth, peak_depth, attempts_since_completion, completed_at IS NOT NULL, trashed_at IS NOT NULL,
-                segment_size, progression::text, require_alphabetical FROM cascades WHERE id = $1",
+                segment_size, progression::text FROM cascades WHERE id = $1",
     )
     .bind(cascade)
     .fetch_optional(app.db())
     .await
     .unwrap();
     #[derive(sqlx::FromRow)]
-    struct Q(Uuid, i32, String, String, Option<Uuid>, Option<i32>, Option<i32>, bool, i32, String, bool, i32, i64, i32, i64, i32, i32, i32, i32);
+    struct Q(Uuid, i32, String, String, Option<Uuid>, Option<i32>, Option<i32>, bool, i32, i64, i32, i64, i32, i32, i32, i32);
     let quizzes: Vec<Q> =
         sqlx::query_as(
             "SELECT id, level, status::text, origin::text, origin_quiz_id, origin_attempt, origin_segment_end,
-                    segment_chain, segment_size, progression::text, require_alphabetical, attempt, shuffle_seed,
+                    segment_chain, attempt, shuffle_seed,
                     question_count, questions_hash, correct_count, missed_count, cursor, run_start
              FROM quizzes WHERE cascade_id = $1 ORDER BY id",
         )
@@ -67,14 +67,14 @@ async fn db_state(app: &TestApp, cascade: Uuid) -> Value {
         // stored; every side computes them from the seed.
         let correct = rows.iter().filter(|r| r.1.as_deref() == Some("correct")).count() as i32;
         let missed = rows.iter().filter(|r| r.1.as_deref() == Some("missed")).count() as i32;
-        assert_eq!((q.15, q.16), (correct, missed), "counters match grades");
+        assert_eq!((q.12, q.13), (correct, missed), "counters match grades");
         out.push(json!({
             "id": q.0.to_string(), "level": q.1, "status": q.2, "origin": q.3,
             "origin_quiz_id": q.4.map(|u| u.to_string()), "origin_attempt": q.5, "origin_segment_end": q.6,
-            "segment_chain": q.7, "segment_size": q.8, "progression": q.9, "require_alphabetical": q.10,
-            "attempt": q.11, "shuffle_seed": (q.12 as u64).to_string(), "question_count": q.13,
-            "questions_hash": (q.14 as u64).to_string(), "questions": questions, "correct": q.15, "missed": q.16,
-            "cursor": q.17, "run_start": q.18,
+            "segment_chain": q.7,
+            "attempt": q.8, "shuffle_seed": (q.9 as u64).to_string(), "question_count": q.10,
+            "questions_hash": (q.11 as u64).to_string(), "questions": questions, "correct": q.12, "missed": q.13,
+            "cursor": q.14, "run_start": q.15,
         }));
     }
     let Some(c) = c else {
@@ -86,7 +86,7 @@ async fn db_state(app: &TestApp, cascade: Uuid) -> Value {
     assert_eq!(levels, (1..=i64::from(c.0)).collect::<Vec<_>>());
     json!({
         "depth": c.0, "peak_depth": c.1, "attempts_since_completion": c.2, "completed": c.3, "trashed": c.4,
-        "purged": false, "segment_size": c.5, "progression": c.6, "require_alphabetical": c.7, "quizzes": out,
+        "purged": false, "segment_size": c.5, "progression": c.6, "quizzes": out,
     })
 }
 
@@ -110,7 +110,7 @@ fn expected(state: &Value) -> Value {
     json!({
         "depth": c["depth"], "peak_depth": c["peak_depth"], "attempts_since_completion": c["attempts_since_completion"],
         "completed": c["completions"].as_u64().unwrap() > 0, "trashed": c["trashed"], "purged": false,
-        "segment_size": c["segment_size"], "progression": c["progression"], "require_alphabetical": c["require_alphabetical"],
+        "segment_size": c["segment_size"], "progression": c["progression"],
         "quizzes": quizzes,
     })
 }
@@ -145,7 +145,6 @@ async fn run_vectors(pool: sqlx::PgPool, filter: impl Fn(&str) -> bool) {
         setup.threshold = s["clear_threshold"].as_i64().unwrap() as i16;
         setup.segment_size = s["segment_size"].as_i64().unwrap() as i32;
         setup.progression = if s["progression"] == "drill" { "drill" } else { "ladder" };
-        setup.require_alphabetical = s["require_alphabetical"].as_bool().unwrap();
         setup.source_seed = s["source_seed"].as_str().unwrap().parse().unwrap();
         setup.source_id = s["source_quiz_id"].as_str().unwrap().parse().unwrap();
         insert_cascade(&app, user, &setup).await;

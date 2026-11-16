@@ -10,7 +10,8 @@ use uuid::Uuid;
 use super::{Effects, IncomingOp};
 use crate::cards;
 use crate::cascade::order::{from_i64, questions_hash, to_i64};
-use crate::cascade::rows::{AnswerMode, Origin, Progression, QuizStatus};
+use crate::cascade::rows::{Origin, Progression, QuizStatus};
+use crate::cascade::settings;
 use crate::cascade::rules::{self, CascadeState, FinishResult, Grade, NewQuiz, Opts, QuizState, Reason, SegmentResult};
 use crate::storage;
 
@@ -87,20 +88,15 @@ pub struct Loaded {
     pub updated_seq: i64,
     pub cursor_device_id: Option<Uuid>,
     pub cursor_moved_at: Option<DateTime<Utc>>,
-    pub options_seq: i64,
-    pub options_device_id: Uuid,
-    pub options_changed_at: DateTime<Utc>,
 }
 
 pub async fn load_quiz(conn: &mut PgConnection, user: Uuid, quiz_id: Uuid) -> Result<Loaded, OpError> {
     let r = sqlx::query!(
-        r#"SELECT q.cascade_id, q.level, q.origin AS "origin: Origin", q.segment_chain, q.segment_size,
-                  q.progression AS "progression: Progression", q.require_alphabetical, q.attempt, q.shuffle_seed,
+        r#"SELECT q.cascade_id, q.level, q.origin AS "origin: Origin", q.segment_chain, q.attempt, q.shuffle_seed,
                   q.question_count, q.correct_count, q.missed_count, q.cursor, q.cursor_device_id,
-                  q.cursor_moved_at, q.run_start, q.status AS "status: QuizStatus", q.updated_seq, q.options_seq,
-                  q.options_device_id, q.options_changed_at,
+                  q.cursor_moved_at, q.run_start, q.status AS "status: QuizStatus", q.updated_seq,
                   c.clear_threshold, c.segment_size AS c_segment_size, c.progression AS "c_progression: Progression",
-                  c.require_alphabetical AS c_require_alphabetical, c.depth, c.peak_depth,
+                  c.depth, c.peak_depth,
                   c.attempts_since_completion, c.trashed_at IS NOT NULL AS "trashed!"
            FROM quizzes q JOIN cascades c ON c.id = q.cascade_id
            WHERE q.id = $1 AND q.user_id = $2"#,
@@ -117,7 +113,6 @@ pub async fn load_quiz(conn: &mut PgConnection, user: Uuid, quiz_id: Uuid) -> Re
             level: r.level as u32,
             origin: r.origin,
             segment_chain: r.segment_chain,
-            opts: Opts { segment_size: r.segment_size as u32, progression: r.progression, require_alphabetical: r.require_alphabetical },
             attempt: r.attempt as u32,
             seed: from_i64(r.shuffle_seed),
             question_count: r.question_count as u32,
@@ -127,11 +122,7 @@ pub async fn load_quiz(conn: &mut PgConnection, user: Uuid, quiz_id: Uuid) -> Re
         },
         cascade: CascadeState {
             clear_threshold: r.clear_threshold as u32,
-            opts: Opts {
-                segment_size: r.c_segment_size as u32,
-                progression: r.c_progression,
-                require_alphabetical: r.c_require_alphabetical,
-            },
+            opts: Opts { segment_size: r.c_segment_size as u32, progression: r.c_progression },
             depth: r.depth as u32,
             peak_depth: r.peak_depth as u32,
             attempts_since_completion: r.attempts_since_completion as u32,
@@ -142,9 +133,6 @@ pub async fn load_quiz(conn: &mut PgConnection, user: Uuid, quiz_id: Uuid) -> Re
         updated_seq: r.updated_seq,
         cursor_device_id: r.cursor_device_id,
         cursor_moved_at: r.cursor_moved_at,
-        options_seq: r.options_seq,
-        options_device_id: r.options_device_id,
-        options_changed_at: r.options_changed_at,
     })
 }
 
@@ -246,12 +234,10 @@ async fn insert_quiz(
     let hash = questions_hash(&n.questions);
     sqlx::query!(
         "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, origin_quiz_id, origin_attempt,
-                              origin_segment_end, segment_chain, segment_size, progression, require_alphabetical,
-                              options_changed_at, options_seq, options_device_id, shuffle_seed, questions_hash,
+                              origin_segment_end, segment_chain, shuffle_seed, questions_hash,
                               question_count, cursor_moved_at, cursor_device_id, created_seq, last_activity_at,
                               updated_seq)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $13, $15, $14,
-                 greatest(now(), $13), $14)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, greatest(now(), $13), $15)",
         id,
         cascade,
         ctx.user,
@@ -261,15 +247,12 @@ async fn insert_quiz(
         n.origin_attempt as i32,
         n.origin_segment_end.map(|e| e as i32),
         n.segment_chain,
-        n.opts.segment_size as i32,
-        n.opts.progression as Progression,
-        n.opts.require_alphabetical,
-        at,
-        ctx.seq,
-        ctx.device,
         to_i64(n.seed),
         to_i64(hash),
         count,
+        at,
+        ctx.device,
+        ctx.seq,
     )
     .execute(&mut *conn)
     .await?;
@@ -311,7 +294,6 @@ pub async fn apply(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpRes
         "purge_quiz" => purge_quiz(conn, ctx, op).await,
         "purge_cascade" => purge_cascade(conn, ctx, op).await,
         "set_cascade_options" => set_cascade_options(conn, ctx, op).await,
-        "set_quiz_options" => set_quiz_options(conn, ctx, op).await,
         _ => Err(OpError::Rejected(Reason::Invalid)),
     }
 }
@@ -377,7 +359,7 @@ async fn move_cursor(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpR
     let l = load_quiz(conn, ctx.user, quiz).await?;
     rules::check_live(&l.cascade, &l.quiz)?;
     rules::check_attempt(&l.quiz, attempt, attempt_seed)?;
-    rules::check_move_cursor(&l.quiz, position)?;
+    rules::check_move_cursor(&l.cascade, &l.quiz, position)?;
     let at = clamp(ctx, at);
     let wins = l.cursor_moved_at.is_none()
         || l.cursor_device_id == Some(ctx.device)
@@ -529,7 +511,7 @@ async fn finish_segment(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> 
     rules::check_live(&l.cascade, &l.quiz)?;
     // PQ-013: the attempt and the duplicate before the depth.
     rules::check_attempt(&l.quiz, attempt, attempt_seed)?;
-    rules::check_segment_end(&l.quiz, end)?;
+    rules::check_segment_end(&l.cascade, &l.quiz, end)?;
     let duplicate = sqlx::query_scalar!(
         r#"SELECT EXISTS (SELECT 1 FROM quizzes WHERE origin = 'segment' AND origin_quiz_id = $1
                           AND origin_attempt = $2 AND origin_segment_end = $3) AS "d!""#,
@@ -603,18 +585,12 @@ async fn restore_quiz(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> Op
     let r = rules::restore_quiz(&mut l.cascade, &l.quiz, seed);
     let qs = reset_quiz(conn, ctx, quiz, r.attempt, r.seed, at).await?;
     sqlx::query!(
-        "UPDATE quizzes SET status = 'active', cleared_at = NULL, level = $2, segment_size = $3, progression = $4,
-                            require_alphabetical = $5, options_changed_at = $6, options_seq = $7,
-                            options_device_id = $8, last_activity_at = greatest(last_activity_at, $6)
+        "UPDATE quizzes SET status = 'active', cleared_at = NULL, level = $2,
+                            last_activity_at = greatest(last_activity_at, $3)
          WHERE id = $1",
         quiz,
         r.level as i32,
-        r.opts.segment_size as i32,
-        r.opts.progression as Progression,
-        r.opts.require_alphabetical,
         at,
-        ctx.seq,
-        ctx.device,
     )
     .execute(&mut *conn)
     .await?;
@@ -778,7 +754,6 @@ async fn purge_cascade(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> O
 struct OptionFields {
     segment_size: Option<u32>,
     progression: Option<Progression>,
-    require_alphabetical: Option<bool>,
 }
 
 /// The carried option fields, every value in range or `invalid`.
@@ -791,11 +766,7 @@ fn option_fields(op: &IncomingOp, cap: u32) -> Result<OptionFields, OpError> {
         None => None,
         Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| OpError::Rejected(Reason::Invalid))?),
     };
-    let require_alphabetical = match op.body.get("require_alphabetical") {
-        None => None,
-        Some(v) => Some(v.as_bool().ok_or(Reason::Invalid)?),
-    };
-    Ok(OptionFields { segment_size, progression, require_alphabetical })
+    Ok(OptionFields { segment_size, progression })
 }
 
 /// Latest wins whole: this device's own change, or one made after seeing
@@ -818,89 +789,36 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         None => None,
         Some(v) => Some(rules::check_clear_threshold(v.as_i64().ok_or(Reason::Invalid)?)?),
     };
-    // Flashcard or typed, the cascade's alone like the threshold.
-    let answer_mode: Option<AnswerMode> = match op.body.get("answer_mode") {
-        None => None,
-        Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| OpError::Rejected(Reason::Invalid))?),
-    };
-    // What a card shows and what a reveal marks (PLAN.md § Settings), the cascade's alone too.
-    let flag = |k: &str| match op.body.get(k) {
-        None => Ok(None),
-        Some(v) => v.as_bool().map(Some).ok_or(OpError::Rejected(Reason::Invalid)),
-    };
-    let show_definitions = flag("show_definitions")?;
-    let show_hooks = flag("show_hooks")?;
-    let reveal_correct = flag("reveal_correct")?;
-    let show_found_count = flag("show_found_count")?;
-    let show_probability = flag("show_probability")?;
-    let definition_column = flag("definition_column")?;
-    let leave_value_decimals = match op.body.get("leave_value_decimals") {
-        None => None,
-        Some(v) => Some(v.as_i64().filter(|n| (0..=3).contains(n)).ok_or(Reason::Invalid)? as i16),
-    };
+    // The cascade's own settings (PLAN.md § Settings → Where a setting applies):
+    // its `settings` object, null taking a value away.
+    let changes = settings::changes_of(&op.body)?;
     let at = clamp(ctx, at);
     if !options_win(ctx, op, c.options_device_id, c.options_seq, c.options_changed_at, at) {
         return Err(OpError::Rejected(Reason::Stale));
     }
+    let merged = match &changes {
+        None => None,
+        Some(ch) => {
+            let current = sqlx::query_scalar!(r#"SELECT settings::text AS "settings!" FROM cascades WHERE id = $1"#, id)
+                .fetch_one(&mut *conn)
+                .await?;
+            Some(settings::merge(&current, ch)?)
+        }
+    };
     sqlx::query!(
         "UPDATE cascades SET segment_size = coalesce($2, segment_size), progression = coalesce($3, progression),
-                             require_alphabetical = coalesce($4, require_alphabetical), options_changed_at = $5,
-                             options_seq = $6, options_device_id = $7, updated_seq = $6,
-                             clear_threshold = coalesce($8, clear_threshold),
-                             answer_mode = coalesce($9, answer_mode),
-                             show_definitions = coalesce($10, show_definitions),
-                             show_hooks = coalesce($11, show_hooks),
-                             reveal_correct = coalesce($12, reveal_correct),
-                             leave_value_decimals = coalesce($13, leave_value_decimals),
-                             show_found_count = coalesce($14, show_found_count),
-                             show_probability = coalesce($15, show_probability),
-                             definition_column = coalesce($16, definition_column)
+                             options_changed_at = $4, options_seq = $5, options_device_id = $6, updated_seq = $5,
+                             clear_threshold = coalesce($7, clear_threshold),
+                             settings = coalesce($8::text::jsonb, settings)
          WHERE id = $1",
         id,
         f.segment_size.map(|s| s as i32),
         f.progression as Option<Progression>,
-        f.require_alphabetical,
         at,
         ctx.seq,
         ctx.device,
         threshold.map(|t| t as i16),
-        answer_mode as Option<AnswerMode>,
-        show_definitions,
-        show_hooks,
-        reveal_correct,
-        leave_value_decimals,
-        show_found_count,
-        show_probability,
-        definition_column,
-    )
-    .execute(conn)
-    .await?;
-    Ok(Effects::default())
-}
-
-async fn set_quiz_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult {
-    let quiz = uuid_of(op, "quiz_id")?;
-    let at = at_of(op)?;
-    let l = load_quiz(conn, ctx.user, quiz).await?;
-    rules::check_live(&l.cascade, &l.quiz)?;
-    let f = option_fields(op, ctx.cap)?;
-    rules::check_quiz_option_fields(&l.quiz, f.progression.is_some(), f.segment_size.is_some())?;
-    let at = clamp(ctx, at);
-    if !options_win(ctx, op, l.options_device_id, l.options_seq, l.options_changed_at, at) {
-        return Err(OpError::Rejected(Reason::Stale));
-    }
-    sqlx::query!(
-        "UPDATE quizzes SET segment_size = coalesce($2, segment_size), progression = coalesce($3, progression),
-                            require_alphabetical = coalesce($4, require_alphabetical), options_changed_at = $5,
-                            options_seq = $6, options_device_id = $7, updated_seq = $6
-         WHERE id = $1",
-        quiz,
-        f.segment_size.map(|s| s as i32),
-        f.progression as Option<Progression>,
-        f.require_alphabetical,
-        at,
-        ctx.seq,
-        ctx.device,
+        merged,
     )
     .execute(conn)
     .await?;

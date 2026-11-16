@@ -249,7 +249,7 @@ test('admin uploads, a broken file, a Leave Value cascade from the new set, dele
 	await expect(row.getByRole('button', { name: 'Delete' })).toBeDisabled({ timeout: 30_000 });
 	await expect(row.getByText('In use: it has leave values and 3 cascades use it.')).toBeVisible();
 
-	// More than 2,000 levels: warned about in a level's options, in Settings.
+	// More than 2,000 levels: warned about under the cascade's segment size, in Settings.
 	await page.goto('/cascades/new');
 	await page.getByLabel('Lexicon').selectOption(lex);
 	await page.getByLabel('Minimum').first().fill('7');
@@ -260,7 +260,7 @@ test('admin uploads, a broken file, a Leave Value cascade from the new set, dele
 	await expect(page).toHaveURL(/\/cascades\/[0-9a-f-]{36}$/, { timeout: 60_000 });
 	await expect(page.getByText(/^1 \/ 11000$/)).toBeVisible({ timeout: 60_000 });
 	await openPlayerSettings(page);
-	const d = page.getByRole('dialog', { name: 'Settings' }).getByRole('group', { name: /the level you are studying/ });
+	const d = page.getByRole('dialog', { name: 'Settings' }).getByRole('region', { name: 'This Cascade' });
 	await d.getByLabel('Study in segments').check();
 	await d.getByLabel('Segment size', { exact: true }).fill('5');
 	await expect(d.getByText('One pass could create up to 2,200 drill levels, one for each segment with a miss.')).toBeVisible();

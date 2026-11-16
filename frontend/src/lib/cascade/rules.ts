@@ -38,7 +38,6 @@ export class Rejected extends Error {
 export interface Opts {
 	segment_size: number;
 	progression: Progression;
-	require_alphabetical: boolean;
 }
 
 export interface CascadeState {
@@ -54,7 +53,6 @@ export interface QuizState {
 	level: number;
 	origin: Origin;
 	segment_chain: boolean;
-	opts: Opts;
 	attempt: number;
 	seed: bigint;
 	question_count: number;
@@ -70,7 +68,6 @@ export interface NewQuiz {
 	questions: number[];
 	seed: bigint;
 	segment_chain: boolean;
-	opts: Opts;
 	origin_attempt: number;
 	origin_segment_end: number | null;
 }
@@ -96,26 +93,28 @@ export interface Restored {
 	level: number;
 	attempt: number;
 	seed: bigint;
-	opts: Opts;
 	cascade_restored: boolean;
 }
 
-/** A created quiz's options: the cascade's, except a chain: Drill, no segments. */
-export function newQuizOpts(c: CascadeState, chain: boolean): Opts {
-	return chain
-		? { segment_size: 0, progression: 'drill', require_alphabetical: c.opts.require_alphabetical }
-		: { ...c.opts };
+/**
+ * The quiz options are the cascade's alone (PLAN.md § Quiz options): every
+ * level reads them when it uses them, the one in progress included. A segment
+ * chain's quiz is always Drill and never segmented.
+ */
+export function effectiveSegmentSize(o: Opts, q: QuizState): number {
+	const s = o.segment_size;
+	return q.segment_chain || s === 0 || s >= q.question_count ? 0 : s;
 }
 
-export function effectiveSegmentSize(q: QuizState): number {
-	const s = q.opts.segment_size;
-	return q.segment_chain || s === 0 || s >= q.question_count ? 0 : s;
+/** The progression a quiz finishes with: the cascade's, or Drill for a segment chain's. */
+export function progressionOf(o: Opts, q: QuizState): Progression {
+	return q.segment_chain ? 'drill' : o.progression;
 }
 
 /** The smallest multiple of the segment size above the cursor and below the
  * count; null when off, too large, or a chain — nothing divides by the size. */
-export function nextBoundary(q: QuizState): number | null {
-	const s = effectiveSegmentSize(q);
+export function nextBoundary(o: Opts, q: QuizState): number | null {
+	const s = effectiveSegmentSize(o, q);
 	if (s === 0) return null;
 	const b = (Math.floor(q.cursor / s) + 1) * s;
 	return b < q.question_count ? b : null;
@@ -128,10 +127,10 @@ export interface RunIndicator {
 	length: number;
 }
 
-export function runIndicator(q: QuizState): RunIndicator | null {
-	const s = effectiveSegmentSize(q);
+export function runIndicator(o: Opts, q: QuizState): RunIndicator | null {
+	const s = effectiveSegmentSize(o, q);
 	if (s === 0) return null;
-	const end = nextBoundary(q) ?? q.question_count;
+	const end = nextBoundary(o, q) ?? q.question_count;
 	return {
 		run: Math.floor(q.run_start / s) + 1,
 		total: Math.floor((q.question_count - 1) / s) + 1,
@@ -161,13 +160,13 @@ export function checkDeepest(c: CascadeState, q: QuizState) {
 	if (q.level !== c.depth) throw new Rejected('not_deepest');
 }
 
-export function checkMoveCursor(q: QuizState, position: number) {
-	const limit = nextBoundary(q) ?? q.question_count;
+export function checkMoveCursor(o: Opts, q: QuizState, position: number) {
+	const limit = nextBoundary(o, q) ?? q.question_count;
 	if (position < q.run_start || position >= limit) throw new Rejected('bad_cursor');
 }
 
-export function checkSegmentEnd(q: QuizState, end: number) {
-	const s = q.opts.segment_size;
+export function checkSegmentEnd(o: Opts, q: QuizState, end: number) {
+	const s = o.segment_size;
 	if (q.segment_chain || s === 0 || end % s !== 0 || end === 0 || end >= q.question_count)
 		throw new Rejected('bad_segment');
 }
@@ -185,11 +184,6 @@ export function checkSegmentSize(size: number, cap: number): number {
 export function checkClearThreshold(t: number): number {
 	if (Number.isInteger(t) && t >= 1 && t <= 100) return t;
 	throw new Rejected('invalid');
-}
-
-export function checkQuizOptionFields(q: QuizState, progression: boolean, segmentSize: boolean) {
-	if (q.segment_chain && (progression || segmentSize)) throw new Rejected('invalid');
-	if (q.origin === 'source' && progression) throw new Rejected('invalid');
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +208,6 @@ export function finish(c: CascadeState, q: QuizState, correct: number, misses: n
 		questions: misses,
 		seed,
 		segment_chain: chain,
-		opts: newQuizOpts(c, chain),
 		origin_attempt: q.attempt,
 		origin_segment_end: null
 	});
@@ -232,7 +225,7 @@ export function finish(c: CascadeState, q: QuizState, correct: number, misses: n
 		return { kind: 'descended', reset_seed: reset, new_level: n };
 	}
 	if (correct === 0) return { kind: 'reshuffled', reset_seed: reset };
-	if (q.opts.progression === 'ladder' && !passed) {
+	if (progressionOf(c.opts, q) === 'ladder' && !passed) {
 		const n = make(q.level + 1, 'descent', false);
 		pushDepth(c);
 		return { kind: 'descended', reset_seed: reset, new_level: n };
@@ -257,7 +250,6 @@ export function finishSegment(c: CascadeState, q: QuizState, runMisses: number[]
 		questions: runMisses,
 		seed,
 		segment_chain: true,
-		opts: newQuizOpts(c, true),
 		origin_attempt: q.attempt,
 		origin_segment_end: end
 	};
@@ -270,6 +262,5 @@ export function restoreQuiz(c: CascadeState, q: QuizState, seed: bigint): Restor
 	const cascadeRestored = c.trashed;
 	c.trashed = false;
 	pushDepth(c);
-	const opts = q.segment_chain ? { ...q.opts, require_alphabetical: c.opts.require_alphabetical } : { ...c.opts };
-	return { level: c.depth, attempt: q.attempt + 1, seed, opts, cascade_restored: cascadeRestored };
+	return { level: c.depth, attempt: q.attempt + 1, seed, cascade_restored: cascadeRestored };
 }

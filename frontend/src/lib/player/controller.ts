@@ -9,12 +9,12 @@
 // `run_start`. A card whose key never arrived reads "this question needs a
 // connection" and is moved past with nothing emitted; a card whose answer is
 // gone still grades, and a typed card falls back to flashcard mode.
-import { applyLocally, APPLY_STORES, quizState, type LocalResult, type NewOp } from '$lib/local/apply';
+import { applyLocally, APPLY_STORES, optsOf, quizState, type LocalResult, type NewOp } from '$lib/local/apply';
 import type { UserDb } from '$lib/local/db';
-import type { CascadeRow, QuestionRow, QuizRow, WordHooks } from '$lib/local/rows';
+import type { AnswerMode, CascadeRow, QuestionRow, QuizRow, WordHooks } from '$lib/local/rows';
 import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
-import { nextBoundary, Rejected, runIndicator, type Grade } from '$lib/cascade/rules';
+import { nextBoundary, Rejected, runIndicator, type Grade, type Opts } from '$lib/cascade/rules';
 import { Distribution } from '$lib/tiles';
 import { finishBanner, runBanner } from './banner';
 import { statusRows, type StatusRows } from './segment';
@@ -74,6 +74,12 @@ export interface PlayerOptions {
 	fetchAhead?: (cascadeId: string, idx: number[]) => Promise<void>;
 	/** Fetches the cascade's tile distribution the device lacks, for typed mode (online only). */
 	fetchDistribution?: (cascadeId: string) => Promise<void>;
+	/**
+	 * The answer mode, reveal grade and typed order this device uses for the
+	 * cascade, from whichever place holds them (lib/settings/layers). Without
+	 * it, the cascade's own settings, else flashcards marked correct, in any order.
+	 */
+	answer?: () => { answer_mode: AnswerMode; reveal_correct: boolean; require_alphabetical: boolean };
 	seed?: () => string;
 	uuid?: () => string;
 }
@@ -138,6 +144,7 @@ export class Player {
 	private listeners = new Set<(v: PlayerView) => void>();
 	private readonly seed: () => string;
 	private readonly uuid: () => string;
+	private readonly answer: NonNullable<PlayerOptions['answer']>;
 
 	constructor(
 		private readonly db: UserDb,
@@ -146,6 +153,16 @@ export class Player {
 	) {
 		this.seed = opts.seed ?? randomSeed;
 		this.uuid = opts.uuid ?? (() => crypto.randomUUID());
+		this.answer =
+			opts.answer ??
+			(() => {
+				const own = this.v.cascade?.settings ?? {};
+				return {
+					answer_mode: own.answer_mode === 'typed' ? 'typed' : 'flashcard',
+					reveal_correct: own.reveal_correct !== false,
+					require_alphabetical: own.require_alphabetical === true
+				};
+			});
 	}
 
 	subscribe(fn: (v: PlayerView) => void): () => void {
@@ -158,7 +175,7 @@ export class Player {
 		const quiz = this.v.quiz;
 		// The grades of this pass, by position: the rows in memory are the quiz's own.
 		const bar = quiz
-			? statusRows(quiz, this.v.quizzes, this.v.card?.pos ?? quiz.cursor, (p) => this.rows.get(this.order[p])?.grade)
+			? statusRows(this.opts_(), quiz, this.v.quizzes, this.v.card?.pos ?? quiz.cursor, (p) => this.rows.get(this.order[p])?.grade)
 			: null;
 		this.v = { ...this.v, bar };
 		for (const fn of this.listeners) fn(this.v);
@@ -318,7 +335,7 @@ export class Player {
 		}
 		// Typed mode splits words with the cascade's tiles: a cascade played card by
 		// card may not have them yet, so they are fetched now, as the card is.
-		if (!this.dist && this.v.cascade?.quiz_type === 'anagram' && this.v.cascade.answer_mode === 'typed') {
+		if (!this.dist && this.v.cascade?.quiz_type === 'anagram' && this.answer().answer_mode === 'typed') {
 			await this.ensureDistribution(this.v.cascade);
 			if (!this.dist && this.opts.fetchDistribution) {
 				this.v.fetchingCard = true;
@@ -340,7 +357,7 @@ export class Player {
 	/** Shows the card at `pos` from what is in hand: no IndexedDB, so it costs one redraw. */
 	private present(pos: number, idx: number, key: string | null, answer: unknown | null, word: WordHooks | null) {
 		const saved = this.rows.get(idx)?.grade ?? null;
-		const typedWanted = this.v.cascade!.quiz_type === 'anagram' && this.v.cascade!.answer_mode === 'typed';
+		const typedWanted = this.v.cascade!.quiz_type === 'anagram' && this.answer().answer_mode === 'typed';
 		this.v.distributionMissing = typedWanted && !this.dist;
 		// A card with no answer, or no distribution to split typed text, falls back to flashcard mode.
 		const typed = typedWanted && answer !== null && this.dist && key && saved === null ? emptyTyped() : null;
@@ -571,8 +588,13 @@ export class Player {
 	// The three actions
 	// -------------------------------------------------------------------------
 
+	/** The cascade's quiz options, which every level reads (PLAN.md § Quiz options). */
+	private opts_(): Opts {
+		return this.v.cascade ? optsOf(this.v.cascade) : { segment_size: 0, progression: 'ladder' };
+	}
+
 	private runEnd(q: QuizRow): number {
-		return nextBoundary(quizState(q)) ?? q.question_count;
+		return nextBoundary(this.opts_(), quizState(q)) ?? q.question_count;
 	}
 
 	/** Show / Next. Resolves once its writes are saved; the screen changes before that. */
@@ -589,7 +611,7 @@ export class Player {
 
 	/** The grade a shown answer starts with: the cascade's setting's (correct unless set otherwise). */
 	private revealGrade(card: Card): Grade {
-		const base: Grade = this.v.cascade?.reveal_correct === false ? 'missed' : 'correct';
+		const base: Grade = this.answer().reveal_correct === false ? 'missed' : 'correct';
 		return card.toggled ? (base === 'correct' ? 'missed' : 'correct') : base;
 	}
 
@@ -671,7 +693,7 @@ export class Player {
 			count: q.question_count,
 			misses: current.missed_count,
 			threshold: this.v.cascade!.clear_threshold,
-			progression: q.progression,
+			progression: q.segment_chain ? 'drill' : this.v.cascade!.progression,
 			segmentChain: q.segment_chain
 		};
 		if (end === q.question_count) {
@@ -687,14 +709,14 @@ export class Player {
 			await this.reload();
 			let back: { level: number; run: number; runs: number } | undefined;
 			if (q.segment_chain && this.v.quiz) {
-				const ri = runIndicator(quizState(this.v.quiz));
+				const ri = runIndicator(this.opts_(), quizState(this.v.quiz));
 				if (ri) back = { level: this.v.quiz.level, run: ri.run, runs: ri.total };
 			}
 			this.v.banner = finishBanner({ ...facts, outcome: r.outcome!, completion: r.completion, back });
 			if (r.completion) this.v.completion = r.completion;
 			return this.emit();
 		}
-		const ri = runIndicator(quizState(q))!;
+		const ri = runIndicator(this.opts_(), quizState(q))!;
 		let runMisses = 0;
 		for (let p = q.run_start; p < end; p++) if (this.rows.get(this.order[p])?.grade === 'missed') runMisses++;
 		const r = await this.write({
@@ -751,7 +773,7 @@ export class Player {
 		const target = card.pos - 1;
 		if (target < q.run_start) {
 			// A blocked Previous always has a visible cause.
-			if (card.pos > 0 && !runIndicator(quizState(q))) this.v.message = 'You have already finished this part of the pass.';
+			if (card.pos > 0 && !runIndicator(this.opts_(), quizState(q))) this.v.message = 'You have already finished this part of the pass.';
 			return this.emit();
 		}
 		// Going back discards this card's unsaved reveal and toggle.
@@ -781,7 +803,7 @@ export class Player {
 			words,
 			this.dist.parseMagpie(card.key, true),
 			this.dist,
-			this.v.quiz!.require_alphabetical
+			this.answer().require_alphabetical
 		);
 		if (result.kind === 'empty') {
 			await this.showNext();

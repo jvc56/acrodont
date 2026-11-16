@@ -12,10 +12,10 @@ use uuid::Uuid;
 use super::order::from_i64;
 use crate::search::wire::QuizType;
 
-/// Flashcard or typed: an Anagram cascade's own (PLAN.md § Typed mode).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+/// Flashcard or typed (PLAN.md § Typed mode): the answer mode a new cascade
+/// may be created with, which becomes its own `answer_mode` setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "anagram_answer_mode", rename_all = "snake_case")]
 pub enum AnswerMode {
     Flashcard,
     Typed,
@@ -57,6 +57,17 @@ pub mod u64_text {
     }
 }
 
+/// Serialises JSON held as text (a jsonb column read with `::text`) as the
+/// JSON it is, not as a string.
+pub mod json_text {
+    use serde::{Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &str, s: S) -> Result<S::Ok, S::Error> {
+        let parsed: serde_json::Value = serde_json::from_str(v).map_err(serde::ser::Error::custom)?;
+        parsed.serialize(s)
+    }
+}
+
 /// Serialises a sequence, or another 64-bit count, as decimal text.
 pub mod seq_text {
     use serde::Serializer;
@@ -81,22 +92,12 @@ pub struct CascadeRow {
     pub clear_threshold: i16,
     pub segment_size: i32,
     pub progression: Progression,
-    pub require_alphabetical: bool,
-    /// Flashcard or typed: an Anagram cascade's own, inert in the other types.
-    pub answer_mode: AnswerMode,
-    /// Anagram cascades: each anagram's definition, and its hooks, on reveal.
-    pub show_definitions: bool,
-    pub show_hooks: bool,
-    /// Whether a reveal marks the card correct (else missed) until toggled.
-    pub reveal_correct: bool,
-    /// Anagram cascades: typed mode's "3 of 9 found" in the status bar.
-    pub show_found_count: bool,
-    /// Whether a word shows its probability order on reveal.
-    pub show_probability: bool,
-    /// Whether a definition has a column of its own beside its word (else beneath it).
-    pub definition_column: bool,
-    /// Leave Value cascades: decimal places shown, 0–3.
-    pub leave_value_decimals: i16,
+    /// The cascade's own settings (PLAN.md § Settings → Where a setting
+    /// applies): setting name to value, for every device. A setting it does
+    /// not name falls through to the device's and the account's. Read as text
+    /// and sent as the JSON object it holds.
+    #[serde(with = "json_text")]
+    pub settings: String,
     pub options_changed_at: DateTime<Utc>,
     #[serde(with = "seq_text")]
     pub options_seq: i64,
@@ -128,13 +129,6 @@ pub struct QuizRow {
     pub origin_segment_end: Option<i32>,
     pub status: QuizStatus,
     pub segment_chain: bool,
-    pub segment_size: i32,
-    pub progression: Progression,
-    pub require_alphabetical: bool,
-    pub options_changed_at: DateTime<Utc>,
-    #[serde(with = "seq_text")]
-    pub options_seq: i64,
-    pub options_device_id: Uuid,
     pub attempt: i32,
     #[serde(with = "u64_text")]
     pub shuffle_seed: i64,
@@ -159,9 +153,7 @@ pub struct QuizRow {
 pub const CASCADE_SELECT: &str = r#"
     SELECT c.id, c.name, c.quiz_type, l.name AS lexicon, d.name AS letter_distribution,
            l.definitions_revision, ls.values_revision AS leave_values_revision,
-           c.clear_threshold, c.segment_size, c.progression, c.require_alphabetical, c.answer_mode,
-           c.show_definitions, c.show_hooks, c.reveal_correct, c.show_found_count, c.show_probability, c.definition_column,
-           c.leave_value_decimals,
+           c.clear_threshold, c.segment_size, c.progression, c.settings::text AS settings,
            c.options_changed_at, c.options_seq, c.options_device_id, c.question_count, c.depth,
            c.peak_depth, c.attempts_since_completion, c.created_at, c.last_activity_at,
            c.completed_at, c.trashed_at, c.storage_bytes, c.updated_seq
@@ -172,8 +164,7 @@ pub const CASCADE_SELECT: &str = r#"
 
 pub const QUIZ_SELECT: &str = r#"
     SELECT q.id, q.cascade_id, q.level, q.origin, q.origin_quiz_id, q.origin_attempt,
-           q.origin_segment_end, q.status, q.segment_chain, q.segment_size, q.progression,
-           q.require_alphabetical, q.options_changed_at, q.options_seq, q.options_device_id,
+           q.origin_segment_end, q.status, q.segment_chain,
            q.attempt, q.shuffle_seed, q.questions_hash, q.question_count, q.correct_count,
            q.missed_count, q.cursor, q.cursor_moved_at, q.cursor_device_id, q.run_start,
            q.created_at, q.created_seq, q.last_activity_at, q.cleared_at, q.updated_seq

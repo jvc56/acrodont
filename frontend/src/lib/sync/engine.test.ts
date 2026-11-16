@@ -450,13 +450,13 @@ describe('the sync engine', () => {
 	it("a stale-rejected change to a cascade's settings reverts it; the other device's stands", async () => {
 		const { server, a } = await setup();
 		const b = await second(server);
-		await a.apply({ type: 'set_cascade_options', cascade_id: C1, show_hooks: false });
-		await b.apply({ type: 'set_cascade_options', cascade_id: C1, leave_value_decimals: 3 });
+		await a.apply({ type: 'set_cascade_options', cascade_id: C1, settings: { show_hooks: false } });
+		await b.apply({ type: 'set_cascade_options', cascade_id: C1, settings: { leave_value_decimals: 3 } });
 		await b.sync();
 		// A's change is older and unseen: stale; the cascade reverts to the server's row.
 		await a.sync();
 		const c = (await a.db.get('cascades', C1))!;
-		expect([c.show_hooks, c.leave_value_decimals]).toEqual([true, 3]);
+		expect(c.settings).toEqual({ leave_value_decimals: 3 });
 		expect(await a.db.get('overlay_cascades', C1)).toBeUndefined();
 	});
 
@@ -1262,7 +1262,8 @@ describe('the rebase, continued', () => {
 					question_idx: byPos[p].question_idx,
 					grade: miss(p) && q.level === 1 ? 'missed' : 'correct'
 				});
-				const size = q.segment_chain ? 0 : q.segment_size;
+				// The cascade's segment size, 5, which every level reads; a drill is never segmented.
+				const size = q.segment_chain ? 0 : 5;
 				if (p + 1 === q.question_count) {
 					await a.finish(quizId, String(p) + q.level);
 					return;
@@ -1646,11 +1647,11 @@ describe('operations held for a level the server built from another set', () => 
 		expect(texts(a)).toEqual([AGAIN]);
 	});
 
-	it('a change of a level’s options made for a level this device has not downloaded is replayed, not held: it reads no question row', async () => {
+	it('a change of the cascade’s options made where its levels are not downloaded is replayed, not held: it reads no question row', async () => {
 		const { server, a } = await setup();
 		const b = await second(server, false);
 		expect(await b.db.countFromIndex('quiz_questions', 'quiz_id', Q1)).toBe(0);
-		await b.apply({ type: 'set_quiz_options', quiz_id: Q1, require_alphabetical: true });
+		await b.apply({ type: 'set_cascade_options', cascade_id: C1, segment_size: 5 });
 		// Another device answers a card; B's next pull carries it, with B's own change still unsent.
 		await a.play(Q1, 'C');
 		await a.sync();
@@ -1658,7 +1659,7 @@ describe('operations held for a level the server built from another set', () => 
 		await b.sync();
 		expect(await b.db.count('outbox')).toBe(1);
 		expect(await getMeta(b.db, 'held')).toEqual({});
-		expect((await b.quiz(Q1))!.require_alphabetical).toBe(true);
+		expect((await view.cascade(b.db.transaction(APPLY_STORES) as unknown as RwTx, C1))!.segment_size).toBe(5);
 	});
 
 	it('an engine stopped by a change of account replays nothing; they wait in that account’s database', async () => {

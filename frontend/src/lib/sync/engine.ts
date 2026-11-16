@@ -3,7 +3,7 @@
 // Locks API; where Web Locks is missing every tab syncs and idempotency keeps
 // that correct. It pushes the outbox in batches of up to BATCH_OPS, pulls
 // every page, rebases, and backs off on 429 and 503 by Retry-After.
-import { pendingShares, takeShared, type SharedSettings } from '$lib/settings/device';
+import { pendingShares, takeShared, type SharedSettings } from '$lib/settings/everywhere';
 import { ApiError, request } from '$lib/api';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';

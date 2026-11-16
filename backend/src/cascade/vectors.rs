@@ -38,7 +38,6 @@ fn op_of(o: &Value) -> Op {
     let aseed = || u64s(&o["attempt_seed"]);
     let opt_prog = || o.get("progression").map(prog);
     let opt_size = || o.get("segment_size").map(|v| v.as_i64().unwrap());
-    let opt_alpha = || o.get("require_alphabetical").map(|v| v.as_bool().unwrap());
     match o["type"].as_str().unwrap() {
         "grade" => Op::Grade {
             quiz: q(),
@@ -71,10 +70,8 @@ fn op_of(o: &Value) -> Op {
         "set_cascade_options" => Op::SetCascadeOptions {
             segment_size: opt_size(),
             progression: opt_prog(),
-            require_alphabetical: opt_alpha(),
             clear_threshold: o.get("clear_threshold").map(|v| v.as_i64().unwrap()),
         },
-        "set_quiz_options" => Op::SetQuizOptions { quiz: q(), segment_size: opt_size(), progression: opt_prog(), require_alphabetical: opt_alpha() },
         t => panic!("unknown op {t}"),
     }
 }
@@ -112,9 +109,6 @@ fn snapshot(c: &SimCascade) -> Value {
                 "origin_attempt": q.origin_attempt,
                 "origin_segment_end": q.origin_segment_end,
                 "segment_chain": s.segment_chain,
-                "segment_size": s.opts.segment_size,
-                "progression": prog_str(s.opts.progression),
-                "require_alphabetical": s.opts.require_alphabetical,
                 "attempt": s.attempt,
                 "shuffle_seed": s.seed.to_string(),
                 "question_count": s.question_count,
@@ -124,8 +118,8 @@ fn snapshot(c: &SimCascade) -> Value {
                 "missed": q.missed(),
                 "cursor": s.cursor,
                 "run_start": s.run_start,
-                "next_boundary": if s.active { rules::next_boundary(s) } else { None },
-                "run_indicator": if s.active { rules::run_indicator(s).map(|r| r.to_string()) } else { None },
+                "next_boundary": if s.active { rules::next_boundary(&c.state, s) } else { None },
+                "run_indicator": if s.active { rules::run_indicator(&c.state, s).map(|r| r.to_string()) } else { None },
             })
         })
         .collect();
@@ -140,7 +134,6 @@ fn snapshot(c: &SimCascade) -> Value {
             "purged": c.purged,
             "segment_size": c.state.opts.segment_size,
             "progression": prog_str(c.state.opts.progression),
-            "require_alphabetical": c.state.opts.require_alphabetical,
         },
         "quizzes": quizzes,
     })
@@ -156,11 +149,7 @@ fn every_rule_vector() {
         let s = &v["setup"];
         let mut c = SimCascade::new(
             s["clear_threshold"].as_u64().unwrap() as u32,
-            Opts {
-                segment_size: s["segment_size"].as_u64().unwrap() as u32,
-                progression: prog(&s["progression"]),
-                require_alphabetical: s["require_alphabetical"].as_bool().unwrap(),
-            },
+            Opts { segment_size: s["segment_size"].as_u64().unwrap() as u32, progression: prog(&s["progression"]) },
             s["question_count"].as_u64().unwrap() as u32,
             uuid(&s["source_quiz_id"]),
             u64s(&s["source_seed"]),
@@ -271,8 +260,7 @@ pub(crate) fn check_invariants(c: &SimCascade) {
         assert!(q.questions.iter().all(|i| *i < source.state.question_count));
         assert!(s.run_start <= s.cursor && s.cursor < s.question_count);
         if s.segment_chain {
-            assert_eq!(s.opts.segment_size, 0);
-            assert_eq!(s.opts.progression, Progression::Drill);
+            assert_eq!(rules::effective_segment_size(&c.state, s), 0, "a chain is never segmented");
         }
         if s.origin == super::rows::Origin::Segment {
             assert!(s.segment_chain);
@@ -290,11 +278,7 @@ fn the_shared_random_sequences() {
         let s = &v["setup"];
         let mut c = SimCascade::new(
             s["clear_threshold"].as_u64().unwrap() as u32,
-            Opts {
-                segment_size: s["segment_size"].as_u64().unwrap() as u32,
-                progression: prog(&s["progression"]),
-                require_alphabetical: s["require_alphabetical"].as_bool().unwrap(),
-            },
+            Opts { segment_size: s["segment_size"].as_u64().unwrap() as u32, progression: prog(&s["progression"]) },
             s["question_count"].as_u64().unwrap() as u32,
             uuid(&s["source_quiz_id"]),
             u64s(&s["source_seed"]),
@@ -327,11 +311,7 @@ mod props {
     /// operations from the current state, and checks the invariants after each.
     fn drive(choices: &[u32], count: u32, size: u32, drill: bool) {
         let source = Uuid::from_u128(1);
-        let opts = Opts {
-            segment_size: size,
-            progression: if drill { Progression::Drill } else { Progression::Ladder },
-            require_alphabetical: false,
-        };
+        let opts = Opts { segment_size: size, progression: if drill { Progression::Drill } else { Progression::Ladder } };
         let mut c = SimCascade::new(80, opts, count, source, 0x1234_5678_9ABC_DEF0);
         let mut next_id = 2u128;
         for (k, &ch) in choices.iter().enumerate() {
@@ -341,7 +321,7 @@ mod props {
                 0..=5 => {
                     let Some(q) = c.deepest().cloned() else { continue };
                     let pos = q.positions();
-                    let end = rules::next_boundary(&q.state).unwrap_or(q.state.question_count);
+                    let end = rules::next_boundary(&c.state, &q.state).unwrap_or(q.state.question_count);
                     let run_done = (q.state.run_start..end).all(|p| q.grades.contains_key(&pos[p as usize]));
                     next_id += 1;
                     if run_done && q.state.cursor + 1 == end {
@@ -357,10 +337,11 @@ mod props {
                         Op::MoveCursor { quiz: q.id, attempt: q.state.attempt, attempt_seed: q.state.seed, position: q.state.cursor + 1 }
                     }
                 }
-                6 => {
-                    let Some(q) = c.deepest().cloned() else { continue };
-                    Op::SetQuizOptions { quiz: q.id, segment_size: Some([0, 5, 6, 130_000][(ch as usize / 10) % 4]), progression: None, require_alphabetical: None }
-                }
+                6 => Op::SetCascadeOptions {
+                    segment_size: Some([0, 5, 6, 130_000][(ch as usize / 10) % 4]),
+                    progression: Some(if (ch / 40) % 2 == 0 { Progression::Ladder } else { Progression::Drill }),
+                    clear_threshold: None,
+                },
                 7 => {
                     let cleared: Vec<Uuid> = c.quizzes.values().filter(|q| !q.state.active).map(|q| q.id).collect();
                     if cleared.is_empty() {
@@ -372,7 +353,6 @@ mod props {
                 _ => Op::SetCascadeOptions {
                     segment_size: Some([0, 5, 9][(ch as usize / 10) % 3]),
                     progression: None,
-                    require_alphabetical: None,
                     clear_threshold: [None, Some(1), Some(60), Some(100), Some(0)][(ch as usize / 30) % 5],
                 },
             };
