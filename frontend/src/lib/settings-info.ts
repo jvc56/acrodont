@@ -34,6 +34,8 @@ export const INFO = {
 		'Puts each word’s definition in a column of its own to the right of its back hooks. Off, the definition is centred under the word. On a narrow screen, such as a phone held upright, it is always under the word.',
 	found_count:
 		'In typed mode, shows "3 of 9 found" in the status bar. Off by default, since knowing how many anagrams are left is a hint.',
+	cascade_name:
+		'What this cascade is called, on the Cascades page and everywhere else. Each of your cascades needs its own name, the Trash included. Renaming needs a connection; your other devices show the new name at their next sync.',
 	clear_threshold:
 		'The score a pass needs to clear a level of this cascade. A change applies at once, to every level, including the pass you are in.',
 	// Quiz options

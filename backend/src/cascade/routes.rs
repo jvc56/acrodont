@@ -1,5 +1,6 @@
-//! `POST /api/cascades`, `POST /api/cascades/:id/duplicate` and
-//! `GET /api/cascades/:id/cards` (PLAN.md § API → Cascades and sync).
+//! `POST /api/cascades`, `POST /api/cascades/:id/duplicate`,
+//! `POST /api/cascades/:id/name` and `GET /api/cascades/:id/cards`
+//! (PLAN.md § API → Cascades and sync).
 
 use std::collections::HashMap;
 
@@ -37,6 +38,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/cascades", post(create))
         .route("/api/cascades/{id}/duplicate", post(duplicate))
+        .route("/api/cascades/{id}/name", post(rename))
         .route("/api/cascades/{id}/cards", get(cards))
 }
 
@@ -61,6 +63,13 @@ pub struct CreateBody {
     require_alphabetical: bool,
     answer_mode: AnswerMode,
     filters: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenameBody {
+    name: String,
+    device_id: Uuid,
 }
 
 #[derive(Deserialize)]
@@ -101,14 +110,19 @@ struct Display {
     leave_value_decimals: i16,
 }
 
-fn check_fields(state: &AppState, name: &str, threshold: i64, segment_size: i64) -> Result<(), ApiError> {
-    let mut errors = Vec::new();
+/// A cascade's name: 1–200 characters, none of them NUL.
+fn check_name(name: &str, errors: &mut Vec<PathError>) {
     let n = name.chars().count();
     if n == 0 || n > 200 {
         errors.push(PathError::new(&[], "name", "The name must be 1–200 characters."));
     } else if name.contains('\0') {
         errors.push(PathError::new(&[], "name", crate::search::validate::NOT_STORABLE));
     }
+}
+
+fn check_fields(state: &AppState, name: &str, threshold: i64, segment_size: i64) -> Result<(), ApiError> {
+    let mut errors = Vec::new();
+    check_name(name, &mut errors);
     if !(1..=100).contains(&threshold) {
         errors.push(PathError::new(&[], "clear_threshold", "The clear threshold is 1–100."));
     }
@@ -425,6 +439,64 @@ async fn duplicate(
         copy_of_spec: Some(row.spec_id),
     };
     store(&state, &user, n, p).await
+}
+
+/// A new name for one of the account's cascades, the Trash included
+/// (PLAN.md § API → Cascades and sync). Online only: the server checks the
+/// name against the account's others at once, so no device can hold a name
+/// another device has taken. The row is stamped like any other change, so the
+/// account's other devices pull it at their next sync, and hear of it at once
+/// on their change stream; the renaming device, named by `device_id`, applies
+/// the answer itself. The same name again is answered with the row, unchanged.
+async fn rename(
+    State(state): State<AppState>,
+    Session(user): Session,
+    Path(id): Path<Uuid>,
+    ApiJson(b): ApiJson<RenameBody>,
+) -> ApiResult<Response> {
+    let mut errors = Vec::new();
+    check_name(&b.name, &mut errors);
+    if !errors.is_empty() {
+        return Err(path_errors(errors));
+    }
+    let mut tx = state.db.begin().await?;
+    sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE").bind(user.id).execute(&mut *tx).await?;
+    let current: Option<String> = sqlx::query_scalar("SELECT name FROM cascades WHERE id = $1 AND user_id = $2")
+        .bind(id)
+        .bind(user.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let current = current.ok_or(ApiError::NotFound)?;
+    let mut seq: Option<i64> = None;
+    if current != b.name {
+        let s: i64 = sqlx::query_scalar("UPDATE users SET sync_seq = sync_seq + 1 WHERE id = $1 RETURNING sync_seq")
+            .bind(user.id)
+            .fetch_one(&mut *tx)
+            .await?;
+        let renamed = sqlx::query("UPDATE cascades SET name = $2, updated_seq = $3 WHERE id = $1")
+            .bind(id)
+            .bind(&b.name)
+            .bind(s)
+            .execute(&mut *tx)
+            .await;
+        match renamed {
+            Ok(_) => {}
+            Err(sqlx::Error::Database(d)) if d.constraint() == Some("cascades_user_id_name_key") => {
+                return Err(name_taken(&b.name));
+            }
+            Err(e) => return Err(e.into()),
+        }
+        crate::sync::notify::changed(&mut tx, user.id, Some(b.device_id)).await?;
+        seq = Some(s);
+    }
+    tx.commit().await?;
+    let mut conn = state.db.acquire().await?;
+    let cascade = rows::cascade(&mut conn, user.id, id).await?.ok_or(ApiError::NotFound)?;
+    let mut body = json!({ "cascade": cascade });
+    if let Some(s) = seq {
+        body["sync_seq"] = json!(s.to_string());
+    }
+    Ok(Json(body).into_response())
 }
 
 // ---------------------------------------------------------------------------

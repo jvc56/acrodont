@@ -30,7 +30,7 @@
 	import { display, textStyle } from '$lib/player/display.svelte';
 	import { controls } from '$lib/player/controls.svelte';
 	import { applyOrRefuse, CHANGE_REFUSED, type NewOp } from '$lib/local/apply';
-	import { storeCreated, type Created } from '$lib/local/created';
+	import { storeCreated, storeRenamed, type Created } from '$lib/local/created';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta, recordOpen } from '$lib/local/meta';
 	import { DEFAULT_STORAGE_LIMIT, formatBytes } from '$lib/cascades/storage';
@@ -68,6 +68,9 @@
 	let desktop = $state(true);
 	let landscape = $state(false);
 	let settingsOpen = $state(false);
+	/** The Name field's answer: an error under it, or that the rename was saved. */
+	let nameError = $state<string | null>(null);
+	let nameSaved = $state(false);
 	let typedText = $state('');
 	let typedInput = $state<HTMLInputElement | null>(null);
 	let typedFocused = $state(false);
@@ -571,6 +574,49 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 	let starting = $state<{ stage: 'server' | 'device'; progress: number; count: number | null } | null>(null);
 
 	/** Settings → Duplicate cascade: a new cascade from the same filters and settings, at Level 1. */
+	/**
+	 * Renames this cascade (§ Settings → Name). Online only: the server checks
+	 * the name against the account's other cascades at once, then this device
+	 * shows it everywhere, and the others pull it at their next sync.
+	 */
+	async function rename(input: HTMLInputElement) {
+		const c = v?.cascade;
+		if (!db || !c) return;
+		const name = input.value.trim();
+		nameError = null;
+		nameSaved = false;
+		if (name === c.name) {
+			input.value = c.name;
+			return;
+		}
+		if (!name) {
+			nameError = 'A cascade needs a name.';
+			input.value = c.name;
+			return;
+		}
+		if (!navigator.onLine) {
+			nameError = 'Renaming a cascade needs a connection.';
+			return;
+		}
+		try {
+			const { device_id } = await getMeta(db, 'device');
+			// The same name sent again is answered the same, so a retry is safe.
+			const r = await sendWithRetry(() =>
+				api.post<{ cascade: { name: string } }>(`/api/cascades/${id}/name`, { name, device_id })
+			);
+			await storeRenamed(db, id, r.cascade.name);
+			input.value = r.cascade.name;
+			nameSaved = true;
+			afterLocalWrite();
+			await player?.load(true);
+		} catch (e) {
+			const field = e instanceof ApiError ? e.fieldErrors.find((f) => f.field === 'name') : undefined;
+			if (field) nameError = field.message;
+			else if (isRetriable(e)) nameError = 'Renaming a cascade needs a connection.';
+			else nameError = 'The cascade could not be renamed. Try again.';
+		}
+	}
+
 	async function duplicate() {
 		if (!db || !session.userId) return;
 		const ok = await confirmAction({
@@ -1053,6 +1099,24 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 					{@const q = v.quiz}
 					<section class="space-y-4" aria-labelledby="settings-cascade">
 						{@render scopeHead('settings-cascade', 'Cascade Settings', SCOPE.cascade)}
+						<SettingRow label="Name" info={INFO.cascade_name} for="cascade-name">
+							<input
+								id="cascade-name"
+								class="w-72 max-w-full rounded-md border bg-background px-2 py-1"
+								type="text"
+								maxlength="200"
+								value={c.name}
+								aria-invalid={nameError ? 'true' : undefined}
+								oninput={() => {
+									nameError = null;
+									nameSaved = false;
+								}}
+								onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+								onchange={(e) => rename(e.currentTarget)}
+							/>
+						</SettingRow>
+						{#if nameError}<p class="text-sm text-destructive" role="alert">{nameError}</p>{/if}
+						{#if nameSaved}<p class="text-sm text-muted-foreground" role="status">✓ Renamed</p>{/if}
 						<div class="overflow-x-auto"><CascadeLadder {rows} onExport={(r) => goto(`/cascades/${id}/export?quiz=${r.quiz.id}`)} /></div>
 						<SettingRow label="Clear threshold (%)" info={INFO.clear_threshold} for="cascade-threshold">
 							<input
