@@ -2,7 +2,7 @@
 # Deploy the checked-out commit of main to production. Terraform is the only
 # deployer; this runs from the operator's laptop.
 #
-#   scripts/deploy.sh [--all] [--skip-ci-check] [--set KEY=VALUE]...
+#   scripts/deploy.sh [--all] [--skip-ci-check] [--reset-database] [--set KEY=VALUE]...
 #
 # In order, stopping at the first thing wrong:
 #   1. the checkout: clean, HEAD on origin/main, CI's run on main green on this
@@ -16,24 +16,33 @@
 #      contract-fixtures/ and the ops scripts baked into images -> rebuild;
 #      infra/ -> plan and apply; anything else -> nothing (--all deploys anyway);
 #   5. migrations: anything but an added file under backend/migrations/ is
-#      refused (append-only; production is never reset);
+#      refused (append-only; production is never reset) -- except with
+#      --reset-database, which asks for `reset` typed and goes on;
 #   6. the three images ECR lacks are built (linux/amd64, capped jobs) and
 #      pushed; tags are immutable, so one already there is this commit;
-#   7. image_tag and any --set written to prod.tfvars; the plan gate; apply;
-#      prod.tfvars uploaded;
+#   7. image_tag and any --set written to prod.tfvars; with --reset-database,
+#      the service stopped (desired count 0) and the database's schema dropped
+#      and made again, empty; the plan gate; apply (which starts the service
+#      again at prod.tfvars' desired_count); prod.tfvars uploaded;
 #   8. the wait: one COMPLETED deployment running this tag with the cpu and
 #      memory applied, healthy targets, and https://$SITE/health.
+#
+# --reset-database is for before launch only, when 0001_initial.sql was edited
+# in place (docs/migration-edits.md): it deletes every account and everything
+# the app has stored, and the new backend migrates the empty database as it
+# starts. Never once real users have accounts (docs/runbook.md).
 set -euo pipefail
 # shellcheck source=scripts/lib/ops.sh
 source "$(dirname "$0")/lib/ops.sh"
 
 usage() { sed -n '5p' "$0" >&2; exit 2; }
 
-all=0 skip_ci=0 sets=()
+all=0 skip_ci=0 reset=0 sets=()
 while (($#)); do
   case $1 in
     --all) all=1 ;;
     --skip-ci-check) skip_ci=1 ;;
+    --reset-database) reset=1 ;;
     --set) [[ $# -ge 2 && "$2" == *=* ]] || usage; sets+=("$2"); shift ;;
     --set=*=*) sets+=("${1#--set=}") ;;
     -h | --help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//' >&2; exit 0 ;;
@@ -152,7 +161,7 @@ elif [[ "$live" != "$tag" ]]; then
     ! grep -qx infra <<<"$parts" || infra=1
   fi
 fi
-if ((images == 0 && infra == 0 && ${#sets[@]} == 0)); then
+if ((images == 0 && infra == 0 && ${#sets[@]} == 0 && !reset)); then
   ops_say "nothing deployable changed since the live release $live (docs, tests, scripts): nothing to do (--all deploys anyway)"
   exit 0
 fi
@@ -165,11 +174,17 @@ if ((images && !first)) && [[ "$live" != "$tag" ]]; then
   case $rc in
     0)
       printf '%s\n' "$changed" >&2
-      ops_die "these migrations were modified, renamed or deleted since the live release $live: migrations are append-only (sqlx refuses a changed one, and production is never reset). Add a new migration instead." ;;
+      ((reset)) || ops_die "these migrations were modified, renamed or deleted since the live release $live: migrations are append-only (sqlx refuses a changed one, and production is never reset). Add a new migration instead."
+      ops_say "these migrations were modified since the live release $live: with --reset-database they are applied to an empty database" ;;
     2) ops_die "cannot compare migrations with the live tag $live (git fetch?)" ;;
   esac
   added=$(ops_migrations_added "$live" "$commit")
   [[ -z "$added" ]] || { ops_say "new migrations, applied as the backend starts:"; printf '%s\n' "$added" >&2; }
+fi
+
+if ((reset)); then
+  ops_say "WARNING: --reset-database deletes every account and everything the app has stored, for good. The site is down from when the service stops until the new release is healthy"
+  ops_confirm_typed reset "empty the production database"
 fi
 
 # 6. The images.
@@ -210,6 +225,31 @@ if ((images)); then
     ops_say "pushed ${missing[*]}"
   fi
   ops_tfvars_set image_tag "\"$tag\""
+fi
+
+# --reset-database: the service is stopped first, so no task of the old
+# release migrates the empty database with its own 0001 (the new backend
+# would then refuse it), and the schema is dropped and made again as the app
+# role, which owns it. The apply below starts the service again.
+if ((reset)); then
+  ops_say "stopping the service (desired count 0)"
+  aws ecs update-service --cluster "$OPS_CLUSTER" --service "$OPS_SERVICE" --desired-count 0 --output json >/dev/null \
+    || ops_die "the service could not be stopped: nothing was deleted"
+  for i in $(seq 61); do
+    left=$(ops_describe_service | jq -r '.services[0] | (.runningCount // 0) + (.pendingCount // 0)') || left=""
+    [[ "$left" != 0 ]] || break
+    ((i < 61)) || ops_die "the service still has ${left:-?} tasks after 10 minutes: nothing was deleted. The service is at desired count 0; run this again, or start it with scripts/set-setting.sh desired_count=1"
+    ((i % 4 != 1)) || ops_say "waiting for ${left:-?} tasks to stop"
+    sleep 10
+  done
+  ops_say "emptying the database"
+  rc=0
+  # shellcheck disable=SC2016
+  ops_run_ops_script 'printf "%s" "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" | psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f -' || rc=$?
+  # psql runs it as one transaction: a failed statement drops nothing. Exit 2
+  # is ECS not knowing, so either may be true; emptying again is harmless.
+  ((rc == 0)) || ops_die "the database was not emptied, or ECS cannot say (exit $rc). The service is stopped: run scripts/deploy.sh --reset-database again"
+  ops_say "the database is empty and the service stopped: the apply starts the new release on it. If the apply does not go through, run scripts/deploy.sh --reset-database again"
 fi
 
 # 7. Plan gate, apply, upload, and 8. the wait.

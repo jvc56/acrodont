@@ -259,6 +259,33 @@ said "append-only" || fail "the refusal does not say why"
 { ! called "docker" && ! called "$TF plan" && ! called "ecr describe-images"; } || fail "deploy.sh built or planned before refusing"
 pass "deploy.sh refuses a modified migration before any build or plan"
 
+# --reset-database: the edited migration goes through once `reset` is typed;
+# the images are built, the service stops, the schema is dropped and made
+# again, then the plan and the apply, which starts the service again at prod.tfvars' desired count.
+fresh "$B" "$B"
+answers reset y
+run deploy.sh --reset-database || fail "deploy.sh --reset-database failed"
+said "applied to an empty database" || fail "the edited migration was not said to go to an empty database"
+# The images are built while the old release still serves, so the site is down only from the stop.
+in_order "docker build" "aws ecs update-service --cluster acrodont --service acrodont --desired-count 0" \
+         "aws ecs run-task" "$TF plan" "$TF apply" "curl -fsS --max-time 20 https://acrodont.test/health"
+grep -qF 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' "$FAKE_DIR/psql/1.stdin" \
+  || fail "the schema was not dropped and made again"
+grep -qx -- '--single-transaction' "$FAKE_DIR/psql/1.args" || fail "the reset did not run as one transaction"
+[[ "$(cat "$FAKE_DIR/ecs/desired")" == 1 ]] || fail "the apply did not start the service again"
+[[ "$(s3_tag)" == "$E" && "$(running_field tag)" == "$E" ]] || fail "the reset did not deploy $E"
+fresh "$B" "$B"
+answers nope
+if run deploy.sh --reset-database; then fail "a mistyped confirmation reset the database"; fi
+{ ! called "update-service" && ! called "run-task" && ! called "docker" && ! called "$TF plan"; } \
+  || fail "a mistyped confirmation stopped, emptied, built or planned"
+fresh "$B" "$B"
+answers reset y
+if FAKE_PSQL_EXIT=3 run deploy.sh --reset-database; then fail "a failed reset went on to deploy"; fi
+said "was not emptied" || fail "the failed reset is not reported"
+! called "$TF plan" || fail "a failed reset went on to plan"
+pass "deploy.sh --reset-database: past the migration check only with reset typed; stops the service, empties the schema in one transaction, deploys and starts it again; a failed reset stops there"
+
 git -C "$R" checkout -q "$B"
 fresh "$A" "$A" "$B"
 printf '%s' "$PLAN_DB_REPLACE" > "$FAKE_DIR/plan.json"

@@ -8,7 +8,7 @@ State, under FAKE_DIR:
   s3/<bucket>/<key>    objects for `aws s3 cp`
   ecr/<repo>/<tag>     images ECR holds; the file holds imagePushedAt
   ecs/running.json     what the service runs: {"tag", "cpu", "memory"}
-  ecs/desired          the service's desired count (default 1)
+  ecs/desired          the service's desired count (default 1; an apply sets prod.tfvars')
   runtask/<n>.json     each run-task: {"overrides", "exec", "network", "env"}
   tasks/<n>.json       each task: {"status", "exit", "output", "reason"}
   psql/<n>.{args,stdin,env}  what the stub psql inside a task was given
@@ -497,6 +497,9 @@ def terraform(args):
         rc = int(os.environ.get("FAKE_APPLY_RC", "0"))
         if rc:
             sys.exit(rc)
+        # The service's desired count is Terraform's: an apply sets it back
+        # to prod.tfvars' (the variable's default, 1) after a change by hand.
+        write(path("ecs", "desired"), tfvar(tfvars, "desired_count", "1"))
         if not os.environ.get("FAKE_ROLLBACK"):
             write(path("ecs", "running.json"), json.dumps({
                 "tag": tfvar(tfvars, "image_tag"), "cpu": tfvar(tfvars, "task_cpu", "1024"),

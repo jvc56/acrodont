@@ -216,4 +216,5 @@ with this change, so the edit is in place rather than a second migration.
 
 A database made by the earlier file no longer matches: `./scripts/dev.py --reset`
 (and `make sqlx-db` for the compile-check database), and the production
-database is reset.
+database is reset: `scripts/deploy.sh --reset-database` (docs/runbook.md,
+Deploying).
