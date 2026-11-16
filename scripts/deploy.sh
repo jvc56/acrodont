@@ -21,9 +21,10 @@
 #   6. the three images ECR lacks are built (linux/amd64, capped jobs) and
 #      pushed; tags are immutable, so one already there is this commit;
 #   7. image_tag and any --set written to prod.tfvars; with --reset-database,
-#      the service stopped (desired count 0) and the database's schema dropped
-#      and made again, empty; the plan gate; apply (which starts the service
-#      again at prod.tfvars' desired_count); prod.tfvars uploaded;
+#      first a plan gate and apply of the new release at desired count 0, a
+#      wait until every task has stopped, and the database's schema dropped
+#      and made again, empty; the plan gate; apply (with --reset-database,
+#      setting the desired count back); prod.tfvars uploaded;
 #   8. the wait: one COMPLETED deployment running this tag with the cpu and
 #      memory applied, healthy targets, and https://$SITE/health.
 #
@@ -130,6 +131,13 @@ if [[ "$live" != "$state_tag" && "$live" == "$tag" ]]; then
   ops_say "the service already runs $tag, which prod.tfvars does not name yet ($state_tag): an apply of this release stopped part-way. Finishing it"
   # Its images are in ECR already; the plan is whatever the apply left undone.
   all=1
+elif [[ "$live" != "$state_tag" ]] && ((reset)); then
+  # ECS rolled a release back (a reset whose old tasks migrated the emptied
+  # database, say). The database is emptied again anyway, so this run
+  # replaces whatever came back, rather than rollback.sh, which refuses a
+  # release whose 0001 differs.
+  ops_say "the service runs $live, but prod.tfvars names $state_tag: ECS rolled that release back. --reset-database deploys $tag over it"
+  all=1
 elif [[ "$live" != "$state_tag" ]]; then
   ops_show_events
   ops_die "the service runs $live, but prod.tfvars (and Terraform) name $state_tag: ECS rolled back. Run scripts/rollback.sh first, then deploy"
@@ -227,29 +235,51 @@ if ((images)); then
   ops_tfvars_set image_tag "\"$tag\""
 fi
 
-# --reset-database: the service is stopped first, so no task of the old
-# release migrates the empty database with its own 0001 (the new backend
-# would then refuse it), and the schema is dropped and made again as the app
-# role, which owns it. The apply below starts the service again.
-if ((reset)); then
-  ops_say "stopping the service (desired count 0)"
-  aws ecs update-service --cluster "$OPS_CLUSTER" --service "$OPS_SERVICE" --desired-count 0 --output json >/dev/null \
-    || ops_die "the service could not be stopped: nothing was deleted"
+# --reset-database, in two applies. The first applies the new release at
+# desired count 0, so the old release's deployment is gone with nothing
+# running; then every task is waited on until it has stopped, draining
+# included, and the schema is dropped and made again as the app role, which
+# owns it. The second apply sets the desired count back, and only the new
+# release can start. (One apply that both restored the count and changed the
+# image let ECS start an old task to keep the service at its minimum healthy
+# percent, and that task migrated the empty database with the old 0001.)
+reset_wait_stopped() {
+  local i arns left n
   for i in $(seq 61); do
-    left=$(ops_describe_service | jq -r '.services[0] | (.runningCount // 0) + (.pendingCount // 0)') || left=""
-    [[ "$left" != 0 ]] || break
-    ((i < 61)) || ops_die "the service still has ${left:-?} tasks after 10 minutes: nothing was deleted. The service is at desired count 0; run this again, or start it with scripts/set-setting.sh desired_count=1"
-    ((i % 4 != 1)) || ops_say "waiting for ${left:-?} tasks to stop"
+    arns=$( { aws ecs list-tasks --cluster "$OPS_CLUSTER" --service-name "$OPS_SERVICE" --desired-status RUNNING --query taskArns --output text
+              aws ecs list-tasks --cluster "$OPS_CLUSTER" --service-name "$OPS_SERVICE" --desired-status STOPPED --query taskArns --output text
+            } | tr '\t' '\n' | grep -v -e '^None$' -e '^$') || arns=""
+    left=0
+    if [[ -n "$arns" ]]; then
+      left=$(printf '%s\n' "$arns" | xargs -n 100 aws ecs describe-tasks --cluster "$OPS_CLUSTER" \
+        --query 'tasks[?lastStatus!=`STOPPED`].taskArn' --output text --tasks | wc -w) || left="?"
+    fi
+    n=$(ops_describe_service | jq -r '.services[0].deployments | length') || n="?"
+    [[ "$left" != 0 || "$n" != 1 ]] || return 0
+    ((i < 61)) || ops_die "after 10 minutes the service still has ${left} tasks not stopped (${n} deployments): nothing was deleted. Run scripts/deploy.sh --reset-database again"
+    ((i % 4 != 1)) || ops_say "waiting for every task to stop (${left} left, ${n} deployments)"
     sleep 10
   done
-  ops_say "emptying the database"
+}
+
+if ((reset)); then
+  want=$(ops_tfvar desired_count)
+  # A run that stopped after the first apply left 0 in the bucket's copy.
+  [[ "$want" =~ ^[12]$ ]] || want=1
+  ops_tfvars_set desired_count 0
+  ops_say "first apply: the new release with no task running (desired count 0); the database is emptied after it"
+  ops_show_tfvars_diff "the first apply"
+  ops_ship
+  reset_wait_stopped
+  ops_say "every task has stopped: emptying the database"
   rc=0
   # shellcheck disable=SC2016
   ops_run_ops_script 'printf "%s" "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" | psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f -' || rc=$?
   # psql runs it as one transaction: a failed statement drops nothing. Exit 2
   # is ECS not knowing, so either may be true; emptying again is harmless.
   ((rc == 0)) || ops_die "the database was not emptied, or ECS cannot say (exit $rc). The service is stopped: run scripts/deploy.sh --reset-database again"
-  ops_say "the database is empty and the service stopped: the apply starts the new release on it. If the apply does not go through, run scripts/deploy.sh --reset-database again"
+  ops_tfvars_set desired_count "$want"
+  ops_say "second apply: the service started again at desired count $want, on the empty database. If it does not go through, run scripts/deploy.sh --reset-database again"
 fi
 
 # 7. Plan gate, apply, upload, and 8. the wait.

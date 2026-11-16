@@ -247,15 +247,26 @@ scripts/deploy.sh --reset-database
 It deletes every account and everything the app has stored, for good. Never
 use it once real users have accounts. After the usual checks it names the
 edited migrations and asks for `reset` to be typed. Then it builds the images
-while the old release still serves, stops the service (desired count 0, so
-no task of the old release migrates the empty database with its own file),
-and drops and makes again the `public` schema as the app role, in one
-transaction. The roles and their grants are untouched. The plan gate and the
-apply follow, and the apply starts the service again at `prod.tfvars`'
-`desired_count`; the new backend migrates the empty database as it starts.
-The site is down from the stop until the new release is healthy. If the
-apply does not go through, the service stays stopped on the empty database:
-run the same command again. Afterwards, every browser that used the site
+while the old release still serves, and works in two applies, each through
+the plan gate:
+
+1. The first applies the new release at desired count 0, so the old
+   release's deployment is replaced with nothing running. It then waits until
+   every task has stopped, including one still draining its connections.
+2. It drops and makes again the `public` schema as the app role, in one
+   transaction. The roles and their grants are untouched.
+3. The second apply sets the desired count back to `prod.tfvars`' value, so
+   the only release that can start is the new one, and it migrates the empty
+   database as it starts.
+
+A single apply that both changed the image and restored the count let ECS
+start a task of the old release to keep the service at its minimum healthy
+percent, and that task migrated the empty database with the old file. The
+site is down from the first apply until the new release is healthy. If a run
+stops part-way, or ECS rolls the release back, run the same command again:
+it accepts a rolled-back service, which `scripts/rollback.sh` would refuse
+(the releases' `0001_initial.sql` differ), and empties the database again.
+Afterwards, every browser that used the site
 holds the old accounts' data: log out on the Account page with "Remove this
 account's data from this device" on, or clear the site's data in the browser,
 and register again. `scripts/rollback.sh` refuses

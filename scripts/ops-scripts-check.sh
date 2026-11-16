@@ -260,31 +260,49 @@ said "append-only" || fail "the refusal does not say why"
 pass "deploy.sh refuses a modified migration before any build or plan"
 
 # --reset-database: the edited migration goes through once `reset` is typed;
-# the images are built, the service stops, the schema is dropped and made
-# again, then the plan and the apply, which starts the service again at prod.tfvars' desired count.
+# the images are built while the old release serves; a first apply puts the
+# new release in at desired count 0; once every task has stopped, a stopping
+# one still draining included, the schema is dropped and made again; a second
+# apply sets the desired count back, so only the new release ever starts.
 fresh "$B" "$B"
-answers reset y
-run deploy.sh --reset-database || fail "deploy.sh --reset-database failed"
+answers reset y y
+FAKE_DRAINING_POLLS=1 run deploy.sh --reset-database || fail "deploy.sh --reset-database failed"
 said "applied to an empty database" || fail "the edited migration was not said to go to an empty database"
-# The images are built while the old release still serves, so the site is down only from the stop.
-in_order "docker build" "aws ecs update-service --cluster acrodont --service acrodont --desired-count 0" \
-         "aws ecs run-task" "$TF plan" "$TF apply" "curl -fsS --max-time 20 https://acrodont.test/health"
+in_order "docker build" "$TF plan" "$TF apply" "aws ecs list-tasks" "aws ecs describe-tasks" "aws ecs run-task" \
+         "$TF plan" "$TF apply" "curl -fsS --max-time 20 https://acrodont.test/health"
+[[ "$(grep -c "aws ecs list-tasks .*--desired-status STOPPED" "$FAKE_DIR/calls.log")" -ge 2 ]] \
+  || fail "the database was emptied while a stopping task was still draining"
+! called "aws ecs update-service" || fail "the reset changed the service outside Terraform"
 grep -qF 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' "$FAKE_DIR/psql/1.stdin" \
   || fail "the schema was not dropped and made again"
 grep -qx -- '--single-transaction' "$FAKE_DIR/psql/1.args" || fail "the reset did not run as one transaction"
-[[ "$(cat "$FAKE_DIR/ecs/desired")" == 1 ]] || fail "the apply did not start the service again"
+[[ "$(cat "$FAKE_DIR/ecs/desired")" == 1 ]] || fail "the second apply did not start the service again"
+grep -q '^desired_count *= *1$' "$S3_TFVARS" || fail "the uploaded prod.tfvars does not set the desired count back"
 [[ "$(s3_tag)" == "$E" && "$(running_field tag)" == "$E" ]] || fail "the reset did not deploy $E"
 fresh "$B" "$B"
 answers nope
 if run deploy.sh --reset-database; then fail "a mistyped confirmation reset the database"; fi
-{ ! called "update-service" && ! called "run-task" && ! called "docker" && ! called "$TF plan"; } \
-  || fail "a mistyped confirmation stopped, emptied, built or planned"
+{ ! called "run-task" && ! called "docker" && ! called "$TF plan"; } \
+  || fail "a mistyped confirmation emptied, built or planned"
 fresh "$B" "$B"
 answers reset y
 if FAKE_PSQL_EXIT=3 run deploy.sh --reset-database; then fail "a failed reset went on to deploy"; fi
 said "was not emptied" || fail "the failed reset is not reported"
-! called "$TF plan" || fail "a failed reset went on to plan"
-pass "deploy.sh --reset-database: past the migration check only with reset typed; stops the service, empties the schema in one transaction, deploys and starts it again; a failed reset stops there"
+[[ "$(grep -c "$TF apply" "$FAKE_DIR/calls.log")" == 1 ]] || fail "a failed reset went on to the second apply"
+# A reset that ECS rolled back (the old release came back on the database it
+# migrated): run again, it goes ahead without rollback.sh.
+fresh "$B" "$B" "$E"
+tfvars_with "$E" > "$S3_TFVARS"
+answers reset y y
+run deploy.sh --reset-database || fail "a reset that ECS rolled back could not be run again"
+said "ECS rolled that release back" || fail "the rolled-back reset is not recognised"
+! called "docker build" || fail "the rolled-back reset built images ECR holds"
+[[ "$(running_field tag)" == "$E" ]] || fail "the rerun did not deploy $E"
+fresh "$B" "$B" "$E"
+tfvars_with "$E" > "$S3_TFVARS"
+if run deploy.sh; then fail "deploy.sh without --reset-database went past an ECS rollback"; fi
+said "scripts/rollback.sh first" || fail "a plain deploy over a rollback does not send to rollback.sh"
+pass "deploy.sh --reset-database: past the migration check only with reset typed; the new release applied at desired count 0, every task stopped (draining too), the schema emptied in one transaction, then a second apply starts it; a failed empty stops before it; a reset ECS rolled back runs again"
 
 git -C "$R" checkout -q "$B"
 fresh "$A" "$A" "$B"
