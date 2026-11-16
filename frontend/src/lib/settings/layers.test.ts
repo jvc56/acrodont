@@ -21,6 +21,8 @@ describe('where a setting applies', () => {
 		expect([d.answer_mode, d.reveal_correct, d.show_definitions, d.show_hooks]).toEqual(['flashcard', true, true, true]);
 		expect([d.show_found_count, d.show_probability, d.definition_column, d.leave_value_decimals]).toEqual([false, false, true, 0]);
 		expect(d.bindings).toEqual(DEFAULT_BINDINGS);
+		// A Definition card shows its word in the answer; the buttons show on a touch screen or below 900 px.
+		expect([d.hooks_on_question, d.player_buttons, d.buttons_below_px]).toEqual([false, 'auto', 900]);
 	});
 
 	it('takes the first place that holds a value: this cascade on this device, this cascade, this device, everywhere', () => {

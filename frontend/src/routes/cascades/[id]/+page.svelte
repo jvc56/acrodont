@@ -67,7 +67,9 @@
 	let player = $state<Player | null>(null);
 	let v = $state<PlayerView | null>(null);
 	let attempts = $state<AttemptRow[]>([]);
-	let desktop = $state(true);
+	/** A mouse or trackpad, and the window's width: with the buttons setting, they choose the layout. */
+	let pointerFine = $state(true);
+	let windowWidth = $state(1280);
 	let landscape = $state(false);
 	let settingsOpen = $state(false);
 	/** The Name field's answer: an error under it, or that the rename was saved. */
@@ -101,6 +103,12 @@
 	let levelPos = $derived(!levelQuiz ? 0 : v?.bar && !v.bar.played ? levelQuiz.cursor : (v?.card?.pos ?? levelQuiz.cursor));
 	/** Every setting's value for this cascade on this device, from whichever place holds it. */
 	let dsp = $derived(settings.value);
+	/**
+	 * The desktop layout, or the touch layout with its Previous, Toggle and
+	 * Show / Next buttons: those on a touch screen, in a window narrower than
+	 * the setting's width, or always, as the player_buttons setting asks.
+	 */
+	let desktop = $derived(dsp.player_buttons !== 'always' && pointerFine && windowWidth >= dsp.buttons_below_px);
 /** Typed mode's "3 of 9 found", when the cascade's setting asks for it and the card is still being typed. */
 	let foundCount = $derived.by(() => {
 		const card = v?.card;
@@ -165,15 +173,17 @@
 	}
 
 	onMount(() => {
-		const fine = matchMedia('(pointer: fine) and (min-width: 900px)');
+		const fine = matchMedia('(pointer: fine)');
 		const land = matchMedia('(orientation: landscape)');
 		const layout = () => {
-			desktop = fine.matches;
+			pointerFine = fine.matches;
+			windowWidth = window.innerWidth;
 			landscape = land.matches;
 		};
 		layout();
 		fine.addEventListener('change', layout);
 		land.addEventListener('change', layout);
+		window.addEventListener('resize', layout);
 		let release: (() => void) | null = null;
 		let unsub: (() => void) | null = null;
 		let cancelled = false;
@@ -228,6 +238,7 @@
 			cancelled = true;
 			fine.removeEventListener('change', layout);
 			land.removeEventListener('change', layout);
+			window.removeEventListener('resize', layout);
 			unsub?.();
 			release?.();
 			if (syncState.openCascade === id) syncState.openCascade = null;
@@ -728,7 +739,31 @@
 		{#if card.key === null}
 			<p class="text-center text-muted-foreground">This question needs a connection.</p>
 		{:else}
-			<div class="text-center font-semibold" style={textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing)} data-question><TileText text={card.key} /></div>
+			{@const hooked = v.cascade?.quiz_type === 'definition' && dsp.hooks_on_question ? card.word : null}
+			{#if hooked}
+				<!-- A Definition card shows its word once (hooks_on_question): here, with its hooks and
+				     inner hooks once the answer is shown. The dots' places are kept before then and the
+				     hooks sit either side, so the reveal never moves the word. -->
+				<div
+					class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 font-semibold"
+					style={textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing)}
+					data-question
+				>
+					<span class="justify-self-end font-normal text-muted-foreground" style={`font-size: ${dsp.hook_size_px}px;`} data-hooks="front">
+						{#if card.revealed}<TileText text={hooked.front_hooks} lower />{/if}
+					</span>
+					<span class="whitespace-nowrap">
+						<span class:invisible={!(card.revealed && hooked.front_inner)} aria-hidden={!(card.revealed && hooked.front_inner)}>·</span><TileText
+							text={card.key}
+						/><span class:invisible={!(card.revealed && hooked.back_inner)} aria-hidden={!(card.revealed && hooked.back_inner)}>·</span>
+					</span>
+					<span class="justify-self-start font-normal text-muted-foreground" style={`font-size: ${dsp.hook_size_px}px;`} data-hooks="back">
+						{#if card.revealed}<TileText text={hooked.back_hooks} lower />{/if}
+					</span>
+				</div>
+			{:else}
+				<div class="text-center font-semibold" style={textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing)} data-question><TileText text={card.key} /></div>
+			{/if}
 			<!-- The answer space: typed words as they are found, bare, then the whole answer on the reveal. -->
 			<div class="mt-6" bind:this={answerBox}>
 				{#if card.revealed}
@@ -746,7 +781,7 @@
 							definition={{ font: dsp.definition_font, size: dsp.definition_size_px, spacing: dsp.definition_spacing }}
 							definitionWidth={dsp.definition_width_px}
 							hookSize={dsp.hook_size_px}
-							word={card.word}
+							word={hooked ? null : card.word}
 						/>
 					{/if}
 				{:else if card.typed}
@@ -1104,7 +1139,12 @@
 	</div>
 {/snippet}
 
-{#snippet flag(key: 'show_definitions' | 'show_hooks' | 'show_found_count' | 'show_probability' | 'definition_column', label: string, id: string, info: string)}
+{#snippet flag(
+	key: 'show_definitions' | 'show_hooks' | 'show_found_count' | 'show_probability' | 'definition_column' | 'hooks_on_question',
+	label: string,
+	id: string,
+	info: string
+)}
 	<LayeredSetting {key} {label} for={id} {info}>
 		<input {id} type="checkbox" checked={dsp[key]} onchange={(e) => settings.change(key, e.currentTarget.checked)} />
 	</LayeredSetting>
@@ -1282,6 +1322,9 @@
 						{#if c.quiz_type !== 'leave_value'}
 							{@render flag('show_probability', 'Show each word’s probability order', 'cascade-probability', INFO.show_probability)}
 							{@render flag('definition_column', 'Definitions in their own column', 'cascade-definition-column', INFO.definition_column)}
+						{/if}
+						{#if c.quiz_type === 'definition'}
+							{@render flag('hooks_on_question', 'Show the word once, with its hooks, in the question', 'cascade-hooks-on-question', INFO.hooks_on_question)}
 						{/if}
 						{#if c.quiz_type === 'leave_value'}
 							<LayeredSetting key="leave_value_decimals" label="Round leave values to (decimal places)" info={INFO.leave_value_decimals} for="cascade-decimals">

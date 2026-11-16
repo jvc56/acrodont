@@ -697,6 +697,7 @@ defaults in the [schema](#schema)), and no settings of its own.
 | **Show how many anagrams are found in typed mode** (`show_found_count`) | Typed Anagram cards | off | on / off |
 | **Show each word's probability order** (`show_probability`) | Anagram answers and a Definition card's word | off | on / off |
 | **Definitions in their own column** (`definition_column`) | Anagram answers and a Definition card's definition | **on** | on / off: beside the word, or centred beneath it |
+| **Show the word once, with its hooks, in the question** (`hooks_on_question`) | Definition cards (see [Answers](#answers)) | off | on / off: the question shows the word's hooks once revealed, and the answer is the definition alone |
 | **Round leave values to (decimal places)** (`leave_value_decimals`) | Leave Value answers, rounded half away from zero | `0` | `0`, `1`, `2`, `3` |
 
 The rules are changed with `set_cascade_options`, under the cascade options'
@@ -1038,13 +1039,20 @@ Settings, and on the completion screen for its Move to Trash.
 
 `/cascades/:id` plays the deepest level's quiz one card at a time. Upper levels
 are shown as waiting and cannot be opened. The player chooses its layout from the
-device's **primary pointer**:
+device's **primary pointer**, the window's width and the display setting
+**Show the Previous, Toggle and Show / Next buttons** (`player_buttons`):
 
 - **Desktop layout** for a mouse or trackpad (`pointer: fine`) in a window at
-  least 900 px wide.
-- **Touch layout** otherwise (see [Touch zones](#touch-zones)).
+  least as wide as the setting **A window is narrow below**
+  (`buttons_below_px`, 900 px by default), while the buttons setting is
+  **On a touch screen or a narrow window** (the default).
+- **Touch layout**, with its Previous, Toggle and Show / Next buttons,
+  otherwise (see [Touch zones](#touch-zones)), and at any size and with any
+  pointer when the buttons setting is **Always**. Its tap zones act on a
+  mouse click like a tap.
 - A tablet with a keyboard and mouse gets the layout for its primary pointer.
-  Key bindings work in both layouts.
+  Key bindings work in both layouts, and the layout changes at once when the
+  window is resized or a setting changes.
 
 #### Desktop layout
 
@@ -1197,7 +1205,7 @@ as the term of the data model and the API.
   default, three quarters of the answers' default), and anagram definitions
   have their own. These, the question's
   position, the borders, whether the status bar and the sync status are
-  shown, how wide a definition's own column may be (0 px by default: all the room there is; see
+  shown, how wide a definition may be, in its own column or beneath its word (0 px by default: all the room a column has, and 42 rem beneath a word; see
   [Answers](#answers)), a phone's
   [tap zones](#touch-zones) and the repeat guard are settings like any other:
   in the player's Settings, under Display, and set in any of the four places
@@ -1343,8 +1351,9 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
     is two lines; a line too long for its column wraps). It is in its own
     column after the back hooks (the cascade's *Definitions in their own
     column*, on by default), or, with that off, centred beneath the word. The
-    column runs to the right edge of the page, or to the device's *Definition
-    column width* when that is not 0. The probability order and the hooks, which are
+    column runs to the right edge of the page, and a definition beneath its
+    word is at most 42 rem wide; the *Definition width* setting, when it is
+    not 0, limits both. The probability order and the hooks, which are
     smaller than the word, are centred on it vertically, not sat on its
     baseline, and the word and the definition are **centred on each
     other**, however many lines the definition takes or wraps to: a
@@ -1355,7 +1364,13 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   order, hooks and inner hooks, and the full definition text in its column
   or beneath it, as above. A Definition cascade's cards
   are always fetched with hooks; the card carries its word's (`word`) beside the
-  definition, which stays the answer.
+  definition, which stays the answer. With the answer setting **Show the word
+  once, with its hooks, in the question** (`hooks_on_question`, off by
+  default), the word is not written again: once the answer is shown, the
+  question itself (which is the word) gains its front and back hooks either
+  side and its inner-hook dots, whose places it keeps before the reveal so the
+  word never moves, and the answer is the definition alone, centred, as wide
+  as the *Definition width* allows.
 - **Leave Value**: the value rounded to the cascade's decimal places (half away
   from zero), e.g. `34.1` or `-8.4`: a negative value has its `-`, and a
   positive one no `+`. A value that rounds to zero is
@@ -8035,6 +8050,16 @@ through the ordinary endpoints, so there is still no test-only path.
   with the input focused, the bar holds Previous and Show / Next and no Toggle.
 - Set a leave value cascade's decimals to 3 in its Settings and see a leave
   answer rendered to three places.
+- **Definition width** (`misc.spec.ts`): with definitions beneath their
+  words, a *Definition width* of 60 px holds a definition to 60 px.
+- **A Definition card's word once** (`misc.spec.ts`): a Definition cascade's
+  revealed answer shows the word with its hooks over the definition; with
+  *Show the word once, with its hooks, in the question* on, the answer is the
+  definition alone and the question shows the word's front hook.
+- **The player's buttons** (`misc.spec.ts`): a mouse in a wide window has the
+  desktop layout and no buttons; **Always** shows Show / Next, which acts on
+  a click; back on automatic, a narrow-window width above the window's shows
+  the buttons, and one below it the desktop layout again.
 - **A cascade's rules** (`settings.spec.ts`): with two cascades, see no
   settings in the site header, none on the Account page, and none in the
   builder, which says where they are instead. Change one cascade's threshold

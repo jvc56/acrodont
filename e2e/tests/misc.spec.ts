@@ -95,6 +95,17 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	[w, d] = [await box(word), await box(definition)];
 	expect(d.y).toBeGreaterThanOrEqual(w.y + w.height - 1);
 	expect(Math.abs(d.x + d.width / 2 - (w.x + w.width / 2))).toBeLessThan(3);
+	// The definition width limits a definition under its word too.
+	await openPlayerSettings(page);
+	const widthBox = page.getByRole('dialog', { name: 'Settings' }).getByLabel('Definition width', { exact: true });
+	await widthBox.fill('60');
+	await widthBox.press('Tab');
+	await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close' }).click();
+	expect((await box(definition)).width).toBeLessThanOrEqual(61);
+	await openPlayerSettings(page);
+	await widthBox.fill('0');
+	await widthBox.press('Tab');
+	await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close' }).click();
 	await playerSetting(page, 'Definitions in their own column', true);
 	// Both are the cascade's settings: another cascade has its own, at their defaults.
 	// Its definition has a line for each part of speech, centred as a whole on the word's line.
@@ -182,7 +193,7 @@ test('on a phone the header is one line, and a setting\'s name is not squeezed b
 	await page.goto(port);
 	await openPlayerSettings(page);
 	const dialog = page.getByRole('dialog', { name: 'Settings' });
-	for (const label of ['Show the status bar', 'Definition column width', 'Grade border width']) {
+	for (const label of ['Show the status bar', 'Definition width', 'Grade border width']) {
 		const text = dialog.locator('label', { hasText: new RegExp(`^${label}$`) });
 		await text.scrollIntoViewIfNeeded();
 		expect((await box(text)).height, label).toBeLessThan(30);
@@ -344,3 +355,61 @@ test('a reveal marks the card correct by default, or missed when set; settings e
 	}
 });
 
+
+// PLAN.md § Settings: a Definition cascade can show its word once, in the
+// question with its hooks and inner hooks once revealed, the answer being the
+// definition alone.
+test('a Definition cascade can show its word once, with its hooks, in the question', async ({ page }) => {
+	await newUser(page, 'defonce');
+	const port = await apiCascade(page, {
+		name: 'Port definitions',
+		quiz_type: 'definition',
+		filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'O P R T' }] }
+	});
+	await page.goto(port);
+	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
+	await press(page, 'Space');
+	const question = page.locator('[data-question]');
+	// By default the answer shows the word again, with its hooks, over the definition.
+	await expect(page.locator('[data-definition]').filter({ hasText: 'a harbour' })).toBeVisible({ timeout: 30_000 });
+	await expect(page.locator('[data-answer]').filter({ hasText: /PORT/ })).toBeVisible();
+	await expect(question.locator('[data-hooks]')).toHaveCount(0);
+	await playerSetting(page, 'Show the word once, with its hooks, in the question', true);
+	// The word once: in the question, with its hooks; the answer is the definition alone.
+	await expect(page.locator('[data-answer]')).toHaveCount(0);
+	await expect(page.locator('[data-definition]').filter({ hasText: 'a harbour' })).toBeVisible();
+	await expect(question.locator('[data-hooks="front"]')).toContainText('s');
+	await expect(question).toContainText('PORT');
+});
+
+// PLAN.md § Desktop layout: the Previous, Toggle and Show / Next buttons show
+// on a touch screen and in a window narrower than a setting's width, or always.
+test('the player\'s buttons show in a narrow window, at a width the user sets, or always', async ({ page }) => {
+	await newUser(page, 'buttons');
+	const port = await apiCascade(page, { name: 'Port', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'O P R T' }] } });
+	await page.goto(port);
+	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
+	const next = page.getByRole('button', { name: /^Show \/ Next ▸$/ });
+	const quizArea = page.getByRole('application', { name: 'Quiz area' });
+	// A mouse in a wide window: the desktop layout, no buttons.
+	await expect(quizArea).toBeVisible();
+	await expect(next).toHaveCount(0);
+	// Always: the buttons, with a mouse in a wide window.
+	await playerSetting(page, 'Show the Previous, Toggle and Show / Next buttons', 'always');
+	await expect(next).toBeVisible();
+	await expect(quizArea).toHaveCount(0);
+	await next.click();
+	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
+	// Automatically, below a width the user sets: wider than this window, then narrower.
+	await playerSetting(page, 'Show the Previous, Toggle and Show / Next buttons', 'auto');
+	await expect(quizArea).toBeVisible();
+	await openPlayerSettings(page);
+	const width = page.getByRole('dialog', { name: 'Settings' }).getByLabel('A window is narrow below', { exact: true });
+	await width.fill('5000');
+	await width.press('Tab');
+	await expect(next).toBeVisible();
+	await width.fill('600');
+	await width.press('Tab');
+	await expect(quizArea).toBeVisible();
+	await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close' }).click();
+});

@@ -33,6 +33,8 @@ export const INFO = {
 		'Flashcard: reveal the answer and grade yourself. Typed (anagram cascades only): type each anagram, then press Enter on an empty box when you are finished; the card is correct only if you found them all and typed nothing else.',
 	reveal_correct:
 		'The grade a card gets when you reveal its answer, before you toggle it. “Correct” suits studying words you mostly know; “Missed” makes you mark the ones you got.',
+	hooks_on_question:
+		'Definition cascades: once the answer is shown, the question (the word) shows its hooks and inner hooks, and the answer is the definition alone, so the word is shown once.',
 	show_probability:
 		'Shows each word’s probability order to the left of its front hooks: its rank among the lexicon’s words of the same length, 1 being the likeliest to be drawn.',
 	definition_column:
@@ -63,7 +65,11 @@ export const INFO = {
 	sync_status:
 		'“Synced”, “Syncing…” and “Waiting to sync” at the bottom right of the quiz. Hidden, only what needs your attention still shows there: offline, log in, reload, or no room on this device.',
 	definition_width:
-		'The widest a definition’s own column may be, in pixels, in cascades that give definitions one; a longer definition wraps. 0, the default, lets the column use all of the page to the right of the back hooks.',
+		'The widest a definition may be, in pixels, in a column of its own or centred under its word; a longer definition wraps. 0, the default, lets a column use all of the page to the right of the back hooks, and keeps a definition under its word to a comfortable reading width.',
+	player_buttons:
+		'The Previous, Toggle and Show / Next buttons, and the layout that holds them (the one a phone has). Automatically, they are shown on a touch screen and in a window narrower than the width below; Always shows them at any size, with a mouse too.',
+	buttons_below:
+		'With the buttons shown automatically: the window width, in pixels, below which they are, whatever the pointer. 900 by default.',
 	hook_size: 'The text size of the front and back hooks, and of the probability order, in pixels.',
 	mobile_buttons:
 		'On a phone or tablet. Columns: Previous, Toggle and Show / Next side by side, each a third of the screen, tapped anywhere in its column. Rows: the question, then Previous, Toggle and Show / Next in rows under it, Show / Next at the bottom, nearest your thumb.',

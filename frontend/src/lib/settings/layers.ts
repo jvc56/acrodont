@@ -39,6 +39,11 @@ export interface Settings {
 	definition_column: boolean;
 	/** Leave Value cascades: decimal places, 0 to 3. */
 	leave_value_decimals: number;
+	/**
+	 * Definition cascades: the revealed question shows the word's hooks and
+	 * inner hooks, and the answer is the definition alone, so the word shows once.
+	 */
+	hooks_on_question: boolean;
 	question_font: string;
 	answer_font: string;
 	definition_font: string;
@@ -55,11 +60,18 @@ export interface Settings {
 	border_missed: boolean;
 	status_bar_hidden: boolean;
 	sync_status_hidden: boolean;
-	/** 0 lets a definition's column take all the room there is. */
+	/** The widest a definition may be, in its own column or under its word; 0: all the room a column has, a reading width under a word. */
 	definition_width_px: number;
 	hook_size_px: number;
 	/** On a phone: three tap columns, or three rows of buttons. */
 	mobile_buttons: 'columns' | 'rows';
+	/**
+	 * When the player has its Previous, Toggle and Show / Next buttons (the
+	 * touch layout): on a touch screen or below `buttons_below_px` ('auto'), or always.
+	 */
+	player_buttons: 'auto' | 'always';
+	/** The window width below which 'auto' shows the buttons. */
+	buttons_below_px: number;
 	mobile_row_px: number;
 	/** The same action again within this many ms counts once; 0 is off. */
 	repeat_guard_ms: number;
@@ -71,7 +83,15 @@ export type SettingKey = keyof Settings;
 /** The answer settings: what a revealed answer holds and how it is graded. */
 export type AnswerSettings = Pick<
 	Settings,
-	'answer_mode' | 'reveal_correct' | 'show_definitions' | 'show_hooks' | 'show_found_count' | 'show_probability' | 'definition_column' | 'leave_value_decimals'
+	| 'answer_mode'
+	| 'reveal_correct'
+	| 'show_definitions'
+	| 'show_hooks'
+	| 'show_found_count'
+	| 'show_probability'
+	| 'definition_column'
+	| 'leave_value_decimals'
+	| 'hooks_on_question'
 >;
 
 interface Definition<T> {
@@ -116,6 +136,7 @@ export const DEFINITIONS: { [K in SettingKey]: Definition<Settings[K]> } = {
 		clean: (v) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 3 ? v : undefined),
 		text: (v) => String(v)
 	},
+	hooks_on_question: flag(false),
 	question_font: font(),
 	answer_font: font(),
 	definition_font: font(),
@@ -134,6 +155,8 @@ export const DEFINITIONS: { [K in SettingKey]: Definition<Settings[K]> } = {
 	definition_width_px: number('definition_width_px', ' px'),
 	hook_size_px: number('hook_size_px', ' px'),
 	mobile_buttons: choice<'columns' | 'rows'>('columns', { columns: 'Columns', rows: 'Rows' }),
+	player_buttons: choice<'auto' | 'always'>('auto', { auto: 'Touch screen or narrow window', always: 'Always' }),
+	buttons_below_px: number('buttons_below_px', ' px'),
 	mobile_row_px: number('mobile_row_px', ' px'),
 	repeat_guard_ms: number('repeat_guard_ms', ' ms'),
 	bindings: {

@@ -102,8 +102,23 @@
 		{@render number('Grade border width', 'px', 'border_px', 'border_px', INFO.border_width)}
 		{@render check('Show the status bar', 'status_bar_hidden', 'display-status-bar', !d.status_bar_hidden, INFO.status_bar, (on) => settings.change('status_bar_hidden', !on))}
 		{@render check('Show the sync status', 'sync_status_hidden', 'display-sync-status', !d.sync_status_hidden, INFO.sync_status, (on) => settings.change('sync_status_hidden', !on))}
-		{@render number('Definition column width', 'px', 'definition_width_px', 'definition_width_px', INFO.definition_width)}
+		{@render number('Definition width', 'px', 'definition_width_px', 'definition_width_px', INFO.definition_width)}
 		{@render number('Hook size', 'px', 'hook_size_px', 'hook_size_px', INFO.hook_size)}
+		<LayeredSetting key="player_buttons" label="Show the Previous, Toggle and Show / Next buttons" info={INFO.player_buttons} for="display-player-buttons">
+			<select
+				id="display-player-buttons"
+				class={selectClass}
+				value={d.player_buttons}
+				onchange={(e) => settings.change('player_buttons', e.currentTarget.value === 'always' ? 'always' : 'auto')}
+			>
+				<option value="auto">On a touch screen or a narrow window</option>
+				<option value="always">Always</option>
+			</select>
+			<span class="w-8" aria-hidden="true"></span>
+		</LayeredSetting>
+		{#if d.player_buttons === 'auto'}
+			{@render number('A window is narrow below', 'px', 'buttons_below_px', 'buttons_below_px', INFO.buttons_below)}
+		{/if}
 		<LayeredSetting key="mobile_buttons" label="Tap zones on a phone" info={INFO.mobile_buttons} for="display-mobile-buttons">
 			<select
 				id="display-mobile-buttons"

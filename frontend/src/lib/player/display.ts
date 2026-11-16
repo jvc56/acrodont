@@ -27,7 +27,9 @@ export const LIMITS = {
 	question_top_px: { min: 0, max: 800, step: 1, default: 8 },
 	border_px: { min: 0, max: 40, step: 1, default: 10 },
 	mobile_row_px: { min: 32, max: 200, step: 1, default: 64 },
-	repeat_guard_ms: { min: 0, max: 1000, step: 5, default: 0 }
+	repeat_guard_ms: { min: 0, max: 1000, step: 5, default: 0 },
+	// The window width below which the player shows its buttons, as on a phone.
+	buttons_below_px: { min: 0, max: 8000, step: 1, default: 900 }
 } as const;
 export type LimitKey = keyof typeof LIMITS;
 
