@@ -80,11 +80,10 @@ test('/trash with 5,000 cleared chain quizzes: one collapsed group, pages of 100
 		     src AS (SELECT q.id, q.cascade_id FROM quizzes q WHERE q.cascade_id = '${cascade}' AND q.origin = 'source'),
 		     ins AS (
 		       INSERT INTO quizzes (id, cascade_id, user_id, level, origin, origin_quiz_id, origin_attempt, origin_segment_end,
-		                            status, segment_chain, segment_size, progression, options_changed_at, options_seq,
-		                            options_device_id, shuffle_seed, questions_hash, question_count, correct_count,
+		                            status, segment_chain, shuffle_seed, questions_hash, question_count, correct_count,
 		                            created_seq, updated_seq, cleared_at, last_activity_at)
-		       SELECT gen_random_uuid(), src.cascade_id, u.id, 2, 'segment', src.id, g, 5, 'cleared', true, 0, 'drill', now(),
-		              u.sync_seq, gen_random_uuid(), g, 0, 1, 1, u.sync_seq, u.sync_seq, now() - interval '1 day', now()
+		       SELECT gen_random_uuid(), src.cascade_id, u.id, 2, 'segment', src.id, g, 5, 'cleared', true,
+		              g, 0, 1, 1, u.sync_seq, u.sync_seq, now() - interval '1 day', now()
 		       FROM u, src, generate_series(1, 5000) AS g RETURNING 1)
 		SELECT count(*) FROM ins;`);
 	await page.goto('/cascades');
