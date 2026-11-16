@@ -205,7 +205,12 @@
 			syncState.openCascade = id;
 			const p = new Player(d, id, {
 				ensure: (cid, progress) => ensureCascade(d, cid, progress),
-				answer: () => ({ answer_mode: settings.value.answer_mode, reveal_correct: settings.value.reveal_correct }),
+				// Read as a card is shown, which can be before the effect below has passed the
+				// cascade's row to the settings: its own settings are taken from the player first.
+				answer: () => {
+					settings.setCascade(p.v.cascade);
+					return { answer_mode: settings.value.answer_mode, reveal_correct: settings.value.reveal_correct };
+				},
 				fetchCard: (cid, idx, ahead) => fetchCard(d, cid, idx, ahead),
 				fetchAhead: (cid, idx) => fetchAhead(d, cid, idx),
 				fetchDistribution: (cid) => fetchDistribution(d, cid),

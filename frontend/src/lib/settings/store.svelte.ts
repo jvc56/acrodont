@@ -4,6 +4,7 @@
 // changed while it is open. A change made in Settings applies to this cascade
 // on this device, the narrowest place, and the row then offers to move it to
 // a wider one; any place's value can be taken out from the row's 2×2.
+import { untrack } from 'svelte';
 import type { UserDb } from '$lib/local/db';
 import type { CascadeRow } from '$lib/local/rows';
 import {
@@ -65,7 +66,8 @@ class SettingsState {
 		if (!row || row.id !== this.#cascade?.id) return;
 		this.#cascade = row;
 		const own = cascadePlace(row);
-		if (!sameValue(own, this.layers.cascade)) this.layers = { ...this.layers, cascade: own };
+		// Untracked: an effect that passes the row in depends on the row alone.
+		if (!untrack(() => sameValue(own, this.layers.cascade))) this.layers = { ...untrack(() => this.layers), cascade: own };
 	}
 
 	/** Reads the places again: after a sync took the account's values, or another tab changed this device's. */
