@@ -1352,8 +1352,8 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
     column after the back hooks (the cascade's *Definitions in their own
     column*, on by default), or, with that off, centred beneath the word. The
     column runs to the right edge of the page, and a definition beneath its
-    word is at most 42 rem wide; the *Definition width* setting, when it is
-    not 0, limits both. The probability order and the hooks, which are
+    word may use the page's whole width; the *Definition width* setting, when
+    it is not 0, limits both. The probability order and the hooks, which are
     smaller than the word, are centred on it vertically, not sat on its
     baseline, and the word and the definition are **centred on each
     other**, however many lines the definition takes or wraps to: a
@@ -8051,7 +8051,8 @@ through the ordinary endpoints, so there is still no test-only path.
 - Set a leave value cascade's decimals to 3 in its Settings and see a leave
   answer rendered to three places.
 - **Definition width** (`misc.spec.ts`): with definitions beneath their
-  words, a *Definition width* of 60 px holds a definition to 60 px.
+  words, a *Definition width* of 60 px holds a definition to 60 px, and
+  at 0 it has no limit.
 - **A Definition card's word once** (`misc.spec.ts`): a Definition cascade's
   revealed answer shows the word with its hooks over the definition; with
   *Show the word once, with its hooks, in the question* on, the answer is the

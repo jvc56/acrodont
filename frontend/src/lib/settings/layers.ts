@@ -60,7 +60,7 @@ export interface Settings {
 	border_missed: boolean;
 	status_bar_hidden: boolean;
 	sync_status_hidden: boolean;
-	/** The widest a definition may be, in its own column or under its word; 0: all the room a column has, a reading width under a word. */
+	/** The widest a definition may be, in its own column or under its word; 0: all the room it has. */
 	definition_width_px: number;
 	hook_size_px: number;
 	/** On a phone: three tap columns, or three rows of buttons. */

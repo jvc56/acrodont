@@ -74,7 +74,7 @@
 		typing?: string[] | null;
 		/** Typed mode: the word found most recently, which `typing` (kept in tile order) cannot say. */
 		entered?: string | null;
-		/** The greatest width of a definition, in px, in its column or under its word; 0 is all the room a column has, and a reading width under a word. */
+		/** The greatest width of a definition, in px, in its column or under its word; 0 is all the room it has. */
 		definitionWidth?: number;
 		/** This device's choice: the size of the hooks and the probability order, in px. */
 		hookSize?: number;
@@ -181,7 +181,7 @@
 			{@render row(word, true, [word], String(answer), false)}
 		</div>
 	{:else}
-		<p class="mx-auto text-center" style={`${definitionStyle} max-width: ${definitionWidth > 0 ? `${definitionWidth}px` : '42rem'};`} data-definition>
+		<p class="mx-auto text-center" style={`${definitionStyle} max-width: ${definitionWidth > 0 ? `${definitionWidth}px` : 'none'};`} data-definition>
 			{@render lines(String(answer))}
 		</p>
 	{/if}
@@ -218,11 +218,11 @@
 		grid-column: 3;
 		justify-self: start;
 	}
-	/* As wide as the device's limit (definition_width_px), or a reading width without one. */
+	/* As wide as the limit (definition_width_px), or the whole row without one. */
 	.definition {
 		grid-column: 1 / -1;
 		justify-self: center;
-		max-width: var(--definition-width, 42rem);
+		max-width: var(--definition-width, none);
 		text-align: center;
 	}
 	.line {

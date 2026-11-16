@@ -106,6 +106,8 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	await widthBox.fill('0');
 	await widthBox.press('Tab');
 	await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close' }).click();
+	// At 0 it has no limit under its word: it may use the page's whole width.
+	await expect.poll(() => definition.evaluate((e) => getComputedStyle(e).maxWidth)).toBe('none');
 	await playerSetting(page, 'Definitions in their own column', true);
 	// Both are the cascade's settings: another cascade has its own, at their defaults.
 	// Its definition has a line for each part of speech, centred as a whole on the word's line.

@@ -65,7 +65,7 @@ export const INFO = {
 	sync_status:
 		'“Synced”, “Syncing…” and “Waiting to sync” at the bottom right of the quiz. Hidden, only what needs your attention still shows there: offline, log in, reload, or no room on this device.',
 	definition_width:
-		'The widest a definition may be, in pixels, in a column of its own or centred under its word; a longer definition wraps. 0, the default, lets a column use all of the page to the right of the back hooks, and keeps a definition under its word to a comfortable reading width.',
+		'The widest a definition may be, in pixels, in a column of its own or centred under its word; a longer definition wraps. 0, the default, lets a definition use all the room it has: in its column, all of the page to the right of the back hooks; under its word, the page’s whole width.',
 	player_buttons:
 		'The Previous, Toggle and Show / Next buttons, and the layout that holds them (the one a phone has). Automatically, they are shown on a touch screen and in a window narrower than the width below; Always shows them at any size, with a mouse too.',
 	buttons_below:
