@@ -1438,7 +1438,10 @@ with **Reset controls to defaults**.
 
   Each can be combined with any mix of Ctrl, Shift, Alt and Meta.
 - **Where bindings act.** Mouse and wheel bindings act only inside the quiz
-  area. Key bindings act anywhere on the player page except text fields outside
+  area. **A mouse binding acts as its button goes down**, as a key binding
+  does, not when it comes back up: a click's answer is not held for the
+  length of the click. A press on the scrollbar of an answer too long to fit
+  scrolls it instead. Key bindings act anywhere on the player page except text fields outside
   the quiz area, such as the Settings dialog. **A wheel binding takes the
   wheel** inside the quiz area: a bound direction acts and does not scroll, and
   an unbound direction scrolls as usual. **An answer is fitted to the panel**:
@@ -7964,7 +7967,8 @@ through the ordinary endpoints, so there is still no test-only path.
   blank standing for a tile.
 - **Desktop controls:**
   - Left click shows and advances, right click toggles, and middle click goes
-    back, with no context menu appearing; with the repeat guard at its default of
+    back, with no context menu appearing; the answer shows while the button is
+    still down; with the repeat guard at its default of
     off, both clicks of a double click count; and a wheel binding fires once
     per flick.
   - Clicks on the status bar do nothing to the quiz.

@@ -30,8 +30,12 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await page.waitForTimeout(150);
 
 	// Left click shows and advances, right click toggles, middle click goes back.
-	await area(page).click({ position: { x: 200, y: 300 } });
+	// A button acts as it goes down: the answer is shown before it comes back up.
+	const box = (await area(page).boundingBox())!;
+	await page.mouse.move(box.x + 200, box.y + 300);
+	await page.mouse.down();
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
+	await page.mouse.up();
 	await page.waitForTimeout(150);
 	await area(page).click({ button: 'right', position: { x: 200, y: 300 } });
 	await expect(page.locator('[data-grade="missed"]')).toBeVisible();

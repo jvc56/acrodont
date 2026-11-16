@@ -298,13 +298,29 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 		void act(a);
 	}
 
+	/**
+	 * A mouse button acts as it goes down, as a key does, not when it comes back
+	 * up: a click's answer is not held for the length of the click.
+	 */
 	function onMouse(e: MouseEvent) {
+		// Middle-click autoscroll and paste are off everywhere in the quiz area.
+		if (e.button === 1) e.preventDefault();
 		if ((e.target as HTMLElement).closest('input,button,a')) return;
+		// A press on the scrollbar of an answer too long to fit scrolls it.
+		if (fitArea && e.target === fitArea && e.offsetX >= fitArea.clientWidth) return;
 		const s = mouseStroke(e);
 		if (!s) return;
 		e.preventDefault();
 		const a = actionFor(controls.value, s);
-		if (a) void act(a);
+		if (!a) return;
+		// Before the reveal, Show / Next from the mouse only focuses the typed input,
+		// even while it has the focus: a click never gives a typed card up.
+		const card = v?.card;
+		if (a === 'show_next' && card?.typed && !card.revealed) {
+			typedInput?.focus();
+			return;
+		}
+		void act(a);
 	}
 
 	function onWheel(e: WheelEvent) {
@@ -953,8 +969,7 @@ ensure: (cid, progress) => ensureCascade(d, cid, progress),
 				style={`border-width: ${dsp.border_px}px; border-style: solid;`}
 				data-grade={gradeState ?? undefined}
 				aria-label="Quiz area"
-				onmousedown={(e) => e.button === 1 && e.preventDefault()}
-				onmouseup={onMouse}
+				onmousedown={onMouse}
 				oncontextmenu={(e) => e.preventDefault()}
 				onauxclick={(e) => e.preventDefault()}
 				onwheel={onWheel}
