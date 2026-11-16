@@ -28,7 +28,7 @@ function snapshot(c: SimCascade) {
 			let cor = 0,
 				mis = 0;
 			for (const g of q.grades.values()) (g === 'correct' ? cor++ : mis++);
-			const ri = s.active ? runIndicator(s) : null;
+			const ri = s.active ? runIndicator(c.state.opts, s) : null;
 			return {
 				id: q.id,
 				level: s.level,
@@ -38,8 +38,6 @@ function snapshot(c: SimCascade) {
 				origin_attempt: q.origin_attempt,
 				origin_segment_end: q.origin_segment_end,
 				segment_chain: s.segment_chain,
-				segment_size: s.opts.segment_size,
-				progression: s.opts.progression,
 				attempt: s.attempt,
 				shuffle_seed: s.seed.toString(),
 				question_count: s.question_count,
@@ -49,7 +47,7 @@ function snapshot(c: SimCascade) {
 				missed: mis,
 				cursor: s.cursor,
 				run_start: s.run_start,
-				next_boundary: s.active ? nextBoundary(s) : null,
+				next_boundary: s.active ? nextBoundary(c.state.opts, s) : null,
 				run_indicator: ri ? runIndicatorText(ri) : null
 			};
 		});

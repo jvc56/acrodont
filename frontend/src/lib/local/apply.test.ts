@@ -13,7 +13,7 @@ import rules from '../../../../contract-fixtures/cascade/rules.json';
 import { questionsHash, shuffle } from '$lib/cascade/order';
 import { nextBoundary, Rejected, runIndicator, runIndicatorText, type Progression, type QuizState } from '$lib/cascade/rules';
 import { userDbName } from './accounts';
-import { applyLocally, applyOrRefuse, APPLY_STORES, CHANGE_REFUSED, type NewOp } from './apply';
+import { applyLocally, applyOrRefuse, APPLY_STORES, CHANGE_REFUSED, optsOf, type NewOp } from './apply';
 import { openUserDb, upgradeFrom, USER_DB_VERSION, type UserDb } from './db';
 import { getMeta, initMeta } from './meta';
 import { CASCADE_SETTING_DEFAULTS, type CascadeRow, type QuestionRow, type QuizRow } from './rows';
@@ -85,10 +85,6 @@ async function seed(db: UserDb, s: Setup) {
 		origin_segment_end: null,
 		status: 'active',
 		segment_chain: false,
-		...opts,
-		options_changed_at: t,
-		options_seq: 1,
-		options_device_id: 'd',
 		attempt: 1,
 		shuffle_seed: s.seed.toString(),
 		questions_hash: questionsHash(idx).toString(),
@@ -124,7 +120,6 @@ function quizState(q: QuizRow): QuizState {
 		level: q.level,
 		origin: q.origin,
 		segment_chain: q.segment_chain,
-		opts: { segment_size: q.segment_size, progression: q.progression },
 		attempt: q.attempt,
 		seed: BigInt(q.shuffle_seed),
 		question_count: q.question_count,
@@ -142,7 +137,8 @@ async function snapshot(db: UserDb, cascadeId: string, completions: number) {
 	for (const q of (await view.quizzesOf(tx, cascadeId)).sort((a, b) => (a.id < b.id ? -1 : 1))) {
 		const rows = await view.questionsOf(tx, q.id);
 		const s = quizState(q);
-		const ri = s.active ? runIndicator(s) : null;
+		const o = optsOf(c!);
+		const ri = s.active ? runIndicator(o, s) : null;
 		const questions = rows.map((r) => r.question_idx);
 		// Invariants: counters match grades; positions come from the seed.
 		expect(q.correct_count).toBe(rows.filter((r) => r.grade === 'correct').length);
@@ -158,8 +154,6 @@ async function snapshot(db: UserDb, cascadeId: string, completions: number) {
 			origin_attempt: q.origin_attempt,
 			origin_segment_end: q.origin_segment_end,
 			segment_chain: q.segment_chain,
-			segment_size: q.segment_size,
-			progression: q.progression,
 			attempt: q.attempt,
 			shuffle_seed: q.shuffle_seed,
 			question_count: q.question_count,
@@ -169,7 +163,7 @@ async function snapshot(db: UserDb, cascadeId: string, completions: number) {
 			missed: q.missed_count,
 			cursor: q.cursor,
 			run_start: q.run_start,
-			next_boundary: s.active ? nextBoundary(s) : null,
+			next_boundary: s.active ? nextBoundary(o, s) : null,
 			run_indicator: ri ? runIndicatorText(ri) : null
 		});
 	}

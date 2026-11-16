@@ -233,21 +233,17 @@ pub async fn insert_cascade(app: &TestApp, user: Uuid, s: &Setup) {
     .unwrap();
     let all: Vec<u32> = (0..s.count as u32).collect();
     sqlx::query(
-        "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, segment_size, progression,
-                              options_changed_at, options_seq, options_device_id, shuffle_seed, questions_hash,
+        "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, shuffle_seed, questions_hash,
                               question_count, created_seq, updated_seq)
-         VALUES ($1, $2, $3, 1, 'source', $4, $5::quiz_progression, now() - interval '1 day', $6, $7, $8, $9, $10, $6, $6)",
+         VALUES ($1, $2, $3, 1, 'source', $4, $5, $6, $7, $7)",
     )
     .bind(s.source_id)
     .bind(s.cascade_id)
     .bind(user)
-    .bind(s.segment_size)
-    .bind(s.progression)
-    .bind(seq)
-    .bind(device)
     .bind(to_i64(s.source_seed))
     .bind(to_i64(questions_hash(&all)))
     .bind(s.count)
+    .bind(seq)
     .execute(&mut *tx)
     .await
     .unwrap();
@@ -410,11 +406,10 @@ pub async fn insert_cleared_chains(app: &TestApp, user: Uuid, s: &Setup, n: i32,
         .unwrap();
     sqlx::query(
         "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, origin_quiz_id, origin_attempt, origin_segment_end,
-                              status, segment_chain, segment_size, progression, options_changed_at, options_seq,
-                              options_device_id, shuffle_seed, questions_hash, question_count, created_seq, updated_seq,
+                              status, segment_chain, shuffle_seed, questions_hash, question_count, created_seq, updated_seq,
                               cleared_at, last_activity_at, correct_count)
-         SELECT gen_random_uuid(), $1, $2, 2, 'segment', $3, g, 5, 'cleared', true, 0, 'drill', now(), $4,
-                gen_random_uuid(), g, 0, 1, $4, $4, now() - make_interval(days => $6), now() - make_interval(days => $6), 1
+         SELECT gen_random_uuid(), $1, $2, 2, 'segment', $3, g, 5, 'cleared', true,
+                g, 0, 1, $4, $4, now() - make_interval(days => $6), now() - make_interval(days => $6), 1
          FROM generate_series(1, $5) AS g",
     )
     .bind(s.cascade_id)

@@ -41,7 +41,7 @@ CREATE TYPE finish_outcome AS ENUM (
 CREATE TYPE sync_op_type AS ENUM (
     'grade', 'move_cursor', 'finish', 'finish_segment', 'restore_quiz',
     'trash_cascade', 'restore_cascade', 'purge_quiz', 'purge_cascade',
-    'set_cascade_options', 'set_quiz_options'
+    'set_cascade_options'
 );
 
 CREATE TYPE sync_op_status AS ENUM ('applied', 'rejected');
@@ -426,7 +426,7 @@ CREATE TABLE cascades (
                           -- cascade's spec; Duplicate copies it again
     clear_threshold   SMALLINT NOT NULL CHECK (clear_threshold BETWEEN 1 AND 100),
 
-    -- Quiz options: what every quiz created for this cascade starts with.
+    -- Quiz options: every level of the cascade reads these, the one in progress included.
     segment_size         INTEGER NOT NULL DEFAULT 0
                              CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 300000),
                                  -- 0 = no segments; the minimum of 5 rules out the
@@ -503,16 +503,8 @@ CREATE TABLE quizzes (
     segment_chain     BOOLEAN NOT NULL DEFAULT false,
                           -- a run's drill quiz and every replacement of it: Drill for
                           -- life and never segmented (see Segments)
-
-    -- Quiz options, copied from the cascade at creation and editable afterwards.
-    segment_size         INTEGER NOT NULL DEFAULT 0
-                             CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 300000),
-    progression          quiz_progression NOT NULL DEFAULT 'ladder',
-    options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
-                             -- set_quiz_options; an older operation is rejected whole
-    options_seq          BIGINT NOT NULL,            -- sync sequence of that change, for seen_seq
-    options_device_id    UUID NOT NULL,              -- the device that made it; its own next
-                                                     -- change always applies
+                          -- No quiz holds options: every level reads its
+                          -- cascade's segment size and progression (see Quiz options)
 
     attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
     shuffle_seed      BIGINT NOT NULL,            -- the u64 seed of the current attempt's order,
@@ -545,7 +537,6 @@ CREATE TABLE quizzes (
     CHECK (origin <> 'source' OR (origin_quiz_id IS NULL AND origin_attempt IS NULL)),
     CHECK ((origin = 'segment') = (origin_segment_end IS NOT NULL)),
     CHECK (origin <> 'segment' OR segment_chain),            -- a run's misses start a chain
-    CHECK (NOT segment_chain OR (progression = 'drill' AND segment_size = 0)),
     CHECK (correct_count + missed_count <= question_count),
     CHECK (cursor >= 0 AND cursor < question_count),      -- the card being shown
     CHECK (run_start BETWEEN 0 AND cursor),                -- Previous never crosses a boundary

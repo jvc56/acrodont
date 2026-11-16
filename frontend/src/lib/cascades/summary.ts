@@ -2,7 +2,7 @@
 // § Cascades page, § Trash page, § On the device → Downloads). Everything
 // here works offline.
 import { levelBytes } from './storage';
-import { APPLY_STORES } from '$lib/local/apply';
+import { APPLY_STORES, optsOf } from '$lib/local/apply';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';
 import type { AttemptRow, CascadeRow, QuizRow } from '$lib/local/rows';
@@ -97,7 +97,7 @@ export async function cascadeSummaries(db: UserDb, online: boolean, offline = tr
 		out.push({
 			cascade: c,
 			options: optionsSummary(c),
-			levels: levelRows(quizzes, c.depth, attempts),
+			levels: levelRows(optsOf(c), quizzes, c.depth, attempts),
 			completedAt: c.completed_at,
 			offline: state,
 			progress

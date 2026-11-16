@@ -269,16 +269,11 @@ def scenarios():
 
     v = Vector("segments off or too large", [SEG, "next_boundary None"], count=10, opts=(10, "ladder"))
     v.finish_segment(v.source, 5, expect="bad_segment")
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 0})
-    v.finish_segment(v.source, 5, expect="bad_segment")
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 4}, expect="invalid")
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 5})
-    v.op({"type": "set_cascade_options", "segment_size": 4}, expect="invalid")
     v.op({"type": "set_cascade_options", "segment_size": 0})
+    v.finish_segment(v.source, 5, expect="bad_segment")
+    v.op({"type": "set_cascade_options", "segment_size": 4}, expect="invalid")
     v.op({"type": "set_cascade_options", "segment_size": 5})
     # The upper bound, the question ceiling: at it, and one past it.
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 300001}, expect="invalid")
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 300000})
     v.op({"type": "set_cascade_options", "segment_size": 300001}, expect="invalid")
     v.op({"type": "set_cascade_options", "segment_size": 300000})
     out.append(v)
@@ -288,22 +283,22 @@ def scenarios():
     chain, _ = v.finish_segment(v.source, 100)
     v.play(chain, "C")
     v.finish(chain)
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 30})  # run 4 of 9 · 1 of 20
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 0})  # run_start survives
+    v.op({"type": "set_cascade_options", "segment_size": 30})  # run 4 of 9 · 1 of 20
+    v.op({"type": "set_cascade_options", "segment_size": 0})  # run_start survives
     v.op({"type": "move_cursor", "quiz": v.source, "attempt": 1, "attempt_seed": str(v.quiz(v.source).seed),
           "position": 99}, expect="bad_cursor")
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 130000})
+    v.op({"type": "set_cascade_options", "segment_size": 130000})
     v.op({"type": "move_cursor", "quiz": v.source, "attempt": 1, "attempt_seed": str(v.quiz(v.source).seed),
           "position": 99}, expect="bad_cursor")
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 100})
+    v.op({"type": "set_cascade_options", "segment_size": 100})
     v.play(v.source, "C" * 100)
     v.finish_segment(v.source, 200)  # run 3 of 3 · 1 of 50 on the last run
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 50})  # a size that divides the count
+    v.op({"type": "set_cascade_options", "segment_size": 50})  # a size that divides the count
     out.append(v)
 
     v = Vector("segments turned on mid-attempt", [SEG, "How a run is numbered"], count=250)
     v.play(v.source, "C" * 200)
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 50})  # run 1 of 5 · 201 of 250
+    v.op({"type": "set_cascade_options", "segment_size": 50})  # run 1 of 5 · 201 of 250
     out.append(v)
 
     v = Vector("the ceil(question_count / S) bound", [OPTS, SEG], count=40, opts=(5, "ladder"))
@@ -325,7 +320,7 @@ def scenarios():
     chain, _ = v.finish_segment(v.source, 40)
     v.play(chain, "C")
     v.finish(chain)
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 15})  # next boundary 45, not 30
+    v.op({"type": "set_cascade_options", "segment_size": 15})  # next boundary 45, not 30
     v.finish_segment(v.source, 30, expect="bad_segment")
     v.play(v.source, "CCCCC")
     v.finish_segment(v.source, 45)
@@ -335,7 +330,7 @@ def scenarios():
     for _ in range(17):
         v.play(v.source, "C" * 7, checkpoint=False)
         v.finish_segment(v.source, v.quiz(v.source).cursor + 1, expect="applied")
-    v.op({"type": "set_quiz_options", "quiz": v.source, "segment_size": 120})  # next boundary 120: one question
+    v.op({"type": "set_cascade_options", "segment_size": 120})  # next boundary 120: one question
     v.play(v.source, "C")
     v.finish_segment(v.source, 120)
     out.append(v)
@@ -354,13 +349,11 @@ def scenarios():
     out.append(v)
 
     # -- Options ----------------------------------------------------------------------
-    v = Vector("options are copied, never referenced", [OPTS])
+    v = Vector("every level reads the cascade's options", [OPTS])
     v.op({"type": "set_cascade_options", "progression": "drill"})
     v.play(v.source, "CCCCCMMMMM")
-    l2, _ = v.finish(v.source)  # the new quiz takes the cascade's options
-    v.op({"type": "set_quiz_options", "quiz": l2, "progression": "ladder"})  # touches nothing else
-    v.op({"type": "set_cascade_options", "segment_size": 5})  # touches no existing quiz
-    v.op({"type": "set_quiz_options", "quiz": v.source, "progression": "drill"}, expect="invalid")
+    l2, _ = v.finish(v.source)  # no quiz holds a copy
+    v.op({"type": "set_cascade_options", "segment_size": 5})  # the waiting Source quiz now has a boundary at 5
     out.append(v)
 
     v = Vector("the clear threshold changes for the quiz in progress", [OPTS, RULES], count=10, threshold=80)
@@ -382,49 +375,49 @@ def scenarios():
 
     v = Vector("a chain stays drill through replacements", [OPTS, SEG], count=10, opts=(5, "ladder"))
     v.play(v.source, "CMMMM")
-    chain, _ = v.finish_segment(v.source, 5)
-    v.op({"type": "set_quiz_options", "quiz": chain, "progression": "ladder"}, expect="invalid")
-    v.op({"type": "set_quiz_options", "quiz": chain, "segment_size": 5}, expect="invalid")
+    chain, _ = v.finish_segment(v.source, 5)  # Drill and unsegmented, whatever the cascade's options
     v.play(chain, "CMMM")
     c2, _ = v.finish(chain)
     v.play(c2, "CMM")
     c3, _ = v.finish(c2)
     out.append(v)
 
-    v = Vector("a quiz's own progression decides", [OPTS, PROG])
+    v = Vector("a progression change reaches the level in progress", [OPTS, PROG])
     v.play(v.source, "CCCCCMMMMM")
     l2, _ = v.finish(v.source)
-    v.op({"type": "set_quiz_options", "quiz": l2, "progression": "drill"})
-    v.play(l2, "CCMMM")  # below the threshold: replaced, as Drill
+    v.play(l2, "CC")
+    v.op({"type": "set_cascade_options", "progression": "drill"})  # mid-attempt
+    v.play(l2, "MMM")  # below the threshold: replaced, as Drill
     l2b, _ = v.finish(l2)
     out.append(v)
 
     v = Vector("switched to ladder in a drill cascade", [OPTS, PROG], opts=(0, "drill"))
     v.play(v.source, "CCCCCMMMMM")
     l2, _ = v.finish(v.source)
-    v.op({"type": "set_quiz_options", "quiz": l2, "progression": "ladder"})
+    v.op({"type": "set_cascade_options", "progression": "ladder"})
     v.play(l2, "CCMMM")  # below the threshold: descends, as Ladder
     v.finish(l2)
     out.append(v)
 
-    v = Vector("options on a waiting upper level", [OPTS, SEG], count=20)
+    v = Vector("a size change reaches a waiting upper level", [OPTS, SEG], count=20)
     v.play(v.source, "CCCCCMMMMMCCCCCMMMMM")
     l2, _ = v.finish(v.source)
     v.play(l2, "CCMMMMMMMM")
     l3, _ = v.finish(l2)
-    v.op({"type": "set_quiz_options", "quiz": l2, "segment_size": 5})  # Level 2 waits, reset
+    # Level 2 (10 questions) waits, reset; Level 3 (8) is at or below the size, so unsegmented.
+    v.op({"type": "set_cascade_options", "segment_size": 9})
     v.play(l3, "CCCCCCCC")
-    v.finish(l3)  # back up: Level 2 now has its boundary at 5
+    v.finish(l3)  # back up: Level 2 now has its boundary at 9
     out.append(v)
 
     # -- Restore details -------------------------------------------------------------
-    v = Vector("restores take the cascade's current options", [TRASH, OPTS], count=10, opts=(0, "ladder"))
+    v = Vector("restores read the cascade's current options", [TRASH, OPTS], count=10, opts=(0, "ladder"))
     v.play(v.source, "CCCCCCCCMM")
     l2, _ = v.finish(v.source)
     v.play(l2, "CC")
     v.finish(l2)
     v.op({"type": "set_cascade_options", "segment_size": 5, "progression": "drill"})
-    v.op({"type": "restore_quiz", "quiz": l2, "shuffle_seed": v.next_seed()})  # takes the new options
+    v.op({"type": "restore_quiz", "quiz": l2, "shuffle_seed": v.next_seed()})  # reads the new options
     out.append(v)
 
     v = Vector("restore on top of a chain", [TRASH, SEG], count=20, opts=(5, "ladder"))
@@ -480,7 +473,6 @@ def scenarios():
     v.play(v.source, "CCCCC")
     v.finish(v.source)  # completed: levels 3, attempts counted
     v.op({"type": "restore_quiz", "quiz": l2, "shuffle_seed": v.next_seed()})  # peak_depth 2
-    v.op({"type": "set_quiz_options", "quiz": l2, "segment_size": 5})
     out.append(v)
 
     v = Vector("peak depth 3 below a restored quiz", [SRC, "Completion counts"], count=10)
@@ -573,7 +565,7 @@ def random_sequences(n_seqs=40, n_steps=160):
             elif r < 78 and active:
                 q = active[pick(len(active))]
                 size = [0, 5, 6, 7, 9, 13, 130000, len(q.idx), len(q.idx) + 5][pick(9)]
-                v.op({"type": "set_quiz_options", "quiz": q.id, "segment_size": size}, checkpoint=False)
+                v.op({"type": "set_cascade_options", "segment_size": size}, checkpoint=False)
             elif r < 83:
                 o = {"type": "set_cascade_options", "segment_size": [0, 5, 8, 20][pick(4)],
                      "progression": ["ladder", "drill"][pick(2)]}

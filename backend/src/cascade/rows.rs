@@ -129,12 +129,6 @@ pub struct QuizRow {
     pub origin_segment_end: Option<i32>,
     pub status: QuizStatus,
     pub segment_chain: bool,
-    pub segment_size: i32,
-    pub progression: Progression,
-    pub options_changed_at: DateTime<Utc>,
-    #[serde(with = "seq_text")]
-    pub options_seq: i64,
-    pub options_device_id: Uuid,
     pub attempt: i32,
     #[serde(with = "u64_text")]
     pub shuffle_seed: i64,
@@ -170,8 +164,7 @@ pub const CASCADE_SELECT: &str = r#"
 
 pub const QUIZ_SELECT: &str = r#"
     SELECT q.id, q.cascade_id, q.level, q.origin, q.origin_quiz_id, q.origin_attempt,
-           q.origin_segment_end, q.status, q.segment_chain, q.segment_size, q.progression,
-           q.options_changed_at, q.options_seq, q.options_device_id,
+           q.origin_segment_end, q.status, q.segment_chain,
            q.attempt, q.shuffle_seed, q.questions_hash, q.question_count, q.correct_count,
            q.missed_count, q.cursor, q.cursor_moved_at, q.cursor_device_id, q.run_start,
            q.created_at, q.created_seq, q.last_activity_at, q.cleared_at, q.updated_seq

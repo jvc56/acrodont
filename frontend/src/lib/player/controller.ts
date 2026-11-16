@@ -9,12 +9,12 @@
 // `run_start`. A card whose key never arrived reads "this question needs a
 // connection" and is moved past with nothing emitted; a card whose answer is
 // gone still grades, and a typed card falls back to flashcard mode.
-import { applyLocally, APPLY_STORES, quizState, type LocalResult, type NewOp } from '$lib/local/apply';
+import { applyLocally, APPLY_STORES, optsOf, quizState, type LocalResult, type NewOp } from '$lib/local/apply';
 import type { UserDb } from '$lib/local/db';
 import type { AnswerMode, CascadeRow, QuestionRow, QuizRow, WordHooks } from '$lib/local/rows';
 import * as view from '$lib/local/view';
 import type { RwTx } from '$lib/local/view';
-import { nextBoundary, Rejected, runIndicator, type Grade } from '$lib/cascade/rules';
+import { nextBoundary, Rejected, runIndicator, type Grade, type Opts } from '$lib/cascade/rules';
 import { Distribution } from '$lib/tiles';
 import { finishBanner, runBanner } from './banner';
 import { statusRows, type StatusRows } from './segment';
@@ -175,7 +175,7 @@ export class Player {
 		const quiz = this.v.quiz;
 		// The grades of this pass, by position: the rows in memory are the quiz's own.
 		const bar = quiz
-			? statusRows(quiz, this.v.quizzes, this.v.card?.pos ?? quiz.cursor, (p) => this.rows.get(this.order[p])?.grade)
+			? statusRows(this.opts_(), quiz, this.v.quizzes, this.v.card?.pos ?? quiz.cursor, (p) => this.rows.get(this.order[p])?.grade)
 			: null;
 		this.v = { ...this.v, bar };
 		for (const fn of this.listeners) fn(this.v);
@@ -588,8 +588,13 @@ export class Player {
 	// The three actions
 	// -------------------------------------------------------------------------
 
+	/** The cascade's quiz options, which every level reads (PLAN.md § Quiz options). */
+	private opts_(): Opts {
+		return this.v.cascade ? optsOf(this.v.cascade) : { segment_size: 0, progression: 'ladder' };
+	}
+
 	private runEnd(q: QuizRow): number {
-		return nextBoundary(quizState(q)) ?? q.question_count;
+		return nextBoundary(this.opts_(), quizState(q)) ?? q.question_count;
 	}
 
 	/** Show / Next. Resolves once its writes are saved; the screen changes before that. */
@@ -688,7 +693,7 @@ export class Player {
 			count: q.question_count,
 			misses: current.missed_count,
 			threshold: this.v.cascade!.clear_threshold,
-			progression: q.progression,
+			progression: q.segment_chain ? 'drill' : this.v.cascade!.progression,
 			segmentChain: q.segment_chain
 		};
 		if (end === q.question_count) {
@@ -704,14 +709,14 @@ export class Player {
 			await this.reload();
 			let back: { level: number; run: number; runs: number } | undefined;
 			if (q.segment_chain && this.v.quiz) {
-				const ri = runIndicator(quizState(this.v.quiz));
+				const ri = runIndicator(this.opts_(), quizState(this.v.quiz));
 				if (ri) back = { level: this.v.quiz.level, run: ri.run, runs: ri.total };
 			}
 			this.v.banner = finishBanner({ ...facts, outcome: r.outcome!, completion: r.completion, back });
 			if (r.completion) this.v.completion = r.completion;
 			return this.emit();
 		}
-		const ri = runIndicator(quizState(q))!;
+		const ri = runIndicator(this.opts_(), quizState(q))!;
 		let runMisses = 0;
 		for (let p = q.run_start; p < end; p++) if (this.rows.get(this.order[p])?.grade === 'missed') runMisses++;
 		const r = await this.write({
@@ -768,7 +773,7 @@ export class Player {
 		const target = card.pos - 1;
 		if (target < q.run_start) {
 			// A blocked Previous always has a visible cause.
-			if (card.pos > 0 && !runIndicator(quizState(q))) this.v.message = 'You have already finished this part of the pass.';
+			if (card.pos > 0 && !runIndicator(this.opts_(), quizState(q))) this.v.message = 'You have already finished this part of the pass.';
 			return this.emit();
 		}
 		// Going back discards this card's unsaved reveal and toggle.

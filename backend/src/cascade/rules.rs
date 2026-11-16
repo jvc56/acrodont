@@ -110,7 +110,6 @@ pub struct QuizState {
     pub level: u32,
     pub origin: Origin,
     pub segment_chain: bool,
-    pub opts: Opts,
     pub attempt: u32,
     pub seed: u64,
     pub question_count: u32,
@@ -128,7 +127,6 @@ pub struct NewQuiz {
     pub questions: Vec<u32>,
     pub seed: u64,
     pub segment_chain: bool,
-    pub opts: Opts,
     pub origin_attempt: u32,
     pub origin_segment_end: Option<u32>,
 }
@@ -191,25 +189,15 @@ pub struct Restored {
     pub level: u32,
     pub attempt: u32,
     pub seed: u64,
-    pub opts: Opts,
     /// The cascade was trashed and comes back with it.
     pub cascade_restored: bool,
 }
 
-/// The options a created quiz takes: the cascade's, except a segment chain,
-/// which is Drill with no segments for life.
-pub fn new_quiz_opts(c: &CascadeState, chain: bool) -> Opts {
-    if chain {
-        Opts { segment_size: 0, progression: Progression::Drill }
-    } else {
-        c.opts
-    }
-}
-
-/// The segment size the rules read: 0 for a chain, for 0, and at or above
-/// the question count.
-pub fn effective_segment_size(q: &QuizState) -> u32 {
-    let s = q.opts.segment_size;
+/// The segment size the rules read for a quiz: the cascade's, which every
+/// level reads (no quiz holds a copy), but 0 for a chain, for 0, and at or
+/// above the question count.
+pub fn effective_segment_size(c: &CascadeState, q: &QuizState) -> u32 {
+    let s = c.opts.segment_size;
     if q.segment_chain || s == 0 || s >= q.question_count {
         0
     } else {
@@ -220,8 +208,8 @@ pub fn effective_segment_size(q: &QuizState) -> u32 {
 /// The smallest multiple of the segment size above the cursor and below the
 /// question count; `None` when segments are off, at or above the count, or
 /// for a chain — so nothing ever divides by the size.
-pub fn next_boundary(q: &QuizState) -> Option<u32> {
-    let s = effective_segment_size(q);
+pub fn next_boundary(c: &CascadeState, q: &QuizState) -> Option<u32> {
+    let s = effective_segment_size(c, q);
     if s == 0 {
         return None;
     }
@@ -245,12 +233,12 @@ impl std::fmt::Display for RunIndicator {
     }
 }
 
-pub fn run_indicator(q: &QuizState) -> Option<RunIndicator> {
-    let s = effective_segment_size(q);
+pub fn run_indicator(c: &CascadeState, q: &QuizState) -> Option<RunIndicator> {
+    let s = effective_segment_size(c, q);
     if s == 0 {
         return None;
     }
-    let end = next_boundary(q).unwrap_or(q.question_count);
+    let end = next_boundary(c, q).unwrap_or(q.question_count);
     Some(RunIndicator {
         run: q.run_start / s + 1,
         total: (q.question_count - 1) / s + 1,
@@ -290,8 +278,8 @@ pub fn check_deepest(c: &CascadeState, q: &QuizState) -> Result<(), Reason> {
 
 /// Not below `run_start`, and below the next boundary, or the question count
 /// when there is none.
-pub fn check_move_cursor(q: &QuizState, position: u32) -> Result<(), Reason> {
-    let limit = next_boundary(q).unwrap_or(q.question_count);
+pub fn check_move_cursor(c: &CascadeState, q: &QuizState, position: u32) -> Result<(), Reason> {
+    let limit = next_boundary(c, q).unwrap_or(q.question_count);
     if position < q.run_start || position >= limit {
         return Err(Reason::BadCursor);
     }
@@ -300,8 +288,8 @@ pub fn check_move_cursor(q: &QuizState, position: u32) -> Result<(), Reason> {
 
 /// The segment end's own validity: a segment size, a multiple of it, strictly
 /// inside the quiz. The duplicate and cursor checks come after (see `finish_segment`).
-pub fn check_segment_end(q: &QuizState, end: u32) -> Result<(), Reason> {
-    let s = q.opts.segment_size;
+pub fn check_segment_end(c: &CascadeState, q: &QuizState, end: u32) -> Result<(), Reason> {
+    let s = c.opts.segment_size;
     if q.segment_chain || s == 0 || !end.is_multiple_of(s) || end == 0 || end >= q.question_count {
         return Err(Reason::BadSegment);
     }
@@ -334,17 +322,6 @@ pub fn check_clear_threshold(t: i64) -> Result<u32, Reason> {
     }
 }
 
-/// A chain's progression and segment size are fixed; the Source quiz has no progression.
-pub fn check_quiz_option_fields(q: &QuizState, progression: bool, segment_size: bool) -> Result<(), Reason> {
-    if q.segment_chain && (progression || segment_size) {
-        return Err(Reason::Invalid);
-    }
-    if q.origin == Origin::Source && progression {
-        return Err(Reason::Invalid);
-    }
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // The rules
 // ---------------------------------------------------------------------------
@@ -365,13 +342,12 @@ pub fn finish(c: &mut CascadeState, q: &QuizState, correct: u32, misses: Vec<u32
     let passed = u64::from(correct) * 100 >= u64::from(c.clear_threshold) * u64::from(count);
     c.attempts_since_completion += 1;
     let reset = reset_seed(seed);
-    let new_quiz = |c: &CascadeState, level: u32, origin: Origin, chain: bool, questions: Vec<u32>, origin_attempt| NewQuiz {
+    let new_quiz = |level: u32, origin: Origin, chain: bool, questions: Vec<u32>, origin_attempt| NewQuiz {
         level,
         origin,
         questions,
         seed,
         segment_chain: chain,
-        opts: new_quiz_opts(c, chain),
         origin_attempt,
         origin_segment_end: None,
     };
@@ -386,15 +362,17 @@ pub fn finish(c: &mut CascadeState, q: &QuizState, correct: u32, misses: Vec<u32
             return FinishResult::Reshuffled { reset_seed: reset };
         }
         // The Source quiz's misses always go down, whatever the score.
-        let n = new_quiz(c, 2, Origin::Descent, false, misses, q.attempt);
+        let n = new_quiz(2, Origin::Descent, false, misses, q.attempt);
         push_depth(c);
         return FinishResult::Descended { reset_seed: reset, new_level: n };
     }
     if correct == 0 {
         return FinishResult::Reshuffled { reset_seed: reset };
     }
-    if q.opts.progression == Progression::Ladder && !passed {
-        let n = new_quiz(c, q.level + 1, Origin::Descent, false, misses, q.attempt);
+    // The cascade's progression, which every level reads; a chain is Drill for life.
+    let progression = if q.segment_chain { Progression::Drill } else { c.opts.progression };
+    if progression == Progression::Ladder && !passed {
+        let n = new_quiz(q.level + 1, Origin::Descent, false, misses, q.attempt);
         push_depth(c);
         return FinishResult::Descended { reset_seed: reset, new_level: n };
     }
@@ -404,7 +382,7 @@ pub fn finish(c: &mut CascadeState, q: &QuizState, correct: u32, misses: Vec<u32
         return FinishResult::Finished { cleared: passed, replacement: None };
     }
     let origin = if passed { Origin::ClearReplacement } else { Origin::DrillReplacement };
-    let n = new_quiz(c, q.level, origin, q.segment_chain, misses, q.attempt);
+    let n = new_quiz(q.level, origin, q.segment_chain, misses, q.attempt);
     FinishResult::Finished { cleared: passed, replacement: Some(n) }
 }
 
@@ -421,7 +399,6 @@ pub fn finish_segment(c: &mut CascadeState, q: &QuizState, run_misses: Vec<u32>,
         questions: run_misses,
         seed,
         segment_chain: true,
-        opts: new_quiz_opts(c, true),
         origin_attempt: q.attempt,
         origin_segment_end: Some(end),
     };
@@ -430,12 +407,10 @@ pub fn finish_segment(c: &mut CascadeState, q: &QuizState, run_misses: Vec<u32>,
 }
 
 /// Restoring a cleared quiz: the new deepest level, attempt + 1, shuffled
-/// with the seed unmodified, options copied afresh from the cascade (a chain
-/// keeps its own). A trashed cascade comes back with it.
+/// with the seed unmodified. A trashed cascade comes back with it.
 pub fn restore_quiz(c: &mut CascadeState, q: &QuizState, seed: u64) -> Restored {
     let cascade_restored = c.trashed;
     c.trashed = false;
     push_depth(c);
-    let opts = if q.segment_chain { q.opts } else { c.opts };
-    Restored { level: c.depth, attempt: q.attempt + 1, seed, opts, cascade_restored }
+    Restored { level: c.depth, attempt: q.attempt + 1, seed, cascade_restored }
 }

@@ -240,7 +240,7 @@ async fn a_finish_past_five_times_the_limit_is_refused(pool: sqlx::PgPool) {
     assert_storage_consistent(&app, user).await;
 
     // A segment's finish: refused when its run's miss would make a level...
-    let o = d.op("set_quiz_options", json!({ "quiz_id": level2, "segment_size": 5 }));
+    let o = d.op("set_cascade_options", json!({ "cascade_id": cascade, "segment_size": 5 }));
     assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
     let q = quiz_now(&app, level2).await;
     let run = |d: &mut Device<'_>| {

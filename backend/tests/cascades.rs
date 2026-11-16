@@ -112,8 +112,8 @@ async fn creation_for_all_three_types(pool: sqlx::PgPool) {
     }
 }
 
-/// "creating a cascade with each combination of quiz options, and the Source
-/// quiz carrying the copy".
+/// "creating a cascade with each combination of quiz options": the cascade
+/// holds them, and the Source quiz no copy, since every level reads the cascade's.
 #[sqlx::test]
 async fn every_combination_of_quiz_options(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
@@ -126,10 +126,11 @@ async fn every_combination_of_quiz_options(pool: sqlx::PgPool) {
             let r = c.post("/api/cascades", b).await;
             assert_eq!(r.status, StatusCode::CREATED);
             let j = r.json();
-            for row in [&j["cascade"], &j["source_quiz"]] {
-                assert_eq!(row["segment_size"], seg);
-                assert_eq!(row["progression"], prog);
-                assert!(row.get("require_alphabetical").is_none());
+            assert_eq!(j["cascade"]["segment_size"], seg);
+            assert_eq!(j["cascade"]["progression"], prog);
+            let q = &j["source_quiz"];
+            for k in ["segment_size", "progression", "options_changed_at", "options_seq", "options_device_id", "require_alphabetical"] {
+                assert!(q.get(k).is_none(), "{k}");
             }
         }
     }

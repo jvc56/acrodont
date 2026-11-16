@@ -12,7 +12,6 @@ import {
 	checkDeepest,
 	checkLive,
 	checkMoveCursor,
-	checkQuizOptionFields,
 	checkSegmentEnd,
 	checkSegmentPastCursor,
 	checkSegmentSize,
@@ -83,12 +82,6 @@ export type NewOp =
 			clear_threshold?: number;
 			/** Changes to the cascade's own settings (the "This cascade" place): a value, or null to take one out. */
 			settings?: Record<string, unknown>;
-	  }
-	| {
-			type: 'set_quiz_options';
-			quiz_id: string;
-			segment_size?: number;
-			progression?: Progression;
 	  };
 
 export const APPLY_STORES: StoreName[] = [...view.VIEW_STORES, 'meta', 'outbox'];
@@ -97,7 +90,7 @@ export const APPLY_STORES: StoreName[] = [...view.VIEW_STORES, 'meta', 'outbox']
 // Rows ↔ rule state
 // ---------------------------------------------------------------------------
 
-function optsOf(r: { segment_size: number; progression: Progression }): Opts {
+export function optsOf(r: { segment_size: number; progression: Progression }): Opts {
 	return { segment_size: r.segment_size, progression: r.progression };
 }
 
@@ -117,7 +110,6 @@ export function quizState(q: QuizRow): QuizState {
 		level: q.level,
 		origin: q.origin,
 		segment_chain: q.segment_chain,
-		opts: optsOf(q),
 		attempt: q.attempt,
 		seed: BigInt(q.shuffle_seed),
 		question_count: q.question_count,
@@ -218,10 +210,6 @@ async function insertQuiz(
 		origin_segment_end: n.origin_segment_end,
 		status: 'active',
 		segment_chain: n.segment_chain,
-		...n.opts,
-		options_changed_at: at,
-		options_seq: 0,
-		options_device_id: ctx.device_id,
 		attempt: 1,
 		shuffle_seed: n.seed.toString(),
 		questions_hash: hash,
@@ -302,7 +290,7 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 			const s = quizState(q);
 			checkLive(cascadeState(c), s);
 			checkAttempt(s, op.attempt as number, BigInt(op.attempt_seed as string));
-			checkMoveCursor(s, op.position as number);
+			checkMoveCursor(optsOf(c), s, op.position as number);
 			await putQuiz(tx, { ...q, cursor: op.position as number, cursor_moved_at: at, cursor_device_id: ctx.device_id });
 			return { cascade_id: c.id, level: q.level };
 		}
@@ -382,7 +370,7 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 			checkLive(cs, qs);
 			// PQ-013: the attempt and the duplicate before the depth.
 			checkAttempt(qs, op.attempt as number, BigInt(op.attempt_seed as string));
-			checkSegmentEnd(qs, end);
+			checkSegmentEnd(cs.opts, qs, end);
 			for (const o of await view.quizzesOf(tx, c.id)) {
 				if (o.origin === 'segment' && o.origin_quiz_id === q.id && o.origin_attempt === q.attempt && o.origin_segment_end === end) {
 					throw new Rejected('duplicate_segment');
@@ -432,9 +420,6 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 				status: 'active',
 				cleared_at: null,
 				level: r.level,
-				...r.opts,
-				options_changed_at: at,
-				options_device_id: ctx.device_id,
 				last_activity_at: later(q.last_activity_at, at)
 			};
 			await putQuiz(tx, row);
@@ -492,19 +477,6 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 			if (op.progression !== undefined) next.progression = op.progression as Progression;
 			if (op.settings !== undefined) next.settings = mergeCascadeSettings(c.settings ?? {}, op.settings);
 			await putCascade(tx, next);
-			return { cascade_id: c.id };
-		}
-		case 'set_quiz_options': {
-			const { q, c } = await loadQuiz(tx, op.quiz_id as string);
-			const qs = quizState(q);
-			checkLive(cascadeState(c), qs);
-			const size =
-				op.segment_size === undefined ? undefined : checkSegmentSize(op.segment_size as number, ctx.max_quiz_questions);
-			checkQuizOptionFields(qs, op.progression !== undefined, op.segment_size !== undefined);
-			const next = { ...q, options_changed_at: at, options_device_id: ctx.device_id };
-			if (size !== undefined) next.segment_size = size;
-			if (op.progression !== undefined) next.progression = op.progression as Progression;
-			await putQuiz(tx, next);
 			return { cascade_id: c.id };
 		}
 		default:

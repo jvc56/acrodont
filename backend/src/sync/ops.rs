@@ -88,18 +88,13 @@ pub struct Loaded {
     pub updated_seq: i64,
     pub cursor_device_id: Option<Uuid>,
     pub cursor_moved_at: Option<DateTime<Utc>>,
-    pub options_seq: i64,
-    pub options_device_id: Uuid,
-    pub options_changed_at: DateTime<Utc>,
 }
 
 pub async fn load_quiz(conn: &mut PgConnection, user: Uuid, quiz_id: Uuid) -> Result<Loaded, OpError> {
     let r = sqlx::query!(
-        r#"SELECT q.cascade_id, q.level, q.origin AS "origin: Origin", q.segment_chain, q.segment_size,
-                  q.progression AS "progression: Progression", q.attempt, q.shuffle_seed,
+        r#"SELECT q.cascade_id, q.level, q.origin AS "origin: Origin", q.segment_chain, q.attempt, q.shuffle_seed,
                   q.question_count, q.correct_count, q.missed_count, q.cursor, q.cursor_device_id,
-                  q.cursor_moved_at, q.run_start, q.status AS "status: QuizStatus", q.updated_seq, q.options_seq,
-                  q.options_device_id, q.options_changed_at,
+                  q.cursor_moved_at, q.run_start, q.status AS "status: QuizStatus", q.updated_seq,
                   c.clear_threshold, c.segment_size AS c_segment_size, c.progression AS "c_progression: Progression",
                   c.depth, c.peak_depth,
                   c.attempts_since_completion, c.trashed_at IS NOT NULL AS "trashed!"
@@ -118,7 +113,6 @@ pub async fn load_quiz(conn: &mut PgConnection, user: Uuid, quiz_id: Uuid) -> Re
             level: r.level as u32,
             origin: r.origin,
             segment_chain: r.segment_chain,
-            opts: Opts { segment_size: r.segment_size as u32, progression: r.progression },
             attempt: r.attempt as u32,
             seed: from_i64(r.shuffle_seed),
             question_count: r.question_count as u32,
@@ -139,9 +133,6 @@ pub async fn load_quiz(conn: &mut PgConnection, user: Uuid, quiz_id: Uuid) -> Re
         updated_seq: r.updated_seq,
         cursor_device_id: r.cursor_device_id,
         cursor_moved_at: r.cursor_moved_at,
-        options_seq: r.options_seq,
-        options_device_id: r.options_device_id,
-        options_changed_at: r.options_changed_at,
     })
 }
 
@@ -243,12 +234,10 @@ async fn insert_quiz(
     let hash = questions_hash(&n.questions);
     sqlx::query!(
         "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, origin_quiz_id, origin_attempt,
-                              origin_segment_end, segment_chain, segment_size, progression,
-                              options_changed_at, options_seq, options_device_id, shuffle_seed, questions_hash,
+                              origin_segment_end, segment_chain, shuffle_seed, questions_hash,
                               question_count, cursor_moved_at, cursor_device_id, created_seq, last_activity_at,
                               updated_seq)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $12, $14, $13,
-                 greatest(now(), $12), $13)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, greatest(now(), $13), $15)",
         id,
         cascade,
         ctx.user,
@@ -258,14 +247,12 @@ async fn insert_quiz(
         n.origin_attempt as i32,
         n.origin_segment_end.map(|e| e as i32),
         n.segment_chain,
-        n.opts.segment_size as i32,
-        n.opts.progression as Progression,
-        at,
-        ctx.seq,
-        ctx.device,
         to_i64(n.seed),
         to_i64(hash),
         count,
+        at,
+        ctx.device,
+        ctx.seq,
     )
     .execute(&mut *conn)
     .await?;
@@ -307,7 +294,6 @@ pub async fn apply(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpRes
         "purge_quiz" => purge_quiz(conn, ctx, op).await,
         "purge_cascade" => purge_cascade(conn, ctx, op).await,
         "set_cascade_options" => set_cascade_options(conn, ctx, op).await,
-        "set_quiz_options" => set_quiz_options(conn, ctx, op).await,
         _ => Err(OpError::Rejected(Reason::Invalid)),
     }
 }
@@ -373,7 +359,7 @@ async fn move_cursor(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpR
     let l = load_quiz(conn, ctx.user, quiz).await?;
     rules::check_live(&l.cascade, &l.quiz)?;
     rules::check_attempt(&l.quiz, attempt, attempt_seed)?;
-    rules::check_move_cursor(&l.quiz, position)?;
+    rules::check_move_cursor(&l.cascade, &l.quiz, position)?;
     let at = clamp(ctx, at);
     let wins = l.cursor_moved_at.is_none()
         || l.cursor_device_id == Some(ctx.device)
@@ -525,7 +511,7 @@ async fn finish_segment(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> 
     rules::check_live(&l.cascade, &l.quiz)?;
     // PQ-013: the attempt and the duplicate before the depth.
     rules::check_attempt(&l.quiz, attempt, attempt_seed)?;
-    rules::check_segment_end(&l.quiz, end)?;
+    rules::check_segment_end(&l.cascade, &l.quiz, end)?;
     let duplicate = sqlx::query_scalar!(
         r#"SELECT EXISTS (SELECT 1 FROM quizzes WHERE origin = 'segment' AND origin_quiz_id = $1
                           AND origin_attempt = $2 AND origin_segment_end = $3) AS "d!""#,
@@ -599,17 +585,12 @@ async fn restore_quiz(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> Op
     let r = rules::restore_quiz(&mut l.cascade, &l.quiz, seed);
     let qs = reset_quiz(conn, ctx, quiz, r.attempt, r.seed, at).await?;
     sqlx::query!(
-        "UPDATE quizzes SET status = 'active', cleared_at = NULL, level = $2, segment_size = $3, progression = $4,
-                            options_changed_at = $5, options_seq = $6,
-                            options_device_id = $7, last_activity_at = greatest(last_activity_at, $5)
+        "UPDATE quizzes SET status = 'active', cleared_at = NULL, level = $2,
+                            last_activity_at = greatest(last_activity_at, $3)
          WHERE id = $1",
         quiz,
         r.level as i32,
-        r.opts.segment_size as i32,
-        r.opts.progression as Progression,
         at,
-        ctx.seq,
-        ctx.device,
     )
     .execute(&mut *conn)
     .await?;
@@ -838,33 +819,6 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         ctx.device,
         threshold.map(|t| t as i16),
         merged,
-    )
-    .execute(conn)
-    .await?;
-    Ok(Effects::default())
-}
-
-async fn set_quiz_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult {
-    let quiz = uuid_of(op, "quiz_id")?;
-    let at = at_of(op)?;
-    let l = load_quiz(conn, ctx.user, quiz).await?;
-    rules::check_live(&l.cascade, &l.quiz)?;
-    let f = option_fields(op, ctx.cap)?;
-    rules::check_quiz_option_fields(&l.quiz, f.progression.is_some(), f.segment_size.is_some())?;
-    let at = clamp(ctx, at);
-    if !options_win(ctx, op, l.options_device_id, l.options_seq, l.options_changed_at, at) {
-        return Err(OpError::Rejected(Reason::Stale));
-    }
-    sqlx::query!(
-        "UPDATE quizzes SET segment_size = coalesce($2, segment_size), progression = coalesce($3, progression),
-                            options_changed_at = $4, options_seq = $5, options_device_id = $6, updated_seq = $5
-         WHERE id = $1",
-        quiz,
-        f.segment_size.map(|s| s as i32),
-        f.progression as Option<Progression>,
-        at,
-        ctx.seq,
-        ctx.device,
     )
     .execute(conn)
     .await?;

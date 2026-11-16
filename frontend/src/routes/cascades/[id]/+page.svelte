@@ -31,7 +31,7 @@
 	import { settings } from '$lib/settings/store.svelte';
 	import type { SettingKey } from '$lib/settings/layers';
 	import LayeredSetting from '$lib/components/settings/LayeredSetting.svelte';
-	import { applyOrRefuse, CHANGE_REFUSED, type NewOp } from '$lib/local/apply';
+	import { applyOrRefuse, CHANGE_REFUSED, optsOf, type NewOp } from '$lib/local/apply';
 	import { storeCreated, storeRenamed, type Created } from '$lib/local/created';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta, recordOpen } from '$lib/local/meta';
@@ -86,14 +86,13 @@
 	/** The scrolling quiz area, and the answer inside it that shrinks to fit it. */
 	let fitArea = $state<HTMLElement | null>(null);
 	let answerBox = $state<HTMLElement | null>(null);
-	let quizOptions = $state<QuizOptions | null>(null);
 	let maxQuiz = $state(300_000);
 
 	// The repeat guard is a setting (repeat_guard_ms), read on every press.
 	const actions = new Debounce(() => settings.value.repeat_guard_ms);
 	const wheel = new Debounce(150);
 
-	let rows = $derived<LevelRow[]>(v?.cascade ? levelRows(v.quizzes, v.cascade.depth, attempts) : []);
+	let rows = $derived<LevelRow[]>(v?.cascade ? levelRows(optsOf(v.cascade), v.quizzes, v.cascade.depth, attempts) : []);
 	/** The quiz the status bar's Level row describes: the one played, or the segmented level whose segment it drills. */
 	let levelQuiz = $derived(v?.bar?.level ?? v?.quiz ?? null);
 	/** The Segment row, on a level studied in segments (PLAN.md § Desktop layout). */
@@ -163,8 +162,6 @@
 	type Offer = { fields: CascadeSettings; reach: number; serial: number };
 	let offers = $state<Record<string, Offer>>({});
 	let offerSerial = 0;
-	/** The level's options were just saved: says so under them. */
-	let levelSaved = $state(0);
 	/** The cascades whose settings this one can copy, the one chosen, and what copying did. */
 	let sources = $state<CascadeRow[]>([]);
 	let copyFrom = $state('');
@@ -472,7 +469,7 @@
 	/**
 	 * Changes this cascade's rules, for it alone, then offers to use the same
 	 * values for every cascade (§ Settings → A cascade's rules). `key` names the
-	 * offer: the threshold, or the new levels' options.
+	 * offer: the threshold, or the quiz options, which every level reads.
 	 */
 	async function setCascade(fields: CascadeSettings, key: string = Object.keys(fields)[0]) {
 		const c = v?.cascade;
@@ -502,14 +499,11 @@
 
 	/** Settings: what is read fresh each time it opens, then the dialog. */
 	async function openSettings() {
-		const q = v?.quiz;
-		quizOptions = q ? { segment_size: q.segment_size, progression: q.progression } : null;
 		const c = v?.cascade;
 		cascadeOptions = c ? { segment_size: clampPrefill(c.segment_size, maxQuiz), progression: c.progression } : null;
 		cascadeError = null;
 		offers = {};
 		settings.resetRows();
-		levelSaved = 0;
 		copied = null;
 		copyFrom = '';
 		if (db) {
@@ -521,18 +515,7 @@
 		settingsOpen = true;
 	}
 
-	/** The level being studied: its options change as soon as one is changed, from the current card. */
-	async function saveQuizOptions(o: QuizOptions) {
-		const q = v?.quiz;
-		if (!q) return;
-		const op: Record<string, unknown> = { type: 'set_quiz_options', quiz_id: q.id };
-		if (o.segment_size !== q.segment_size) op.segment_size = o.segment_size;
-		if (o.progression !== q.progression) op.progression = o.progression;
-		if (Object.keys(op).length <= 2) return;
-		if (await write(op as unknown as NewOp)) levelSaved++;
-	}
-
-	/** The options the cascade's new levels start with: saved as soon as one is changed, like its other settings. */
+	/** The cascade's quiz options, which every level reads, the one in progress included: saved as soon as one is changed. */
 	async function saveCascadeOptions(o: QuizOptions) {
 		const c = v?.cascade;
 		if (!c) return;
@@ -1185,7 +1168,6 @@
 				<p class="pt-4 text-sm text-muted-foreground" data-places-intro>{SCOPE.places}</p>
 				{#if v?.cascade && v.quiz}
 					{@const c = v.cascade}
-					{@const q = v.quiz}
 					<section class="space-y-4" aria-labelledby="settings-cascade">
 						{@render scopeHead('settings-cascade', 'This Cascade', SCOPE.cascade)}
 						<SettingRow label="Name" info={INFO.cascade_name} for="cascade-name">
@@ -1221,41 +1203,15 @@
 						</SettingRow>
 						{@render widen('clear_threshold')}
 						{#key formKey}
-							{#if quizOptions}
-								<div class="space-y-3" role="group" aria-labelledby="settings-level">
-									{@render subHead('settings-level', `Level ${q.level}, the level you are studying`, q.segment_chain ? null : SECTION.level)}
-									<QuizOptionsForm
-										bind:options={quizOptions}
-										idPrefix="quiz-"
-										questionCount={q.question_count}
-										maxQuizQuestions={maxQuiz}
-										segmentChain={q.segment_chain}
-										source={q.origin === 'source'}
-										onchange={saveQuizOptions}
-									/>
-									{#if levelSaved}
-										{#key levelSaved}
-											<p class="text-right text-xs text-green-700 dark:text-green-500" role="status" data-level-saved>✓ Saved for this level</p>
-										{/key}
-									{/if}
-								</div>
-							{/if}
 							{#if cascadeOptions}
-								<div class="space-y-3" role="group" aria-labelledby="settings-new-levels">
-									{@render subHead(
-										'settings-new-levels',
-										'Levels made from now on',
-										SECTION.new_levels
-									)}
-									<QuizOptionsForm
-										bind:options={cascadeOptions}
-										idPrefix="cascade-"
-										questionCount={c.question_count}
-										maxQuizQuestions={maxQuiz}
-										onchange={saveCascadeOptions}
-									/>
-									{@render widen('levels')}
-								</div>
+								<QuizOptionsForm
+									bind:options={cascadeOptions}
+									idPrefix="cascade-"
+									questionCount={c.question_count}
+									maxQuizQuestions={maxQuiz}
+									onchange={saveCascadeOptions}
+								/>
+								{@render widen('levels')}
 							{/if}
 						{/key}
 						{#if sources.length}

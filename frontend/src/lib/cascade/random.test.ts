@@ -23,7 +23,6 @@ function invariants(c: SimCascade) {
 		const s = q.state;
 		expect(q.questions.every((i) => i < source.state.question_count)).toBe(true);
 		expect(s.run_start <= s.cursor && s.cursor < s.question_count).toBe(true);
-		if (s.segment_chain) expect([s.opts.segment_size, s.opts.progression]).toEqual([0, 'drill']);
 		if (s.origin === 'segment') {
 			const key = `${q.origin_quiz_id}/${q.origin_attempt}/${q.origin_segment_end}`;
 			expect(runs.has(key)).toBe(false);

@@ -25,9 +25,6 @@ interface QuizMeta {
 	cursor_at: string | null;
 	cursor_device: string | null;
 	cursor_seq: number;
-	options_at: string;
-	options_seq: number;
-	options_device: string;
 	questions: Map<number, QMeta>;
 	/** Every grade as (seq, idx), in sequence order: an incremental pull reads only its recent end. */
 	log: [number, number][];
@@ -172,11 +169,6 @@ export class FakeServer {
 			origin_segment_end: q.origin_segment_end,
 			status: q.state.active ? 'active' : 'cleared',
 			segment_chain: q.state.segment_chain,
-			segment_size: q.state.opts.segment_size,
-			progression: q.state.opts.progression,
-			options_changed_at: m.options_at,
-			options_seq: String(m.options_seq),
-			options_device_id: m.options_device,
 			attempt: q.state.attempt,
 			shuffle_seed: fromI64(toI64(q.state.seed)).toString(),
 			questions_hash: questionsHash(q.questions).toString(),
@@ -218,9 +210,6 @@ export class FakeServer {
 					cursor_at: null,
 					cursor_device: null,
 					cursor_seq: 0,
-					options_at: at,
-					options_seq: seq,
-					options_device: device,
 					questions: new Map(),
 					log: []
 				};
@@ -353,7 +342,6 @@ export class FakeServer {
 			e.updated_seq = seq;
 		}
 		if (type === 'move_cursor' && m) Object.assign(m, { cursor_at: at, cursor_device: device, cursor_seq: seq });
-		if (type === 'set_quiz_options' && m) Object.assign(m, { options_at: at, options_seq: seq, options_device: device });
 		if (type === 'purge_quiz') {
 			e.quizzes.delete(w.quiz_id as string);
 			this.tombstones.push({ entity: 'quiz', entity_id: w.quiz_id as string, seq: String(seq), seqn: seq });

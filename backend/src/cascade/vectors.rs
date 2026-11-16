@@ -72,7 +72,6 @@ fn op_of(o: &Value) -> Op {
             progression: opt_prog(),
             clear_threshold: o.get("clear_threshold").map(|v| v.as_i64().unwrap()),
         },
-        "set_quiz_options" => Op::SetQuizOptions { quiz: q(), segment_size: opt_size(), progression: opt_prog() },
         t => panic!("unknown op {t}"),
     }
 }
@@ -110,8 +109,6 @@ fn snapshot(c: &SimCascade) -> Value {
                 "origin_attempt": q.origin_attempt,
                 "origin_segment_end": q.origin_segment_end,
                 "segment_chain": s.segment_chain,
-                "segment_size": s.opts.segment_size,
-                "progression": prog_str(s.opts.progression),
                 "attempt": s.attempt,
                 "shuffle_seed": s.seed.to_string(),
                 "question_count": s.question_count,
@@ -121,8 +118,8 @@ fn snapshot(c: &SimCascade) -> Value {
                 "missed": q.missed(),
                 "cursor": s.cursor,
                 "run_start": s.run_start,
-                "next_boundary": if s.active { rules::next_boundary(s) } else { None },
-                "run_indicator": if s.active { rules::run_indicator(s).map(|r| r.to_string()) } else { None },
+                "next_boundary": if s.active { rules::next_boundary(&c.state, s) } else { None },
+                "run_indicator": if s.active { rules::run_indicator(&c.state, s).map(|r| r.to_string()) } else { None },
             })
         })
         .collect();
@@ -263,8 +260,7 @@ pub(crate) fn check_invariants(c: &SimCascade) {
         assert!(q.questions.iter().all(|i| *i < source.state.question_count));
         assert!(s.run_start <= s.cursor && s.cursor < s.question_count);
         if s.segment_chain {
-            assert_eq!(s.opts.segment_size, 0);
-            assert_eq!(s.opts.progression, Progression::Drill);
+            assert_eq!(rules::effective_segment_size(&c.state, s), 0, "a chain is never segmented");
         }
         if s.origin == super::rows::Origin::Segment {
             assert!(s.segment_chain);
@@ -325,7 +321,7 @@ mod props {
                 0..=5 => {
                     let Some(q) = c.deepest().cloned() else { continue };
                     let pos = q.positions();
-                    let end = rules::next_boundary(&q.state).unwrap_or(q.state.question_count);
+                    let end = rules::next_boundary(&c.state, &q.state).unwrap_or(q.state.question_count);
                     let run_done = (q.state.run_start..end).all(|p| q.grades.contains_key(&pos[p as usize]));
                     next_id += 1;
                     if run_done && q.state.cursor + 1 == end {
@@ -341,10 +337,11 @@ mod props {
                         Op::MoveCursor { quiz: q.id, attempt: q.state.attempt, attempt_seed: q.state.seed, position: q.state.cursor + 1 }
                     }
                 }
-                6 => {
-                    let Some(q) = c.deepest().cloned() else { continue };
-                    Op::SetQuizOptions { quiz: q.id, segment_size: Some([0, 5, 6, 130_000][(ch as usize / 10) % 4]), progression: None }
-                }
+                6 => Op::SetCascadeOptions {
+                    segment_size: Some([0, 5, 6, 130_000][(ch as usize / 10) % 4]),
+                    progression: Some(if (ch / 40) % 2 == 0 { Progression::Ladder } else { Progression::Drill }),
+                    clear_threshold: None,
+                },
                 7 => {
                     let cleared: Vec<Uuid> = c.quizzes.values().filter(|q| !q.state.active).map(|q| q.id).collect();
                     if cleared.is_empty() {

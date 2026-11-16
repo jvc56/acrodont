@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, origin_quiz_id, origin_attempt,\n                              origin_segment_end, segment_chain, shuffle_seed, questions_hash,\n                              question_count, cursor_moved_at, cursor_device_id, created_seq, last_activity_at,\n                              updated_seq)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, greatest(now(), $13), $15)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int4",
+        {
+          "Custom": {
+            "name": "quiz_origin",
+            "kind": {
+              "Enum": [
+                "source",
+                "clear_replacement",
+                "drill_replacement",
+                "descent",
+                "segment"
+              ]
+            }
+          }
+        },
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Bool",
+        "Int8",
+        "Int8",
+        "Int4",
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b52d67aa8dccc29a501306a69786c78e8091f3cffaa0462e4edd7533035118ef"
+}

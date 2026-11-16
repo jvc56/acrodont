@@ -62,7 +62,6 @@ pub enum Op {
         /// The cascade's alone: every finish reads it, the quiz in progress included.
         clear_threshold: Option<i64>,
     },
-    SetQuizOptions { quiz: Uuid, segment_size: Option<i64>, progression: Option<Progression> },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -95,7 +94,6 @@ impl SimCascade {
                     level: 1,
                     origin: Origin::Source,
                     segment_chain: false,
-                    opts,
                     attempt: 1,
                     seed: source_seed,
                     question_count: count,
@@ -162,7 +160,6 @@ impl SimCascade {
                     level: n.level,
                     origin: n.origin,
                     segment_chain: n.segment_chain,
-                    opts: n.opts,
                     attempt: 1,
                     seed: n.seed,
                     question_count: count,
@@ -194,7 +191,7 @@ impl SimCascade {
             Op::MoveCursor { quiz, attempt, attempt_seed, position } => {
                 let q = self.live(*quiz)?;
                 rules::check_attempt(&q.state, *attempt, *attempt_seed)?;
-                rules::check_move_cursor(&q.state, *position)?;
+                rules::check_move_cursor(&self.state, &q.state, *position)?;
                 self.quizzes.get_mut(quiz).unwrap().state.cursor = *position;
                 Ok(Applied::default())
             }
@@ -241,7 +238,7 @@ impl SimCascade {
                 let q = self.live(*quiz)?;
                 // PQ-013: the attempt and the duplicate before the depth.
                 rules::check_attempt(&q.state, *attempt, *attempt_seed)?;
-                rules::check_segment_end(&q.state, *segment_end)?;
+                rules::check_segment_end(&self.state, &q.state, *segment_end)?;
                 let duplicate = self.quizzes.values().any(|o| {
                     o.state.origin == Origin::Segment
                         && o.origin_quiz_id == Some(*quiz)
@@ -292,7 +289,6 @@ impl SimCascade {
                 rq.reset(r.seed);
                 rq.state.attempt = r.attempt;
                 rq.state.level = r.level;
-                rq.state.opts = r.opts;
                 rq.state.active = true;
                 Ok(Applied {
                     new_quiz_question_count: Some(rq.state.question_count),
@@ -358,19 +354,6 @@ impl SimCascade {
                     self.state.clear_threshold = t;
                 }
                 let o = &mut self.state.opts;
-                if let Some(s) = size {
-                    o.segment_size = s;
-                }
-                if let Some(p) = progression {
-                    o.progression = *p;
-                }
-                Ok(Applied::default())
-            }
-            Op::SetQuizOptions { quiz, segment_size, progression } => {
-                let q = self.live(*quiz)?;
-                let size = segment_size.map(|s| rules::check_segment_size(s, self.max_quiz_questions)).transpose()?;
-                rules::check_quiz_option_fields(&q.state, progression.is_some(), segment_size.is_some())?;
-                let o = &mut self.quizzes.get_mut(quiz).unwrap().state.opts;
                 if let Some(s) = size {
                     o.segment_size = s;
                 }

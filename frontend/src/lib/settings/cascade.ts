@@ -1,6 +1,6 @@
 // A cascade's rules (PLAN.md § Settings → A cascade's rules): its clear
-// threshold and the options of the levels it makes from now on, which decide
-// how a pass is judged and so are always the cascade's, on every device. A
+// threshold and its quiz options (segment size and progression), which every
+// level reads, the one being studied included. They decide how a pass is judged and so are always the cascade's, on every device. A
 // change applies to that cascade alone; the player then offers to use the same
 // value for every cascade, and can copy another cascade's rules and own
 // settings at once. Neither is a new kind of change: each is the ordinary

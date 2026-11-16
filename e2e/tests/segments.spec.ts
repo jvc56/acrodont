@@ -8,9 +8,9 @@ async function settingsDialog(page: Page) {
 	return page.getByRole('dialog', { name: 'Settings' });
 }
 
-/** The options of the level being studied, in Settings. */
+/** The cascade's own section of Settings, which holds its quiz options: every level reads them. */
 async function settings(page: Page) {
-	return (await settingsDialog(page)).getByRole('group', { name: /the level you are studying/ });
+	return (await settingsDialog(page)).getByRole('region', { name: 'This Cascade' });
 }
 
 async function setSegment(page: Page, size: number) {
@@ -22,7 +22,7 @@ async function setSegment(page: Page, size: number) {
 		await d.getByLabel('Segment size', { exact: true }).press('Enter');
 	}
 	// Saved as soon as it is changed: no Save button.
-	await expect(d.locator('[data-level-saved]')).toBeVisible();
+	await expect(d.getByText('✓ Saved for this cascade')).toBeVisible();
 	await close(page);
 }
 
@@ -102,34 +102,30 @@ test('segments and progression', async ({ page }) => {
 	}
 	await expect(page.getByText('Level 1: 88%. Reshuffled, and its 2 missed questions are now Level 2.')).toBeVisible();
 
-	// This quiz on Drill: finished below the threshold, it is replaced at the same level.
+	// The cascade on Drill: the level in progress follows it at once; finished below the threshold, it is replaced at the same level.
 	let d = await settings(page);
 	await d.getByLabel('When a quiz is finished below the clear threshold').selectOption('drill');
-	await expect(d.locator('[data-level-saved]')).toBeVisible();
+	// Saved as soon as it is changed, like every rule of the cascade; with no
+	// other cascade, there is no offer to use it for all of them.
+	await expect(d.getByText('✓ Saved for this cascade')).toBeVisible();
+	await expect(d.getByText('Also use for:')).toHaveCount(0);
 	await close(page);
 	expect(await playLevel(page, (i) => i === 0)).toBe('Level 2: 50%. Replaced with its 1 missed question.');
 	await expect(page.getByText('Level 2 of 2')).toBeVisible();
-
-	// The cascade on Drill: the quiz in progress keeps its own; the next new one takes it.
+	// The Cascades page's options summary says so.
 	const player = new URL(page.url()).pathname;
-	const dialog = await settingsDialog(page);
-	const levels = dialog.getByRole('group', { name: 'Levels made from now on' });
-	await levels.getByLabel('When a quiz is finished below the clear threshold').selectOption('drill');
-	// Saved as soon as it is changed, like every setting of the cascade; with no
-	// other cascade, there is no offer to use it for all of them.
-	await expect(levels.getByText('✓ Saved for this cascade')).toBeVisible();
-	await expect(levels.getByText('Also use for:')).toHaveCount(0);
-	await close(page);
-	await expect(dialog).toHaveCount(0);
-	// Written once the Cascades page's options summary says so.
 	await page.goto('/cascades');
 	await expect(page.getByTitle(/· drill/).first()).toBeAttached();
 	await page.goto(player);
+	// Ladder again: every level follows it, the replacement made under Drill too.
 	d = await settings(page);
-	await expect(d.getByLabel('When a quiz is finished below the clear threshold')).toHaveValue('ladder');
+	await expect(d.getByLabel('When a quiz is finished below the clear threshold')).toHaveValue('drill');
+	await d.getByLabel('When a quiz is finished below the clear threshold').selectOption('ladder');
+	await expect(d.getByText('✓ Saved for this cascade')).toBeVisible();
 	await close(page);
 	expect(await playLevel(page, () => false)).toBe('Level 2 cleared with 100%. Back to Level 1.');
 	expect(await playLevel(page, (i) => i < 3)).toMatch(/^Level 1: \d+%\. Reshuffled, and its 3 missed questions are now Level 2\.$/);
-	d = await settings(page);
-	await expect(d.getByLabel('When a quiz is finished below the clear threshold')).toHaveValue('drill');
+	expect(await playLevel(page, (i) => i < 2)).toMatch(
+		/^Level 2: [\d.]+%, and 80% is needed to clear\. Level 2 is reshuffled and waiting\. Down to Level 3 with 2 missed questions\.$/
+	);
 });

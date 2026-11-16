@@ -1,8 +1,7 @@
 <script lang="ts">
-	// Segment size and progression, each explained behind
-	// its ⓘ (PLAN.md § Quiz options, § Frontend → QuizOptionsForm), for
-	// the level being studied and for the levels a cascade makes from now on,
-	// both in a cascade's Settings. Each option is a row with its control on the
+	// Segment size and progression, each explained behind its ⓘ (PLAN.md §
+	// Quiz options, § Frontend → QuizOptionsForm): a cascade's, which every
+	// level reads, the one being studied included, in the cascade's Settings. Each option is a row with its control on the
 	// right, like every other setting, and is saved as soon as it is changed:
 	// `onchange` runs with the options once a change is complete (a segment size
 	// when its field is left or Enter is pressed), never for a half-typed one.
@@ -16,17 +15,13 @@
 		options = $bindable(),
 		questionCount = null,
 		maxQuizQuestions = 300_000,
-		segmentChain = false,
-		source = false,
 		idPrefix = '',
 		onchange = () => undefined
 	}: {
 		options: QuizOptions;
-		/** The cascade's count in the builder and options dialog, the quiz's own in its menu. */
+		/** The cascade's count. */
 		questionCount?: number | null;
 		maxQuizQuestions?: number;
-		segmentChain?: boolean;
-		source?: boolean;
 		/** Keeps the controls' ids apart when two forms share a page. */
 		idPrefix?: string;
 		onchange?: (options: QuizOptions) => void;
@@ -56,54 +51,42 @@
 </script>
 
 <div class="grid gap-3">
-	{#if segmentChain}
-		<p class="text-sm text-muted-foreground">
-			This quiz drills a segment's misses: it always uses Drill progression and is never split into
-			segments.
-		</p>
-	{:else}
-		<SettingRow
-			label="Study in segments" info={INFO.segmented}
-			for={`${idPrefix}segmented`}
-		>
-			<Checkbox id={`${idPrefix}segmented`} checked={segmented} onCheckedChange={(v) => setSegmented(v === true)} />
+	<SettingRow label="Study in segments" info={INFO.segmented} for={`${idPrefix}segmented`}>
+		<Checkbox id={`${idPrefix}segmented`} checked={segmented} onCheckedChange={(v) => setSegmented(v === true)} />
+	</SettingRow>
+	{#if segmented}
+		<SettingRow label="Segment size" info={INFO.segment_size} for={`${idPrefix}segment-size`}>
+			<Input
+				id={`${idPrefix}segment-size`}
+				class="h-8 w-28"
+				type="number"
+				min="5"
+				max={maxQuizQuestions}
+				bind:value={sizeText}
+				onchange={commitSize}
+				onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && commitSize()}
+			/>
+			<span class="text-muted-foreground">questions each</span>
 		</SettingRow>
-		{#if segmented}
-			<SettingRow label="Segment size" info={INFO.segment_size} for={`${idPrefix}segment-size`}>
-				<Input
-					id={`${idPrefix}segment-size`}
-					class="h-8 w-28"
-					type="number"
-					min="5"
-					max={maxQuizQuestions}
-					bind:value={sizeText}
-					onchange={commitSize}
-					onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && commitSize()}
-				/>
-				<span class="text-muted-foreground">questions each</span>
-			</SettingRow>
-		{/if}
-		{#if error}<p class="text-sm text-destructive">{error}</p>{/if}
-		{#if questionCount && levels > 2000}
-			<p class="text-sm text-amber-400">
-				One pass could create up to {levels.toLocaleString()} drill levels, one for each segment with a miss.
-			</p>
-		{/if}
-		{#if !source}
-			<SettingRow label="When a quiz is finished below the clear threshold" info={INFO.progression} for={`${idPrefix}progression`}>
-				<select
-					id={`${idPrefix}progression`}
-					class="rounded border bg-background px-2 py-1"
-					value={options.progression}
-					onchange={(e) => {
-						options.progression = e.currentTarget.value as QuizOptions['progression'];
-						onchange(options);
-					}}
-				>
-					<option value="ladder">Ladder</option>
-					<option value="drill">Drill</option>
-				</select>
-			</SettingRow>
-		{/if}
 	{/if}
+	{#if error}<p class="text-sm text-destructive">{error}</p>{/if}
+	{#if questionCount && levels > 2000}
+		<p class="text-sm text-amber-400">
+			One pass could create up to {levels.toLocaleString()} drill levels, one for each segment with a miss.
+		</p>
+	{/if}
+	<SettingRow label="When a quiz is finished below the clear threshold" info={INFO.progression} for={`${idPrefix}progression`}>
+		<select
+			id={`${idPrefix}progression`}
+			class="rounded border bg-background px-2 py-1"
+			value={options.progression}
+			onchange={(e) => {
+				options.progression = e.currentTarget.value as QuizOptions['progression'];
+				onchange(options);
+			}}
+		>
+			<option value="ladder">Ladder</option>
+			<option value="drill">Drill</option>
+		</select>
+	</SettingRow>
 </div>

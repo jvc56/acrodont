@@ -28,9 +28,9 @@ use crate::extract::ApiJson;
 
 pub const MAX_INDEX_PAGE: i64 = 50_000;
 
-/// The `set_cascade_options` fields a `set_quiz_options` never carries: the
-/// clear threshold and the cascade's own settings.
-const CASCADE_ONLY_FIELDS: [&str; 2] = ["clear_threshold", "settings"];
+/// The fields a `set_cascade_options` may carry: the rules and the cascade's own settings.
+const CASCADE_OPTION_FIELDS: [&str; 10] =
+    ["id", "device_seq", "seen_seq", "at", "type", "cascade_id", "segment_size", "progression", "clear_threshold", "settings"];
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -206,14 +206,9 @@ fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Reques
         let id = m.get("id").and_then(Value::as_str).and_then(|s| s.parse().ok()).ok_or_else(|| bad("operation id"))?;
         let device_seq = m.get("device_seq").and_then(Value::as_i64).ok_or_else(|| bad("device_seq"))?;
         let op_type = m.get("type").and_then(Value::as_str).unwrap_or_default().to_owned();
-        if op_type == "set_cascade_options" || op_type == "set_quiz_options" {
-            let target = if op_type == "set_cascade_options" { "cascade_id" } else { "quiz_id" };
+        if op_type == "set_cascade_options" {
             for k in m.keys() {
-                let allowed = ["id", "device_seq", "seen_seq", "at", "type", target, "segment_size", "progression"];
-                // The clear threshold and the cascade's own settings are never a quiz's.
-                let cascade_only = op_type == "set_cascade_options"
-                    && CASCADE_ONLY_FIELDS.contains(&k.as_str());
-                if !allowed.contains(&k.as_str()) && !cascade_only {
+                if !CASCADE_OPTION_FIELDS.contains(&k.as_str()) {
                     return Err(bad(&format!("{op_type} carries only the fields that changed; {k} is not one")));
                 }
             }

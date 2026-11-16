@@ -7,7 +7,7 @@
 // it is part of the segment: while one is played the Level row stays on the
 // segmented level above it, and the Segment row counts the drill as the
 // segment's next pass.
-import { runIndicator } from '$lib/cascade/rules';
+import { effectiveSegmentSize, runIndicator, type Opts } from '$lib/cascade/rules';
 import { quizState } from '$lib/local/apply';
 import type { QuizRow } from '$lib/local/rows';
 
@@ -34,9 +34,9 @@ export interface StatusRows {
 
 type Grade = 'correct' | 'missed' | null | undefined;
 
-/** The effective segment size of a quiz as the rules see it; 0 when it is not segmented. */
-function sizeOf(q: QuizRow): number {
-	return q.segment_chain || q.segment_size === 0 || q.segment_size >= q.question_count ? 0 : q.segment_size;
+/** The effective segment size of a quiz as the rules see it, from its cascade's options; 0 when it is not segmented. */
+function sizeOf(o: Opts, q: QuizRow): number {
+	return effectiveSegmentSize(o, quizState(q));
 }
 
 /**
@@ -44,7 +44,7 @@ function sizeOf(q: QuizRow): number {
  * segments ended where the drill began, and the pass this is. Null when
  * `quiz` is not a drill, or its level is no longer studied in segments.
  */
-function drillOf(quiz: QuizRow, quizzes: QuizRow[]): { parent: QuizRow; segment: number; total: number; pass: number } | null {
+function drillOf(o: Opts, quiz: QuizRow, quizzes: QuizRow[]): { parent: QuizRow; segment: number; total: number; pass: number } | null {
 	if (!quiz.segment_chain) return null;
 	const byId = new Map(quizzes.map((q) => [q.id, q]));
 	// Back through the drills this one replaced, to the one a segment's misses made.
@@ -59,7 +59,7 @@ function drillOf(quiz: QuizRow, quizzes: QuizRow[]): { parent: QuizRow; segment:
 		(first?.origin_quiz_id ? byId.get(first.origin_quiz_id) : undefined) ??
 		quizzes.find((q) => q.status === 'active' && q.level === quiz.level - 1 && !q.segment_chain);
 	if (!parent) return null;
-	const size = sizeOf(parent);
+	const size = sizeOf(o, parent);
 	if (size === 0) return null;
 	const end = first?.origin_segment_end ?? parent.run_start;
 	return {
@@ -71,12 +71,13 @@ function drillOf(quiz: QuizRow, quizzes: QuizRow[]): { parent: QuizRow; segment:
 }
 
 /**
- * What the status bar shows for the quiz being played: `pos` is the position
+ * What the status bar shows for the quiz being played, under its cascade's
+ * options `o`: `pos` is the position
  * of the card shown, and `gradeAt` the grade of the question at a position of
  * the quiz played, in this pass.
  */
-export function statusRows(quiz: QuizRow, quizzes: QuizRow[], pos: number, gradeAt: (position: number) => Grade): StatusRows {
-	const drill = drillOf(quiz, quizzes);
+export function statusRows(o: Opts, quiz: QuizRow, quizzes: QuizRow[], pos: number, gradeAt: (position: number) => Grade): StatusRows {
+	const drill = drillOf(o, quiz, quizzes);
 	if (drill) {
 		return {
 			level: drill.parent,
@@ -92,7 +93,7 @@ export function statusRows(quiz: QuizRow, quizzes: QuizRow[], pos: number, grade
 			}
 		};
 	}
-	const ri = runIndicator(quizState(quiz));
+	const ri = runIndicator(o, quizState(quiz));
 	if (!ri) return { level: quiz, played: true, segment: null };
 	let correct = 0;
 	let missed = 0;
@@ -118,7 +119,7 @@ export function statusRows(quiz: QuizRow, quizzes: QuizRow[], pos: number, grade
 }
 
 /** `segment 2 of 6`, for the level list. */
-export function segmentText(q: QuizRow): string | null {
-	const ri = runIndicator(quizState(q));
+export function segmentText(o: Opts, q: QuizRow): string | null {
+	const ri = runIndicator(o, quizState(q));
 	return ri ? `segment ${ri.run} of ${ri.total}` : null;
 }

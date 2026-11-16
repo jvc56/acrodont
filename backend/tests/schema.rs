@@ -239,11 +239,10 @@ async fn minimal_cascade(app: &TestApp, owner: Uuid, lexicon: i16, leave_set: Op
 
 async fn quiz(app: &TestApp, owner: Uuid, cascade: Uuid, level: i32, origin: &str, status: &str) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, status, cleared_at, options_changed_at,
-                              options_seq, options_device_id, shuffle_seed, questions_hash, question_count,
-                              created_seq, updated_seq)
+        "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, status, cleared_at, shuffle_seed, questions_hash,
+                              question_count, created_seq, updated_seq)
          VALUES (gen_random_uuid(), $1, $2, $3, $4::quiz_origin, $5::quiz_status,
-                 CASE WHEN $5 = 'cleared' THEN now() END, now(), 1, gen_random_uuid(), 1, 1, 10, 1, 1)",
+                 CASE WHEN $5 = 'cleared' THEN now() END, 1, 1, 10, 1, 1)",
     )
     .bind(cascade)
     .bind(owner)

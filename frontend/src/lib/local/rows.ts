@@ -49,7 +49,7 @@ export interface CascadeRow {
 
 /**
  * The rules every new cascade starts with (PLAN.md § Settings): its clear
- * threshold and the options of its new levels. It has no settings of its own.
+ * threshold and its quiz options, which every level reads. It has no settings of its own.
  */
 export const CASCADE_SETTING_DEFAULTS = {
 	clear_threshold: 90,
@@ -67,11 +67,6 @@ export interface QuizRow {
 	origin_segment_end: number | null;
 	status: QuizStatus;
 	segment_chain: boolean;
-	segment_size: number;
-	progression: Progression;
-	options_changed_at: string;
-	options_seq: number;
-	options_device_id: string;
 	attempt: number;
 	shuffle_seed: string;
 	questions_hash: string;
@@ -210,7 +205,6 @@ export function cascadeFromWire(w: Wire, seq: number): CascadeRow {
 export function quizFromWire(w: Wire, seq: number): QuizRow {
 	return {
 		...(w as unknown as QuizRow),
-		options_seq: num(w.options_seq),
 		created_seq: num(w.created_seq),
 		updated_seq: num(w.updated_seq),
 		seq

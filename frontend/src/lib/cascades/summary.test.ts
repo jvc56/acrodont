@@ -111,7 +111,7 @@ describe('the Cascades and Trash pages', () => {
 		const { db, engine } = await device(server, () => new Date());
 		await engine.sync();
 		await db.put('meta', { trash_retention_days: 30, max_quiz_questions: 100 }, 'server');
-		await expect(applyLocally(db, { type: 'set_quiz_options', quiz_id: Q, segment_size: 101 })).rejects.toMatchObject({ reason: 'invalid' });
-		await applyLocally(db, { type: 'set_quiz_options', quiz_id: Q, segment_size: 100 });
+		await expect(applyLocally(db, { type: 'set_cascade_options', cascade_id: C, segment_size: 101 })).rejects.toMatchObject({ reason: 'invalid' });
+		await applyLocally(db, { type: 'set_cascade_options', cascade_id: C, segment_size: 100 });
 	});
 });

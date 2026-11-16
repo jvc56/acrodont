@@ -7,7 +7,6 @@ import {
 	checkDeepest,
 	checkLive,
 	checkMoveCursor,
-	checkQuizOptionFields,
 	checkSegmentEnd,
 	checkSegmentPastCursor,
 	checkSegmentSize,
@@ -59,12 +58,6 @@ export type Op =
 			progression?: Progression;
 			/** The cascade's alone: every finish reads it, the quiz in progress included. */
 			clear_threshold?: number;
-	  }
-	| {
-			type: 'set_quiz_options';
-			quiz: string;
-			segment_size?: number;
-			progression?: Progression;
 	  };
 
 export interface Applied {
@@ -114,7 +107,6 @@ export class SimCascade {
 				level: 1,
 				origin: 'source',
 				segment_chain: false,
-				opts: { ...opts },
 				attempt: 1,
 				seed: sourceSeed,
 				question_count: count,
@@ -158,7 +150,6 @@ export class SimCascade {
 				level: n.level,
 				origin: n.origin,
 				segment_chain: n.segment_chain,
-				opts: n.opts,
 				attempt: 1,
 				seed: n.seed,
 				question_count: n.questions.length,
@@ -196,7 +187,7 @@ export class SimCascade {
 			case 'move_cursor': {
 				const q = this.live(op.quiz);
 				checkAttempt(q.state, op.attempt, op.attempt_seed);
-				checkMoveCursor(q.state, op.position);
+				checkMoveCursor(this.state.opts, q.state, op.position);
 				q.state.cursor = op.position;
 				return {};
 			}
@@ -237,7 +228,7 @@ export class SimCascade {
 				const q = this.live(op.quiz);
 				// PQ-013: the attempt and the duplicate before the depth.
 				checkAttempt(q.state, op.attempt, op.attempt_seed);
-				checkSegmentEnd(q.state, op.segment_end);
+				checkSegmentEnd(this.state.opts, q.state, op.segment_end);
 				for (const o of this.quizzes.values()) {
 					if (
 						o.state.origin === 'segment' &&
@@ -275,7 +266,6 @@ export class SimCascade {
 				this.reset(q, r.seed);
 				q.state.attempt = r.attempt;
 				q.state.level = r.level;
-				q.state.opts = r.opts;
 				q.state.active = true;
 				return { new_quiz_question_count: q.state.question_count, new_quiz_questions_hash: questionsHash(q.questions) };
 			}
@@ -312,14 +302,6 @@ export class SimCascade {
 				if (threshold !== undefined) this.state.clear_threshold = threshold;
 				if (size !== undefined) this.state.opts.segment_size = size;
 				if (op.progression !== undefined) this.state.opts.progression = op.progression;
-				return {};
-			}
-			case 'set_quiz_options': {
-				const q = this.live(op.quiz);
-				const size = op.segment_size === undefined ? undefined : checkSegmentSize(op.segment_size, this.maxQuizQuestions);
-				checkQuizOptionFields(q.state, op.progression !== undefined, op.segment_size !== undefined);
-				if (size !== undefined) q.state.opts.segment_size = size;
-				if (op.progression !== undefined) q.state.opts.progression = op.progression;
 				return {};
 			}
 		}

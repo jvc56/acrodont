@@ -78,7 +78,7 @@ class Rejected(Exception):
 
 
 class Quiz:
-    def __init__(self, qid, level, origin, idx, seed, opts, chain=False, origin_quiz=None,
+    def __init__(self, qid, level, origin, idx, seed, cascade, chain=False, origin_quiz=None,
                  origin_attempt=None, origin_segment_end=None):
         self.id = qid
         self.level = level
@@ -88,16 +88,23 @@ class Quiz:
         self.origin_segment_end = origin_segment_end
         self.status = "active"
         self.segment_chain = chain
-        self.segment_size, self.progression = opts
-        if chain:
-            # A segment chain is Drill for life and never segmented.
-            self.segment_size, self.progression = 0, "drill"
+        # No quiz holds options: every level reads its cascade's.
+        self.cascade = cascade
         self.attempt = 1
         self.seed = seed
         self.idx = sorted(idx)
         self.grades = {}
         self.cursor = 0
         self.run_start = 0
+
+    @property
+    def segment_size(self):
+        return self.cascade.segment_size
+
+    @property
+    def progression(self):
+        # A segment chain is Drill for life (and never segmented: effective_size).
+        return "drill" if self.segment_chain else self.cascade.progression
 
     @property
     def correct(self):
@@ -157,10 +164,7 @@ class Cascade:
         self.purged = False
         self.quizzes = {}
         self.purged_quizzes = set()
-        self.quizzes[source_id] = Quiz(source_id, 1, "source", range(count), source_seed, self.opts())
-
-    def opts(self):
-        return (self.segment_size, self.progression)
+        self.quizzes[source_id] = Quiz(source_id, 1, "source", range(count), source_seed, self)
 
     def active_at(self, level):
         for q in self.quizzes.values():
@@ -192,8 +196,7 @@ class Cascade:
             raise Rejected("invalid")
 
     def new_quiz(self, qid, level, origin, idx, seed, chain, **origin_fields):
-        opts = (0, "drill") if chain else self.opts()
-        q = Quiz(qid, level, origin, idx, seed, opts, chain=chain, **origin_fields)
+        q = Quiz(qid, level, origin, idx, seed, self, chain=chain, **origin_fields)
         self.quizzes[qid] = q
         return q
 
@@ -345,9 +348,6 @@ class Cascade:
         self.push_depth()
         q.level = self.depth
         q.reset(int(op["shuffle_seed"]))
-        # Options copied afresh from the cascade; a chain keeps its own.
-        if not q.segment_chain:
-            q.segment_size, q.progression = self.opts()
         return {"new_quiz_question_count": len(q.idx), "new_quiz_questions_hash": str(questions_hash(q.idx))}
 
     def op_trash_cascade(self, op):
@@ -414,18 +414,6 @@ class Cascade:
                 setattr(self, k, op[k])
         return {}
 
-    def op_set_quiz_options(self, op):
-        q = self.live_quiz(op["quiz"])
-        self.check_option_values(op)
-        if q.segment_chain and ("progression" in op or "segment_size" in op):
-            raise Rejected("invalid")
-        if q.origin == "source" and "progression" in op:
-            raise Rejected("invalid")
-        for k in ("segment_size", "progression"):
-            if k in op:
-                setattr(q, k, op[k])
-        return {}
-
     # -- state for the fixtures -----------------------------------------------
 
     def snapshot(self):
@@ -440,8 +428,6 @@ class Cascade:
                 "origin_attempt": q.origin_attempt,
                 "origin_segment_end": q.origin_segment_end,
                 "segment_chain": q.segment_chain,
-                "segment_size": q.segment_size,
-                "progression": q.progression,
                 "attempt": q.attempt,
                 "shuffle_seed": str(q.seed),
                 "question_count": len(q.idx),

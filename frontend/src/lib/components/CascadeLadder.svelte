@@ -1,26 +1,24 @@
 <script lang="ts">
 	// The levels of a cascade (PLAN.md § Frontend → CascadeLadder): sizes,
 	// passes, last scores, the current run of a segmented level, which level is
-	// current, a pending level shown as "waiting for download", and per-level
-	// Quiz options and Export… actions. The panel is a table, so every column
+	// current, a pending level shown as "waiting for download", and a per-level
+	// Export… action. The panel is a table, so every column
 	// lines up; `compact` is a one-line-per-level list.
 	import { compactItems, ladderItems, type LevelRow } from '$lib/player/ladder';
 
 	let {
 		rows,
 		compact = false,
-		onOptions,
 		onExport
 	}: {
 		rows: LevelRow[];
 		compact?: boolean;
-		onOptions?: (row: LevelRow) => void;
 		onExport?: (row: LevelRow) => void;
 	} = $props();
 
 	let expanded = $state(false);
 	let items = $derived(compact ? compactItems(rows, expanded) : ladderItems(rows, expanded));
-	let actions = $derived(!!onOptions || !!onExport);
+	let actions = $derived(!!onExport);
 
 	function status(r: LevelRow): string {
 		if (r.downloading) return 'waiting for download';
@@ -75,8 +73,7 @@
 						<td class="py-1.5 pr-4" class:text-muted-foreground={!r.current}>{status(r)}</td>
 						{#if actions}
 							<td class="py-1.5 text-right whitespace-nowrap">
-								{#if onOptions}<button class="underline" onclick={() => onOptions?.(r)}>Quiz options</button>{/if}
-								{#if onExport}<button class="ml-3 underline" onclick={() => onExport?.(r)}>Export…</button>{/if}
+								{#if onExport}<button class="underline" onclick={() => onExport?.(r)}>Export…</button>{/if}
 							</td>
 						{/if}
 					</tr>

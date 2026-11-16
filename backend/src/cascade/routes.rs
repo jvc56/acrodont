@@ -284,23 +284,18 @@ async fn store(state: &AppState, user: &CurrentUser, n: NewCascade, p: Prepared)
         Err(e) => return Err(e.into()),
     }
     storage::add_to_user(&mut tx, user.id, needed).await?;
-    // The Source quiz takes a copy of the cascade's options.
+    // The Source quiz holds no options: every level reads the cascade's.
     let inserted = sqlx::query!(
-        "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, segment_size, progression,
-                              options_changed_at, options_seq, options_device_id,
-                              shuffle_seed, questions_hash, question_count, created_seq, updated_seq)
-         VALUES ($1, $2, $3, 1, 'source', $4, $5, $6, $7, $8, $9, $10, $11, $7, $7)",
+        "INSERT INTO quizzes (id, cascade_id, user_id, level, origin, shuffle_seed, questions_hash, question_count,
+                              created_seq, updated_seq)
+         VALUES ($1, $2, $3, 1, 'source', $4, $5, $6, $7, $7)",
         n.source_quiz_id,
         n.id,
         user.id,
-        n.segment_size,
-        n.progression as Progression,
-        at,
-        seq,
-        n.device_id,
         to_i64(seed),
         to_i64(hash),
         count_q,
+        seq,
     )
     .execute(&mut *tx)
     .await;

@@ -8,7 +8,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { fireEvent, render } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import { questionsHash } from '$lib/cascade/order';
-import { applyLocally, APPLY_STORES } from '$lib/local/apply';
+import { applyLocally, APPLY_STORES, optsOf } from '$lib/local/apply';
 import { storeCreated } from '$lib/local/created';
 import { openUserDb, type UserDb } from '$lib/local/db';
 import { initMeta } from '$lib/local/meta';
@@ -60,7 +60,7 @@ async function deepCascade(levels: number) {
 	}
 	const tx = db.transaction(APPLY_STORES) as unknown as RwTx;
 	const c = (await view.cascade(tx, C))!;
-	return levelRows(await view.quizzesOf(tx, C), c.depth, []);
+	return levelRows(optsOf(c), await view.quizzesOf(tx, C), c.depth, []);
 }
 
 const shown = (container: HTMLElement) => [...container.querySelectorAll('[data-level]')].map((e) => Number(e.getAttribute('data-level')));

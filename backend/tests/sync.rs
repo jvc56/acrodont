@@ -276,7 +276,7 @@ async fn request_level_400s(pool: sqlx::PgPool) {
     b["app_version"] = json!("1.2.3");
     cases.push(("non-numeric app_version", b));
     let mut b = base.clone();
-    let mut o = d.op("set_quiz_options", json!({ "quiz_id": Uuid::new_v4(), "segment_size": 5, "colour": "red" }));
+    let mut o = d.op("set_cascade_options", json!({ "cascade_id": Uuid::new_v4(), "segment_size": 5, "colour": "red" }));
     o["x"] = json!(1);
     b["ops"] = json!([o]);
     cases.push(("an options op with another field", b));
@@ -403,8 +403,8 @@ async fn out_of_range_values_are_invalid_never_error(pool: sqlx::PgPool) {
     let s = cascade(&app, &mut d, Setup::new(10)).await;
     let ops = vec![
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 3 })),
-        d.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 300001 })),
-        d.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 1 })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 300001 })),
+        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 1 })),
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "progression": "spiral" })),
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 4 } })),
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": -1 } })),
@@ -458,10 +458,11 @@ async fn an_unknown_operation_type_is_invalid(pool: sqlx::PgPool) {
     assert!(types.iter().all(|t| t == "trash_cascade"), "{types:?}");
 }
 
-/// "`set_quiz_options` naming progression or segment_size for a segment-chain
-/// quiz, or progression for the Source quiz, is rejected as invalid".
+/// A quiz has no options of its own: `set_quiz_options` is no operation, so
+/// it is rejected as invalid like any unknown type, for a chain quiz and the
+/// Source quiz alike, and is never recorded.
 #[sqlx::test]
-async fn chain_and_source_options(pool: sqlx::PgPool) {
+async fn no_quiz_has_options_of_its_own(pool: sqlx::PgPool) {
     let app = app(pool).await;
     let mut d = device(&app, "alice").await;
     let mut setup = Setup::new(10);
@@ -478,6 +479,11 @@ async fn chain_and_source_options(pool: sqlx::PgPool) {
     let r = d.sync(ops).await;
     let reasons: Vec<Value> = r.json()["results"].as_array().unwrap()[6..].iter().map(|x| x["reason"].clone()).collect();
     assert_eq!(reasons, [json!("invalid"), json!("invalid"), json!("invalid")]);
+    let recorded: i64 = sqlx::query_scalar("SELECT count(*) FROM sync_operations WHERE op_type::text NOT IN ('grade', 'finish_segment')")
+        .fetch_one(app.db())
+        .await
+        .unwrap();
+    assert_eq!(recorded, 0);
 }
 
 /// finish_segment refusals, and the race for one boundary.
@@ -587,7 +593,7 @@ async fn cursor_bounds_and_gaps(pool: sqlx::PgPool) {
     assert_eq!(result(&r, 0)["status"], "applied");
     assert_eq!(result(&r, 1)["reason"], "bad_cursor");
     // With no segments, at the question count.
-    let o = d.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 0 }));
+    let o = d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 0 }));
     d.sync(vec![o]).await;
     let ops = vec![mv(&mut d, 10), mv(&mut d, 9)];
     let r = d.sync(ops).await;
@@ -678,16 +684,16 @@ async fn latest_wins_whole(pool: sqlx::PgPool) {
     // Two changes from one device with a clock a day ahead, in one batch: both applied.
     let mut fast = b.sibling(&app);
     fast.skew = Duration::days(1);
-    let o1 = fast.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 5 }));
-    let o2 = fast.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 6 }));
+    let o1 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 5 }));
+    let o2 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 6 }));
     let p1 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "reveal_correct": false } }));
     let p2 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 3 } }));
     let r = fast.sync(vec![o1, o2, p1, p2]).await;
     for i in 0..4 {
         assert_eq!(result(&r, i)["status"], "applied", "{i}");
     }
-    let clamped: bool = sqlx::query_scalar("SELECT options_changed_at <= now() + interval '5 minutes' FROM quizzes WHERE id = $1")
-        .bind(s.source_id)
+    let clamped: bool = sqlx::query_scalar("SELECT options_changed_at <= now() + interval '5 minutes' FROM cascades WHERE id = $1")
+        .bind(s.cascade_id)
         .fetch_one(app.db())
         .await
         .unwrap();
@@ -840,8 +846,8 @@ async fn an_options_change_right_after_creation_from_a_slow_clock(pool: sqlx::Pg
 }
 
 /// "`set_cascade_options` may carry the clear threshold": 1–100, the cascade's
-/// alone (a quiz's options operation naming it is a 400), and read by every
-/// finish, so the pass in progress is judged by the new value.
+/// alone, and read by every finish, so the pass in progress is judged by the
+/// new value.
 #[sqlx::test]
 async fn the_clear_threshold_changes_for_the_pass_in_progress(pool: sqlx::PgPool) {
     let app = app(pool).await;
@@ -862,18 +868,10 @@ async fn the_clear_threshold_changes_for_the_pass_in_progress(pool: sqlx::PgPool
     for x in r.json()["results"].as_array().unwrap() {
         assert_eq!(x["reason"], "invalid", "{x}");
     }
-    // A quiz has no threshold of its own: the request is refused whole.
-    let o = d.op("set_quiz_options", json!({ "quiz_id": l2, "clear_threshold": 50 }));
+    // Alphabetical order is an answer setting, not an option: set_cascade_options never carries it.
+    let o = d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "require_alphabetical": true }));
     let body = json!({ "device_id": d.id, "app_version": 1, "cursor": d.cursor, "question_rows_for": [], "ops": [o] });
     assert_eq!(d.raw_sync(body).await.status, StatusCode::BAD_REQUEST);
-    // Alphabetical order is an answer setting, not an option: neither op carries it.
-    for o in [
-        d.op("set_quiz_options", json!({ "quiz_id": l2, "require_alphabetical": true })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "require_alphabetical": true })),
-    ] {
-        let body = json!({ "device_id": d.id, "app_version": 1, "cursor": d.cursor, "question_rows_for": [], "ops": [o] });
-        assert_eq!(d.raw_sync(body).await.status, StatusCode::BAD_REQUEST);
-    }
     // Level 2 half right, then the threshold lowered to 50 mid-pass: the finish clears it.
     let mut ops = grades(&app, &mut d, l2, 0, "CM").await;
     ops.push(d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "clear_threshold": 50 })));
@@ -931,10 +929,6 @@ async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
         .map(|t| serde_json::from_str::<Value>(&t).unwrap()["leave_value_decimals"].clone())
         .unwrap();
     assert_eq!(decimals, json!(3));
-    // The settings are the cascade's alone: a quiz's options operation carrying them is refused whole.
-    let o = d.op("set_quiz_options", json!({ "quiz_id": s.source_id, "settings": { "show_hooks": false } }));
-    let body = json!({ "device_id": d.id, "app_version": 1, "cursor": d.cursor, "question_rows_for": [], "ops": [o] });
-    assert_eq!(d.raw_sync(body).await.status, StatusCode::BAD_REQUEST);
 }
 
 

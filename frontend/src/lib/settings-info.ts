@@ -6,7 +6,7 @@ export const SCOPE = {
 	places:
 		'Under each setting, two switches say where its value applies: this cascade or all cascades, on this device or all devices. A setting not yet changed starts at this cascade on this device; a change is saved where its switches point, and switching one moves the value.',
 	cascade:
-		'This cascade’s name, and its rules: the clear threshold and the options of its levels. They decide how a pass is judged, so they are the same on every device. After you change one you can optionally use it for every cascade too.',
+		'This cascade’s name, and its rules: the clear threshold, segments and progression, which every level follows, the one you are studying included. They decide how a pass is judged, so they are the same on every device. After you change one you can optionally use it for every cascade too.',
 	answers:
 		'What a revealed answer shows and how a reveal grades it. Each can be set for this cascade on this device, this cascade, this device, or everywhere; the first of those that has a value is used.',
 	display:
@@ -15,9 +15,7 @@ export const SCOPE = {
 
 /** What each part of a cascade's Settings is for, behind an ⓘ beside its heading. */
 export const SECTION = {
-	level: 'These options belong to the level you are studying. Changes apply to this quiz only, from the current card.',
-	new_levels: 'Each new level this cascade makes from your misses starts with these. Levels it already has keep their own.',
-	copy: 'Gives this cascade the other one’s rules, and the same settings of its own (the ones set for “This cascade”). The level you are studying keeps its own options.',
+	copy: 'Gives this cascade the other one’s rules, and the same settings of its own (the ones set for “This cascade”).',
 	controls:
 		'The keys, mouse buttons and wheel directions for each action. They are one setting, which can be set for this cascade on this device, this cascade, this device, or everywhere.'
 } as const;

@@ -8,7 +8,6 @@ use chrono::{Duration, Utc};
 use common::sync::{
     finish_op, grades, insert_cascade, one, play_and_finish, quiz_now, result, rows, Device, Setup,
 };
-use axum::http::StatusCode;
 use common::TestApp;
 use serde_json::json;
 use uuid::Uuid;
@@ -143,7 +142,6 @@ async fn trashed_while_the_other_studies(pool: sqlx::PgPool) {
     ops.push(b.op("move_cursor", json!({ "quiz_id": s.source_id, "attempt": q.attempt, "attempt_seed": q.seed, "position": 1 })));
     let (f, _) = finish_op(&app, &mut b, s.source_id, "9").await;
     ops.push(f);
-    ops.push(b.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 5 })));
     ops.push(b.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 5 })));
     let r = b.sync(ops).await;
     for x in r.json()["results"].as_array().unwrap() {
@@ -258,7 +256,7 @@ async fn a_finish_and_a_finish_segment(pool: sqlx::PgPool) {
     let mut offline = grades(&app, &mut b, s2.source_id, 0, "CCCCM").await;
     offline.push(b.op("finish_segment", json!({ "quiz_id": s2.source_id, "attempt": q.attempt, "attempt_seed": q.seed,
                                                  "segment_end": 5, "shuffle_seed": "7", "new_quiz_id": Uuid::new_v4() })));
-    let o = a.op("set_quiz_options", json!({ "quiz_id": s2.source_id, "segment_size": 0 }));
+    let o = a.op("set_cascade_options", json!({ "cascade_id": s2.cascade_id, "segment_size": 0 }));
     one(&mut a, o).await;
     let (r, _) = play_and_finish(&app, &mut a, s2.source_id, "CCCCCCCCCM").await;
     assert_eq!(r["outcome"], "descended");
@@ -311,24 +309,22 @@ async fn two_different_quizzes_restored(pool: sqlx::PgPool) {
     assert_eq!(one(&mut a, f).await, "not_deepest");
 }
 
-/// Row: quiz options changed on one device while the quiz was finished on another.
+/// Row: quiz options changed on one device while a quiz was finished on
+/// another. They are the cascade's, which no finish changes, so the change
+/// applies whatever the finish did.
 #[sqlx::test]
 async fn options_against_a_finish(pool: sqlx::PgPool) {
     let app = app(pool).await;
     let (mut a, mut b, s) = two(&app, Setup::new(5)).await;
     let (_, l2) = play_and_finish(&app, &mut a, s.source_id, "CCCCM").await;
     b.sync(vec![]).await;
-    // Reset (the Source quiz descended): the change applies to the reset quiz.
-    let o = b.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 5 }));
-    assert_eq!(one(&mut b, o).await, "applied");
-    // Cleared: rejected.
-    let o = b.op("set_quiz_options", json!({ "quiz_id": l2, "segment_size": 5 }));
+    let o = b.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 5 }));
     play_and_finish(&app, &mut a, l2, "C").await;
-    assert_eq!(one(&mut b, o).await, "not_active");
+    assert_eq!(one(&mut b, o).await, "applied");
 }
 
 /// A cascade's own settings are the cascade's alone: `set_cascade_options`
-/// carries them and the other device pulls them; `set_quiz_options` cannot.
+/// carries them and the other device pulls them; no other operation can.
 #[sqlx::test]
 async fn own_settings_are_the_cascades(pool: sqlx::PgPool) {
     let app = app(pool).await;
@@ -339,26 +335,29 @@ async fn own_settings_are_the_cascades(pool: sqlx::PgPool) {
     assert_eq!(rows(&pages, "cascades")[0]["settings"], json!({ "answer_mode": "typed" }));
     let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "answer_mode": "spoken" } }));
     assert_eq!(one(&mut a, o).await, "invalid");
+    // `set_quiz_options` is no operation now: rejected like any unknown type.
     let o = a.op("set_quiz_options", json!({ "quiz_id": s.source_id, "settings": { "answer_mode": "typed" } }));
-    assert_eq!(a.sync(vec![o]).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(one(&mut a, o).await, "invalid");
 }
 
-// Row: quiz or cascade options changed on two devices — tests/sync.rs latest_wins_whole.
+// Row: a cascade's options changed on two devices — tests/sync.rs latest_wins_whole.
 
-/// Row: a quiz created while the cascade's options were different keeps its own.
+/// Row: a quiz created before the cascade's options changed. No quiz holds a
+/// copy: every level reads the cascade's, so it follows the change.
 #[sqlx::test]
-async fn quizzes_keep_the_options_they_were_created_with(pool: sqlx::PgPool) {
+async fn every_level_reads_the_cascades_options(pool: sqlx::PgPool) {
     let app = app(pool).await;
     let (mut a, _b, s) = two(&app, Setup::new(10)).await;
     let (_, l2) = play_and_finish(&app, &mut a, s.source_id, "CCCCMMMMMM").await;
-    let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 5, "progression": "drill" }));
-    one(&mut a, o).await;
-    let (seg, prog): (i32, String) = sqlx::query_as("SELECT segment_size, progression::text FROM quizzes WHERE id = $1")
-        .bind(l2)
-        .fetch_one(app.db())
-        .await
-        .unwrap();
-    assert_eq!((seg, prog.as_str()), (0, "ladder"));
+    let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 5 }));
+    assert_eq!(one(&mut a, o).await, "applied");
+    // Level 2's six questions now have a run boundary at 5.
+    let q = quiz_now(&app, l2).await;
+    let mut ops = grades(&app, &mut a, l2, 0, "CCCCM").await;
+    ops.push(a.op("finish_segment", json!({ "quiz_id": l2, "attempt": q.attempt, "attempt_seed": q.seed,
+                                             "segment_end": 5, "shuffle_seed": "4", "new_quiz_id": Uuid::new_v4() })));
+    let r = a.sync(ops).await;
+    assert_eq!(result(&r, 5)["outcome"], "drilled");
 }
 
 // Row: a finish applied with a different outcome — tests/sync.rs finishes_across_devices.
@@ -374,28 +373,25 @@ async fn segment_size_changed_under_a_boundary(pool: sqlx::PgPool) {
     let mut offline = grades(&app, &mut b, s.source_id, 0, "CCCCM").await;
     offline.push(b.op("finish_segment", json!({ "quiz_id": s.source_id, "attempt": q.attempt, "attempt_seed": q.seed,
                                                  "segment_end": 5, "shuffle_seed": "1", "new_quiz_id": Uuid::new_v4() })));
-    let o = a.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 10 }));
+    let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 10 }));
     assert_eq!(one(&mut a, o).await, "applied");
     let r = b.sync(offline).await;
     assert_eq!(result(&r, 5)["reason"], "bad_segment");
 }
 
 /// Row: the cascade's options changed while another device, offline with the
-/// old options, finished a quiz — the server builds the new quiz from its own.
+/// old options, finished a quiz — the server judges it by its own.
 #[sqlx::test]
-async fn new_quizzes_take_the_servers_options(pool: sqlx::PgPool) {
+async fn finishes_read_the_servers_options(pool: sqlx::PgPool) {
     let app = app(pool).await;
     let (mut a, mut b, s) = two(&app, Setup::new(10)).await;
-    let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "progression": "drill", "segment_size": 5 }));
+    let (_, l2) = play_and_finish(&app, &mut a, s.source_id, "CCCCMMMMMM").await;
+    b.sync(vec![]).await;
+    let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "progression": "drill" }));
     one(&mut a, o).await;
-    let (r, l2) = play_and_finish(&app, &mut b, s.source_id, "CCCCMMMMMM").await;
-    assert_eq!(r["outcome"], "descended");
-    let (seg, prog): (i32, String) = sqlx::query_as("SELECT segment_size, progression::text FROM quizzes WHERE id = $1")
-        .bind(l2)
-        .fetch_one(app.db())
-        .await
-        .unwrap();
-    assert_eq!((seg, prog.as_str()), (5, "drill"));
+    // Below the threshold: replaced, as Drill, though b last saw Ladder.
+    let (r, _) = play_and_finish(&app, &mut b, l2, "CCMMMM").await;
+    assert_eq!(r["outcome"], "replaced");
 }
 
 /// Row: the cursor moved on two devices in the same attempt.
@@ -423,14 +419,14 @@ async fn cursor_moves_on_two_devices(pool: sqlx::PgPool) {
     let r = b.sync(vec![o1, o2]).await;
     assert_eq!((result(&r, 0)["status"].clone(), result(&r, 1)["status"].clone()), (json!("applied"), json!("applied")));
     assert_eq!(quiz_now(&app, s.source_id).await.cursor, 5);
-    // An options change by a device that had seen the options but not a later
-    // cursor move on the same quiz applies (options_seq, not the quiz's seq).
-    let o = a.op("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 5 }));
+    // An options change by a device that had seen the cascade's options but not
+    // a later cursor move applies (the cascade's options_seq, not the quiz's seq).
+    let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 5 }));
     a.sync(vec![o]).await;
     b.sync(vec![]).await;
     let m = mv(&mut a, 7, Utc::now());
     a.sync(vec![m]).await;
-    let o = b.op_at("set_quiz_options", json!({ "quiz_id": s.source_id, "segment_size": 0 }), now - Duration::hours(1));
+    let o = b.op_at("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 0 }), now - Duration::hours(1));
     assert_eq!(one(&mut b, o).await, "applied");
 }
 

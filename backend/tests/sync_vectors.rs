@@ -41,11 +41,11 @@ async fn db_state(app: &TestApp, cascade: Uuid) -> Value {
     .await
     .unwrap();
     #[derive(sqlx::FromRow)]
-    struct Q(Uuid, i32, String, String, Option<Uuid>, Option<i32>, Option<i32>, bool, i32, String, i32, i64, i32, i64, i32, i32, i32, i32);
+    struct Q(Uuid, i32, String, String, Option<Uuid>, Option<i32>, Option<i32>, bool, i32, i64, i32, i64, i32, i32, i32, i32);
     let quizzes: Vec<Q> =
         sqlx::query_as(
             "SELECT id, level, status::text, origin::text, origin_quiz_id, origin_attempt, origin_segment_end,
-                    segment_chain, segment_size, progression::text, attempt, shuffle_seed,
+                    segment_chain, attempt, shuffle_seed,
                     question_count, questions_hash, correct_count, missed_count, cursor, run_start
              FROM quizzes WHERE cascade_id = $1 ORDER BY id",
         )
@@ -67,14 +67,14 @@ async fn db_state(app: &TestApp, cascade: Uuid) -> Value {
         // stored; every side computes them from the seed.
         let correct = rows.iter().filter(|r| r.1.as_deref() == Some("correct")).count() as i32;
         let missed = rows.iter().filter(|r| r.1.as_deref() == Some("missed")).count() as i32;
-        assert_eq!((q.14, q.15), (correct, missed), "counters match grades");
+        assert_eq!((q.12, q.13), (correct, missed), "counters match grades");
         out.push(json!({
             "id": q.0.to_string(), "level": q.1, "status": q.2, "origin": q.3,
             "origin_quiz_id": q.4.map(|u| u.to_string()), "origin_attempt": q.5, "origin_segment_end": q.6,
-            "segment_chain": q.7, "segment_size": q.8, "progression": q.9,
-            "attempt": q.10, "shuffle_seed": (q.11 as u64).to_string(), "question_count": q.12,
-            "questions_hash": (q.13 as u64).to_string(), "questions": questions, "correct": q.14, "missed": q.15,
-            "cursor": q.16, "run_start": q.17,
+            "segment_chain": q.7,
+            "attempt": q.8, "shuffle_seed": (q.9 as u64).to_string(), "question_count": q.10,
+            "questions_hash": (q.11 as u64).to_string(), "questions": questions, "correct": q.12, "missed": q.13,
+            "cursor": q.14, "run_start": q.15,
         }));
     }
     let Some(c) = c else {
