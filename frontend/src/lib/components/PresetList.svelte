@@ -25,7 +25,8 @@
 	let open = $state<{ kind: 'copy' | 'rename' | 'from'; id: string } | null>(null);
 	let text = $state('');
 	let fromCascade = $state('');
-	/** New preset: its name, and what it starts from ('defaults' or a cascade's id). */
+	/** New preset: whether its form is open, its name, and what it starts from ('defaults' or a cascade's id). */
+	let making = $state(false);
 	let newName = $state('');
 	let newFrom = $state('defaults');
 	let busy = $state(false);
@@ -44,6 +45,7 @@
 
 	function show(kind: 'copy' | 'rename' | 'from', p: Preset) {
 		open = { kind, id: p.id };
+		making = false;
 		error = null;
 		message = null;
 		text = kind === 'copy' ? nextFreeName(p.name, presets) : p.name;
@@ -148,6 +150,7 @@
 			await savePreset(db, c ? await fromThe(c, id, name) : { ...defaultsPreset(), id, name });
 			newName = '';
 			newFrom = 'defaults';
+			making = false;
 			return c ? `Made “${name}” from “${c.name}”.` : `Made “${name}” from the defaults.`;
 		});
 	}
@@ -212,25 +215,46 @@
 			</li>
 		{/each}
 	</ul>
-	<div class="flex flex-wrap items-center justify-end gap-2 text-sm" data-new-preset>
-		<label for="new-preset-name" class="sr-only">New preset’s name</label>
-		<input
-			id="new-preset-name"
-			class="max-w-full min-w-0 flex-1 rounded-md border bg-background px-2 py-1 sm:max-w-xs"
-			type="text"
-			maxlength="100"
-			placeholder="New preset’s name"
-			bind:value={newName}
-			oninput={() => (error = null)}
-			onkeydown={(e) => e.key === 'Enter' && create()}
-		/>
-		<label for="new-preset-from" class="sr-only">New preset starts from</label>
-		<select id="new-preset-from" class="max-w-full min-w-0 rounded border bg-background px-2 py-1" bind:value={newFrom}>
-			<option value="defaults">From the defaults</option>
-			{#each cascades as c (c.id)}<option value={c.id}>From “{c.name}”</option>{/each}
-		</select>
-		<Button size="sm" disabled={busy || !newName.trim()} onclick={create}>New preset</Button>
-	</div>
+	<!-- Opened by New preset, so the cascades it can start from are listed only then. -->
+	{#if making}
+		<div class="flex flex-wrap items-center justify-end gap-2 text-sm" data-new-preset>
+			<label for="new-preset-name" class="sr-only">New preset’s name</label>
+			<input
+				id="new-preset-name"
+				class="max-w-full min-w-0 flex-1 rounded-md border bg-background px-2 py-1 sm:max-w-xs"
+				type="text"
+				maxlength="100"
+				placeholder="New preset’s name"
+				bind:value={newName}
+				oninput={() => (error = null)}
+				onkeydown={(e) => {
+					if (e.key === 'Enter') void create();
+					if (e.key === 'Escape') making = false;
+				}}
+				{@attach (el: HTMLInputElement) => el.focus()}
+			/>
+			<label for="new-preset-from" class="sr-only">New preset starts from</label>
+			<select id="new-preset-from" class="max-w-full min-w-0 rounded border bg-background px-2 py-1" bind:value={newFrom}>
+				<option value="defaults">From the defaults</option>
+				{#each cascades as c (c.id)}<option value={c.id}>From “{c.name}”</option>{/each}
+			</select>
+			<Button size="sm" disabled={busy || !newName.trim()} onclick={create}>Make preset</Button>
+			<Button size="sm" variant="ghost" onclick={() => (making = false)}>Cancel</Button>
+		</div>
+	{:else}
+		<div class="flex justify-end">
+			<Button
+				size="sm"
+				variant="outline"
+				onclick={() => {
+					making = true;
+					open = null;
+					error = null;
+					message = null;
+				}}>New preset</Button
+			>
+		</div>
+	{/if}
 	{#if error}<p class="text-right text-sm text-destructive" role="alert" data-preset-error>{error}</p>{/if}
 	{#if message}<p class="text-right text-sm text-green-700 dark:text-green-500" role="status" data-preset-message>✓ {message}</p>{/if}
 </section>

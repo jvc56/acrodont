@@ -941,8 +941,10 @@ in)"), then the user's presets by name, each with:
   “Alpha”."
 - **Delete**, as in a cascade's Settings. Defaults has none.
 
-Under the list, a name field, a choice of what the preset starts from ("From
-the defaults", or "From “Alpha”" for each cascade), and **New preset**: "✓ Made
+Under the list, **New preset** opens a name field, a choice of what the
+preset starts from ("From the defaults", or "From “Alpha”" for each cascade,
+listed only once it is open, so the page names each cascade once), and **Make
+preset**: "✓ Made
 “Desk” from the defaults." or "✓ Made “Desk” from “Alpha”." Every one of these
 needs a connection ("Copying a preset needs a connection.", "Making a preset
 needs a connection.", "Changing a preset needs a connection."). The list is

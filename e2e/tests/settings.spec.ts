@@ -337,8 +337,9 @@ test('presets on the Cascades page: copied, made, renamed, edited, given a casca
 	await section.getByLabel('Name of the copy of “Defaults”').fill('Mine');
 	await section.getByRole('button', { name: 'Make copy' }).click();
 	await expect(section.getByText('✓ Copied “Defaults” as “Mine”.')).toBeVisible({ timeout: 15_000 });
-	await section.getByLabel('New preset’s name').fill('Desk');
 	await section.getByRole('button', { name: 'New preset' }).click();
+	await section.getByLabel('New preset’s name').fill('Desk');
+	await section.getByRole('button', { name: 'Make preset' }).click();
 	await expect(section.getByText('✓ Made “Desk” from the defaults.')).toBeVisible({ timeout: 15_000 });
 	await row('Mine').getByRole('button', { name: 'Rename “Mine”' }).click();
 	await section.getByLabel('New name for “Mine”').fill('Desk');
