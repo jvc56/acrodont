@@ -21,11 +21,12 @@
 	};
 	import { Button } from '$lib/components/ui/button';
 	import { confirmAction } from '$lib/confirm.svelte';
-	import { settings } from '$lib/settings/store.svelte';
+	import { useSettings } from '$lib/settings/source';
 	import ScopeOffer from './ScopeOffer.svelte';
 	import { bind, DEFAULT_BINDINGS, keyStroke, mayNotReceive, mouseStroke, unbind, wheelStroke, type Action, type Binding, type Stroke } from '$lib/player/bindings';
 
-	// The caller opens `settings` for the cascade first.
+	// The cascade's settings, opened by the caller first, or the preset editor's.
+	const settings = useSettings();
 	const bindings = $derived(settings.value.bindings);
 
 	const ACTIONS: { action: Action; label: string }[] = [
@@ -82,7 +83,7 @@
 	}
 </script>
 
-<div id="controls" class="grid gap-4 text-sm" data-setting="bindings" data-source={settings.sourceOf('bindings')}>
+<div id="controls" class="grid gap-4 text-sm" data-setting="bindings" data-source={settings.sourceOf?.('bindings')}>
 	{#each ACTIONS as a (a.action)}
 		<div>
 			<p class="font-medium">{a.label}</p>
@@ -122,7 +123,7 @@
 		</div>
 	{/if}
 	{#if notice}<p role="status">{notice}</p>{/if}
-	<ScopeOffer id="bindings" />
+	{#if settings.scoped}<ScopeOffer id="bindings" />{/if}
 	<Button
 		variant="outline"
 		onclick={async () => {

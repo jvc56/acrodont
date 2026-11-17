@@ -314,3 +314,94 @@ test('each cascade on each device has its own settings; a change offered more wi
 	await sizeOf(page, alpha, '52', 'all');
 	await other.close();
 });
+
+// PLAN.md § Settings → Presets, on the Cascades page under the Trash: Defaults
+// (copy only) and the account's presets, each edited on its own page, copied,
+// renamed, given a cascade's settings, or deleted; a new one from the defaults
+// or a cascade. Editing a preset changes no cascade it was applied to. Every
+// change needs a connection.
+test('presets on the Cascades page: copied, made, renamed, edited, given a cascade’s settings and deleted', async ({ page }) => {
+	test.setTimeout(240_000);
+	await newUser(page, 'presets');
+	const alpha = await apiCascade(page, { name: 'Alpha', filters: AEINRST });
+	const section = page.locator('[data-preset-section]');
+	const row = (name: string) => section.locator(`[data-preset-row="${name}"]`);
+	await page.goto('/');
+	await expect(section.getByText('(built in)')).toBeVisible({ timeout: 30_000 });
+	await expect(row('Defaults').getByRole('button', { name: 'Delete “Defaults”' })).toHaveCount(0);
+	await expect(row('Defaults').getByRole('link', { name: 'Edit “Defaults”' })).toHaveCount(0);
+
+	// Copied, under a name of one's own; then a new one from the defaults; then renamed.
+	await row('Defaults').getByRole('button', { name: 'Copy “Defaults”' }).click();
+	await expect(section.getByLabel('Name of the copy of “Defaults”')).toHaveValue('Defaults (2)');
+	await section.getByLabel('Name of the copy of “Defaults”').fill('Mine');
+	await section.getByRole('button', { name: 'Make copy' }).click();
+	await expect(section.getByText('✓ Copied “Defaults” as “Mine”.')).toBeVisible({ timeout: 15_000 });
+	await section.getByLabel('New preset’s name').fill('Desk');
+	await section.getByRole('button', { name: 'New preset' }).click();
+	await expect(section.getByText('✓ Made “Desk” from the defaults.')).toBeVisible({ timeout: 15_000 });
+	await row('Mine').getByRole('button', { name: 'Rename “Mine”' }).click();
+	await section.getByLabel('New name for “Mine”').fill('Desk');
+	await section.getByRole('button', { name: 'Save name' }).click();
+	await expect(section.getByText('You already have a preset with that name.')).toBeVisible();
+	await section.getByLabel('New name for “Mine”').fill('Phone');
+	await section.getByRole('button', { name: 'Save name' }).click();
+	await expect(section.getByText('✓ Renamed “Mine” to “Phone”.')).toBeVisible({ timeout: 15_000 });
+
+	// Edited on its own page, each change saved at once.
+	await row('Phone').getByRole('link', { name: 'Edit “Phone”' }).click();
+	await expect(page).toHaveURL(/\/presets\/[0-9a-f-]{36}$/);
+	await page.getByLabel('Answer mode', { exact: true }).selectOption('typed');
+	await expect(page.locator('[data-preset-status]')).toHaveText('✓ Saved', { timeout: 15_000 });
+	const threshold = page.getByLabel('Clear threshold (%)', { exact: true });
+	await threshold.fill('95');
+	await threshold.press('Tab');
+	await expect(page.locator('[data-preset-status]')).toHaveText('✓ Saved', { timeout: 15_000 });
+	// No offer to apply a change more widely: a preset is not a cascade on a device.
+	await expect(page.locator('[data-offer]')).toHaveCount(0);
+	await page.reload();
+	await expect(page.getByLabel('Answer mode', { exact: true })).toHaveValue('typed', { timeout: 15_000 });
+	await expect(page.getByLabel('Clear threshold (%)', { exact: true })).toHaveValue('95');
+	// Offline, nothing is saved and the preset stays as it was.
+	await page.context().setOffline(true);
+	await page.getByLabel('Answer mode', { exact: true }).selectOption('flashcard');
+	await expect(page.locator('[data-preset-error]')).toHaveText('Changing a preset needs a connection.');
+	await expect(page.getByLabel('Answer mode', { exact: true })).toHaveValue('typed');
+	await page.context().setOffline(false);
+
+	// Applied to Alpha, then edited again: Alpha keeps what it was given.
+	await openPlayer(page, alpha);
+	await openPlayerSettings(page);
+	await apply(page, 'Phone');
+	await expect(presets(page).getByText('✓ Applied “Phone”: 2 settings changed.')).toBeVisible();
+	await closeSettings(page);
+	await expect(page.getByLabel('Type an answer')).toBeVisible();
+	await page.goto('/');
+	await row('Phone').getByRole('link', { name: 'Edit “Phone”' }).click();
+	await page.getByLabel('Answer mode', { exact: true }).selectOption('flashcard');
+	await expect(page.locator('[data-preset-status]')).toHaveText('✓ Saved', { timeout: 15_000 });
+	await openPlayer(page, alpha);
+	await expect(page.getByLabel('Type an answer')).toBeVisible();
+
+	// Desk takes Alpha's settings (typed, 95%), then is deleted.
+	await page.goto('/');
+	await row('Desk').getByRole('button', { name: 'Copy a cascade’s settings to “Desk”' }).click();
+	await section.getByLabel('Cascade whose settings “Desk” takes').selectOption({ label: 'Alpha' });
+	await section.getByRole('button', { name: 'Copy settings' }).click();
+	await confirm(page, 'Copy settings');
+	await expect(section.getByText('✓ “Desk” now has the settings of “Alpha”.')).toBeVisible({ timeout: 15_000 });
+	await row('Desk').getByRole('link', { name: 'Edit “Desk”' }).click();
+	await expect(page.getByLabel('Answer mode', { exact: true })).toHaveValue('typed', { timeout: 15_000 });
+	await expect(page.getByLabel('Clear threshold (%)', { exact: true })).toHaveValue('95');
+	await page.goto('/');
+	await row('Desk').getByRole('button', { name: 'Delete “Desk”' }).click();
+	await confirm(page, 'Delete');
+	await expect(section.getByText('✓ Deleted “Desk”.')).toBeVisible({ timeout: 15_000 });
+	await expect(row('Desk')).toHaveCount(0);
+	// Offline, a copy is not made.
+	await page.context().setOffline(true);
+	await row('Phone').getByRole('button', { name: 'Copy “Phone”' }).click();
+	await section.getByRole('button', { name: 'Make copy' }).click();
+	await expect(section.getByText('Copying a preset needs a connection.')).toBeVisible();
+	await page.context().setOffline(false);
+});

@@ -12,9 +12,11 @@
 	import TileText from '$lib/components/TileText.svelte';
 	import ScopedSetting from '$lib/components/settings/ScopedSetting.svelte';
 	import { clampSetting, FONTS, LIMITS, textStyle, type LimitKey } from '$lib/player/display';
-	import { settings } from '$lib/settings/store.svelte';
+	import { useSettings } from '$lib/settings/source';
 	import type { SettingKey } from '$lib/settings/layers';
 
+	// The cascade's settings, opened by the caller first, or the preset editor's.
+	const settings = useSettings();
 	const d = $derived(settings.value);
 	// Every control is the same width and followed by the same unit column (px, em, ms, or
 	// nothing), so the fields, choices and checkboxes of the rows line up with each other.

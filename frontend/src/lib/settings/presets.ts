@@ -11,7 +11,7 @@ import type { UserDb } from '$lib/local/db';
 import { getMeta, readMeta, writeMeta } from '$lib/local/meta';
 import type { Progression } from '$lib/cascade/rules';
 import { CASCADE_SETTING_DEFAULTS, type CascadeRow } from '$lib/local/rows';
-import { SETTING_KEYS, type Settings, type Values } from './layers';
+import { DEFINITIONS, defaultOf, SETTING_KEYS, type Settings, type Values } from './layers';
 
 export interface Preset {
 	id: string;
@@ -165,4 +165,15 @@ export function startingSettings(p: Preset): Values | undefined {
 	if (isDefaults(p)) return undefined;
 	const out = Object.fromEntries(Object.entries(p.settings).filter(([, v]) => v !== null && v !== undefined));
 	return Object.keys(out).length ? out : undefined;
+}
+
+/** Every setting's value in `p`: a value this build cannot read, or none, is the default. */
+export function presetValues(p: Pick<Preset, 'settings'>): Settings {
+	return Object.fromEntries(
+		SETTING_KEYS.map((k) => {
+			const v = p.settings[k];
+			const clean = v === null || v === undefined ? undefined : DEFINITIONS[k].clean(v);
+			return [k, clean === undefined ? defaultOf(k) : clean];
+		})
+	) as unknown as Settings;
 }

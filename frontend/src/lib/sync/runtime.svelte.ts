@@ -27,6 +27,8 @@ class SyncState {
 	pending = $state<number | null>(null);
 	/** Cascades a rebase changed: a player showing one refreshes (step 5). */
 	changed = $state<{ ids: string[]; tick: number }>({ ids: [], tick: 0 });
+	/** Bumped when a sync brought the account's settings or presets: pages listing presets read them again. */
+	settingsTick = $state(0);
 }
 
 export const syncState = new SyncState();
@@ -157,6 +159,7 @@ onUpdatedElsewhere(() => stopSync());
 /** The account's settings or presets changed: an open player reads its scopes again. */
 function reloadDeviceSettings() {
 	void settings.reload();
+	syncState.settingsTick += 1;
 }
 
 type Message =

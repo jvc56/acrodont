@@ -917,7 +917,56 @@ In a cascade's Settings, under This Cascade, the **Presets** group holds:
   "Delete the preset “Phone”?" ("Cascades made with it, or that it was
   applied to, keep their settings.") and then says "✓ Deleted “Phone”."
   Offline, "Renaming a preset needs a connection." and "Deleting a preset
-  needs a connection."
+  needs a connection." Each also has **Edit**, a link to its editor (below).
+
+**On the [Cascades page](#cascades-page), under the Trash**, a section
+headed **Presets** (`id="presets"`, `PresetList`) lists Defaults ("(built
+in)"), then the user's presets by name, each with:
+
+- **Edit**, a link to the preset's editor (the name is the same link).
+  Defaults has none.
+- **Copy**: a name field, suggested as the name with the next free number
+  ("Phone (2)", as Duplicate names a cascade), and **Make copy**, which saves
+  a new preset with the same settings and rules: "✓ Copied “Phone” as
+  “Phone (2)”." A name another preset holds is refused under the list ("You
+  already have a preset with that name."); there is no replacing from here.
+  Defaults can be copied, which is how a preset is started from the defaults.
+- **Rename**, as in a cascade's Settings.
+- **Copy from a cascade…**: a choice of the user's cascades not in the Trash,
+  by name, and **Copy settings**, which asks "Give “Phone” the settings of
+  “Alpha”?" ("The preset takes the cascade’s settings as they are on this
+  device, and its three rules. Cascades the preset was applied to, or made
+  with, keep their settings.") and then replaces the preset's settings and
+  rules with those, keeping its name: "✓ “Phone” now has the settings of
+  “Alpha”."
+- **Delete**, as in a cascade's Settings. Defaults has none.
+
+Under the list, a name field, a choice of what the preset starts from ("From
+the defaults", or "From “Alpha”" for each cascade), and **New preset**: "✓ Made
+“Desk” from the defaults." or "✓ Made “Desk” from “Alpha”." Every one of these
+needs a connection ("Copying a preset needs a connection.", "Making a preset
+needs a connection.", "Changing a preset needs a connection."). The list is
+read again after each, and after any sync that brought the account's presets.
+The page's ⓘ beside the heading says what presets are for.
+
+**The preset editor**, `/presets/:id`, shows a preset's **Name and rules**
+(the name, the clear threshold and the [quiz options](#quiz-options)), then
+**Answers** (every answer setting: a preset can be applied to any cascade, so
+none is left out for a quiz type), **Display** and **Controls**, in the same
+rows as a cascade's Settings (`AnswerSettings`, `DisplaySettings`,
+`ControlsEditor`, which read the source a page provides: a cascade's settings
+on this device, or the editor's; `lib/settings/source.ts`). Each change is
+**saved to the preset at once**, the whole preset in one `PUT`, one save after
+another (`lib/settings/preset-editor.svelte.ts`); a bar at the bottom says
+"✓ Saved". Offline, or refused, it says why ("Changing a preset needs a
+connection.", "You already have a preset with that name.") and the preset goes
+back to what was last saved. There is no "Also apply to" offer: a preset is
+not a cascade on a device. **Editing a preset changes no cascade**: a cascade
+made with it, or that it was applied to, keeps the values it was given, and
+applying it again gives one the changes. Defaults has no editor: its address
+says it is built in and can be copied on the Cascades page. A preset this
+device does not hold yet says it may come with the next sync, and shows once
+it does.
 
 ### Creating a cascade
 
@@ -1043,8 +1092,8 @@ because searching runs on the server.
 ### Cascades page
 
 `/` is the landing page (`/cascades` redirects to it): it lists the user's cascades, newest activity
-first, one compact row each, for a glance, with **New cascade** at the top and
-the [Trash](#trash) below the list. Each cascade shows:
+first, one compact row each, for a glance, with **New cascade** at the top,
+the [Trash](#trash) below the list, and the [presets](#presets) below the Trash. Each cascade shows:
 
 - its name on the left, then its quiz type (Anagram, Definition or Leave
   Value) in muted text; on a phone the name wraps rather than being cut
@@ -6052,6 +6101,7 @@ SvelteKit static SPA. The routes:
 | `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, name, preview with what the cascade will use against the account's storage), and the preset the cascade starts with (Settings: Defaults or one of the user's [presets](#presets), starting at the one this device used last); a note says a new cascade's settings are changed in its Settings once it is created |
 | `/cascades/:id` | Player for the cascade's deepest level, whose Settings dialog holds the ladder and every [setting](#settings), the cascade's and this device's |
 | `/trash` | No page of its own: redirects to `/#trash`, so an old link lands on the Cascades page scrolled to the Trash |
+| `/presets/:id` | The [preset editor](#presets): a preset's name, rules and every setting, each change saved to it at once (online only) |
 | `/account` | Log out (with **Remove this account's data from this device**), sync status, change password (current and new), sign out everywhere, delete account. Nothing about storage: the Cascades page has the account's. No settings: those are in a cascade's Settings (☰ → Settings in the player) |
 | `/admin` | Catalog overview with delete actions (admins only; others get a not-found page): a card per kind (letter distributions, lexicons, leave values), each with its **Upload** button, its items a table on a wide screen and a list of entries, figures under each name, on a phone, so nothing scrolls sideways |
 | `/admin/letter-distributions/new`, `/admin/lexicons/new`, `/admin/leave-sets/new` | Upload forms with validation error lists |
@@ -6184,11 +6234,17 @@ Components:
 - **`lib/components/settings/`**:
   - **`ControlsEditor`**: the binding list per action, the capture box,
     conflict and reserved-stroke notices, and **Reset controls to defaults**,
-    under Controls in the player's Settings. The list is one setting, changed
-    through the settings store like any other (`lib/settings/store.svelte`).
+    under Controls in the player's Settings and in the preset editor. The list
+    is one setting, changed through the page's settings source like any other
+    (`lib/settings/source.ts`: a cascade's on this device, or a preset's).
     Escape in the capture box cancels the capture and goes no further, so it
     does not close Settings.
-  - **`ScopedSetting`**: a setting's row, with its `ScopeOffer` under it.
+  - **`ScopedSetting`**: a setting's row, with its `ScopeOffer` under it when
+    the page's settings source is a cascade's (none in the preset editor).
+  - **`AnswerSettings`**: the answer settings' rows, those of a cascade's quiz
+    type in its Settings, every one in the preset editor.
+  - **`PresetList`**: the Presets section of the Cascades page (see
+    [Presets](#presets)).
   - **`ScopeOffer`**: the offer under a setting (or a preset applied) just
     changed: "✓ Saved for this cascade on this device · Also apply to: this
     cascade on all devices · all N cascades on this device · all N cascades

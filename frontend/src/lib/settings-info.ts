@@ -18,7 +18,15 @@ export const SECTION = {
 	presets:
 		'A preset holds every setting and the three rules. Apply one to give this cascade its settings on this device and its rules; Defaults puts everything back to the defaults. Save as preset keeps this cascade’s settings as they are here under a name, for another cascade or for a new one (the builder asks which preset to start with). Saving, renaming and deleting a preset need a connection.',
 	controls:
-		'The keys, mouse buttons and wheel directions for each action. They are one setting, saved for this cascade on this device, which can then be applied more widely.'
+		'The keys, mouse buttons and wheel directions for each action. They are one setting, saved for this cascade on this device, which can then be applied more widely.',
+	presets_list:
+		'Presets hold every setting and the three rules, under a name. Apply one in a cascade’s Settings, or choose one in the builder for a new cascade. Edit changes a preset’s values; Copy from a cascade gives it a cascade’s settings as they are on this device. Changing or deleting a preset changes no cascade: each keeps the values it was given. Every change to a preset needs a connection.',
+	preset_editor:
+		'Each change is saved to this preset at once. Cascades made with it, or that it was applied to, keep their settings; apply it again to give one the changes.',
+	preset_rules: 'The name, and the clear threshold, segments and progression a cascade takes when this preset is applied to it or it is made with it.',
+	preset_answers: 'What a revealed answer shows and how a reveal grades it. Every answer setting is here; a cascade uses the ones that apply to its quiz type.',
+	preset_display: 'How the player looks and responds.',
+	preset_controls: 'The keys, mouse buttons and wheel directions for each action, as one setting.'
 } as const;
 
 export const INFO = {
@@ -42,6 +50,7 @@ export const INFO = {
 		'In typed mode, shows "3 of 9 found" in the status bar. Off by default, since knowing how many anagrams are left is a hint.',
 	alphabetical:
 		'In typed mode, each anagram must be entered after the ones before it in alphabetical order. One typed out of order marks the card missed at once. A change applies to the card you are on.',
+	preset_name: 'What the preset is called, in a cascade’s Settings and in the builder. Each of your presets needs its own name, and “Defaults” is the built-in one’s. Renaming needs a connection.',
 	cascade_name:
 		'What this cascade is called, on the Cascades page and everywhere else. Each of your cascades needs its own name, the Trash included. Renaming needs a connection; your other devices show the new name at their next sync.',
 	clear_threshold:

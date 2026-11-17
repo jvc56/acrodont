@@ -42,6 +42,8 @@ export interface Offer {
 }
 
 class SettingsState {
+	/** A cascade's settings on this device: rows say where a value comes from and offer to widen a change. */
+	readonly scoped = true;
 	layers = $state<Layers>(emptyLayers());
 	/** When the open cascade was made: a change for all cascades made before it does not reach it. */
 	createdAt = $state<string | null>(null);

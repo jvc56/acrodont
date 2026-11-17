@@ -6,7 +6,9 @@
 	// Trash; the rest (quiz options, Export…, Start
 	// over) is in the player. The header shows the account's storage against
 	// its one limit (PLAN.md § Storage limit). The Trash is under the cascades, so
-	// they are seen together. Everything reads the local stores and works offline.
+	// they are seen together, and the presets under the Trash (PLAN.md § Settings →
+	// Presets). Everything reads the local stores and works offline, but for a
+	// change to a preset, which needs a connection.
 	import { onMount } from 'svelte';
 	import { QUIZ_TYPE_LABELS } from '$lib/filters';
 	import { api } from '$lib/api';
@@ -15,6 +17,7 @@
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import { Button } from '$lib/components/ui/button';
 	import TrashList from '$lib/components/TrashList.svelte';
+	import PresetList from '$lib/components/PresetList.svelte';
 	import { tick, untrack } from 'svelte';
 	import { cascadeSummaries, ladderText, offlineStates, type CascadeSummary } from '$lib/cascades/summary';
 	import { DEFAULT_STORAGE_LIMIT, finishesRefused, formatBytes, levelBytes, storageState } from '$lib/cascades/storage';
@@ -73,10 +76,10 @@
 			if (!session.userId) return;
 			db = await userDb(session.userId, session.username);
 			await refresh();
-			// A link to the Trash (/trash, or #trash) lands on it once it is drawn.
-			if (location.hash === '#trash') {
+			// A link to the Trash (/trash, or #trash) or the Presets (#presets) lands on it once it is drawn.
+			if (location.hash === '#trash' || location.hash === '#presets') {
 				await tick();
-				document.getElementById('trash')?.scrollIntoView({ block: 'start' });
+				document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: 'start' });
 			}
 			if (list.length === 0 && navigator.onLine) {
 				api
@@ -253,5 +256,6 @@
 	{/if}
 	{#if db}
 		<div class="mt-10"><TrashList {db} version={trashVersion} onchange={refresh} /></div>
+		<div class="mt-10"><PresetList {db} /></div>
 	{/if}
 </main>

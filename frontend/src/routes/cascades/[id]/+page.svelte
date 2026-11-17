@@ -31,17 +31,17 @@
 	import { textStyle } from '$lib/player/display';
 	import { settings } from '$lib/settings/store.svelte';
 	import { SETTING_KEYS, type SettingKey } from '$lib/settings/layers';
-	import ScopedSetting from '$lib/components/settings/ScopedSetting.svelte';
+	import AnswerSettings from '$lib/components/settings/AnswerSettings.svelte';
 	import { applyOrRefuse, CHANGE_REFUSED, optsOf, type NewOp } from '$lib/local/apply';
 	import { storeCreated, storeRenamed, type Created } from '$lib/local/created';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta, recordOpen } from '$lib/local/meta';
 	import { DEFAULT_STORAGE_LIMIT, formatBytes } from '$lib/cascades/storage';
 	import { applyToAll, reachable, rulesToApply, type CascadeSettings, type Widening } from '$lib/settings/cascade';
+	import { presetFailure, presetNameError } from '$lib/settings/preset-actions';
 	import {
 		deletePreset,
 		isDefaults,
-		isDefaultsName,
 		presetFrom,
 		presetList,
 		renamePreset,
@@ -615,24 +615,6 @@
 		applied = n ? `Applied “${p.name}”: ${n} setting${n === 1 ? '' : 's'} changed.` : `This cascade already matches “${p.name}”.`;
 	}
 
-	/** What a refused or failed preset change says. */
-	function presetFailure(e: unknown, what: string): string {
-		if (e instanceof ApiError && e.code === 'name_taken') return 'You already have a preset with that name.';
-		if (e instanceof ApiError && e.code === 'preset_limit') return 'You have 50 presets, the most an account can hold. Delete one to make room.';
-		const field = e instanceof ApiError ? e.fieldErrors.find((f) => f.field === 'name') : undefined;
-		if (field) return field.message;
-		if (isRetriable(e)) return `${what} needs a connection.`;
-		return `The preset could not be ${what === 'Saving a preset' ? 'saved' : what === 'Renaming a preset' ? 'renamed' : 'deleted'}. Try again.`;
-	}
-
-	/** A preset's name, or why it cannot be one. */
-	function presetNameError(name: string, id: string | null): string | null {
-		if (!name) return 'A preset needs a name.';
-		if (isDefaultsName(name)) return '“Defaults” is the built-in preset’s name.';
-		if (id !== null && presets.some((o) => o.id !== id && !isDefaults(o) && o.name === name)) return 'You already have a preset with that name.';
-		return null;
-	}
-
 	/**
 	 * Save as preset: every setting as this cascade shows it on this device, and
 	 * its rules. A name already taken asks first, then replaces that preset.
@@ -642,7 +624,7 @@
 		if (!db || !c || presetBusy) return;
 		const name = presetName.trim();
 		presetSaved = null;
-		presetError = presetNameError(name, null);
+		presetError = presetNameError(name, null, presets);
 		if (presetError) return;
 		if (!navigator.onLine) {
 			presetError = 'Saving a preset needs a connection.';
@@ -665,7 +647,7 @@
 			presetName = '';
 			afterLocalWrite();
 		} catch (e) {
-			presetError = presetFailure(e, 'Saving a preset');
+			presetError = presetFailure(e, 'Saving a preset', 'saved');
 		} finally {
 			presetBusy = false;
 		}
@@ -679,7 +661,7 @@
 			renaming = null;
 			return;
 		}
-		presetError = presetNameError(name, p.id);
+		presetError = presetNameError(name, p.id, presets);
 		if (presetError) return;
 		if (!navigator.onLine) {
 			presetError = 'Renaming a preset needs a connection.';
@@ -693,7 +675,7 @@
 			renaming = null;
 			afterLocalWrite();
 		} catch (e) {
-			presetError = presetFailure(e, 'Renaming a preset');
+			presetError = presetFailure(e, 'Renaming a preset', 'renamed');
 		} finally {
 			presetBusy = false;
 		}
@@ -721,7 +703,7 @@
 			presetSaved = `Deleted “${p.name}”.`;
 			afterLocalWrite();
 		} catch (e) {
-			presetError = presetFailure(e, 'Deleting a preset');
+			presetError = presetFailure(e, 'Deleting a preset', 'deleted');
 		} finally {
 			presetBusy = false;
 		}
@@ -1267,17 +1249,6 @@
 	</div>
 {/snippet}
 
-{#snippet flag(
-	key: 'show_definitions' | 'show_hooks' | 'show_found_count' | 'require_alphabetical' | 'show_probability' | 'definition_column' | 'hooks_on_question',
-	label: string,
-	id: string,
-	info: string
-)}
-	<ScopedSetting {key} {label} for={id} {info}>
-		<input {id} type="checkbox" checked={dsp[key]} onchange={(e) => settings.change(key, e.currentTarget.checked)} />
-	</ScopedSetting>
-{/snippet}
-
 {#snippet subHead(id: string, title: string, text: string | null = null)}
 	<div class="flex items-center gap-1 pt-2">
 		<h4 {id} class="text-sm font-semibold">{title}</h4>
@@ -1408,6 +1379,7 @@
 												<Button size="sm" variant="ghost" onclick={() => (renaming = null)}>Cancel</Button>
 											{:else}
 												<span class="min-w-0 flex-1 truncate">{o.name}</span>
+												<Button size="sm" variant="ghost" href={`/presets/${o.id}`} aria-label={`Edit “${o.name}”`}>Edit</Button>
 												<Button
 													size="sm"
 													variant="ghost"
@@ -1441,56 +1413,7 @@
 					{@const c = v.cascade}
 					<section class="space-y-4" aria-labelledby="settings-answers">
 						{@render scopeHead('settings-answers', 'Answers', SCOPE.answers)}
-						{#if c.quiz_type === 'anagram'}
-							<!-- Typing answers is for anagram quizzes only. -->
-							<ScopedSetting key="answer_mode" label="Answer mode" info={INFO.answer_mode} for="player-mode">
-								<select
-									id="player-mode"
-									class="rounded border bg-background px-2 py-1"
-									value={dsp.answer_mode}
-									onchange={(e) => settings.change('answer_mode', e.currentTarget.value === 'typed' ? 'typed' : 'flashcard')}
-								>
-									<option value="flashcard">Flashcard</option>
-									<option value="typed">Typed</option>
-								</select>
-							</ScopedSetting>
-						{/if}
-						<ScopedSetting key="reveal_correct" label="When an answer is revealed, mark it" info={INFO.reveal_correct} for="cascade-reveal">
-							<select
-								id="cascade-reveal"
-								class="rounded border bg-background px-2 py-1"
-								value={dsp.reveal_correct ? 'correct' : 'missed'}
-								onchange={(e) => settings.change('reveal_correct', e.currentTarget.value === 'correct')}
-							>
-								<option value="correct">Correct</option>
-								<option value="missed">Missed</option>
-							</select>
-						</ScopedSetting>
-						{#if c.quiz_type === 'anagram'}
-							{@render flag('show_definitions', 'Show definitions', 'cascade-definitions', INFO.show_definitions)}
-							{@render flag('show_hooks', 'Show hooks', 'cascade-hooks', INFO.show_hooks)}
-							{@render flag('show_found_count', 'Show how many anagrams are found in typed mode', 'cascade-found-count', INFO.found_count)}
-							{@render flag('require_alphabetical', 'Typed answers must be in alphabetical order', 'cascade-alphabetical', INFO.alphabetical)}
-						{/if}
-						{#if c.quiz_type !== 'leave_value'}
-							{@render flag('show_probability', 'Show each word’s probability order', 'cascade-probability', INFO.show_probability)}
-							{@render flag('definition_column', 'Definitions in their own column', 'cascade-definition-column', INFO.definition_column)}
-						{/if}
-						{#if c.quiz_type === 'definition'}
-							{@render flag('hooks_on_question', 'Show the word once, with its hooks, in the question', 'cascade-hooks-on-question', INFO.hooks_on_question)}
-						{/if}
-						{#if c.quiz_type === 'leave_value'}
-							<ScopedSetting key="leave_value_decimals" label="Round leave values to (decimal places)" info={INFO.leave_value_decimals} for="cascade-decimals">
-								<select
-									id="cascade-decimals"
-									class="rounded border bg-background px-2 py-1"
-									value={String(dsp.leave_value_decimals)}
-									onchange={(e) => settings.change('leave_value_decimals', Number(e.currentTarget.value))}
-								>
-									{#each [0, 1, 2, 3] as d (d)}<option value={String(d)}>{d}</option>{/each}
-								</select>
-							</ScopedSetting>
-						{/if}
+						<AnswerSettings quizType={c.quiz_type} />
 					</section>
 				{/if}
 				<section class="space-y-4" aria-labelledby="settings-display">
