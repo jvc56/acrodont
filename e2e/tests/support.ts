@@ -164,8 +164,8 @@ export const AEINRST_WORDS = ['ANESTRI', 'ANTSIER', 'NASTIER', 'RATINES', 'RETAI
 export const lengths = (min: number, max: number) => ({ op: 'and', children: [{ type: 'length', negated: false, min, max }] });
 
 /**
- * Sets a cascade's own settings (the "This cascade" place) on the server, as
- * another device would, with a `set_cascade_options` through the sync
+ * Changes a cascade's settings for it on all devices on the server, as
+ * another device would, with a `set_cascade_settings` through the sync
  * endpoint. Used on a cascade made with `apiCascade` before this device has
  * seen it, so it downloads with them.
  */
@@ -185,7 +185,7 @@ export async function apiSettings(page: Page, path: string, fields: Record<strin
 					device_seq: 1,
 					seen_seq: 0,
 					at: new Date().toISOString(),
-					type: 'set_cascade_options',
+					type: 'set_cascade_settings',
 					cascade_id: path.split('/').pop(),
 					settings: fields
 				}
