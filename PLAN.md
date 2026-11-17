@@ -21,10 +21,10 @@ There are three quiz types:
 
 Twenty of the filters match search conditions in Zyzzyva
 (<https://github.com/scrabblewords/collins-zyzzyva>), so experienced players can
-describe a word list the way they already know how. Three are Acrodont-only:
+describe a word list the way they already know how. Four are Acrodont-only:
 **Front Inner Hook** and **Back Inner Hook**, which Zyzzyva shows in its word
-display but has no search condition for, and **Leave Value**, for Leave Value
-quizzes. Filters combine with AND and OR in nested groups whose precedence the
+display but has no search condition for, **Root Word**, read from the
+definitions, and **Leave Value**, for Leave Value quizzes. Filters combine with AND and OR in nested groups whose precedence the
 user chooses. [Filters](#filters) below explains what each filter means and how
 Zyzzyva implements it.
 
@@ -2325,9 +2325,9 @@ Words and leaves both use the **lexicon's** letter distribution.
 
 ## Filters
 
-There are 23 filters: 20 of Zyzzyva's condition types, in the order of its
-search dropdown, plus three Acrodont-only filters at the end: **Front Inner
-Hook**, **Back Inner Hook** and **Leave Value**. Zyzzyva's Belongs to Group
+There are 24 filters: 20 of Zyzzyva's condition types, in the order of its
+search dropdown, plus four Acrodont-only filters at the end: **Front Inner
+Hook**, **Back Inner Hook**, **Root Word** and **Leave Value**. Zyzzyva's Belongs to Group
 condition is deliberately left out; the other filters are enough to build any
 study list, and its "Inner Hooks" group is what the two inner hook filters
 replace. A filter has a type, a Not flag, and parameters, and it is either a
@@ -2459,7 +2459,8 @@ tiles.
 | 20 | **Number of Anagrams** | min, max | — | The number of valid words with this word's alphagram (including itself) is within min–max. |
 | 21 | **Front Inner Hook** *(Acrodont only)* | — | ✓ | The word with its first tile removed is also a valid word: SPORT, because PORT is a word. A one-tile word never has one. Zyzzyva has no condition for this; it is the front half of its "Inner Hooks" group. |
 | 22 | **Back Inner Hook** *(Acrodont only)* | — | ✓ | The word with its last tile removed is also a valid word: SPORTS, because SPORT is a word. |
-| 23 | **Leave Value** *(Acrodont only)* | min, max (decimals; either may be blank) | — | *Leave Value quizzes only.* The leave's stored value is between min and max, inclusive. A blank bound is open, so `min 10, max blank` means "worth at least 10". At least one bound is required, and min ≤ max when both are given. The comparison uses the full stored value, not the rounded display value. |
+| 23 | **Root Word** *(Acrodont only)* | — | ✓ | The word is a root, as its definition says (`catalog/roots.rs`). A definition's senses are separated by ` / `; a sense is a **form of** another word when it starts with an all-capitals word the lexicon holds, followed by a comma, a space, a period or nothing (CSW24's `EATS: EAT, to consume food [v]`, `ABSENTMINDEDLY: ABSENTMINDED [adv]`). A word is a root when none of its senses is a form of another word (EAT, EATER, BIZARRE), or when some but not all are and another word in the lexicon is a form of it (SUBDUED: `SUBDUE, … [v] / quiet and serious [adj]`, which SUBDUEDLY names). A word whose every sense is a form of another word is not (EATS, MICE, ABSENTMINDEDLY). Negated, it finds the inflected forms. A lexicon whose definitions do not follow this convention has every word a root. Zyzzyva has no condition for this. |
+| 24 | **Leave Value** *(Acrodont only)* | min, max (decimals; either may be blank) | — | *Leave Value quizzes only.* The leave's stored value is between min and max, inclusive. A blank bound is open, so `min 10, max blank` means "worth at least 10". At least one bound is required, and min ≤ max when both are given. The comparison uses the full stored value, not the rounded display value. |
 
 Details that are easy to get wrong:
 
@@ -2579,6 +2580,7 @@ distribution, with the blank treated as an ordinary tile.
 | Point Value | ✓ | ✓ | ✓ (a blank is worth 0) |
 | Takes Prefix / Takes Suffix | ✓ | ✓ | — |
 | Front Inner Hook / Back Inner Hook | ✓ | ✓ | — |
+| Root Word | ✓ | ✓ | — |
 | Part of Speech / Definition | ✓ | ✓ | — |
 | Consists of | ✓ | ✓ | ✓ (the blank is an ordinary tile: `?` may be in the set and matches only itself) |
 | Number of Anagrams | ✓ | ✓ | ✓ (valid words in the lexicon using exactly the leave's tiles; 0 if the leave contains a blank) |
@@ -2696,6 +2698,8 @@ in-memory `LexiconIndex`, computing for every word:
 - `front_hooks` and `back_hooks` (for a cascade's Show hooks setting)
 - `has_front_inner_hook` and `has_back_inner_hook`: whether the word minus its
   first, or last, tile is in the lexicon
+- `is_root`: whether the word is a root, from every word's definition (the
+  [Root Word](#filter-reference) filter; `catalog/roots.rs`)
 - `combinations` (with two blanks), `probability_order`,
   `min_probability_order` and `max_probability_order`
 - `playability_order`, `min_playability_order`, `max_playability_order`,
@@ -4473,6 +4477,7 @@ CREATE TYPE condition_type AS ENUM (
     'num_anagrams',
     'front_inner_hook',
     'back_inner_hook',
+    'root_word',
     'leave_value'
 );
 
@@ -4750,7 +4755,8 @@ CREATE TABLE search_conditions (
     CHECK (NOT negated OR condition_type IN (
         'anagram_match', 'pattern_match', 'subanagram_match', 'in_lexicon',
         'in_word_list', 'includes_letters', 'takes_prefix', 'takes_suffix',
-        'part_of_speech', 'definition', 'front_inner_hook', 'back_inner_hook')),
+        'part_of_speech', 'definition', 'front_inner_hook', 'back_inner_hook',
+        'root_word')),
 
     -- Exactly the parameters each type uses are present.
     CHECK (CASE
@@ -4791,7 +4797,8 @@ CREATE TABLE search_conditions (
                               min_value, max_value, min_leave_value,
                               max_leave_value, lax) = 1
         WHEN condition_type IN ('in_word_list',   -- its entries are in entries
-                                'front_inner_hook', 'back_inner_hook')  -- no parameters
+                                'front_inner_hook', 'back_inner_hook',  -- no parameters
+                                'root_word')
             THEN num_nonnulls(text_value, part_of_speech_value, other_lexicon_id,
                               min_value, max_value, min_leave_value,
                               max_leave_value, lax) = 0
@@ -5214,7 +5221,7 @@ Notes on the schema:
   The AND / OR tree is `search_groups` rows, with group 0 at the top; group
   depth, the 100-row total and non-empty groups are checked by the application.
   The Rust `ConditionKind` enum is loaded from these rows and written back to
-  them. A round-trip test (see [Testing](#testing)) covers all 23 types and the
+  them. A round-trip test (see [Testing](#testing)) covers all 24 types and the
   group tree. Sync
   operation payloads are not stored at all; only each operation's id, type and
   result are kept, the result including the outcome, count and hash a finish
@@ -5865,8 +5872,9 @@ Two more conditions:
 `probability_order`, `limit_by_probability_order`, `playability_order`,
 `limit_by_playability_order`, `num_unique_letters`, `point_value`,
 `takes_prefix`, `takes_suffix`, `part_of_speech`, `definition`, `consists_of`,
-`num_anagrams`, `front_inner_hook`, `back_inner_hook` or `leave_value`. Only the
-parameters that type uses are accepted (the inner hook filters take none); any
+`num_anagrams`, `front_inner_hook`, `back_inner_hook`, `root_word` or
+`leave_value`. Only the parameters that type uses are accepted (the inner hook
+and Root Word filters take none); any
 extra field is a `400`. Every condition also carries `negated`, a boolean, which
 is `true` only for the types the [Filter reference](#filter-reference) marks
 negatable. The parameter fields, by type:
@@ -5882,7 +5890,7 @@ negatable. The parameter fields, by type:
 | `in_word_list` | `entries` | an array of entries, each in MAGPIE notation, canonical for the request's `quiz_type` |
 | `part_of_speech` | `part_of_speech` | one of `adjective`, `adverb`, `conjunction`, `definite_article`, `indefinite_article`, `interjection`, `noun`, `preposition`, `pronoun`, `verb` |
 | `definition` | `text` | free text, 1–500 characters, matched case-insensitively |
-| `front_inner_hook`, `back_inner_hook` | — | — |
+| `front_inner_hook`, `back_inner_hook`, `root_word` | — | — |
 | `leave_value` | `min`, `max` | numbers, either one `null` for an open bound, not both |
 
 These are the wire names on both sides; the Rust `ConditionKind` may name its
@@ -6957,6 +6965,12 @@ Pure functions and in-memory structures, no database and no network.
     translated.
   - Front Inner Hook and Back Inner Hook against a fixture holding SPORT, PORT
     and SPORTS, including a one-tile word and the negated forms.
+  - Root Word against the fixture, whose inflections are written as CSW24
+    writes them (`SPORTS: SPORT, a game [n]`): the ones naming a word it
+    holds are not roots, the ones naming a word it does not hold are, and the
+    negated form finds the first; the rule's own cases (a bare `ROOT [adv]`,
+    a period, a word with a sense of its own that another word names, one
+    that nothing names) in `catalog/roots.rs`.
   - Groups: `Length 7 AND (Includes Q OR Includes Z)`, an OR of two AND groups,
     a limit inside an AND group ranking that group's result within the
     parent's predicate survivors (`Length 7 AND (Includes V AND Limit 1–50)`
@@ -7369,7 +7383,7 @@ they run in parallel and leave nothing behind.
   of `GET /api/letter-distributions/:name` a `404`, where Postgres's refusal
   of the byte was a `500`.
 - **Schema tests**:
-  - Every one of the 23 condition types round-trips through
+  - Every one of the 24 condition types round-trips through
     `search_conditions` and back into an equal `ConditionKind`, In Lexicon in
     both of its stored forms — the id in a cascade's spec, the name in a saved
     search's — with a row holding both, or neither, rejected by the `CHECK`, and a nested
@@ -8539,7 +8553,7 @@ run.
    - probability and playability ordering
    - `LISTEN/NOTIFY` reload
    - the `/admin` pages
-4. **Search engine**: all 23 filters, including both limits, AND / OR groups, validation errors,
+4. **Search engine**: all 24 filters, including both limits, AND / OR groups, validation errors,
    unit, property and parity tests, `/api/search/preview`.
 5. **Cascade builder**: filter rows, applicability rules, tile palette, word list
    editor, live preview, saved searches, the default settings every new

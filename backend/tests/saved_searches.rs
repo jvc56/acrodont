@@ -47,6 +47,7 @@ async fn a_saved_tree_round_trips(pool: sqlx::PgPool) {
         { "type": "in_word_list", "negated": false, "entries": entries },
         { "type": "in_lexicon", "negated": true, "lexicon": "CSW21" },
         { "type": "front_inner_hook", "negated": false },
+        { "type": "root_word", "negated": true },
         { "type": "limit_by_playability_order", "negated": false, "min": 1, "max": 100, "lax": true } ] });
     let id = Uuid::new_v4();
     let r = c.post("/api/searches", save_body(id, "Big one", tree.clone())).await;

@@ -52,7 +52,7 @@ async fn try_condition(app: &TestApp, spec: Uuid, pos: i16, ctype: &str, negated
     sqlx::query(sqlx::AssertSqlSafe(sql)).execute(app.db()).await.is_ok()
 }
 
-/// Every one of the 23 condition types round-trips through `search_conditions`
+/// Every one of the 24 condition types round-trips through `search_conditions`
 /// and back, and a nested AND / OR tree round-trips unchanged with its spec's
 /// `quiz_type`.
 #[sqlx::test]
@@ -61,11 +61,11 @@ async fn every_condition_type_and_a_nested_tree_round_trip(pool: sqlx::PgPool) {
     app.seed_fixture_catalog("root").await;
     let owner = user(&app).await;
     let conds = contract_conditions();
-    assert_eq!(conds.len(), 23);
+    assert_eq!(conds.len(), 24);
     let tree = json!({ "op": "and", "children": [
         conds[0], conds[1],
         { "op": "or", "children": [ conds[2], conds[3], { "op": "and", "children": conds[4..12].to_vec() } ] },
-        { "op": "and", "children": conds[12..23].to_vec() } ] });
+        { "op": "and", "children": conds[12..24].to_vec() } ] });
     for (kind, quiz_type) in [(SpecKind::Cascade, QuizType::Anagram), (SpecKind::SavedSearch, QuizType::LeaveValue)] {
         let parsed = parse_tree(&tree).unwrap();
         let mut conn = app.db().acquire().await.unwrap();
@@ -126,11 +126,13 @@ async fn the_check_refuses_missing_extra_and_not(pool: sqlx::PgPool) {
         ("num_anagrams", range.to_vec()),
         ("front_inner_hook", vec![]),
         ("back_inner_hook", vec![]),
+        ("root_word", vec![]),
         ("leave_value", vec![("min_leave_value", "1.5")]),
     ];
     let negatable = [
         "anagram_match", "pattern_match", "subanagram_match", "in_lexicon", "in_word_list", "includes_letters",
         "takes_prefix", "takes_suffix", "part_of_speech", "definition", "front_inner_hook", "back_inner_hook",
+        "root_word",
     ];
     let mut pos = 0i16;
     for (t, cols) in &cases {

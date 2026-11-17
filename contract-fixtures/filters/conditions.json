@@ -312,6 +312,17 @@
       ]
     },
     {
+      "type": "root_word",
+      "label": "Root Word",
+      "fields": [],
+      "negatable": true,
+      "limit": false,
+      "applies_to": [
+        "anagram",
+        "definition"
+      ]
+    },
+    {
       "type": "leave_value",
       "label": "Leave Value",
       "fields": [
@@ -517,6 +528,13 @@
         "negated": false
       },
       "text": "{\"type\":\"back_inner_hook\",\"negated\":false}"
+    },
+    {
+      "condition": {
+        "type": "root_word",
+        "negated": false
+      },
+      "text": "{\"type\":\"root_word\",\"negated\":false}"
     },
     {
       "condition": {

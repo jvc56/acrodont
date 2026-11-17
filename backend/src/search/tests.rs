@@ -146,6 +146,23 @@ fn inner_hooks() {
     assert!(not_back.contains(&"SPORT".to_string()));
 }
 
+#[test]
+fn root_words() {
+    let f = load();
+    let roots = words(&f, and(vec![c("root_word", json!({}))]));
+    let not_roots = words(&f, and(vec![not(c("root_word", json!({})))]));
+    assert_eq!(roots.len() + not_roots.len(), 154);
+    assert_eq!(not_roots, s(&["ATE", "OATS", "OXEN", "QATS", "QIS", "QUEENS", "QUIZZED", "SPORTS", "SWAMPS"]));
+    for w in ["SPORT", "EAT", "QAT", "ANESTRI", "BIZARRE"] {
+        assert!(roots.contains(&w.to_string()), "{w}");
+    }
+    // With another filter: every anagram of AEINRST is a root, the ones whose
+    // definition names a word (ANESTRUS, ANTSY, NASTY, RATINE, RETINA) naming one
+    // the fixture does not hold.
+    let sevens = words(&f, and(vec![c("anagram_match", json!({ "pattern": "A E I N R S T" })), c("root_word", json!({}))]));
+    assert_eq!(sevens.len(), 9);
+}
+
 // ---------------------------------------------------------------------------
 // Groups
 // ---------------------------------------------------------------------------

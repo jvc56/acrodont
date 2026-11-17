@@ -12,6 +12,7 @@ pub mod fixtures;
 pub mod index;
 pub mod pos;
 pub mod probability;
+pub mod roots;
 pub mod routes;
 pub mod store;
 pub mod tiles;

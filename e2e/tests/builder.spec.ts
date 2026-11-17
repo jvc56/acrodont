@@ -82,3 +82,20 @@ test('the builder previews and creates a cascade', async ({ page }) => {
 	await expect(page.getByRole('link', { name: 'Sevens again (2)', exact: true })).toBeVisible({ timeout: 30_000 });
 	await expect(page.getByRole('link', { name: 'Sevens again', exact: true })).toBeVisible();
 });
+
+// PLAN.md § Filter reference, Root Word: the fixture's inflections are written
+// as CSW24 writes them (`OATS: OAT, a cereal grass [n]`). Of its 31 four-letter
+// alphagrams, the roots are 28; Not finds OATS, OXEN and QATS, whose roots it holds.
+test('Root Word keeps the roots, and Not the inflected forms', async ({ page }) => {
+	await newUser(page, 'roots');
+	await page.goto('/cascades/new');
+	await page.getByLabel('Lexicon').selectOption('EN-FIX');
+	await page.getByLabel('Minimum').first().fill('4');
+	await page.getByLabel('Maximum').first().fill('4');
+	await expect(page.getByText('31 questions')).toBeVisible({ timeout: 15_000 });
+	await page.getByRole('button', { name: 'Add row' }).first().click();
+	await page.getByLabel('Filter type').nth(1).selectOption({ label: 'Root Word' });
+	await expect(page.getByText('28 questions')).toBeVisible({ timeout: 15_000 });
+	await page.getByLabel('Not').nth(1).check();
+	await expect(page.getByText('3 questions', { exact: true })).toBeVisible({ timeout: 15_000 });
+});

@@ -69,6 +69,7 @@ describe('the default name', () => {
 			'Number of Anagrams 2–5',
 			'Front Inner Hook',
 			'Back Inner Hook',
+			'Root Word',
 			'Leave Value ≥ 10.5'
 		]);
 		expect(describeRow({ type: 'includes_letters', negated: true, tiles: 'U' })).toBe('Not Includes Letters U');

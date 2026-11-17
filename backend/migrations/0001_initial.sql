@@ -71,6 +71,7 @@ CREATE TYPE condition_type AS ENUM (
     'num_anagrams',
     'front_inner_hook',
     'back_inner_hook',
+    'root_word',
     'leave_value'
 );
 
@@ -348,7 +349,8 @@ CREATE TABLE search_conditions (
     CHECK (NOT negated OR condition_type IN (
         'anagram_match', 'pattern_match', 'subanagram_match', 'in_lexicon',
         'in_word_list', 'includes_letters', 'takes_prefix', 'takes_suffix',
-        'part_of_speech', 'definition', 'front_inner_hook', 'back_inner_hook')),
+        'part_of_speech', 'definition', 'front_inner_hook', 'back_inner_hook',
+        'root_word')),
 
     -- Exactly the parameters each type uses are present.
     CHECK (CASE
@@ -389,7 +391,8 @@ CREATE TABLE search_conditions (
                               min_value, max_value, min_leave_value,
                               max_leave_value, lax) = 1
         WHEN condition_type IN ('in_word_list',   -- its entries are in entries
-                                'front_inner_hook', 'back_inner_hook')  -- no parameters
+                                'front_inner_hook', 'back_inner_hook',  -- no parameters
+                                'root_word')
             THEN num_nonnulls(text_value, part_of_speech_value, other_lexicon_id,
                               min_value, max_value, min_leave_value,
                               max_leave_value, lax) = 0

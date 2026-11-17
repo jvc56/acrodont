@@ -119,6 +119,14 @@ mod tests {
         assert_eq!(&*port.front_hooks, &t(d, "S")[..]);
         let a = f.en.find(&t(d, "A")).unwrap();
         assert!(!a.has_front_inner_hook && !a.has_back_inner_hook);
+
+        // Root words: every sense of SPORTS names SPORT, which the lexicon
+        // holds; ANESTRI names ANESTRUS, which it does not, so its sense is
+        // its own. Catalan's definitions name no word in capitals: all roots.
+        let not_roots: Vec<String> = f.en.words.iter().filter(|w| !w.is_root).map(|w| d.to_magpie(&w.tiles)).collect();
+        assert_eq!(not_roots, ["ATE", "OATS", "OXEN", "QATS", "QIS", "QUEENS", "QUIZZED", "SPORTS", "SWAMPS"]);
+        assert!(f.en.find(&t(d, "SPORT")).unwrap().is_root && f.en.find(&t(d, "ANESTRI")).unwrap().is_root);
+        assert!(f.ca.words.iter().all(|w| w.is_root));
         // Hooks in tile order: AA AB AL AN AT AX, and AA BA LA TA ZA.
         assert_eq!(&*a.back_hooks, &t(d, "ABLNTX")[..]);
         assert_eq!(&*a.front_hooks, &t(d, "ABLTZ")[..]);
