@@ -697,12 +697,15 @@ async fn an_incremental_pull_beside_many_chain_quizzes(pool: sqlx::PgPool) {
     assert_eq!(common::sync::rows(&pages, "quizzes").len() as i32, CHAINS + 1);
     let cursor = d.cursor.unwrap();
 
-    // Nothing changed: each query scans its user_seq index and touches a
-    // handful of pages, whatever the user's quiz count.
-    for (sql, index, attempts) in [
-        (acrodont::sync::pull::cascades_sql(), "cascades_user_seq", false),
-        (acrodont::sync::pull::quizzes_sql(), "quizzes_user_seq", false),
-        (acrodont::sync::pull::ATTEMPTS_SQL.to_owned(), "quiz_attempts_user_seq", true),
+    // Nothing changed: each query scans one of the user's indexes and touches
+    // a handful of pages, whatever the user's quiz count. At the suite's
+    // padding (a tenth of the plan's) the planner may read the user's one
+    // cascade through `cascades_user_activity`, which also leads with the
+    // user: the buffer bound is what says no other user's rows are read.
+    for (sql, index, also, attempts) in [
+        (acrodont::sync::pull::cascades_sql(), "cascades_user_seq", Some("cascades_user_activity"), false),
+        (acrodont::sync::pull::quizzes_sql(), "quizzes_user_seq", None, false),
+        (acrodont::sync::pull::ATTEMPTS_SQL.to_owned(), "quiz_attempts_user_seq", None, true),
     ] {
         let plan = explain(&app, &sql, |q| {
             // The range a pull asks for, open above: an empty one (cursor to
@@ -713,7 +716,7 @@ async fn an_incremental_pull_beside_many_chain_quizzes(pool: sqlx::PgPool) {
         .await;
         let mut used = Vec::new();
         indexes(&plan, &mut used);
-        assert!(used.contains(&index.to_owned()), "{index}: {used:?}");
+        assert!(used.iter().any(|u| u == index || Some(u.as_str()) == also), "{index}: {used:?}");
         assert!(buffers(&plan) <= UNCHANGED_PULL_BUFFERS, "{index}: {} buffers", buffers(&plan));
         println!("scale: unchanged pull, {index}: {} buffers", buffers(&plan));
     }
