@@ -140,6 +140,12 @@ describe('the player', () => {
 		await q.load();
 		await q.showNext();
 		expect(q.v.card!.grade).toBe('correct');
+		// Toggle before the reveal marks it missed whatever the setting says.
+		await cascade(5, { reveal_correct: false });
+		const r = player();
+		await r.load();
+		await r.toggle();
+		expect([r.v.card!.revealed, r.v.card!.grade]).toEqual([true, 'missed']);
 	});
 
 	it('Show and Toggle act at once during a slow reload, which keeps them; Next waits for it', async () => {
@@ -273,16 +279,17 @@ describe('the player', () => {
 		expect(p.v.card!.revealed).toBe(false);
 	});
 
-	it('Toggle before the reveal does nothing; Previous shows the earlier card with its saved grade and discards the unsaved reveal', async () => {
+	it('Toggle before the reveal shows the answer marked missed; Previous shows the earlier card with its saved grade and discards the unsaved reveal', async () => {
 		await cascade(3);
 		const p = player();
 		await p.load();
 		await p.toggle();
-		expect([p.v.card!.revealed, p.v.card!.toggled]).toEqual([false, false]);
-		await p.showNext();
+		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'missed']);
+		expect(await ops()).toEqual([]);
+		// A second Toggle flips it as on any shown answer.
+		await p.toggle();
 		expect(p.v.card!.grade).toBe('correct');
 		await p.toggle();
-		expect(p.v.card!.grade).toBe('missed');
 		await p.showNext();
 		await p.showNext(); // reveal card 2
 		await p.previous();
@@ -429,6 +436,19 @@ describe('the player', () => {
 		expect(p.v.card!.revealed).toBe(false);
 		expect((await p.enter(''))!.kind).toBe('empty');
 		expect([p.v.card!.revealed, p.v.card!.grade]).toEqual([true, 'correct']);
+	});
+
+	it('typed mode: Toggle before the reveal gives the card up as missed, even with every answer found', async () => {
+		await cascade(2);
+		await makeTyped();
+		const p = player();
+		await p.load();
+		await p.enter('AB');
+		await p.enter('BA');
+		await p.toggle();
+		expect([p.v.card!.revealed, p.v.card!.grade, p.v.card!.typed!.found]).toEqual([true, 'missed', ['AB', 'BA']]);
+		await p.showNext();
+		expect((await db.getAll('outbox'))[0].op.grade).toBe('missed');
 	});
 
 	it('typed entries: only an anagram of the question can be wrong', () => {
