@@ -50,6 +50,8 @@ describe('the preset editor', () => {
 		const a = e.change('question_size_px', 40);
 		const b = e.setRules({ clear_threshold: 95 });
 		const c = e.rename('Tablet');
+		// Not "Saved" while any change is still out.
+		expect([e.pending, e.saved]).toEqual([3, false]);
 		expect(await Promise.all([a, b, c])).toEqual([true, true, true]);
 		// One save each, never two at once, each the whole preset as it is when it runs:
 		// changes made while one is out go with the next.
@@ -59,7 +61,7 @@ describe('the preset editor', () => {
 		// One change alone is saved alone.
 		await e.change('border_px', 3);
 		expect(saved.at(-1)?.settings.border_px).toBe(3);
-		expect([e.saved, e.error]).toEqual([true, null]);
+		expect([e.pending, e.saved, e.error]).toEqual([0, true, null]);
 		// Not a cascade's: no offer, no scope.
 		expect(e.scoped).toBe(false);
 	});

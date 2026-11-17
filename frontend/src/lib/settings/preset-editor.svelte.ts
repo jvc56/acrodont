@@ -20,7 +20,9 @@ export class PresetEditor implements SettingsSource {
 	readonly scoped = false;
 	preset = $state<Preset>({ ...defaultsPreset(), id: '', name: '', ...CASCADE_SETTING_DEFAULTS });
 	value = $derived<Settings>(presetValues(this.preset));
-	/** What the last save said: "Saved", or why it could not be. */
+	/** Saves queued or under way: while any is, the page says "Saving…", never "Saved". */
+	pending = $state(0);
+	/** Every change made has been saved. */
 	saved = $state(false);
 	error = $state<string | null>(null);
 	/** Bumped when a failed save puts the preset back, so forms holding their own text show it again. */
@@ -58,23 +60,27 @@ export class PresetEditor implements SettingsSource {
 
 	/** Saves the preset as it is now, after any save still under way. */
 	#save(): Promise<boolean> {
+		// Said at once: a change made while an earlier save is out is not saved yet.
+		this.pending += 1;
+		this.saved = false;
+		this.error = null;
 		const run = this.#chain.then(async () => {
 			const db = this.#db;
 			if (!db) return false;
-			this.saved = false;
-			this.error = null;
 			const p = clone($state.snapshot(this.preset) as Preset);
 			try {
 				if (!navigator.onLine) throw new TypeError('offline');
 				const kept = await savePreset(db, p);
 				this.#last = clone(kept);
-				this.saved = true;
 				return true;
 			} catch (e) {
 				this.error = presetFailure(e, 'Changing a preset', 'saved');
 				if (this.#last) this.preset = clone(this.#last);
 				this.reverts += 1;
 				return false;
+			} finally {
+				this.pending -= 1;
+				this.saved = this.pending === 0 && this.error === null;
 			}
 		});
 		this.#chain = run.catch(() => undefined);

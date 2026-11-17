@@ -960,7 +960,8 @@ rows as a cascade's Settings (`AnswerSettings`, `DisplaySettings`,
 on this device, or the editor's; `lib/settings/source.ts`). Each change is
 **saved to the preset at once**, the whole preset in one `PUT`, one save after
 another (`lib/settings/preset-editor.svelte.ts`); a bar at the bottom says
-"✓ Saved". Offline, or refused, it says why ("Changing a preset needs a
+"Saving…" from the moment a change is made until every save it waits on is
+done, then "✓ Saved". Offline, or refused, it says why ("Changing a preset needs a
 connection.", "You already have a preset with that name.") and the preset goes
 back to what was last saved. There is no "Also apply to" offer: a preset is
 not a cascade on a device. **Editing a preset changes no cascade**: a cascade

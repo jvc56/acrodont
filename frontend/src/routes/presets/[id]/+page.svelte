@@ -183,6 +183,8 @@
 		<div class="sticky bottom-0 mt-6 border-t bg-background py-3 text-sm" aria-live="polite">
 			{#if editor.error}
 				<p class="text-destructive" role="alert" data-preset-error>{editor.error}</p>
+			{:else if editor.pending > 0}
+				<p class="text-muted-foreground" data-preset-status>Saving…</p>
 			{:else if editor.saved}
 				<p class="text-green-700 dark:text-green-500" data-preset-status>✓ Saved</p>
 			{:else}
