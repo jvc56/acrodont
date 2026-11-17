@@ -83,8 +83,8 @@ class Dev {
 		return view.questionsOf(this.tx(), quizId);
 	}
 
-	apply(op: NewOp) {
-		return applyLocally(this.db, op);
+	apply(op: NewOp, at?: Date) {
+		return applyLocally(this.db, op, at ? () => at : undefined);
 	}
 
 	/** Grades the quiz's cards from `from` in position order. */
@@ -450,8 +450,9 @@ describe('the sync engine', () => {
 	it("two devices' changes to a cascade's settings both stand, per setting, the later winning", async () => {
 		const { server, a } = await setup();
 		const b = await second(server);
-		await a.apply({ type: 'set_cascade_settings', cascade_id: C1, settings: { show_hooks: false, leave_value_decimals: 1 } });
-		await b.apply({ type: 'set_cascade_settings', cascade_id: C1, settings: { leave_value_decimals: 3 } });
+		const t = Date.now();
+		await a.apply({ type: 'set_cascade_settings', cascade_id: C1, settings: { show_hooks: false, leave_value_decimals: 1 } }, new Date(t));
+		await b.apply({ type: 'set_cascade_settings', cascade_id: C1, settings: { leave_value_decimals: 3 } }, new Date(t + 1000));
 		await b.sync();
 		// A's change is older and unseen, and still applied: its other setting is kept,
 		// and B's later change to the same one wins.
