@@ -105,7 +105,7 @@ for (const orientation of ['portrait', 'landscape'] as const) {
 		await at(page, 2);
 
 		// Typed mode: while the input has the focus the bar holds Previous and Show / Next
-		// above the keyboard, and no Toggle, which does nothing before the reveal.
+		// above the keyboard, and no Toggle, since Show / Next there already gives the card up.
 		await page.waitForTimeout(150);
 		await show.tap();
 		await at(page, 3);

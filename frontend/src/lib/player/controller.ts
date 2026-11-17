@@ -31,8 +31,6 @@ export interface Card {
 	word: WordHooks | null;
 	revealed: boolean;
 	grade: Grade;
-	/** Marked missed in advance, before the reveal. */
-	toggled: boolean;
 	saved: Grade | null;
 	/** Typed mode on this card; null in flashcard mode or when falling back. */
 	typed: TypedState | null;
@@ -369,7 +367,6 @@ export class Player {
 			word,
 			revealed: saved !== null,
 			grade: saved ?? 'correct',
-			toggled: false,
 			saved,
 			typed,
 			note: null
@@ -609,18 +606,18 @@ export class Player {
 		await this.flush();
 	}
 
-	/** The grade a shown answer starts with: the cascade's setting's (correct unless set otherwise). */
-	private revealGrade(card: Card): Grade {
-		const base: Grade = this.answer().reveal_correct === false ? 'missed' : 'correct';
-		return card.toggled ? (base === 'correct' ? 'missed' : 'correct') : base;
-	}
-
-	private reveal(card: Card) {
-		this.v.card = {
-			...card,
-			revealed: true,
-			grade: card.typed && card.answer ? typedGrade(card.typed, this.words(card)) : this.revealGrade(card)
-		};
+	/**
+	 * Shows the answer with `grade`, or else the grade it starts with: a typed
+	 * card's from what was typed, any other the setting's (correct unless set otherwise).
+	 */
+	private reveal(card: Card, grade?: Grade) {
+		const start = (): Grade =>
+			card.typed && card.answer
+				? typedGrade(card.typed, this.words(card))
+				: this.answer().reveal_correct === false
+					? 'missed'
+					: 'correct';
+		this.v.card = { ...card, revealed: true, grade: grade ?? start() };
 		this.emit();
 	}
 
@@ -745,8 +742,9 @@ export class Player {
 	toggle(): Promise<void> {
 		const flip = () => {
 			const card = this.v.card;
-			// Before the answer is shown there is no grade to toggle: nothing happens.
-			if (!card || card.key === null || this.v.status !== 'ready' || !card.revealed || this.v.completion) return;
+			if (!card || card.key === null || this.v.status !== 'ready' || this.v.completion) return;
+			// Before the answer is shown, Toggle shows it marked missed, a typed card's too.
+			if (!card.revealed) return this.reveal(card, 'missed');
 			this.v.card = { ...card, grade: card.grade === 'correct' ? 'missed' : 'correct' };
 			this.emit();
 		};

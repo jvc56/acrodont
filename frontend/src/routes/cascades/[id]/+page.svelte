@@ -283,7 +283,8 @@
 			return;
 		}
 		const p = player;
-		if (a !== 'toggle_grade') {
+		// Every action but a Toggle of a shown answer leaves the card, or shows its answer.
+		if (a !== 'toggle_grade' || !card?.revealed) {
 			typedText = '';
 			typedWrong = false;
 		}
@@ -855,7 +856,8 @@
 		<div class="shrink-0 border-t bg-background px-4 py-3">
 			{#if mobile && typedFocused}
 				<!-- The on-screen keyboard covers the zones: two buttons sit above it. There is no
-				     Toggle: the bar is gone once the answer is shown, and before that there is no grade. -->
+				     Toggle: the bar is gone once the answer is shown, and before that Show / Next
+				     already gives the card up. -->
 				<div class="mb-2 flex justify-around" data-typed-actions>
 					<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('previous')}>Previous</Button>
 					<Button variant="outline" onmousedown={(e: MouseEvent) => e.preventDefault()} onclick={() => act('show_next')}>Show / Next</Button>

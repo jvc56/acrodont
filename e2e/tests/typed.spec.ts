@@ -107,20 +107,23 @@ test('typed mode', async ({ page }) => {
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
 	await next(page, true);
 
-	// Before the reveal, a right click (Toggle) does nothing; a left click only focuses the input.
+	// Before the reveal, a left click only focuses the input.
 	await page.getByLabel('Type an answer').blur();
 	const area = page.getByRole('application', { name: 'Quiz area' });
-	await area.click({ button: 'right', position: { x: 200, y: 300 } });
-	await expect(page.locator('[data-grade]')).toHaveCount(0);
 	await area.click({ position: { x: 200, y: 300 } });
 	await expect(page.getByLabel('Type an answer')).toBeFocused();
-	await expect(page.locator('[data-grade="correct"]')).toHaveCount(0);
+	await expect(page.locator('[data-grade]')).toHaveCount(0);
 	// Switching modes mid-card clears the entries.
 	await type(page, 'RETAINS');
 	await expect(page.getByText('1 of 9 found')).toBeVisible();
 	await playerSetting(page, 'Answer mode', 'flashcard');
 	await playerSetting(page, 'Answer mode', 'typed');
 	await expect(page.getByText('0 of 9 found')).toBeVisible();
+	// A right click (Toggle) before the reveal gives the card up: its answer shown, marked missed.
+	await type(page, 'RETAINS');
+	await area.click({ button: 'right', position: { x: 200, y: 300 } });
+	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
+	await expect(page.getByLabel('Type an answer')).toHaveCount(0);
 });
 
 test('alphabetical order in typed mode', async ({ page }) => {

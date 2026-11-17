@@ -1271,13 +1271,15 @@ Every quiz is driven by three actions, whatever the device:
 | Action | Before the answer is shown | After the answer is shown |
 |---|---|---|
 | **Show / Next** | Show the answer | Save the grade and go to the next card |
-| **Toggle grade** | Nothing: there is no grade until the answer is shown | Flip the grade between Correct and Missed |
+| **Toggle grade** | Show the answer marked Missed | Flip the grade between Correct and Missed |
 | **Previous** | Go back to the previous card | Go back to the previous card |
 
 - **The grade** appears with the answer, as the colour of the quiz area's
   border (green Correct, red Missed; see the layout above). It starts as
   Correct, so a user who knows the answer only ever uses Show / Next, and one
-  who does not shows it, then toggles.
+  who does not toggles, which shows it marked Missed in one press, whatever
+  **When an answer is revealed, mark it** says, and on a typed card whatever
+  was typed. A second Toggle flips it as on any shown answer.
 - **Saving.** A grade is saved only when Show / Next moves on. Going back from a
   card discards that card's unsaved reveal and toggle.
 - **Going back.** Previous shows the earlier card with its answer and saved
@@ -1481,8 +1483,9 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   stroke bound to **Show / Next** inside the quiz area focuses the input instead
   of acting. A stroke bound to Previous, such as the default middle click,
   still acts, so a card can be left with the keyboard covered. One bound to
-  Toggle grade does nothing, as on any card before its answer is shown: there
-  is no grade to flip yet (see [The three actions](#the-three-actions)).
+  Toggle grade gives the card up on purpose: it shows the answer marked
+  Missed, as on any card before its answer is shown (see
+  [The three actions](#the-three-actions)).
 - Switching modes in the middle of a card resets that card's typed entries.
 
 #### Controls
@@ -1610,8 +1613,8 @@ Details:
   shrinks to the space above the on-screen keyboard (`interactive-widget=resizes-content`),
   so the bar sits just above the keyboard. The keyboard covers the zones, so while
   it is open the bar also holds a row of two buttons: Previous and Show / Next.
-  It has no Toggle: the bar is there only until the answer is shown, and Toggle
-  does nothing before the reveal.
+  It has no Toggle: the bar is there only until the answer is shown, and before
+  that its Show / Next already gives the card up.
 - **Customization.** Columns or rows is the one choice; only mouse and
   keyboard controls can be rebound.
 
@@ -7897,9 +7900,10 @@ through the ordinary endpoints, so there is still no test-only path.
   shows in the answer, and grades missed, a found word shows in green as the
   last entry and is the one green word among the found words in the answer
   space (the latest of them all once every anagram is found), finding every anagram reveals nothing until Enter on an empty input,
-  which then grades correct, a repeated entry is ignored, a right click before the reveal does nothing while a
-  left click only focuses the input, the next card's input has the focus with
-  no click, and switching modes mid-card clears the entries. Two answers typed on one line (`RETAINS NASTIER`) stay in the input
+  which then grades correct, a repeated entry is ignored, a left click before the reveal only focuses the input,
+  the next card's input has the focus with
+  no click, switching modes mid-card clears the entries, and a right click before the reveal gives the card up, its answer
+  shown marked missed. Two answers typed on one line (`RETAINS NASTIER`) stay in the input
   with "not an anagram of the question" and the card, with every anagram then found,
   still grades correct. That the typed input keeps Enter and `Shift+T` when they are bound to Toggle grade is a unit test's (`inputOwns`), not a journey's; the controls journey checks only that Ctrl+Backspace still acts as Previous from the input.
 - With **Typed answers must be in alphabetical order** turned on in Settings
