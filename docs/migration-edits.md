@@ -235,6 +235,9 @@ time it was made, and the latest one covering a cascade on a device is used.
 - `users.presets_version` and the `setting_presets` table: presets, at most 50
   per account, outside the storage limit; a sync response carries them when
   the device's version differs.
+- `condition_type` gains `root_word`, the Root Word filter (PLAN.md § Filter
+  reference), negatable and with no parameters, which the two
+  `search_conditions` checks name.
 
 A database made by the earlier file no longer matches: `./scripts/dev.py --reset`
 (and `make sqlx-db` for the compile-check database), and the production
