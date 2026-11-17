@@ -24,7 +24,7 @@ export SQLX_OFFLINE := true
 export CARGO_BUILD_JOBS ?= 2
 
 .PHONY: infra-validate ops-check test test-quick test-unit test-unit-backend test-unit-frontend \
-        test-integration test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-ops-image test-scale test-parity \
+        test-integration test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-ops-image test-scale test-scale-backend test-scale-frontend test-parity \
         frontend-deps e2e-deps e2e-binary e2e-pass-full e2e-pass-ttl e2e-pass-purge e2e-pass-answers \
         e2e-pass-budget e2e-pass-webkit $(addprefix e2e-up-,full ttl purge answers budget) $(addprefix e2e-down-,full ttl purge answers budget) \
         sqlx-db sqlx-prepare
@@ -241,10 +241,14 @@ test-ops-image: e2e-binary
 	grep -Eq '[1-9][0-9]* cascades' "$$out/drill.log" \
 	  || { echo "the drill restored no cascade: its question check ran on nothing" >&2; exit 1; }
 
-## The 300,000-question budgets (PLAN.md § Scale tests): the server's half
-## against a throwaway Postgres with production durability settings, in
-## release mode, one test at a time; then the device's half in Vitest.
-test-scale: frontend-deps
+## The scale budgets (PLAN.md § Scale tests), at a tenth of the question
+## ceiling so each half runs in a few minutes: the server's half against a
+## throwaway Postgres with production durability settings, in release mode,
+## one test at a time; then the device's half in Vitest. CI runs the two
+## halves as separate jobs, side by side.
+test-scale: test-scale-backend test-scale-frontend
+
+test-scale-backend:
 	cid=$$(docker run -d --rm -e POSTGRES_PASSWORD=acrodont -p 127.0.0.1::5432 postgres:16 \
 	  -c max_connections=400 -c shared_buffers=512MB)
 	trap 'docker rm -f $$cid >/dev/null' EXIT
@@ -256,7 +260,9 @@ test-scale: frontend-deps
 	cd backend
 	DATABASE_URL=postgres://postgres:acrodont@127.0.0.1:$$port/postgres \
 	  cargo test --release --test scale -- --ignored --test-threads=1 --nocapture
-	cd ../frontend && npx playwright install chromium >/dev/null && npx vitest run --config vitest.scale.config.ts
+
+test-scale-frontend: frontend-deps
+	cd frontend && npx playwright install chromium >/dev/null && npx vitest run --config vitest.scale.config.ts
 
 ## Zyzzyva comparison; skipped with a notice unless the licensed files are present.
 test-parity:

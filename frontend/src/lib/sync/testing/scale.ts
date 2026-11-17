@@ -15,8 +15,13 @@ import { SyncEngine } from '../engine';
 import type { SyncRequest, SyncResponse } from '../protocol';
 import { FakeServer } from './fake-server';
 
-/** The question ceiling (PLAN.md § Storage limit, D3). */
-export const QUESTIONS = 300_000;
+/**
+ * The size of a large cascade here: a tenth of the question ceiling (PLAN.md §
+ * Storage limit, D3), so the suites run in minutes rather than half an hour.
+ * Budgets that grow with the size are a fifth of what they were at the ceiling,
+ * leaving room for what does not shrink with it.
+ */
+export const QUESTIONS = 30_000;
 export const DAY = 86_400_000;
 
 /** IndexedDB writes (put, add, delete, clear), counted across every database. */

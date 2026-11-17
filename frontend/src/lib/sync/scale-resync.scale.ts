@@ -32,7 +32,7 @@ function rowsIn(p: SyncResponse): number {
 	);
 }
 
-describe('a resync of a device holding five 300,000-question cascades and 4,000 chain quizzes', () => {
+describe(`a resync of a device holding five ${QUESTIONS}-question cascades and 4,000 chain quizzes`, () => {
 	it('compares and deletes within budget, keeps the exported cleared rows, and pages under 50,000 rows', async () => {
 		const server = new FakeServer();
 		const big = Array.from({ length: 5 }, (_, i) => ids(i + 1));

@@ -11,7 +11,8 @@
 #            journeys again in WebKit), the seeding check and the ops image
 #            check (make test-ops-image: the image builds, and the restore
 #            drill passes in it on a dump of a seeded stack).
-#   Nightly  04:30 UTC on main: the Main tier, plus make test-scale. A failure
+#   Nightly  04:30 UTC on main: the Main tier, plus make test-scale (its server
+#            and device halves as two jobs, each a few minutes). A failure
 #            opens (or comments on) one issue.
 #
 # The seeding check also runs on a push that changes scripts/ (or this file),
@@ -280,10 +281,13 @@ jobs:
       - name: make contract-check (the generators still write the checked-in contract fixtures)
         run: make contract-check
 
-  scale:
+  # The scale suites, a tenth of the question ceiling (PLAN.md § Scale
+  # tests): the server's half and the device's half side by side, each in a
+  # few minutes.
+  scale-backend:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
@@ -292,6 +296,15 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: backend
+      - name: make test-scale-backend (the server's budgets)
+        run: make test-scale-backend
+
+  scale-frontend:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
@@ -299,14 +312,14 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Chromium and its system libraries for the device's scale suites
         run: cd frontend && npm ci && npx playwright install --with-deps chromium
-      - name: make test-scale (the 300,000-question budgets)
-        run: make test-scale
+      - name: make test-scale-frontend (the device's budgets)
+        run: make test-scale-frontend
 
   # birdtest's nightly failed for weeks before anyone noticed. A failed
   # scheduled run, in any job, opens (or comments on) one issue, and
   # scripts/deploy.sh warns.
   nightly-failure:
-    needs: [lint, unit-backend, unit-frontend, integration, e2e-core, e2e-main, seeding, ops-image, terraform, scripts, scale]
+    needs: [lint, unit-backend, unit-frontend, integration, e2e-core, e2e-main, seeding, ops-image, terraform, scripts, scale-backend, scale-frontend]
     # A job that runs out its timeout-minutes may end as cancelled, which
     # failure() does not count: a hung scale run must open the issue too.
     if: ${{ always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}

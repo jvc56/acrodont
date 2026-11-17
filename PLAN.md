@@ -8325,6 +8325,23 @@ through the ordinary endpoints, so there is still no test-only path.
 
 ### Scale tests
 
+**Since 2026-11-17 the suites run at a tenth of the sizes below**, so that
+each half finishes in a few minutes. CI runs the server's half
+(`make test-scale-backend`) and the device's half (`make
+test-scale-frontend`) as two jobs side by side, nightly and on a manual run.
+The server's half uses 30,000 questions (the quiz cap is set to match),
+10,000 chain quizzes and 100,000 padding rows. The catalog uploads stay at
+full size: the 300,001-word lexicon and the million-row leave set. The
+device's half uses 30,000 questions (`QUESTIONS` in
+`frontend/src/lib/sync/testing/scale.ts`). Its drop pass runs against a
+hundredth of the limits, with 5,600-question cascades. The push budget is the
+server's own work, since 60 requests fit inside the sync rate limit's burst.
+The device's budgets that grow with the size are a fifth of the full-size
+ones. Some coverage was traded for the runtime: nothing runs at the ceiling,
+the sync after opening and the resync fit in one page, and a cascade's keys
+fit in one page. The rest of this section, the measurements included, is the
+full-size design of 2026-11-11.
+
 Run at the 300,000-question ceiling ([Scale assumptions](#overview)), on a
 scale lexicon of about CSW24's size (300,001 words). The ten concurrent
 exports run at production's `EXPORT_CONCURRENCY` of one, against the
