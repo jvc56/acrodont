@@ -50,11 +50,12 @@ async function cascade(
 			id: C, name: 'x', quiz_type: o.quiz_type ?? 'anagram', lexicon: 'EN', letter_distribution: 'english', clear_threshold: 80, ...opts,
 			options_changed_at: T0, options_seq: '1', options_device_id: 'd', question_count: count, depth: 1, peak_depth: 1,
 			attempts_since_completion: 0, created_at: T0, last_activity_at: T0, completed_at: null, trashed_at: null, updated_seq: '1',
-			settings: {
+			// Changes for the cascade on all devices, made when it was.
+			settings: entries({
 				...(o.answer_mode ? { answer_mode: o.answer_mode } : {}),
 				...(o.reveal_correct === false ? { reveal_correct: false } : {}),
 				leave_value_decimals: 1
-			}
+			})
 		},
 		source_quiz: {
 			id: Q, cascade_id: C, level: 1, origin: 'source', origin_quiz_id: null, origin_attempt: null, origin_segment_end: null,
@@ -80,10 +81,15 @@ async function putDistribution() {
 	await db.put('distributions', { name: 'english', tiles });
 }
 
+/** Setting name to value as changes made at T0. */
+function entries(values: Record<string, unknown>) {
+	return Object.fromEntries(Object.entries(values).map(([k, value]) => [k, { value, at: T0 }]));
+}
+
 /** The cascade made typed, as the player's settings would, with any other answer settings. */
 async function makeTyped(more: Record<string, unknown> = {}) {
 	const c = (await db.get('cascades', C))!;
-	await db.put('cascades', { ...c, settings: { ...c.settings, answer_mode: 'typed', ...more } });
+	await db.put('cascades', { ...c, settings: { ...c.settings, ...entries({ answer_mode: 'typed', ...more }) } });
 }
 
 function player() {
@@ -496,15 +502,20 @@ describe('the player', () => {
 		expect(q.v.card!.typed).toBeNull();
 	});
 
-	it('set_cascade_options carries the answer mode in the cascade\'s own settings, and nothing but flashcard or typed', async () => {
+	it('set_cascade_settings carries the answer mode for the cascade on all devices, and nothing but flashcard or typed', async () => {
 		await cascade(2);
-		await applyLocally(db, { type: 'set_cascade_options', cascade_id: C, settings: { answer_mode: 'typed' } });
+		const at = new Date('2026-11-17T10:00:00.000Z');
+		await applyLocally(db, { type: 'set_cascade_settings', cascade_id: C, settings: { answer_mode: 'typed' } }, () => at);
 		const read = async () => (await view.cascade(db.transaction(view.VIEW_STORES) as never, C))!.settings;
-		expect(await read()).toEqual({ leave_value_decimals: 1, answer_mode: 'typed' });
-		await expect(applyLocally(db, { type: 'set_cascade_options', cascade_id: C, settings: { answer_mode: 'spoken' } })).rejects.toThrow();
-		// Null takes it out again.
-		await applyLocally(db, { type: 'set_cascade_options', cascade_id: C, settings: { answer_mode: null } });
-		expect(await read()).toEqual({ leave_value_decimals: 1 });
+		expect(await read()).toEqual({ ...entries({ leave_value_decimals: 1 }), answer_mode: { value: 'typed', at: at.toISOString() } });
+		const p = player();
+		await p.load();
+		expect(p.v.card!.typed).not.toBeNull();
+		await expect(applyLocally(db, { type: 'set_cascade_settings', cascade_id: C, settings: { answer_mode: 'spoken' } })).rejects.toThrow();
+		// Null is the default, flashcard, a change like any other.
+		const later = new Date('2026-11-17T11:00:00.000Z');
+		await applyLocally(db, { type: 'set_cascade_settings', cascade_id: C, settings: { answer_mode: null } }, () => later);
+		expect((await read()).answer_mode).toEqual({ value: null, at: later.toISOString() });
 	});
 
 	it('the answer mode the page resolves for this device decides over the cascade\'s own', async () => {

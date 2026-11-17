@@ -438,6 +438,14 @@ impl<'a> Client<'a> {
         self.request(Method::POST, path, None).await
     }
 
+    pub async fn put(&mut self, path: &str, body: Value) -> TestResponse {
+        self.request(Method::PUT, path, Some(body)).await
+    }
+
+    pub async fn patch(&mut self, path: &str, body: Value) -> TestResponse {
+        self.request(Method::PATCH, path, Some(body)).await
+    }
+
     pub async fn delete(&mut self, path: &str, body: Value) -> TestResponse {
         self.request(Method::DELETE, path, Some(body)).await
     }

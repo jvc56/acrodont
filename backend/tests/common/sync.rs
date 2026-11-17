@@ -72,8 +72,12 @@ impl<'a> Device<'a> {
             // resync included, carries the account's storage against its limit.
             let s = &r.json()["storage"];
             assert!(s["used"].is_i64() && s["limit"].is_i64(), "storage on every sync response: {s}");
-            // So does the account's shared device settings (PLAN.md § Settings).
-            assert!(r.json()["device_settings"].is_object(), "device_settings on every sync response");
+            // So do the account's settings for all cascades on all devices, its
+            // presets' version and the server's time (PLAN.md § Settings).
+            let b = r.json();
+            assert!(b["settings"].is_object(), "settings on every sync response");
+            assert!(b["presets_version"].is_string(), "presets_version on every sync response");
+            assert!(b["server_time"].as_str().is_some_and(|t| t.parse::<chrono::DateTime<chrono::Utc>>().is_ok()), "server_time");
         }
         r
     }

@@ -5,12 +5,12 @@
 	// The typeface is a choice of the few every device has; the rest are numbers
 	// in px, em or ms, committed when the field loses focus or on Enter, so a
 	// half-typed number is never applied; each control sits at the right of its
-	// row like every other setting. Like every setting, each can be set in any
-	// of four places (lib/settings/layers): a change saves in the place the two
-	// switches under its name show. The caller opens `settings` for the cascade first.
+	// row like every other setting. Like every setting, a change is saved for
+	// this cascade on this device (lib/settings/layers), and the offer under its
+	// row makes it more widely. The caller opens `settings` for the cascade first.
 	import { INFO } from '$lib/settings-info';
 	import TileText from '$lib/components/TileText.svelte';
-	import LayeredSetting from '$lib/components/settings/LayeredSetting.svelte';
+	import ScopedSetting from '$lib/components/settings/ScopedSetting.svelte';
 	import { clampSetting, FONTS, LIMITS, textStyle, type LimitKey } from '$lib/player/display';
 	import { settings } from '$lib/settings/store.svelte';
 	import type { SettingKey } from '$lib/settings/layers';
@@ -34,16 +34,16 @@
 </script>
 
 {#snippet check(label: string, field: FlagKey, id: string, checked: boolean, info: string, set: (on: boolean) => void)}
-	<LayeredSetting key={field} {label} for={id} {info}>
+	<ScopedSetting key={field} {label} for={id} {info}>
 		<!-- On a wide screen the checkbox sits in the fields' column; on a phone, at the row's right end. -->
 		<span class="flex justify-end sm:w-36"><input {id} type="checkbox" {checked} onchange={(e) => set(e.currentTarget.checked)} /></span>
 		<span class="w-8 max-sm:hidden" aria-hidden="true"></span>
-	</LayeredSetting>
+	</ScopedSetting>
 {/snippet}
 
 {#snippet number(label: string, unit: string, field: NumberKey, limit: LimitKey, info: string)}
 	{@const l = LIMITS[limit]}
-	<LayeredSetting key={field} {label} for={`display-${field}`} {info}>
+	<ScopedSetting key={field} {label} for={`display-${field}`} {info}>
 		<input
 			id={`display-${field}`}
 			class={inputClass}
@@ -55,7 +55,7 @@
 			onchange={(e) => setNumber(field, limit, e)}
 		/>
 		<span class="w-8 text-muted-foreground">{unit}</span>
-	</LayeredSetting>
+	</ScopedSetting>
 {/snippet}
 
 <div class="grid gap-4 text-sm">
@@ -70,7 +70,7 @@
 		{@const spacing = d[`${part.which}_spacing`]}
 		<fieldset class="grid gap-3">
 			<legend class="mb-1 font-medium">{part.title}</legend>
-			<LayeredSetting key={fontKey} label="Font" info={INFO.font} for={`display-${fontKey}`}>
+			<ScopedSetting key={fontKey} label="Font" info={INFO.font} for={`display-${fontKey}`}>
 				<select
 					id={`display-${fontKey}`}
 					class={selectClass}
@@ -80,7 +80,7 @@
 					{#each FONTS as f (f.value)}<option value={f.value}>{f.label}</option>{/each}
 				</select>
 				<span class="w-8" aria-hidden="true"></span>
-			</LayeredSetting>
+			</ScopedSetting>
 			{@render number('Size', 'px', `${part.which}_size_px`, part.limit, INFO.size)}
 			{@render number('Letter spacing', 'em', `${part.which}_spacing`, 'spacing_em', INFO.spacing)}
 			<p
@@ -103,7 +103,7 @@
 		{@render check('Show the sync status', 'sync_status_hidden', 'display-sync-status', !d.sync_status_hidden, INFO.sync_status, (on) => settings.change('sync_status_hidden', !on))}
 		{@render number('Definition width', 'px', 'definition_width_px', 'definition_width_px', INFO.definition_width)}
 		{@render number('Hook size', 'px', 'hook_size_px', 'hook_size_px', INFO.hook_size)}
-		<LayeredSetting key="player_buttons" label="Show the Previous, Toggle and Show / Next buttons" info={INFO.player_buttons} for="display-player-buttons">
+		<ScopedSetting key="player_buttons" label="Show the Previous, Toggle and Show / Next buttons" info={INFO.player_buttons} for="display-player-buttons">
 			<select
 				id="display-player-buttons"
 				class={selectClass}
@@ -114,11 +114,11 @@
 				<option value="always">Always</option>
 			</select>
 			<span class="w-8" aria-hidden="true"></span>
-		</LayeredSetting>
+		</ScopedSetting>
 		{#if d.player_buttons === 'auto'}
 			{@render number('A window is narrow below', 'px', 'buttons_below_px', 'buttons_below_px', INFO.buttons_below)}
 		{/if}
-		<LayeredSetting key="mobile_buttons" label="Tap zones on a phone" info={INFO.mobile_buttons} for="display-mobile-buttons">
+		<ScopedSetting key="mobile_buttons" label="Tap zones on a phone" info={INFO.mobile_buttons} for="display-mobile-buttons">
 			<select
 				id="display-mobile-buttons"
 				class={selectClass}
@@ -129,7 +129,7 @@
 				<option value="rows">Rows</option>
 			</select>
 			<span class="w-8" aria-hidden="true"></span>
-		</LayeredSetting>
+		</ScopedSetting>
 		{#if d.mobile_buttons === 'rows'}
 			{@render number('Row height on a phone', 'px', 'mobile_row_px', 'mobile_row_px', INFO.mobile_row_px)}
 		{/if}

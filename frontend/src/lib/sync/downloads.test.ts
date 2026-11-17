@@ -508,30 +508,29 @@ describe('the download manager', () => {
 		const server = new FakeServer();
 		server.create({ id: C1, source_id: Q1, count: 3 });
 		// Definitions are on by default: off first, so the first download has none.
-		server.cascades.get(C1)!.settings.show_definitions = false;
+		server.cascades.get(C1)!.settings.show_definitions = { value: false, at: '2026-01-01T00:00:00.000Z' };
 		const b = await Dev.make(server);
 		await b.open(C1);
 		await b.sync();
 		expect((await b.db.get('cards', [C1, 0]))!.definitions).toBe(false);
 		// Still pending in the outbox: the download reads the cascade as the device sees it.
-		await applyLocally(b.db, { type: 'set_cascade_options', cascade_id: C1, settings: { show_definitions: true } });
+		await applyLocally(b.db, { type: 'set_cascade_settings', cascade_id: C1, settings: { show_definitions: true } });
 		await b.dl.run();
 		expect(b.calls.some((c) => c.kind === 'cards' && c.definitions)).toBe(true);
 		expect((await b.db.get('cards', [C1, 0]))!.definitions).toBe(true);
 	});
 
-	it('cards follow the answer settings this device resolves for the cascade, a device-only place included', async () => {
+	it('cards follow the answer settings this device resolves for the cascade, a device-only scope included', async () => {
 		const server = new FakeServer();
 		server.create({ id: C1, source_id: Q1, count: 3 });
 		const b = await Dev.make(server);
-		// Off on this device for this cascade alone: the cascade's own value says nothing.
-		await b.db.put('meta', { [C1]: { show_definitions: false } }, 'cascade_device_settings');
+		// Off on this device for this cascade alone: the cascade's changes for all devices say nothing.
+		await b.db.put('meta', { [C1]: { show_definitions: { value: false, at: '2026-01-02T00:00:00.000Z' } } }, 'cascade_device_scope');
 		await b.open(C1);
 		await b.sync();
 		expect((await b.db.get('cards', [C1, 0]))!.definitions).toBe(false);
-		// On again for every cascade on this device; the narrower place taken out: refetched with them.
-		await b.db.put('meta', {}, 'cascade_device_settings');
-		await b.db.put('meta', { show_definitions: true }, 'device_settings');
+		// On again for every cascade on this device, a later change: refetched with them.
+		await b.db.put('meta', { show_definitions: { value: true, at: '2026-01-03T00:00:00.000Z' } }, 'device_scope');
 		await b.dl.run();
 		expect((await b.db.get('cards', [C1, 0]))!.definitions).toBe(true);
 	});
@@ -541,7 +540,7 @@ describe('the download manager', () => {
 		server.create({ id: C1, source_id: Q1, count: 3 });
 		server.create({ id: C2, source_id: Q2, count: 3 });
 		// C2 shows no definitions: its cards hold nothing a replacement changes.
-		server.cascades.get(C2)!.settings.show_definitions = false;
+		server.cascades.get(C2)!.settings.show_definitions = { value: false, at: '2026-01-01T00:00:00.000Z' };
 		const b = await Dev.make(server);
 		await b.open(C1);
 		await b.open(C2);

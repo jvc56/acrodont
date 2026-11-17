@@ -81,7 +81,7 @@ when they land. See [Offline and Sync](#offline-and-sync).
 | **Attempt** | One pass through a quiz's questions, identified by its number and the shuffle seed that produced its order. A quiz that is reset or restored starts a new attempt with a new shuffle. |
 | **Segment** (or **run**) | A fixed-size run of questions inside an attempt, the length of one sitting. Finishing a run drills its misses before the attempt goes on. Off by default. |
 | **Finish** | Move on from the last question of an attempt. Finishing always either sends the quiz to the Trash, sends the user down a level, or resets the quiz in place. |
-| **Clear threshold** | The score (X%) needed to clear a quiz. It is a setting of each cascade, 90% when the cascade is created, and can be changed in the cascade's Settings in the player, under This Cascade; a change applies to every level, the pass in progress included. |
+| **Clear threshold** | The score (X%) needed to clear a quiz. It is a setting of each cascade, 90% when the cascade is created (or its [preset](#presets)'s), and can be changed in the cascade's Settings in the player, under This Cascade; a change applies to every level, the pass in progress included. |
 | **Quiz options** | Segment size and progression. They are held by the cascade alone, like the clear threshold, and every level reads them; a change applies at once to every level, the pass in progress included. |
 | **Progression** | What finishing a quiz below the clear threshold does: **Ladder** (keep the quiz and go down a level) or **Drill** (replace the quiz with its misses). |
 | **Clear** | Finish an attempt with a score of at least the clear threshold. The quiz goes to the Trash. The Source quiz is never cleared; see **Complete**. |
@@ -206,7 +206,7 @@ The options belong to the **cascade** alone, exactly as the clear threshold
 does:
 
 - **No quiz holds a copy.** Every new cascade starts with the defaults above,
-  and they can be changed at any time afterwards in the cascade's
+  or the ones of the [preset](#presets) it is created with, and they can be changed at any time afterwards in the cascade's
   [Settings](#settings) (This Cascade), with `set_cascade_options`. Every
   level reads the cascade's current values whenever it uses them, so a change
   applies at once to every level: the one being studied, from the current
@@ -446,8 +446,9 @@ Moving on from the last question of a run that is not the last run:
   which takes the same 1–200 characters as at creation.
 - **Duplicate cascade**, in any cascade's **Settings**, creates a new cascade
   from the same filters: a private copy of them, the same threshold and
-  [quiz options](#quiz-options) and every other setting, starting at Level 1
-  with nothing graded. The search is run again, so the new cascade holds what
+  [quiz options](#quiz-options), and every other setting as the original has
+  it on the duplicating device (for the copy on every device; see
+  [Settings](#settings)), starting at Level 1 with nothing graded. The search is run again, so the new cascade holds what
   matches now. It is how a ladder is abandoned for a clean start without
   losing it, and how a cascade's questions are chosen again after the
   catalog's definitions, playabilities or leave values were replaced. It is not on the
@@ -462,10 +463,12 @@ Moving on from the last question of a run that is not the last run:
   this cascade's name with the next free number after it. This cascade isn't
   changed. You'll have both, and each counts toward your storage until it is
   deleted from the Trash." (see [Storage limit](#storage-limit)). The server
-  copies the settings it holds, so a setting changed on this device and not
+  copies the rules it holds, so a rule changed on this device and not
   yet sent is sent first, with the same wait an export from the server makes
   (see [Exporting words](#exporting-words)); a sync that does not end within
-  it does not stop the duplicate, which then has the settings the server had.
+  it does not stop the duplicate, which then has the rules the server had.
+  The other settings go in the request itself: the original's values as this
+  device shows them.
 - **Exporting** works on anything in the Trash that has not been purged, so a
   cleared quiz can still be downloaded as a word list (see
   [Exporting words](#exporting-words)).
@@ -665,26 +668,32 @@ There are two kinds of settings:
   row and sync like everything else (see [Offline and Sync](#offline-and-sync)).
 - **Every other setting**: what a revealed answer shows and how a reveal
   grades it (the answer settings below), the [display settings](#desktop-layout)
-  and the [controls](#controls). Each can be set in any of **four places**
+  and the [controls](#controls). **Each cascade has its own on each device**
   (see [Where a setting applies](#where-a-setting-applies)).
 
 All are edited in one place only: a cascade's **Settings** dialog in the
 player (the menu's **Settings**, on the desktop and on a phone alike; see
 [Desktop layout](#desktop-layout)), where a change takes effect on the current
 card straight away. There is no settings page and nothing in the site header
-or on the Account page. A line at the top says where a change applies; then
-come four sections, each with a heading and an ⓘ saying what it holds and
-where it applies: **This Cascade** (the name, the ladder, the rules, Copy,
-Duplicate and Move to Trash), **Answers**, **Display** and **Controls**. No
-heading carries a badge.
+or on the Account page. A line at the top says where a change applies
+(`SCOPE.places`: "Each cascade has its own settings on each device. A change
+is saved for this cascade on this device; under it you can then apply the
+same change to this cascade on all devices, to all cascades on this device,
+or to all cascades on all devices. Cascades you create later start from the
+preset you choose."); then come four sections, each with a heading and an ⓘ
+saying what it holds and where it applies: **This Cascade** (the name, the
+ladder, the rules, Presets, Duplicate and Move to Trash), **Answers**,
+**Display** and **Controls**. No heading carries a badge.
 
 **Every setting is saved as soon as it is changed**: a choice or a checkbox
 when it changes, a number when its field is left or Enter is pressed. There is
 no Save button.
 
-Every new cascade starts with the same rules, the defaults below
-(`CASCADE_SETTING_DEFAULTS` in `lib/local/rows.ts`, matching the column
-defaults in the [schema](#schema)), and no settings of its own.
+Every new cascade starts with the rules and settings of the
+[preset](#presets) chosen in the builder. With the built-in **Defaults**, it
+starts with the rules below (`CASCADE_SETTING_DEFAULTS` in
+`lib/local/rows.ts`, matching the column defaults in the [schema](#schema))
+and every setting at its default.
 
 | A cascade's rule | Applies to | Default | Options |
 |---|---|---|---|
@@ -708,7 +717,9 @@ defaults in the [schema](#schema)), and no settings of its own.
 The rules are changed with `set_cascade_options`, under the cascade options'
 latest-wins rule (see [Conflicts](#conflicts)); it is the only way to change
 them, and no quiz holds a copy (see [Quiz options](#quiz-options)). Duplicate
-gives the new cascade the original's rules and own settings.
+gives the new cascade the original's rules, and the original's settings as
+they are on the duplicating device, as changes made for the new cascade on
+all devices.
 
 #### A cascade's rules: one cascade, or all of them
 
@@ -718,106 +729,195 @@ one tap: "✓ Saved for this cascade · Also use for: all N cascades". N counts
 the cascades not in the Trash, this one included, and the offer appears only when N is at least 2. The offer is
 made for the threshold, the segment size and the progression alike. The offer stays until the
 dialog closes, so it is never gone before it is read, and a second change to
-the same rule starts a fresh one.
-
-**Copy another cascade's settings** gives this cascade, in one change, every
-rule of a chosen cascade that applies to this cascade's kind and differs from
-its own, and the same own settings (its "This cascade" place, below) as the
-chosen one. The choice lists the user's other cascades not in the Trash, most
-recently studied first. It says "✓ Copied N settings from “X”." or, when
-nothing differs, "✓ “X” already has the same settings." The rules it copies
-are the threshold and the two quiz options, so the level being studied
-follows the copied options from the current card.
+the same rule starts a fresh one. Applying a [preset](#presets) sets the
+rules too, with the same offer for the rules it changed.
 
 Neither is a new kind of change: "all N cascades" is the ordinary
-`set_cascade_options` for each cascade whose value differs, and a copy is one
-`set_cascade_options` for this cascade, so both work offline, sync, and are
-judged on the server like any other (a change to a threshold or a quiz option
-applies to every level of each cascade, the pass in progress included). The functions are in
-`lib/settings/cascade.ts`.
+`set_cascade_options` for each cascade whose value differs, and a preset's
+rules are one `set_cascade_options` for this cascade, so both work offline,
+sync, and are judged on the server like any other (a change to a threshold or
+a quiz option applies to every level of each cascade, the pass in progress
+included). The functions are in `lib/settings/cascade.ts`.
 
 #### Where a setting applies
 
-Every setting but the rules can be set in four places, which answer two
-questions, which cascades and which devices:
+**Every cascade has its own settings on each device.** A change made in
+Settings is saved for this cascade on this device and nowhere else, and the
+row then offers to make the same change more widely. The device does not
+store a copy for every cascade and device. It stores **each change, as
+`{ value, at }`** (`at` being when it was made; see [Clocks](#clocks)), **in
+one of four scopes**:
 
-| | This device | Every device |
-|---|---|---|
-| **This cascade** | 1. **This cascade on this device** | 2. **This cascade** |
-| **Every cascade** | 3. **This device** | 4. **Everywhere** |
+| Scope | Covers | Kept in | Synced |
+|---|---|---|---|
+| `both` | this cascade on this device | this device's `meta` store, `cascade_device_scope` (by cascade id) | no |
+| `cascade` | this cascade on all devices | the cascade row's `settings` | yes, with `set_cascade_settings` |
+| `device` | all cascades on this device | this device's `meta` store, `device_scope` | no |
+| `all` | all cascades on all devices | the account's `users.settings` | yes, in the sync request's and response's `settings` |
 
-**The first of the four that holds a value is used**, in that order, and the
-setting's default when none does. A cascade's own value beats a device's, so
-a cascade can ask for something wherever it is studied; to make one device
-differ for one cascade, it is set in the first place. A value from another
-build that this one cannot read (a typeface it does not offer, a number that
-is not one) is passed over, as if its place held none; a number out of bounds
-is clamped. The resolution is `lib/settings/layers.ts`.
+**A setting's value for a cascade on a device is the change with the latest
+`at` among the up to four that cover it**, whatever their scope. A change for
+all cascades (`device` or `all`) made before the cascade was created (its
+`created_at`) is ignored, so a new cascade starts from its preset or from the
+defaults, and "all cascades" means the cascades that exist when the change is
+made, the Trash included. A null value means the setting's default and takes
+part in the comparison like any other value (applying the Defaults preset
+records one for every setting). A value from another build that this one
+cannot read (a typeface it does not offer, a number that is not one) is passed
+over, as if that change had not been made; a number out of bounds is clamped.
+Of two changes made at the same time, the narrower scope's wins. With no
+change left, the default is used. The resolution is `resolve` in
+`lib/settings/layers.ts`.
 
-Where each place is kept:
+Nothing can be hidden behind a narrower scope, so the result is the same as
+if each cascade on each device held its own copy, and every wider change had
+been written into each copy it covers at the moment it was made:
 
-- **This cascade on this device** and **This device**: this device's `meta`
-  store (`cascade_device_settings`, by cascade, and `device_settings`). They
-  never leave the device.
-- **This cascade**: the cascade row's `settings`, an object of setting name to
-  value, changed with `set_cascade_options` like the rules (its `settings`
-  field: a value, or null to take one out), so it works offline, syncs, and
-  loses whole to a later change of the cascade's options. The server checks a
-  setting's name (lower-case letters and underscores, at most 40), the range
-  of the answer settings above, and the bounds of the whole (64 settings,
-  16 KB); what any other value means is the frontend's to check. A new cascade
-  has none, but for a typed answer mode asked for when it is created.
-- **Everywhere**: the account's shared settings, `users.device_settings`, an
-  object of setting name to `{ value, at }`, `at` being when the value was set
-  there; a value of null takes the setting out. A change waits in this
-  device's `meta` store (`shared_device.pending`) until the next sync carries
-  it in the request's `device_settings`; the server merges it in, the later
-  `at` winning per setting, so two devices changing the same setting agree on
-  the last one. The server keeps `at` as `least(at, now + 5 minutes)`, as it
-  clamps every device time it compares (see [Operations](#operations)), so a
-  device whose clock is months ahead wins a merge by five minutes at most and
-  the next real change takes the setting back. **Every sync response carries
-  the account's `device_settings`**, which the device keeps
-  (`shared_device.values`); what the place holds is, per setting, the later of
-  that and a change still pending here, and an open player shows a change at
-  once. The server holds at most 64 such settings per account, 16 KB of them in
-  all (a change that would pass either changes nothing: every sync response
-  carries them, and they are outside the [storage limit](#storage-limit)), and
-  reads no meaning into a value.
+| Step | Cascade 1 on the phone | Cascade 1 on the laptop | Cascade 2 on the phone |
+|---|---|---|---|
+| On the phone, cascade 1's question size set to 30 | **30** | default | default |
+| Later, on the laptop, cascade 1's set to 24, then applied to this cascade on all devices | **24** | **24** | default |
+| Later, on the phone, set to 40, then applied to all cascades on this device | **40** | 24 | **40** |
+| Then cascade 3 is created on the phone with Defaults | | | cascade 3 on the phone: the default, the change before it was created being ignored |
 
-**Under each setting's name, two switches say where its value applies**:
-"For [this cascade | all cascades] on [this device | all devices]", the four
-places as the two questions they answer. The pressed halves show the place
-the value comes from. A setting no place holds a value for (its default) has
-its switches **start at this cascade on this device**, the narrowest place,
-and they then show where a change will go; they are never greyed out or
-disabled. **A change is saved in the place the switches show**, at once, so a
-setting set everywhere is changed everywhere.
+Where each scope is kept:
 
-Pressing the other half of a switch **moves the value** to the place the two
-switches now name: it is set there first, so it stays in use throughout, then
-taken out of the place it came from and of **every place narrower than the new
-one**, which would otherwise still win here. A value taken out that differed
-is named under the row until the dialog closes ("Replaced this cascade's
-30 px"). With no value, pressing a switch moves nothing: it only points the
-next change elsewhere, until the dialog closes. **Reset**, beside the switches
-while a place holds a value, takes it out of that place; the next place
-holding one is then used and the switches show it, or, with none, the default,
-with the switches left where they were. There is no offer after a change and
-no table of the places.
+- **This cascade on this device** and **all cascades on this device**: this
+  device's `meta` store (`cascade_device_scope`, by cascade, and
+  `device_scope`), setting name to `{ value, at }`. They never leave the
+  device.
+- **This cascade on all devices**: the cascade row's `settings`, setting name
+  to `{ value, at }`, changed with `set_cascade_settings`
+  (`{ cascade_id, settings: { name: value | null }, at }`; see
+  [Operations](#operations)), so it works offline and syncs. The server
+  merges it per setting, the later `at` winning, so two devices that changed
+  different settings offline both keep theirs; it is not subject to the
+  rules' latest-wins rule, and a later `set_cascade_options` leaves it alone.
+  The server checks a setting's name (lower-case letters and underscores, at
+  most 40), the range of the answer settings above, and the bounds of the
+  whole (64 settings, 16 KB); what any other value means is the frontend's to
+  check. A new cascade holds its preset's values here, each a change made at
+  the creation's `at`; one created with Defaults holds none.
+- **All cascades on all devices**: the account's `users.settings`, setting
+  name to `{ value, at }`. A change waits in this device's `meta` store
+  (`account_settings.pending`) until the next sync carries it in the
+  request's `settings`; the server merges it in, the later `at` winning per
+  setting, so two devices changing the same setting agree on the last one.
+  **Every sync response carries the account's `settings`**, which the device
+  keeps (`account_settings.values`); what the scope holds is, per setting,
+  the later of that and a change still pending here, and an open player shows
+  a change at once. The server holds at most 64 such settings per account,
+  16 KB of them in all (a change that would pass either changes nothing:
+  every sync response carries them, and they are outside the
+  [storage limit](#storage-limit)), and reads no meaning into a value.
 
-The controls are one setting, the whole list of bindings, with one pair of
-switches under the Controls heading; **Reset controls to defaults** is a change
-like any other. The player's menu's Hide status bar and Show status bar are
-changes too.
+**After a change, an offer appears under the row**:
+
+> ✓ Saved for this cascade on this device · Also apply to: this cascade on
+> all devices · all N cascades on this device · all N cascades on all devices
+
+N counts the cascades not in the Trash, this one included; with one cascade,
+only "this cascade on all devices" is offered. **Taking one makes the same
+change in that scope, at a fresh time**, later than every change to the
+setting that covers this cascade here, so it wins here even within the same
+millisecond. Each link
+takes one tap, then reads "✓ Applied to …" and stays done until the dialog
+closes; "all N cascades on all devices" covers the other two and marks them
+done with it. A second change to the same setting starts a fresh offer. A row
+has no switches, no Reset and no note of what a change replaced: to put a
+cascade back to the defaults, the user applies the built-in
+[Defaults](#presets) preset.
+
+The controls are one setting, the whole list of bindings, with one offer
+under the list; **Reset controls to defaults** is a change like any other,
+saved for this cascade on this device. The player's menu's Hide status bar
+and Show status bar are changes for this cascade on this device too.
 
 Changes to definitions, hooks or probability orders change what the cards
 hold: the player drops the cards it holds in memory and a download pass fetches
-the extras the cards lack, whichever place the value is in (see
+the extras the cards lack, whichever scope the change is in (see
 [Downloads](#on-the-device)). The functions are in `lib/settings/` (`layers`,
-`places`, `everywhere`, `store.svelte`).
+`places`, `everywhere`, `clock`, `store.svelte`); a row is `ScopedSetting`,
+with `ScopeOffer` under it.
 
 Question order is **not** a setting: questions are always shuffled.
+
+#### Clocks
+
+The resolution compares `at` values made on different devices, so they are
+read on one clock, the server's. **Every sync response carries
+`server_time`.** The device keeps the difference between it and its own
+clock when the response arrived (`clock.offset_ms` in `meta`), and stamps
+every settings change, the ones that never leave it included, with its own
+time plus that offset (`lib/settings/clock.ts`). A device whose clock is wrong
+then still orders its changes correctly against changes made on other
+devices. Before its first sync the offset is 0. The server also keeps every
+synced `at` as `least(at, now + 5 minutes)`, as it clamps every device time it
+compares (see [Operations](#operations)), so a device whose clock is months
+ahead and has not synced yet wins by five minutes at most, and the next real
+change takes the setting back.
+
+#### Presets
+
+A **preset** is every setting's value and a cascade's three rules, saved
+under a name, to apply to a cascade or to start one with (see
+[Creating a cascade](#creating-a-cascade)). A cascade never refers to a
+preset: creating with one or applying one gives the cascade its values, so a
+preset changed or deleted later changes no cascade.
+
+The account's presets are kept on the server (`setting_presets`; see
+[Schema](#schema)): at most **50** per account (`MAX_PRESETS`), each named
+with 1–100 characters, a name no other of the account's presets holds, and
+each's settings within a cascade's bounds (64, 16 KB). Like the account's
+settings, they are outside the [storage limit](#storage-limit). **Saving,
+renaming and deleting a preset need a connection**, as saving a search does
+(`PUT`, `PATCH` and `DELETE /api/presets/:id`; see [API](#presets-api)); applying one
+works offline. Each change bumps the account's `presets_version` and tells
+its other devices to sync (see [Telling the other devices](#telling-the-other-devices)).
+Every sync request carries the `presets_version` the device holds, and every
+sync response the account's, with the whole list (`presets`) when the two
+differ. The device keeps the list and its version in `meta` (`presets`); after
+a change of its own it changes its list at once and forgets the version, so
+the next sync brings the account's whole list and never misses another
+device's change made meanwhile.
+
+**Defaults** is built in (`lib/settings/presets.ts`, id `defaults`): it is
+never stored, holds null (the default) for every setting and the rules
+`CASCADE_SETTING_DEFAULTS`, and cannot be renamed, replaced or deleted.
+"Defaults", in any case and with any spaces around it, is not a name a
+preset can take: "“Defaults” is the built-in preset’s name." Because it
+records null rather than the values of the day, a later change to a default
+in a new build still reaches a cascade it was applied to.
+
+In a cascade's Settings, under This Cascade, the **Presets** group holds:
+
+- **Apply preset**: a choice ("Preset to apply") listing Defaults first, then
+  the user's presets by name, and an **Apply preset** button. Applying gives
+  this cascade on this device every setting the preset holds (one it does not
+  name is recorded as null, the default), with the usual offer under it
+  ("✓ Its settings saved for this cascade on this device · Also apply to: …"),
+  and gives this cascade every rule of the preset that differs, in one
+  `set_cascade_options`, with the rules' "all N cascades" offer. It says
+  "✓ Applied “Phone”: 7 settings changed." (the settings whose value here
+  changed, and the rules) or "✓ This cascade already matches “Phone”.", and
+  the level being studied follows the preset's segments and progression from
+  the current card.
+- **Save as preset**: a name field and a **Save as preset** button. The
+  preset holds **every setting's value as this cascade shows it on this
+  device, and the cascade's three rules**. A name one of the user's presets
+  already holds asks "Replace your preset “Phone”?" ("It will hold this
+  cascade’s settings as they are on this device, and its rules. Cascades made
+  with it keep their settings."), then replaces that preset. It says
+  "✓ Saved “Phone”." or "✓ Replaced “Phone”."; offline, "Saving a preset
+  needs a connection."; with 50 presets, "You have 50 presets, the most an
+  account can hold. Delete one to make room."
+- **The user's presets**, by name, each with **Rename** (a name field in its
+  place, with Save name and Cancel; "✓ Renamed “Phone” to “Laptop”.", or
+  "You already have a preset with that name.") and **Delete**, which asks
+  "Delete the preset “Phone”?" ("Cascades made with it, or that it was
+  applied to, keep their settings.") and then says "✓ Deleted “Phone”."
+  Offline, "Renaming a preset needs a connection." and "Deleting a preset
+  needs a connection."
 
 ### Creating a cascade
 
@@ -853,14 +953,24 @@ because searching runs on the server.
    are canonical for that type and the load flags the row when the two sides of
    Leave Value differ (see
    [Filter applicability](#filter-applicability-by-quiz-type)).
-5. **Settings**: none here. Every new cascade starts with the same
-   [settings](#settings) (a 90% clear threshold, flashcards, no segments,
-   Ladder, and the rest at their defaults), and a note under the form says so:
-   the cascade's settings, such as its clear threshold, answer mode and
-   segments, can be changed in its Settings once it is created. The create
-   request still carries the threshold, the two [quiz options](#quiz-options)
-   and the answer mode, which the builder fills from
-   `CASCADE_SETTING_DEFAULTS`.
+5. **Settings**: one choice, under the cascade's name, of the
+   [preset](#presets) the cascade starts with: **Defaults** first, then the
+   user's presets by name (`data-preset-select`). No setting is edited here,
+   and a note under it says "The cascade starts with the preset’s settings
+   and rules, or the defaults. You can change its settings, such as its clear
+   threshold, answer mode and segments, in its Settings once it is created."
+   **The choice starts at the preset this device used last** to create a
+   cascade (`last_preset_id` in `meta`, null for Defaults, written once a
+   creation succeeds), or at Defaults when none was used yet or that preset
+   has since been deleted. The create request carries the preset's rules as
+   the threshold and the two [quiz options](#quiz-options), and its settings
+   that are not null as `settings`, which the server keeps as changes made
+   for the new cascade on all devices at the creation's `at`, so the cascade
+   starts with them on every device. With Defaults it carries the rules of
+   `CASCADE_SETTING_DEFAULTS` and no `settings`, and the cascade starts with
+   every setting at its default. The device sends the values rather than the
+   preset's id, so a preset changed on another device at the same moment
+   cannot race the creation.
 6. **Cascade name**: prefilled with a summary of the filters, such as
    `CSW24 · Length 7–7 · Probability Order 1–1000`, which the user can edit.
    The summary is built on the device only, from the same `lib/filters.ts`
@@ -1111,8 +1221,8 @@ as the term of the data model and the API.
     segments, Segment size and "When a quiz is finished below the clear
     threshold" (the cascade's, saved with `set_cascade_options`, for every
     level, the one being studied included, from the current card);
-    **Copy another cascade's settings** (a choice of the
-    user's other cascades and **Copy settings**); then Duplicate and Move to
+    **Presets** (Apply preset, Save as preset, and the user's presets with
+    Rename and Delete; see [Presets](#presets)); then Duplicate and Move to
     Trash. Duplicate is disabled when the account's
     [storage](#storage-limit) is full (`Duplicate cascade: your storage is full`); a
     `409 storage_limit` says what duplicating needs and how much is free. The
@@ -1127,9 +1237,9 @@ as the term of the data model and the API.
   - **Display**: the display settings.
   - **Controls**: the [controls](#controls).
 
-  Every setting of the last three says under its name where its value comes
-  from, and after a change "✓ Saved for this cascade on this device" with the
-  wider places to use it for (see
+  Every setting of the last three shows its value and nothing else, and
+  after a change "✓ Saved for this cascade on this device" under its row,
+  with the wider scopes to apply it to (see
   [Where a setting applies](#where-a-setting-applies)). Every control is the
   same width and followed by the same unit column, so the fields, choices and
   checkboxes line up.
@@ -1214,9 +1324,10 @@ as the term of the data model and the API.
   shown, how wide a definition may be, in its own column or beneath its word (0 px by default: all the room a column has, and 42 rem beneath a word; see
   [Answers](#answers)), a phone's
   [tap zones](#touch-zones) and the repeat guard are settings like any other:
-  in the player's Settings, under Display, and set in any of the four places
-  (see [Where a setting applies](#where-a-setting-applies)), so what suits a
-  laptop can stay on it, and one cascade can have its own.
+  in the player's Settings, under Display, each cascade's own on each device
+  and offered more widely after a change (see
+  [Where a setting applies](#where-a-setting-applies)), so what suits a
+  laptop can stay on it, and one cascade can differ.
 - **Every setting is a row with its control at the right end**: a checkbox,
   a choice or a number, in the player's Settings and in the quiz options
   alike (`SettingRow`), so the place to click is
@@ -1292,7 +1403,7 @@ Every quiz is driven by three actions, whatever the device:
   once, so a bouncing mouse button or an accidental double tap does not skip a
   card. The guard is a display setting, typed in ms, and **0 (off) by
   default**, so every press counts; a user whose mouse bounces raises it,
-  most usefully for that device (This device), since how much a button
+  most usefully for all cascades on that device, since how much a button
   bounces belongs to the hardware. The wheel's own 150 ms guard against one flick firing many
   steps is separate. A key held down is one press whatever the guard: the
   keyboard's own repeats are ignored, since they would show and grade cards
@@ -1394,10 +1505,11 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
 - Only Anagram quizzes can be typed: a Definition or Leave Value card is
   always a flashcard.
 - **The answer mode is an answer setting** (`answer_mode`): Flashcard by
-  default, changed in Settings like any other and set in any of the four
-  [places](#where-a-setting-applies), so a cascade can be typed on a laptop and
-  a flashcard on a phone; a cascade created as typed has it as its own. It is
-  never a quiz's.
+  default, changed in Settings like any other, each cascade's own on each
+  device (see [Where a setting applies](#where-a-setting-applies)), so a
+  cascade can be typed on a laptop and a flashcard on a phone; a cascade
+  created with a [preset](#presets) that types starts typed on every device.
+  It is never a quiz's.
 - **The tiles typed mode needs** are the cascade's letter distribution. A
   cascade played card by card (a new one, or one not downloaded here) may not
   have it yet, so the player fetches it as the card is shown, and a card shown
@@ -1545,12 +1657,13 @@ with **Reset controls to defaults**.
   buttons. The capture box warns when a stroke is one of these.
 - **Wheel bindings** act at most once every 150 ms, so one flick of the wheel is
   one action.
-- **One setting, in any of four places.** The whole list of bindings is one
-  setting, set like the display settings in any of the
-  [four places](#where-a-setting-applies): a laptop's trackpad and a desktop's
-  five-button mouse want different bindings (This device), and one cascade can
-  have its own. A change applies to this cascade on this device, then offers
-  the wider places. A list that is unreadable, or leaves an action with none,
+- **One setting, each cascade's own on each device.** The whole list of
+  bindings is one setting, like a display setting
+  (see [Where a setting applies](#where-a-setting-applies)): a laptop's
+  trackpad and a desktop's five-button mouse want different bindings (all
+  cascades on this device), and one cascade can differ. A change applies to
+  this cascade on this device, then offers the wider scopes. A list that is
+  unreadable, or leaves an action with none,
   is read as the defaults. There is no `set_bindings` operation and no
   bindings table on the server.
 
@@ -3087,7 +3200,7 @@ stores are:
 
 | Store | Contents |
 |---|---|
-| `meta` | user id, username, `device_id` (a UUID made once per device **and user**: it lives in this user-scoped store, so each account on a device syncs as its own device, and its `device_seq` counts from 1 for that account), sync cursor, last sync time, the trash retention period and `max_quiz_questions` as `/api/auth/me` last reported them, the account's [storage](#storage-limit) (`storage_bytes` and `max_storage_bytes`) as `/api/auth/me` or the latest sync response reported it, when this device last opened each cascade (see [Downloads](#on-the-device) for what counts as an open), and the ids the [budget](#on-the-device) pass dropped while they were still inside the window, which are treated as outside it until the user opens them; `held`, the cascades whose last replay held operations back, each with the quiz whose rows they wait for (see [The sync cycle](#the-sync-cycle), step 4); and the settings of the [places](#where-a-setting-applies) this device holds: `device_settings` (This device), `cascade_device_settings` (This cascade on this device, by cascade), and `shared_device`, the account's Everywhere settings as the last sync response carried them with the changes made here and not yet sent. The distribution tiles live in their own store below, not here |
+| `meta` | user id, username, `device_id` (a UUID made once per device **and user**: it lives in this user-scoped store, so each account on a device syncs as its own device, and its `device_seq` counts from 1 for that account), sync cursor, last sync time, the trash retention period and `max_quiz_questions` as `/api/auth/me` last reported them, the account's [storage](#storage-limit) (`storage_bytes` and `max_storage_bytes`) as `/api/auth/me` or the latest sync response reported it, when this device last opened each cascade (see [Downloads](#on-the-device) for what counts as an open), and the ids the [budget](#on-the-device) pass dropped while they were still inside the window, which are treated as outside it until the user opens them; `held`, the cascades whose last replay held operations back, each with the quiz whose rows they wait for (see [The sync cycle](#the-sync-cycle), step 4); the settings changes of the [scopes](#where-a-setting-applies) this device holds, each setting name to `{ value, at }`: `cascade_device_scope` (this cascade on this device, by cascade), `device_scope` (all cascades on this device), and `account_settings`, the account's changes for all cascades on all devices as the last sync response carried them (`values`) with the changes made here and not yet sent (`pending`); `clock` (`offset_ms`, the server's clock less this device's, from the last sync response's `server_time`; see [Clocks](#clocks)); `presets` (`{ version, list }`, the account's [presets](#presets) as the last sync response that carried them had them); and `last_preset_id`, the preset the builder used last (null for Defaults). The distribution tiles live in their own store below, not here |
 | `distributions` | the tiles (letter, blank letter, value, vowel) of every distribution the user's cascades use, keyed by name. A pulled cascade row carries its `lexicon` and `letter_distribution` names, and the download manager fetches a distribution the store lacks from `GET /api/letter-distributions/:name` before any cascade on it shows **Available offline**; typed mode on a cascade whose distribution is missing shows "needs a connection" like a missing card, since it cannot split typed text into tiles |
 | `cascades`, `quizzes`, `quiz_questions`, `quiz_attempts` | the **base**: the server's rows as of the last pull, written only by the sync engine. A base question row also holds its `position`, which the device computes from the quiz's seed in a worker when it builds or rebuilds the quiz, once per attempt; the player keeps the inverse map in memory for the quiz being played. A base quiz row also carries a `pending` flag, set by the staging move and the drop pass on an **active** quiz when its question rows are yet to be fetched and its counters show any grade (an unplayed quiz needs only its index list; a cleared quiz is never flagged, since its rows are fetched only for a restore or an export), and cleared only by the full fetch sequence |
 | `overlay_cascades`, `overlay_quizzes`, `overlay_quiz_questions`, `overlay_quiz_attempts` | the **overlay**: only the rows the outbox has changed or created, keyed like the base. The player's view of any row is the overlay's version if there is one, else the base's. It holds a few hundred rows in normal use, never a second copy of a cascade, except for a level created by a `finish` that is still in the outbox, which lives there until the finish is acknowledged, and except during a long offline session, when it holds one row per pending grade until the outbox drains |
@@ -3096,7 +3209,7 @@ stores are:
 | `staging_cascades`, `staging_quizzes`, `staging_quiz_questions`, `staging_quiz_attempts` | the **staging** stores, mirroring the four base stores: where a pull's rows land when the rebase cannot write them straight to the base (see [The sync cycle](#the-sync-cycle)). Written by the pull, read only by the rebase, and cleared at the start of every pull, so an interrupted one leaves nothing behind |
 | `outbox` | operations not yet accepted by the server, in `device_seq` order |
 
-**Schema versions.** The per-user database is at **version 3**. Each migration
+**Schema versions.** The per-user database is at **version 4**. Each migration
 upgrades from one version to the next inside the upgrade transaction, and they
 run one after another (`upgradeFrom` in `lib/local/db.ts`): a migration that
 rewrites rows finishes its rewrites before the next one starts, so two never
@@ -3107,7 +3220,13 @@ earlier builds kept: it deletes the `preferences` store, drops any
 `set_preferences` entries still in the outbox, and gives each cascade row in
 the base, overlay and staging stores the per-cascade [settings](#settings) at
 their defaults, keeping any value the row already has, until its next pull
-brings the server's.
+brings the server's; version 4 moves to settings kept as changes in
+[scopes](#where-a-setting-applies): it deletes the `meta` keys
+`shared_device`, `device_settings` and `cascade_device_settings`, takes
+`settings` out of every `set_cascade_options` still in the outbox (deleting
+the entry when nothing else is left in it), and resets each cascade row's
+`settings` in the base, overlay and staging stores to `{}` until its next
+pull brings the server's.
 
 **Downloads.**
 - A cascade starts downloading the moment it is created. That covers the user
@@ -3419,7 +3538,8 @@ brings the server's.
 | `move_cursor` | quiz, attempt, attempt seed, position, at | the quiz is active, its cascade is not trashed, the attempt and its seed match, the position is not below `run_start`, is below `next_boundary(cascade, quiz)` when the quiz has one and below the question count otherwise, and the cursor is unset, or was last set by this device, or had been seen by the device (`seen_seq`), or the new `at` is later | Set the cursor, `cursor_moved_at` and the device that moved it. The outbox keeps only the latest pending cursor per quiz, re-appended with a fresh `device_seq` (see [The sync cycle](#the-sync-cycle)). A rejected cursor move (`bad_cursor`) is logged but never counted in a notice; it is not the user's work |
 | `finish` | quiz, attempt, attempt seed, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, every question is graded, `new_quiz_id` is not already a quiz (`invalid`), and the account is not past five times its [storage limit](#storage-limit) (`storage_limit`, checked last) | Apply [Cascade Rules](#cascade-rules) using the server's grades and the cascade's progression (Drill for a segment-chain quiz); any new quiz uses the device's id; record the attempt. A reset or new quiz starts at cursor 0, stamped with the operation's `at` and device. The attempt row and any new level are added to the cascade's and the account's [storage](#storage-limit), past the limit or not: studying never fails for storage, up to five times the limit. The result carries the outcome the server reached and the new quiz's question count and `questions_hash`, so the device can see when the server's grades led somewhere else (see [Conflicts](#conflicts)) |
 | `finish_segment` | quiz, attempt, attempt seed, segment end, shuffle seed, new quiz id | the quiz is active, its cascade is not trashed, it is at the deepest level, the attempt and its seed match, its [effective segment size](#quiz-options) is greater than 0, the segment end is a multiple of it strictly between 0 and the question count and greater than the cursor, every question before the segment end is graded, no quiz already exists for this quiz, attempt and segment end, `new_quiz_id` is not already a quiz (`invalid`), and, when the run has a miss and so would make a drill quiz, the account is not past five times its [storage limit](#storage-limit) (`storage_limit`) | Create the drill quiz one level down from the misses in positions `run_start` … segment end − 1 (nothing if there are none), and set the cursor and `run_start` to the segment end, stamping `cursor_moved_at` and `cursor_device_id` from the operation; a drill quiz's level is added to the [storage](#storage-limit) as a finish's is. See [Segments](#segments) |
-| `set_cascade_options` | cascade, the changed [rules](#settings) (any of `segment_size`, `progression`, `clear_threshold`) and `settings`, changes to the cascade's own settings (setting name to a value, or null to take it out; see [Where a setting applies](#where-a-setting-applies)), at | the cascade exists, is neither trashed nor purged, every carried value is in range (segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, clear threshold 1–100; in `settings`, every name lower-case letters and underscores, at most 40, no NUL in any value, answer mode `flashcard` or `typed`, `show_definitions`, `show_hooks`, `reveal_correct`, `show_found_count`, `require_alphabetical`, `show_probability` and `definition_column` flags, leave value decimals 0–3, and the settings it leaves at most 64 and 16 KB; otherwise `invalid`, so an out-of-range value is a rejection and never a constraint violation recorded as `error`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit. The two quiz options and the clear threshold apply at once, to every level of the cascade, the one being studied included (a size change moves the next run boundary and keeps `run_start`; see [Segments](#segments)); the settings apply at once, to what the player shows |
+| `set_cascade_options` | cascade, the changed [rules](#settings) (any of `segment_size`, `progression`, `clear_threshold`), at | the cascade exists, is neither trashed nor purged, every carried value is in range (segment size 0 or 5 … `MAX_QUIZ_QUESTIONS`, progression one of the two, clear threshold 1–100; otherwise `invalid`, so an out-of-range value is a rejection and never a constraint violation recorded as `error`), and either its options were last changed by this device (`options_device_id`), or the device had seen its current options (`seen_seq` against `options_seq`), or `at` is later than its `options_changed_at`; otherwise rejected as `stale` | Set the carried fields, `options_changed_at` and `options_device_id`, as one unit. The two quiz options and the clear threshold apply at once, to every level of the cascade, the one being studied included (a size change moves the next run boundary and keeps `run_start`; see [Segments](#segments)) |
+| `set_cascade_settings` | cascade, `settings` (setting name to a value, or null for the default: changes made for this cascade on all devices; see [Where a setting applies](#where-a-setting-applies)), at | the cascade exists (`not_found`) and is not trashed (`trashed`); `settings` names at least one setting, every name lower-case letters and underscores, at most 40, no NUL in any value, answer mode `flashcard` or `typed`, `show_definitions`, `show_hooks`, `reveal_correct`, `show_found_count`, `require_alphabetical`, `show_probability` and `definition_column` flags, leave value decimals 0–3, and the settings the cascade then holds at most 64 and 16 KB; otherwise `invalid`. It is not subject to the options' `stale` rule | Merge each carried setting into the cascade's `settings` as `{ value, at }`, `at` clamped like every device time: per setting, the change with the later `at` is kept (the new one when they are equal), so an older operation is applied but loses the settings changed since. Stamps the cascade's `updated_seq`, so the other devices pull it. The settings apply at once, to what the player shows |
 | `restore_quiz` | quiz, shuffle seed | the quiz is cleared and not purged | Push it back as the new deepest level with a new attempt shuffled by the seed, cursor 0 stamped from the operation; bring back its cascade if it was trashed, and only then set `cleared_at` to now on its other cleared quizzes |
 | `trash_cascade` | cascade | the cascade is not trashed (`trashed`) | Trash it |
 | `restore_cascade` | cascade | the cascade is trashed (`not_trashed`) and not purged | Restore it as it was, setting `cleared_at` to now on its cleared quizzes |
@@ -3640,7 +3760,7 @@ which alarms. Then:
    took the account over its limit shows on the Cascades page with the sync
    that applied it. Each pulled cascade row carries its own `storage_bytes`;
    the device never counts a cascade's figure itself. The page, the storage
-   figure and the shared settings are read **on one database connection**,
+   figure, the account's settings and presets are read **on one database connection**,
    taken after the push's transaction has committed and given its own back:
    a request never holds one connection of the pool while it waits for a
    second, because with every connection held by a request waiting for
@@ -3987,11 +4107,14 @@ account's other devices when something changes**, and they sync at once,
 within a second or two of the change:
 
 - Every change that advances an account's `sync_seq` — a push that applied an
-  operation, the account's [Everywhere settings](#where-a-setting-applies), creating
+  operation, the account's [settings for all cascades on all devices](#where-a-setting-applies), creating
   or duplicating a cascade, a [purge](#purge-task) — sends a Postgres
   `NOTIFY` on `acrodont_changes`, naming the account and the device that made
   it, **in the change's own transaction**, so it goes out only once the change
   is committed, and to every instance. A sync that applies nothing sends none.
+  A change to the account's [presets](#presets), which advances its
+  `presets_version` rather than its `sync_seq`, sends one too, naming no
+  device, so every stream of the account hears it.
 - Each instance runs one `LISTEN` (started with its first stream) and fans the
   notes out to the open streams of that account, all but the stream of the
   device that made the change.
@@ -4043,13 +4166,13 @@ offline**. Using one device on a plane never conflicts. The rules:
 | The same quiz finished on one device and a run of it finished on another | Whichever arrives first wins. A `finish` after a `finish_segment` is rejected because the quiz is no longer the deepest level; a `finish_segment` after a `finish` is rejected because its attempt is out of date. The loser's dependent operations are dropped. |
 | A quiz restored on one device while the other finishes the deepest level | Whichever arrives first wins. If the restore lands first, the `finish` is rejected because its quiz is no longer the deepest level. If the finish lands first, the restore still applies, on top of the new deepest level. |
 | Two different quizzes restored on two devices | Both apply, in arrival order; the second becomes the deeper of the two. A `grade` needs only an active quiz, never the deepest one, so the first device's grades on its restored quiz are all kept, and its `finish` is rejected as `not_deepest` until the deeper level, the one restored second, is cleared. Nothing of its work is dropped, so no answers are counted; the notice is the `not_deepest` one below. |
-| A cascade's options changed on two devices | **The later operation wins whole**: this covers every one of a cascade's [settings](#settings) (the threshold, answer mode, definitions, hooks, reveal grade and leave rounding as well as the quiz options), and a widening or a copy, which are ordinary `set_cascade_options`. Unless the device had seen the row's current options (`seen_seq`), an operation whose `at` is older than the row's last change is rejected as `stale`, even when it carries a different field, and the rebase reverts that field on the losing device. One timestamp per row is enough for this, and the loser simply sets the option again. |
+| A cascade's options changed on two devices | **The later operation wins whole**: this covers every one of a cascade's [rules](#settings) (the threshold and the quiz options), and "all N cascades" or a preset's rules, which are ordinary `set_cascade_options`. Unless the device had seen the row's current options (`seen_seq`), an operation whose `at` is older than the row's last change is rejected as `stale`, even when it carries a different field, and the rebase reverts that field on the losing device. One timestamp per row is enough for this, and the loser simply sets the option again. |
 | A quiz created while the cascade's options were different | Nothing to reconcile: no quiz holds options, so it follows the cascade's current ones, like every level. |
 | A `finish` applied with a different outcome than the device computed | Another device's grade changed the score, or another device changed the cascade's progression, so the server cleared where the device descended, or the reverse, or built the new quiz from a different set of misses. The result's `new_quiz_questions_hash` is what tells the device whether the server's new quiz holds the same questions as its own. The new quiz has the same id and seed on both sides, so the device's grades on it stand wherever the question exists in the server's copy; a grade for a question the server's copy lacks is rejected as `not found`. Grades on the new quiz still waiting in the outbox when the finish is acknowledged are not dropped for want of its list: the replay holds them until the list is fetched or the server has judged them ([step 4](#the-sync-cycle)). When the two sides disagree about the finished quiz itself (one cleared it, the other reset it), the device's rows for it are not promoted; the quiz is rebuilt from the pulled row like any quiz whose seed differs from the base's, or, when the server cleared it, the base's rows and positions stay as they are, as for any cleared quiz. The device rebases the cascade and, when the outcome kind (cleared, replaced, descended, completed, reshuffled) or the level structure differs from what it showed, tells the user: "Level 2 came out differently on the server because of changes made on another device." When only the new quiz's question count differs, nothing is said. **This path never opens the completion screen**, even when the server's outcome is `completed`: that screen reports `peak_depth` and `attempts_since_completion`, which the server's own `Completed` has already reset to 1 and 0, and the result carries neither, so the device has no honest numbers to show — the pulled row's would read "after 1 level and 0 attempts". The notice stands, and the Complete badge appears from the pulled cascade row like any other. The screen is shown only for a `Completed` this device computed and the server confirmed, where the device's own rule run reported both numbers before resetting them. Rejected grades, if any, are counted in the usual "weren't kept" notice, separately. |
 | The cascade's segment size changed on one device while another device passed a boundary | The `finish_segment` is rejected if its segment end is no longer a multiple of the size the server's cascade has. The drill quiz it created locally and the grades on it are dropped, with the usual notice. |
 | The cascade's options changed on one device while another, offline with the old options, finished a quiz or restored one | The server judges the finish with the progression its cascade row has, so the outcome may differ from the device's (see the different-outcome row above). A restored quiz copies no options, so it is the same on both sides and follows the cascade's options once the device pulls them. The rebase takes the server's rows, and any `finish_segment` the device sent against a segment size the server's cascade does not have is rejected and dropped. |
 | The cursor moved on two devices in the same attempt | A device that had seen the other's cursor (`seen_seq`) wins; otherwise the later `cursor_moved_at`. A device's own moves always apply in order. If the winning cursor is already past a boundary the loser then tries to pass, the loser's `finish_segment` is rejected and its drill quiz dropped, with the usual notice. |
-| A setting changed on two devices | In a device's own places (This cascade on this device, This device), never a conflict. In This cascade, the cascade options' latest-wins rule. In Everywhere, the later change wins, per setting. |
+| A setting changed on two devices | In a device's own scopes (this cascade on this device, all cascades on this device), never a conflict. In this cascade on all devices (`set_cascade_settings`) and all cascades on all devices, the later change wins, per setting, and is never rejected as `stale`: two devices that changed different settings both keep theirs. On each device the latest change covering it is used, whatever its scope (see [Where a setting applies](#where-a-setting-applies)). |
 
 Rejected operations are never retried. After the rebase, the device shows what
 the server has, and a notice appears only when the user's own work was dropped:
@@ -4320,7 +4443,7 @@ CREATE TYPE finish_outcome AS ENUM (
 CREATE TYPE sync_op_type AS ENUM (
     'grade', 'move_cursor', 'finish', 'finish_segment', 'restore_quiz',
     'trash_cascade', 'restore_cascade', 'purge_quiz', 'purge_cascade',
-    'set_cascade_options'
+    'set_cascade_options', 'set_cascade_settings'
 );
 
 CREATE TYPE sync_op_status AS ENUM ('applied', 'rejected');
@@ -4387,11 +4510,16 @@ CREATE TABLE users (
     storage_limit_bytes BIGINT CHECK (storage_limit_bytes >= 0),
                             -- set only via SQL: replaces MAX_STORAGE_BYTES_PER_USER
                             -- for this account
-    device_settings     JSONB NOT NULL DEFAULT '{}'::jsonb
-                            CHECK (jsonb_typeof(device_settings) = 'object'),
-                            -- the account's settings, the "Everywhere" place:
-                            -- setting name -> {value, at}, a null value taking
-                            -- one out (Where a setting applies)
+    settings            JSONB NOT NULL DEFAULT '{}'::jsonb
+                            CHECK (jsonb_typeof(settings) = 'object'),
+                            -- the changes made for all cascades on all devices:
+                            -- setting name -> {value, at}, a null value meaning
+                            -- the default; the latest change covering a cascade
+                            -- on a device is its value (Where a setting applies)
+    presets_version     BIGINT NOT NULL DEFAULT 0,
+                            -- bumped by every change to the account's presets;
+                            -- a sync response carries them all when the
+                            -- device's version differs (Presets)
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
                             -- when the address was confirmed: a row is made by
                             -- the confirmation, never before it
@@ -4689,6 +4817,24 @@ CREATE TABLE saved_searches (
     UNIQUE (user_id, name)
 );
 
+-- A preset (PLAN.md § Settings → Presets): every setting's value and a
+-- cascade's three rules, saved under a name to apply to a cascade or to start
+-- one with. Outside the storage limit, like the account's settings: at most
+-- 50 per account (MAX_PRESETS), each's settings at most 16 KB.
+CREATE TABLE setting_presets (
+    id              UUID PRIMARY KEY,           -- device-generated, so a save can be retried
+    user_id         UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    name            TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
+    settings        JSONB NOT NULL CHECK (jsonb_typeof(settings) = 'object'),
+                        -- setting name -> value, as the cascade showed it when saved
+    clear_threshold SMALLINT NOT NULL CHECK (clear_threshold BETWEEN 1 AND 100),
+    segment_size    INTEGER NOT NULL CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 300000),
+    progression     quiz_progression NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (user_id, name)
+);
+
 -- -------------------------------------------------------------------------
 -- Cascades and quizzes
 -- -------------------------------------------------------------------------
@@ -4714,10 +4860,10 @@ CREATE TABLE cascades (
     progression          quiz_progression NOT NULL DEFAULT 'ladder',
     settings             JSONB NOT NULL DEFAULT '{}'::jsonb
                              CHECK (jsonb_typeof(settings) = 'object'),
-                                 -- the cascade's own settings, the "This cascade"
-                                 -- place: setting name to value, for every device;
-                                 -- one it does not name falls through to the
-                                 -- device's and the account's (Where a setting applies)
+                                 -- the changes made for this cascade on all devices
+                                 -- (its preset's values at creation among them):
+                                 -- setting name -> {value, at}, a null value
+                                 -- meaning the default (Where a setting applies)
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
                              -- set_cascade_options; an older operation is rejected whole
     options_seq          BIGINT NOT NULL,            -- sync sequence of that change, for seen_seq
@@ -5672,11 +5818,13 @@ enough for a filter tree holding a 300,000-entry In Word List; Axum's default of
 | `POST` | `/api/account/sign-out-everywhere` | Body `{ password }`. Bump `session_generation` and re-issue this device's session and CSRF cookies, so every other session is refused from its next request while this one keeps working. `429` past `RESET_RATE_PER_HOUR` passwords typed for the account, with Change password and Delete account |
 | `DELETE` | `/api/account` | Delete the account (requires password; `429` past the same per-account bucket). On a `2xx` the device removes its own local copy of that account, as [Authentication](#authentication) describes |
 
-A cascade's rules and own settings are read and written through sync, not a
-separate endpoint. The settings of a device's own places stay on it; the
-account's Everywhere settings travel in the sync request's and response's
-`device_settings` and are kept in `users.device_settings` (see
-[Where a setting applies](#where-a-setting-applies)).
+A cascade's rules and settings are read and written through sync, not a
+separate endpoint. The changes a device makes for itself alone (this cascade
+on this device, all cascades on this device) stay on it; the account's
+changes for all cascades on all devices travel in the sync request's and
+response's `settings` and are kept in `users.settings` (see
+[Where a setting applies](#where-a-setting-applies)). Presets have their own
+endpoints (see [Presets](#presets-api)).
 
 ### Catalog and search
 
@@ -5743,20 +5891,35 @@ fields as it likes (`min_pct`, `max_pct`), but serialises to this table. The
 backend's condition schema in step is generated from this table, so the first
 person to write it copies names rather than choosing them.
 
+### Presets API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `PUT` | `/api/presets/:id` | Body `{ name, settings, clear_threshold, segment_size, progression }`: saves a [preset](#presets) under `id`, a device-generated UUID, so a save can be retried. A new preset is `201`, the replacement of the account's preset with that id `200`, each answering `{ preset: { id, name, settings, clear_threshold, segment_size, progression, updated_at }, presets_version }`. `name` is 1–100 characters with no NUL, and not "Defaults" in any case or with spaces around it ("“Defaults” is the built-in preset’s name."); `settings` is setting name to value, checked as a cascade's are (names, the answer settings' ranges, at most 64 settings and 16 KB); the rules are checked as at creation; each is a `400` on its field. A name another of the account's presets holds is `409 name_taken` (the device asks first, then replaces that preset by its id); a new preset when the account holds 50 is `409 preset_limit`; an id another account holds is `409 invalid` |
+| `PATCH` | `/api/presets/:id` | Body `{ name }`: renames one of the account's presets, the name checked as above; `409 name_taken` when another of its presets holds it; another account's, or none, is `404`. Answers `{ preset, presets_version }` |
+| `DELETE` | `/api/presets/:id` | Deletes one of the account's presets (`404` otherwise) → `{ presets_version }`. Cascades made with it, or that it was applied to, keep their settings |
+
+Each needs a connection, counts against the account's `SYNC_RATE_PER_MINUTE`,
+locks the user's row, bumps `users.presets_version` (answered as decimal text)
+and tells the account's devices (see
+[Telling the other devices](#telling-the-other-devices)). There is no `GET`:
+every sync response carries the account's presets whenever the device's
+`presets_version` is not the account's (see `POST /api/sync` below).
+
 ### Cascades and sync
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/cascades` | Body `{ id, source_quiz_id, device_id, at, name, lexicon, quiz_type, clear_threshold, segment_size, progression, answer_mode?, filters }`. `name` is required, 1–200 Unicode scalar values, and one the account's cascades do not already use, the Trash included (`400` on the field `name` otherwise, checked before the search); the device builds the default summary itself (see [Creating a cascade](#creating-a-cascade)). The cascade row carries the lexicon's `definitions_revision` and, for a Leave Value cascade, its leave values' `leave_values_revision` (`null` otherwise). `device_id` is recorded as the cascade's `options_device_id`, so the creating device's option changes never compete on timestamps. `id` and `source_quiz_id` are device-generated UUIDs minted when the button is pressed and reused for any retry of that press, never regenerated on retry; a request whose `id` the server already holds for this user returns the existing cascade and Source quiz unchanged, so a lost response never makes a duplicate or counts its storage twice, and an `id` or `source_quiz_id` held by another user is refused with `409` (`invalid`), never that user's row. `at` is the device's timestamp, used for the cascade's `options_changed_at` exactly as operations' `at` is, so the creating device's first option change is never `stale` against a server clock. Runs the search **before opening any transaction**, then in one short transaction locks the user's row, checks the [storage limit](#storage-limit) against what the new cascade will hold, stores the question index and shuffles the Source quiz with a server-generated seed, and returns `{ cascade, source_quiz, sync_seq }`, whose `cascade` carries `storage_bytes` as a pulled row does, and adds that to `users.storage_bytes`. A cheap check before the search refuses an account already at or over its limit without spending one (`needed` 0), and the lock therefore never covers the search's CPU or its wait for a `SEARCH_CONCURRENCY` permit, so a creation can never block the [purge task](#purge-task) on the same user's row for the length of a search. `source_quiz` carries its `shuffle_seed` rather than its positions: the device derives the Source quiz's order with the shared [shuffle](#deterministic-shuffles) over `idx` 0…count−1, and writes the cascade, the Source quiz and its question rows straight into its base stores from this response, so its first pull finds nothing to rebuild. `sync_seq` is informational; the device does **not** advance its sync cursor from this response, so its next sync pulls the rows the creation stamped. The cascade's private spec is stored with this request's `quiz_type`, which is what an In Word List row's entries were canonicalised under and what Duplicate copies. `422` if the search is empty or over the cap. `409` with `{ error: "storage_limit", used, limit, needed }` when the cascade does not fit (see [Storage limit](#storage-limit)). A `5xx`, such as a deadlock or timeout inside the creation transaction, is retried by the device with the same body, which the device-minted ids make safe, and so is a `429`, after `Retry-After`, since this endpoint shares `SEARCH_RATE_PER_MINUTE` with the builder's preview. The threshold and the two [quiz options](#quiz-options) are required, so an omitted one is a `400`: the builder sends the defaults every new cascade starts with (`CASCADE_SETTING_DEFAULTS`; see [Settings](#settings)). A new cascade has no settings of its own (`settings` is `{}`), but `answer_mode: "typed"`, which becomes its own `answer_mode`; `flashcard`, or none, leaves it without one. Duplicate copies the original's own settings. The Source quiz, like every quiz, holds no options of its own. |
+| `POST` | `/api/cascades` | Body `{ id, source_quiz_id, device_id, at, name, lexicon, quiz_type, clear_threshold, segment_size, progression, settings?, filters }`. `name` is required, 1–200 Unicode scalar values, and one the account's cascades do not already use, the Trash included (`400` on the field `name` otherwise, checked before the search); the device builds the default summary itself (see [Creating a cascade](#creating-a-cascade)). The cascade row carries the lexicon's `definitions_revision` and, for a Leave Value cascade, its leave values' `leave_values_revision` (`null` otherwise). `device_id` is recorded as the cascade's `options_device_id`, so the creating device's option changes never compete on timestamps. `id` and `source_quiz_id` are device-generated UUIDs minted when the button is pressed and reused for any retry of that press, never regenerated on retry; a request whose `id` the server already holds for this user returns the existing cascade and Source quiz unchanged, so a lost response never makes a duplicate or counts its storage twice, and an `id` or `source_quiz_id` held by another user is refused with `409` (`invalid`), never that user's row. `at` is the device's timestamp, used for the cascade's `options_changed_at` exactly as operations' `at` is, so the creating device's first option change is never `stale` against a server clock. Runs the search **before opening any transaction**, then in one short transaction locks the user's row, checks the [storage limit](#storage-limit) against what the new cascade will hold, stores the question index and shuffles the Source quiz with a server-generated seed, and returns `{ cascade, source_quiz, sync_seq }`, whose `cascade` carries `storage_bytes` as a pulled row does, and adds that to `users.storage_bytes`. A cheap check before the search refuses an account already at or over its limit without spending one (`needed` 0), and the lock therefore never covers the search's CPU or its wait for a `SEARCH_CONCURRENCY` permit, so a creation can never block the [purge task](#purge-task) on the same user's row for the length of a search. `source_quiz` carries its `shuffle_seed` rather than its positions: the device derives the Source quiz's order with the shared [shuffle](#deterministic-shuffles) over `idx` 0…count−1, and writes the cascade, the Source quiz and its question rows straight into its base stores from this response, so its first pull finds nothing to rebuild. `sync_seq` is informational; the device does **not** advance its sync cursor from this response, so its next sync pulls the rows the creation stamped. The cascade's private spec is stored with this request's `quiz_type`, which is what an In Word List row's entries were canonicalised under and what Duplicate copies. `422` if the search is empty or over the cap. `409` with `{ error: "storage_limit", used, limit, needed }` when the cascade does not fit (see [Storage limit](#storage-limit)). A `5xx`, such as a deadlock or timeout inside the creation transaction, is retried by the device with the same body, which the device-minted ids make safe, and so is a `429`, after `Retry-After`, since this endpoint shares `SEARCH_RATE_PER_MINUTE` with the builder's preview. The threshold and the two [quiz options](#quiz-options) are required, so an omitted one is a `400`: the builder sends the chosen [preset](#presets)'s rules (`CASCADE_SETTING_DEFAULTS` for Defaults; see [Settings](#settings)). `settings`, optional, is the preset's values, setting name to value, checked as a `set_cascade_settings` is (a `400` on the field `settings` otherwise); the server keeps each as a change made for this cascade on all devices at `at` (clamped), so the cascade starts with them on every device. Without it, the cascade's `settings` is `{}` and it starts with the defaults. The Source quiz, like every quiz, holds no options of its own. |
 | `POST` | `/api/cascades/:id/name` | Body `{ name, device_id }`. Renames one of the account's cascades, the Trash included; another account's, or none, is `404`. The name is checked as at creation (1–200 characters, no NUL) and against the account's other cascades (`UNIQUE (user_id, name)`), with the same `400` field errors. In one transaction that locks the user's row, the cascade's `name` is set and the row stamped with a new `sync_seq` as `updated_seq`, so every device pulls it, and the account's other devices are told on their [change stream](#cascades-and-sync); `device_id` names the renaming device, which applies the answer itself and is not told. Returns `{ cascade, sync_seq }`; the same name again changes nothing and returns `{ cascade }` alone. Online only, by design: no operation carries a name. |
-| `POST` | `/api/cascades/:id/duplicate` | Body `{ id, source_quiz_id, device_id, at }`, minted per press exactly as for creation and subject to the same repeat, timestamp and `options_device_id` rules. New cascade, named after the original with the next free number, with a copy of the spec and the same threshold and options; returns the same shape. Subject to the [storage limit](#storage-limit), with the original's questions and a copy of its spec as what it needs. |
+| `POST` | `/api/cascades/:id/duplicate` | Body `{ id, source_quiz_id, device_id, at, settings? }`, minted per press exactly as for creation and subject to the same repeat, timestamp and `options_device_id` rules. New cascade, named after the original with the next free number, with a copy of the spec and the same threshold and options; returns the same shape. The server does not copy the original's settings: `settings` is the original's values as they are on the duplicating device, setting name to value, kept as for creation. Subject to the [storage limit](#storage-limit), with the original's questions and a copy of its spec as what it needs. |
 | `GET` | `/api/cascades/:id/cards?from=<idx>&limit=<n>&hooks=<0\|1>&definitions=<0\|1>&keys=<0\|1>`, or `?idx=<i,j,…>&hooks=…&definitions=…` | Answer cards `[{ idx, key, answer }]` for question indexes `from`…`from+limit−1` (`limit` ≤ 10,000), or for the comma-separated indexes in `idx` (at most 1,000, returned in idx order; never with `from`, `limit` or `keys`, else `400 invalid_idx`) — the player's read-ahead, which asks for the next cards in its quiz's own order. With `hooks=1`, an Anagram answer's words carry `probability_order` (the word's rank by probability among the lexicon's words of its length), `front_hooks`, `back_hooks` and the booleans `front_inner` and `back_inner` (the word less its first, or last, tile is a word), and a Definition card carries `word`: `{ word, probability_order, front_hooks, back_hooks, front_inner, back_inner }` beside its answer. The device splits each row between its `questions` store (the `key`) and its `cards` store (the rest), so eviction can take the answer and leave the question (see [On the device](#on-the-device)). With `keys=1` the response is `{ from, keys: [...] }` — the keys alone, in idx order, since the range makes every index implied — and **`limit` ≤ 100,000**, which at about 10 bytes a key is roughly the size of one 10,000-card page: a 300,000-question cascade's keys are three requests where its answers are thirty, a tenth of the cost in the shared rate bucket, and about a quarter of the bytes of cards without definitions (see [Downloads](#on-the-device)). It is what the download manager fetches first, so a cascade becomes playable and self-gradable before its answers arrive; `hooks` and `definitions` are then a `400`. A Leave Value `answer` is a JSON number written as the shortest text that round-trips the stored `f64`, which `JSON.parse` reads back exactly. Card pages are served `Cache-Control: private, no-store`, because the device keeps every byte it fetches in IndexedDB and a second copy in the browser's HTTP cache would sit outside every budget the plan states; only the questions endpoint, whose index lists are small and refetched by the pending path, keeps immutable caching. Responses are compressed. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/questions?from=<n>&limit=<n>` | The quiz's question indexes `[idx…]` in idx order, `limit` ≤ 50,000. A quiz's question set never changes, so it is served with the same immutable caching. Fetched when the device materialises a quiz; never part of a pull. `404` for another user's, a purged, or a Source quiz, whose indexes are implied. |
 | `GET` | `/api/cascades/:id/quizzes/:quiz_id/grades?from=<idx>&limit=<n>` | The quiz's graded rows for the attempt its row names, which for a cleared quiz is the attempt it finished on (its grades each dated that finish, the quiz's `last_activity_at`, since a cleared quiz keeps no grade times), as the parallel arrays a pull uses, in idx order, with the quiz row's `attempt` and `shuffle_seed` so the device can tell whether they belong to the order it holds. `from` is an **index, not an offset**, as on the card pages: the response holds the graded rows whose `question_idx` is in `from … from+limit−1`, `limit` ≤ 50,000, so the device pages the index space by `from += limit` until `from` reaches the cascade's `question_count` and a sparse page — most of a quiz's questions may be ungraded — means nothing is left behind. The questions endpoint below reads `from` the other way, as an offset into a dense list, which is why the two are written `<idx>` and `<n>`. There is no `min_updated_seq` here, which only a pull's fast path needs; the device stamps these rows with the sequence of the sync it made before the fetch. Not cacheable. Fetched when the device materialises a quiz whose rows it dropped on leaving the download window; never part of a pull. If the device's quiz row names a different attempt or seed, the device discards the response, syncs and fetches again. `404` for another user's or a purged quiz. |
 | `POST` | `/api/cascades/:id/export-token` | Body: the export's choices, as the query of the export row below. Checks the session, `X-Acrodont-User`, the cascade and quiz, and `EXPORT_RATE_PER_MINUTE`, answering `401`, `404` and `429` with `Retry-After` exactly as any other request does, which a navigation could not show the page; on success returns `{ url }`, the export URL with a token valid for **60 seconds and one use**, bound to this user and these choices: a PASETO under the HKDF-derived export key, which any task can verify and no session validator can decrypt, its use recorded in `export_tokens_spent` (see [Exporting words](#exporting-words)). The dialog navigates a hidden `<iframe>` to it at once, and mints a new one for any retry |
 | `GET` | `/api/cascades/:id/export?scope=<cascade\|quiz>&quiz_id=<uuid>&which=<all\|correct\|missed\|ungraded>&format=<txt\|csv>&lines=<answers\|questions>&columns=<list>&order=<study\|alphabetical>&definitions=<0\|1>&hooks=<0\|1>&decimals=<0-3>&token=<token>` | The same file the device builds locally (see [Exporting words](#exporting-words)), streamed as `text/plain` or `text/csv` with a `Content-Disposition` filename. Used when the device doesn't have what the export needs. `token` is the single-use, 60-second token the row above issued for exactly these choices; it is the request's proof of account, since a download navigation cannot send a header, and an expired, reused or mismatched token answers `204 No Content`, which the dialog's hidden frame discards. `404` for another user's or a purged cascade, and for a `quiz_id` that is not this cascade's, has been purged, or is unknown. |
 | `GET` | `/api/sync/events?user=<id>&device=<id>` | Server-Sent Events: a `changed` event whenever another device of the account syncs a change (see [Telling the other devices](#telling-the-other-devices)). The session cookie, and `user` in place of `X-Acrodont-User`, which `EventSource` cannot send; a mismatch or no session is a `401`. An open past the account's `SYNC_STREAM_RATE_PER_MINUTE` or with `SYNC_STREAMS_PER_USER` already open is a `429` with `Retry-After`. Ends after five minutes |
-| `POST` | `/api/sync` | Body `{ device_id, app_version, cursor, page_token?, question_rows_for[], ops[], device_settings? }` (`device_settings`: changes to the account's Everywhere settings, see [Where a setting applies](#where-a-setting-applies)), where `app_version` is the frontend build's **monotonic integer build number**, injected into the SPA at build time and compared numerically against `MIN_APP_VERSION` (see [Configuration](#configuration)) — never a hash or a semver string, so "too old to sync" is one comparison and raising the floor is one number in the task definition; the build's git hash is logged beside it for support but decides nothing. `question_rows_for` lists every cascade whose question rows this device holds or wants: in its window and not [budget-dropped](#on-the-device), kept automatically by size, **or whose base already holds question rows** (at most `MAX_QUESTION_ROWS_FOR`, 1,000 cascades, a protocol bound rather than a quota; 1,001 is a `400`. **The device sends the list whole and does not split it across requests**: one holding question rows for more than 1,000 cascades would have its sync refused and read "Can't sync: reload" (see [`SyncStatus`](#frontend)), keeping what it has not sent. That is accepted and not built around: under the [storage limit](#storage-limit)'s 10 MB an account could hold that many only as very small cascades, which is not ordinary use). The third case is what keeps a cascade the drop pass spared for its pending operations from going stale: the device holds its rows, so it must keep receiving their changes. A cascade the device holds no rows for and will not open is left out, and stays pending on the device. It is expected on every non-paged request, an omitted field means an empty list, ids that belong to another user or no longer exist are ignored, and the server omits `quiz_questions` rows for every other cascade. `cursor` is `null` for a full pull (a first sync or a resync), whose operations are pushed like any other's → `{ results: [{ op_id, status, reason?, outcome?, new_quiz_question_count?, new_quiz_questions_hash? }], changes: { cascades[], quizzes[], quiz_questions[], quiz_attempts[], tombstones[] }, sync_seq, next_page_token?, resync_required?, storage: { used, limit }, device_settings }`. `storage` is on every `200` and `426` response: the account's [storage](#storage-limit) and its effective limit, as numbers, read after the push so it counts what the push's finishes and purges changed; the device keeps them in `meta`. Pulled `cascades[]` rows carry `storage_bytes`, decimal text like every 64-bit value. `outcome` is set on an applied `finish` (a `finish_outcome`) or `finish_segment` (`drilled` or `continued`), and `new_quiz_question_count` and `new_quiz_questions_hash` whenever a quiz was created, reset or restored: the created quiz's when one was created, otherwise the reset or restored quiz's own; a repeated operation returns the recorded fields unchanged; pulled `quizzes[]` rows carry `questions_hash`. |
+| `POST` | `/api/sync` | Body `{ device_id, app_version, cursor, page_token?, question_rows_for[], ops[], settings?, presets_version? }` (`settings`: changes for all cascades on all devices made on the device and not yet sent, setting name to `{ value, at }`, see [Where a setting applies](#where-a-setting-applies); `presets_version`: the version of the account's [presets](#presets) the device holds, as a number or decimal text, or null when it holds none), where `app_version` is the frontend build's **monotonic integer build number**, injected into the SPA at build time and compared numerically against `MIN_APP_VERSION` (see [Configuration](#configuration)) — never a hash or a semver string, so "too old to sync" is one comparison and raising the floor is one number in the task definition; the build's git hash is logged beside it for support but decides nothing. `question_rows_for` lists every cascade whose question rows this device holds or wants: in its window and not [budget-dropped](#on-the-device), kept automatically by size, **or whose base already holds question rows** (at most `MAX_QUESTION_ROWS_FOR`, 1,000 cascades, a protocol bound rather than a quota; 1,001 is a `400`. **The device sends the list whole and does not split it across requests**: one holding question rows for more than 1,000 cascades would have its sync refused and read "Can't sync: reload" (see [`SyncStatus`](#frontend)), keeping what it has not sent. That is accepted and not built around: under the [storage limit](#storage-limit)'s 10 MB an account could hold that many only as very small cascades, which is not ordinary use). The third case is what keeps a cascade the drop pass spared for its pending operations from going stale: the device holds its rows, so it must keep receiving their changes. A cascade the device holds no rows for and will not open is left out, and stays pending on the device. It is expected on every non-paged request, an omitted field means an empty list, ids that belong to another user or no longer exist are ignored, and the server omits `quiz_questions` rows for every other cascade. `cursor` is `null` for a full pull (a first sync or a resync), whose operations are pushed like any other's → `{ results: [{ op_id, status, reason?, outcome?, new_quiz_question_count?, new_quiz_questions_hash? }], changes: { cascades[], quizzes[], quiz_questions[], quiz_attempts[], tombstones[] }, sync_seq, next_page_token?, resync_required?, storage: { used, limit }, settings, presets_version, presets?, server_time }`. `storage` is on every `200` and `426` response: the account's [storage](#storage-limit) and its effective limit, as numbers, read after the push so it counts what the push's finishes and purges changed; the device keeps them in `meta`. Every response, paged or not, also carries `settings`, the account's changes for all cascades on all devices (`users.settings`, merged with the request's before it is read); `presets_version`, the account's, as decimal text; `presets`, the account's whole list by name, only when the request's `presets_version` is not the account's; and `server_time`, the server's clock, by which the device stamps its settings changes (see [Clocks](#clocks)). Pulled `cascades[]` rows carry `storage_bytes`, decimal text like every 64-bit value. `outcome` is set on an applied `finish` (a `finish_outcome`) or `finish_segment` (`drilled` or `continued`), and `new_quiz_question_count` and `new_quiz_questions_hash` whenever a quiz was created, reset or restored: the created quiz's when one was created, otherwise the reset or restored quiz's own; a repeated operation returns the recorded fields unchanged; pulled `quizzes[]` rows carry `questions_hash`. |
 
 On the wire, `quiz_questions` changes are grouped per quiz as parallel arrays
 (`question_idx[]`, `grade[]`, `graded_at[]`), with no positions: the device
@@ -5830,8 +5993,19 @@ A segment descent and an options change on the wire:
 ```
 
 `set_cascade_options` carries only the fields that changed, out of
-`segment_size`, `progression`, `clear_threshold` and `settings` (the changes
-to the cascade's own settings); any other field is a `400`. It is the only
+`segment_size`, `progression` and `clear_threshold`; any other field,
+`settings` included, is a `400`. `set_cascade_settings` carries
+`cascade_id` and `settings` (setting name to a value, or null for the
+default) and nothing else:
+
+```json
+{ "id": "0192f0d4-…", "device_seq": 121, "seen_seq": 5121,
+  "at": "2026-09-15T14:42:02.640Z",
+  "type": "set_cascade_settings",
+  "cascade_id": "0192f09e-…", "settings": { "question_size_px": 40, "show_hooks": null } }
+```
+
+`set_cascade_options` is the only
 operation that changes the quiz options: no quiz holds a copy, and a
 `set_quiz_options` is refused as `invalid`, like any type the server does
 not know.
@@ -5867,7 +6041,7 @@ SvelteKit static SPA. The routes:
 | `/reset-password` | "Reset your password": an address, then "If that address has a confirmed account, a reset link is on its way, with the account's username. The link expires in 30 minutes." |
 | `/reset-password/confirm` | "Choose a new password" (every device will be signed out), one field and **Set new password**. On success it logs out, on this device, any account this tab was signed in as (its data and unsent changes stay) and goes to `/login` with no message. A `429` says "Too many tries, with this link or from this address. Try again in N minutes, or ask for a new link."; a `503` says the server is busy checking passwords; a spent or expired link says to ask for a new one; a link with no token says so, with a link to ask for a new one, and shows no form |
 | `/` | Cascades page, the landing page (an old link to `/cascades` redirects here): the account's [storage](#storage-limit) against its limit with a meter, New cascade, then one compact row per cascade — its name, type, lexicon, clear threshold and options, the one-line ladder (`L1 · 250 (waiting) → L2 · 38 (12/38 done, 31.58%)`), its size, its download status and Move to Trash; the rest is in the player's Settings. Below the cascades, the [Trash](#trash) (`#trash`) |
-| `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, name, preview with what the cascade will use against the account's storage), with no settings: a note says a new cascade's settings are changed in its Settings once it is created |
+| `/cascades/new` | Cascade builder (type, lexicon, filter rows, load/save search, name, preview with what the cascade will use against the account's storage), and the preset the cascade starts with (Settings: Defaults or one of the user's [presets](#presets), starting at the one this device used last); a note says a new cascade's settings are changed in its Settings once it is created |
 | `/cascades/:id` | Player for the cascade's deepest level, whose Settings dialog holds the ladder and every [setting](#settings), the cascade's and this device's |
 | `/trash` | No page of its own: redirects to `/#trash`, so an old link lands on the Cascades page scrolled to the Trash |
 | `/account` | Log out (with **Remove this account's data from this device**), sync status, change password (current and new), sign out everywhere, delete account. Nothing about storage: the Cascades page has the account's. No settings: those are in a cascade's Settings (☰ → Settings in the player) |
@@ -5890,8 +6064,8 @@ Modules:
   engine. A page's own buttons (a setting, Move to Trash, Restore, Delete
   forever) go through `applyOrRefuse`, which answers null where the rules
   refuse the operation, for the page to say so (see [Trash](#trash));
-  "use for all cascades" and Copy settings write only to cascades they have
-  just read as reachable, and call `applyLocally` directly. One tab at a time runs the sync engine and the download manager,
+  "use for all cascades" writes only to cascades it has
+  just read as reachable, and calls `applyLocally` directly. One tab at a time runs the sync engine and the download manager,
   elected with the Web Locks API (`navigator.locks.request` on a per-user
   lock held for as long as the tab runs as that account and can sync: it is
   given up at a logout, when the account is signed out in another tab, and
@@ -5919,14 +6093,22 @@ Modules:
   `CASCADE_SETTINGS` (the fields `set_cascade_options` can carry), `appliesTo`
   and `kindOf` (which settings only one kind of cascade has), `reachable` (the
   cascades a widening reaches: not in the Trash, of that kind), `applyToAll`
-  (one `set_cascade_options` per cascade that differs), `copySources` (the
-  other cascades not in the Trash, most recently studied first) and
-  `copySettings` (one `set_cascade_options` with every setting of the chosen
-  cascade that applies to both and differs). The defaults every new cascade
-  starts with are `CASCADE_SETTING_DEFAULTS` in `lib/local/rows.ts`.
+  (one `set_cascade_options` per cascade that differs) and `rulesToApply`
+  (a preset's rules that differ from the cascade's, as one
+  `set_cascade_options` carries them). The defaults a cascade made with
+  Defaults starts with are `CASCADE_SETTING_DEFAULTS` in `lib/local/rows.ts`.
+- **`lib/settings/`** (the rest): `layers.ts` (`DEFINITIONS`, the scopes and
+  `resolve`, the latest change winning), `places.ts` (reading and writing
+  the four scopes), `everywhere.ts` (the account's changes for all cascades
+  on all devices, pending and as synced), `clock.ts` (the server's clock),
+  `presets.ts` (the device's copy of the presets, the built-in Defaults,
+  save, rename, delete, `last_preset_id`) and `store.svelte.ts` (the open
+  cascade's settings: `change` for this cascade on this device, `widen` for
+  a wider scope, and the offers); see [Settings](#settings).
 - **`lib/settings-info.ts`**: what each setting does (`INFO`), which
-  `SettingRow` writes under the setting's name, and the line each of the two
-  groups says about where it applies (`SCOPE`).
+  `SettingRow` shows behind the ⓘ beside the setting's name; the line at the
+  top of Settings and each section's ⓘ saying where a change applies
+  (`SCOPE`); and the ⓘ of the Presets group and of the controls (`SECTION`).
 - **`lib/export/`**: builds a word list or CSV from the local stores, in a worker
   and in chunks, and decides when the export has to come from the server
   instead. The Rust and TypeScript formatters are held to one set of fixtures in
@@ -5998,14 +6180,19 @@ Components:
     through the settings store like any other (`lib/settings/store.svelte`).
     Escape in the capture box cancels the capture and goes no further, so it
     does not close Settings.
-  - **`LayeredSetting`** and **`PlaceSwitches`**: a setting's row with its two
-    switches under its name, which cascades and which devices, and Reset (see
+  - **`ScopedSetting`**: a setting's row, with its `ScopeOffer` under it.
+  - **`ScopeOffer`**: the offer under a setting (or a preset applied) just
+    changed: "✓ Saved for this cascade on this device · Also apply to: this
+    cascade on all devices · all N cascades on this device · all N cascades
+    on all devices" (see
     [Where a setting applies](#where-a-setting-applies)).
-  - **`ApplyWider`**: the line under a cascade rule just changed: "✓ Saved
-    for this cascade", then "Also use for: all N cascades", which runs
-    `applyToAll` and then says "✓ Used for all N cascades" (see
-    [A cascade's rules](#a-cascades-rules-one-cascade-or-all-of-them)). It stays
-    until the dialog closes.
+  - **`ApplyWider`**: the line both offers are drawn with, and the one under a
+    cascade rule just changed: "✓ Saved for this cascade", then "Also use
+    for: all N cascades", which runs `applyToAll` and then says "✓ Used for
+    all N cascades" (see
+    [A cascade's rules](#a-cascades-rules-one-cascade-or-all-of-them)). An
+    offer taken marks done the ones it `covers`. It stays until the dialog
+    closes.
 - **`TypedAnagramCard`**: answer input, found counter, the found list with
   the latest found word in green, the last entry taken under the input (green
   if right, red if wrong; a wrong entry also turns the input red until the
@@ -6060,10 +6247,10 @@ Components:
   this device does not hold.
 - **Settings**: the one settings dialog, in the player (its menu's Settings,
   ⚙ on a phone), with its This Cascade, Answers, Display and Controls
-  sections (see [Desktop layout](#desktop-layout)). A cascade rule, or a
-  change to the cascade's own settings, quiz options included, is applied
-  locally through a `set_cascade_options` operation and updates the current
-  card straight away.
+  sections (see [Desktop layout](#desktop-layout)). A cascade rule, quiz
+  options included, is applied locally through a `set_cascade_options`
+  operation, and a change for this cascade on all devices through a
+  `set_cascade_settings`; each updates the current card straight away.
 - **`SettingRow`**: one setting: its name with an ⓘ (`InfoTip`) beside it
   saying what it does (from `INFO` in `lib/settings-info.ts`), nothing under
   the name, and the control at the row's right end.
@@ -7285,8 +7472,14 @@ they run in parallel and leave nothing behind.
     row and no tombstones, never `resync_required`; and a `cursor: null`
     request carrying 200 grades from a device that created its cascade and
     never synced applies them and returns every row.
-  - A pulled cascade row carries its own settings (`settings`, `{}` for a new
-    cascade), and no pull carries a `preferences` object.
+  - A pulled cascade row carries its settings changes for all devices
+    (`settings`, `{}` for a cascade made with no preset), and no pull
+    carries a `preferences` object. `set_cascade_settings` changes any subset
+    of them, each stamped with its `at`, null meaning the default, merged per
+    setting with the later `at` winning (an older change applied but losing
+    to the newer one beside it), is refused for a cascade in the Trash, and
+    is the only operation that can change them: a `set_cascade_options`
+    carrying `settings` is a `400`.
   - The grades endpoint returns a quiz's graded rows in pages with its attempt
     and seed, and `404` for another user's or a purged quiz. `from` is an index,
     so a 300,000-question quiz whose only 400 graded rows sit above index
@@ -7343,8 +7536,7 @@ they run in parallel and leave nothing behind.
     and two
     option changes from one device with a clock
     a day ahead, sent in one batch, are both applied
-    (`options_device_id`); a stale `set_cascade_options` carrying a change to
-    the cascade's own settings loses whole.
+    (`options_device_id`).
   - `move_cursor` is rejected below `run_start`, at or past the next run
     boundary, and at the question count of a quiz with no boundary; a
     `device_seq` gap left by a coalesced cursor move is accepted.
@@ -7553,10 +7745,17 @@ they run in parallel and leave nothing behind.
     stream the client closed gives its place back, and an open past the
     minute's rate is a `429` with a place free, while `POST /api/sync` is
     limited by neither.
-  - The account's Everywhere settings merging per setting by the later `at`, coming back
-    on every response, refusing malformed shares and a `NUL`, and a share
+  - The account's settings for all cascades on all devices merging per setting by the later `at`, coming back
+    on every response with `server_time`, refusing malformed shares and a `NUL`, and a share
     stamped decades ahead being kept as five minutes from now at most, so the
     next share takes the setting back.
+  - Presets (`tests/presets.rs`): saved (`201`), replaced by id (`200`),
+    renamed and deleted, each bumping `presets_version`; a sync response
+    carrying the whole list only while the device's version differs; another
+    preset's name refused as `409 name_taken`, "Defaults" in any case and bad
+    values as field errors; another account neither seeing nor changing
+    them; and a 51st preset refused as `409 preset_limit`, while replacing
+    one of 50 is not.
 - **Other integration tests** (`cargo test`, `TEST_DATABASE_URL`) drive the real
   router in-process, covering:
   - the auth flows, including the reset-password response taking the same time
@@ -7639,11 +7838,14 @@ they run in parallel and leave nothing behind.
     refusal, `/admin` counting only cascades, and that saved search then loading
     with the row flagged and refused at creation, while an In Lexicon row in a
     live or trashed cascade's spec still refuses the deletion
-  - cascade creation for all three types, a new cascade taking the default
-    settings, Duplicate (including at the storage limit, refused with
-    `storage_limit`, the original being purged afterwards, the copy holding
-    the same storage, and the copy keeping the original's threshold, options,
-    answer mode and other settings), card pages, a missing
+  - cascade creation for all three types, a new cascade made with no preset
+    holding no settings changes, and one made with a preset's `settings`
+    holding each as a change made at the creation's `at` (a value out of
+    range, or a name it cannot hold, a field error), Duplicate (including at
+    the storage limit, refused with `storage_limit`, the original being
+    purged afterwards, the copy holding the same storage, and the copy
+    keeping the original's threshold and options and starting with the
+    settings the duplicating device sent), card pages, a missing
     or 201-scalar-value `name` refused with `400`, and a
     300,000-entry In Word List accepted under `API_MAX_BODY_BYTES` while eight
     rows of 250,000 entries — a body well under the same limit — are refused
@@ -8064,30 +8266,41 @@ through the ordinary endpoints, so there is still no test-only path.
   desktop layout and no buttons; **Always** shows Show / Next, which acts on
   a click; back on automatic, a narrow-window width above the window's shows
   the buttons, and one below it the desktop layout again.
-- **A cascade's rules** (`settings.spec.ts`): with two cascades, see no
-  settings in the site header, none on the Account page, and none in the
-  builder, which says where they are instead. Change one cascade's threshold
-  and see "✓ Saved for this cascade · Also use for: all 2 cascades", with no
-  offer for new cascades; leave it untaken and see the other cascade keep 80%.
-  Change it again and take the offer, and see both cascades at the new value.
-  See Show hooks's switches at "this cascade" and "this device"; turn it off,
-  then press "all devices" and see it held by the cascade itself. Make the
-  first cascade typed for every device the same way, then, from the second, **Copy settings** from the first
-  and see "✓ Copied 2 settings from “Alpha”.", hooks off and the typed input;
-  copying again says "✓ “Alpha” already has the same settings."
-- **A setting in four places** (`settings.spec.ts`): set the question size on
-  one cascade and see the other keep the default; on the other, point its
-  switches at "all cascades" first, set it, and see it saved for this device;
-  see the first keep its narrower value; Reset it there and see this device's
-  value show through, the switches with it; press "all devices" and see it
-  everywhere, then set a value there and see a second browser show it after
-  its first sync; Reset it there, and see both go back to the default.
+- **A cascade's rules, and presets** (`settings.spec.ts`): with two
+  cascades, see no settings in the site header, none on the Account page,
+  and in the builder only the Settings choice, holding Defaults alone, with
+  its note. Change one cascade's threshold and see "✓ Saved for this cascade
+  · Also use for: all 2 cascades"; leave it untaken and see the other
+  cascade keep 80%. Change it again and take the offer, and see both
+  cascades at the new value. Turn Show hooks off and see it saved for this
+  cascade on this device, then take "this cascade on all devices"; make the
+  cascade typed. Save it as the preset "Typed" ("✓ Saved “Typed”."), and see
+  "defaults" refused as a name. Apply "Typed" to the second cascade and see
+  "✓ Applied “Typed”: 2 settings changed.", hooks off, the typed input and
+  the offer under the preset; apply it again and see "✓ This cascade already
+  matches “Typed”." Create a third cascade from "Typed" in the builder and
+  see it typed, with the preset's threshold, and the builder start at that
+  preset next time. Apply Defaults to the second cascade and see "✓ Applied
+  “Defaults”: 3 settings changed.", its threshold back at 90% with the
+  "all 3 cascades" offer. Save "Typed" again and confirm the replacement,
+  rename it to "Plain", see "Saving a preset needs a connection." offline,
+  then delete it, and see the third cascade still typed and the builder
+  start at Defaults again.
+- **Each cascade on each device has its own settings** (`settings.spec.ts`):
+  set the question size on one cascade and see the other keep the default;
+  on the other, set it and take "all 2 cascades on this device", and see the
+  first take it, the later change; set the first's own value afterwards and
+  see the second keep the wider one. Set the first's and take "all 2
+  cascades on all devices", and see the other two offers done with it; a
+  second browser shows it after its first sync, and there a change taken to
+  "this cascade on all devices" reaches the first browser for that cascade
+  alone.
 - **What the Settings dialog holds** (`player.spec.ts`): the player menu's
   links are Acrodont and Account (no Cascades, New cascade or Trash); the
   dialog has no index of its sections and four sections, This Cascade,
-  Answers, Display and Controls, under a line saying what the switches under
-  each setting do, with the controls and their **Reset controls to
-  defaults** button in Controls.
+  Answers, Display and Controls, under a line saying where a change applies
+  ("Each cascade has its own settings on each device. …"), with the controls
+  and their **Reset controls to defaults** button in Controls.
 - **Every setting explains itself** (`misc.spec.ts`): a setting's explanation
   is hidden until its ⓘ ("About this setting") is hovered, goes when the
   mouse leaves, and stays open after a click; the examples and the section

@@ -447,16 +447,18 @@ describe('the sync engine', () => {
 		expect(texts(a)[0]).toMatch(/^Level 1 came out differently on the server because of changes made on another device\./);
 	});
 
-	it("a stale-rejected change to a cascade's settings reverts it; the other device's stands", async () => {
+	it("two devices' changes to a cascade's settings both stand, per setting, the later winning", async () => {
 		const { server, a } = await setup();
 		const b = await second(server);
-		await a.apply({ type: 'set_cascade_options', cascade_id: C1, settings: { show_hooks: false } });
-		await b.apply({ type: 'set_cascade_options', cascade_id: C1, settings: { leave_value_decimals: 3 } });
+		await a.apply({ type: 'set_cascade_settings', cascade_id: C1, settings: { show_hooks: false, leave_value_decimals: 1 } });
+		await b.apply({ type: 'set_cascade_settings', cascade_id: C1, settings: { leave_value_decimals: 3 } });
 		await b.sync();
-		// A's change is older and unseen: stale; the cascade reverts to the server's row.
+		// A's change is older and unseen, and still applied: its other setting is kept,
+		// and B's later change to the same one wins.
 		await a.sync();
 		const c = (await a.db.get('cascades', C1))!;
-		expect(c.settings).toEqual({ leave_value_decimals: 3 });
+		const values = Object.fromEntries(Object.entries(c.settings).map(([k, e]) => [k, (e as { value: unknown }).value]));
+		expect(values).toEqual({ show_hooks: false, leave_value_decimals: 3 });
 		expect(await a.db.get('overlay_cascades', C1)).toBeUndefined();
 	});
 

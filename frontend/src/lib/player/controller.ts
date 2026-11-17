@@ -19,6 +19,8 @@ import { Distribution } from '$lib/tiles';
 import { finishBanner, runBanner } from './banner';
 import { statusRows, type StatusRows } from './segment';
 import { emptyTyped, submitTyped, typedGrade, type Submit, type TypedState } from './typed';
+import { emptyLayers, resolveAll } from '$lib/settings/layers';
+import { cascadeEntries } from '$lib/settings/places';
 
 export interface Card {
 	pos: number;
@@ -74,8 +76,8 @@ export interface PlayerOptions {
 	fetchDistribution?: (cascadeId: string) => Promise<void>;
 	/**
 	 * The answer mode, reveal grade and typed order this device uses for the
-	 * cascade, from whichever place holds them (lib/settings/layers). Without
-	 * it, the cascade's own settings, else flashcards marked correct, in any order.
+	 * cascade, from the latest change covering it (lib/settings/layers).
+	 * Without it, the cascade's changes for all devices, else the defaults.
 	 */
 	answer?: () => { answer_mode: AnswerMode; reveal_correct: boolean; require_alphabetical: boolean };
 	seed?: () => string;
@@ -154,12 +156,9 @@ export class Player {
 		this.answer =
 			opts.answer ??
 			(() => {
-				const own = this.v.cascade?.settings ?? {};
-				return {
-					answer_mode: own.answer_mode === 'typed' ? 'typed' : 'flashcard',
-					reveal_correct: own.reveal_correct !== false,
-					require_alphabetical: own.require_alphabetical === true
-				};
+				const c = this.v.cascade;
+				const s = resolveAll({ ...emptyLayers(), cascade: cascadeEntries(c) }, c?.created_at ?? null);
+				return { answer_mode: s.answer_mode, reveal_correct: s.reveal_correct, require_alphabetical: s.require_alphabetical };
 			});
 	}
 

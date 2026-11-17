@@ -1,35 +1,35 @@
-// PLAN.md § Settings → Where a setting applies: a row's two switches show
-// the place its value comes from, or, with none, start at this cascade on this
-// device; a change saves where they point; switching moves the value, taking
-// it out of where it was and of the narrower places, saying what it replaced;
-// Reset takes it out of its place, and the next place holding one is used.
+// PLAN.md § Settings → Where a setting applies: a change is made for this
+// cascade on this device, stamped by the server's clock; the offer under it
+// makes the same change, at a fresh time, for this cascade on all devices, all
+// cascades on this device, or all cascades on all devices; a preset applied is
+// one change of many settings, offered the same way.
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
 import { openUserDb, type UserDb } from '$lib/local/db';
 import { getMeta, initMeta } from '$lib/local/meta';
 import { pendingShares } from './everywhere';
-import { writeLocalPlace } from './places';
+import { SETTING_KEYS, type Entries } from './layers';
+import { writeLocalScope } from './places';
 import { settings } from './store.svelte';
 
 const C = 'c1';
+const CREATED = '2026-01-01T00:00:00.000Z';
 
-async function fresh(own: Record<string, unknown> = {}) {
+async function fresh(own: Entries = {}, offsetMs = 0) {
 	globalThis.indexedDB = new IDBFactory();
 	const db = await openUserDb('u');
 	await initMeta(db, 'u', 'u');
-	const cascadeWrites: Record<string, unknown>[] = [];
+	if (offsetMs) await db.put('meta', { offset_ms: offsetMs }, 'clock');
+	const cascadeWrites: { values: Record<string, unknown>; at: Date }[] = [];
 	const changed: string[][] = [];
-	let row = { id: C, settings: { ...own } };
+	let row = { id: C, settings: { ...own } as Record<string, unknown>, created_at: CREATED };
 	await settings.open(db, row, {
-		writeCascade: async (changes) => {
-			cascadeWrites.push(changes);
+		writeCascade: async (values, at) => {
+			cascadeWrites.push({ values, at });
 			const next = { ...row.settings };
-			for (const [k, v] of Object.entries(changes)) {
-				if (v === null) delete next[k];
-				else next[k] = v;
-			}
-			row = { id: C, settings: next };
+			for (const [k, v] of Object.entries(values)) next[k] = { value: v, at: at.toISOString() };
+			row = { ...row, settings: next };
 			settings.setCascade(row);
 			return true;
 		},
@@ -37,84 +37,77 @@ async function fresh(own: Record<string, unknown> = {}) {
 			changed.push(keys);
 		}
 	});
-	settings.resetRows();
+	settings.resetOffers();
+	settings.reach = 3;
 	return { db: db as UserDb, cascadeWrites, changed };
 }
 
 describe('the settings of the open cascade', () => {
-	it('with no value, the switches start at this cascade on this device, and a change saves there', async () => {
-		const { db, changed } = await fresh();
-		expect([settings.sourceOf('question_size_px'), settings.placeOf('question_size_px')]).toEqual(['default', 'both']);
+	it('a change is saved for this cascade on this device, and offered more widely', async () => {
+		const { db, changed, cascadeWrites } = await fresh();
+		expect(settings.sourceOf('question_size_px')).toBe('default');
 		await settings.change('question_size_px', 44);
 		expect(settings.value.question_size_px).toBe(44);
 		expect(settings.sourceOf('question_size_px')).toBe('both');
-		expect((await getMeta(db, 'cascade_device_settings'))[C]).toEqual({ question_size_px: 44 });
+		expect((await getMeta(db, 'cascade_device_scope'))[C]).toMatchObject({ question_size_px: { value: 44 } });
 		expect(changed).toEqual([['question_size_px']]);
-	});
-
-	it('switched with no value, they point the next change elsewhere, and Settings opening again starts them over', async () => {
-		const { db } = await fresh();
-		await settings.moveTo('border_px', 'device');
-		expect([settings.sourceOf('border_px'), settings.placeOf('border_px')]).toEqual(['default', 'device']);
-		await settings.change('border_px', 4);
-		expect(await getMeta(db, 'device_settings')).toEqual({ border_px: 4 });
-		settings.resetRows();
-		expect(settings.placeOf('show_hooks')).toBe('both');
-	});
-
-	it('a change to a value held wider is saved there', async () => {
-		const { cascadeWrites } = await fresh({ show_hooks: false });
-		expect(settings.placeOf('show_hooks')).toBe('cascade');
-		await settings.change('show_hooks', true);
-		expect(cascadeWrites).toEqual([{ show_hooks: true }]);
-		expect(settings.sourceOf('show_hooks')).toBe('cascade');
-	});
-
-	it('moving a value wider sets it there and takes it out of where it was', async () => {
-		const { db, cascadeWrites } = await fresh();
-		await settings.change('question_size_px', 44);
-		await settings.moveTo('question_size_px', 'device');
-		expect(settings.sourceOf('question_size_px')).toBe('device');
-		expect(await getMeta(db, 'device_settings')).toEqual({ question_size_px: 44 });
-		expect((await getMeta(db, 'cascade_device_settings'))[C]).toBeUndefined();
 		expect(cascadeWrites).toEqual([]);
-		await settings.moveTo('question_size_px', 'all');
-		expect(await pendingShares(db)).toMatchObject({ question_size_px: { value: 44 } });
-		expect((await getMeta(db, 'device_settings')).question_size_px).toBeUndefined();
-		expect([settings.value.question_size_px, settings.sourceOf('question_size_px')]).toEqual([44, 'all']);
-		expect(settings.replaced.question_size_px).toBeUndefined();
+		expect(settings.offers.question_size_px.values).toEqual({ question_size_px: 44 });
+		// A second change starts a fresh offer.
+		const first = settings.offers.question_size_px.serial;
+		await settings.change('question_size_px', 46);
+		expect(settings.offers.question_size_px.serial).toBeGreaterThan(first);
 	});
 
-	it('moving narrower sets it there and takes it out of where it was', async () => {
-		const { db, cascadeWrites } = await fresh({ show_hooks: false });
-		await settings.moveTo('show_hooks', 'both');
-		expect([settings.value.show_hooks, settings.sourceOf('show_hooks')]).toEqual([false, 'both']);
-		expect(cascadeWrites).toEqual([{ show_hooks: null }]);
-		expect((await getMeta(db, 'cascade_device_settings'))[C]).toEqual({ show_hooks: false });
+	it('the offer makes the same change for this cascade on all devices, all cascades on this device, or everywhere', async () => {
+		const { db, cascadeWrites } = await fresh();
+		await settings.change('border_px', 4);
+		expect(await settings.widen('border_px', 'cascade')).toBe(true);
+		expect(cascadeWrites.map((w) => w.values)).toEqual([{ border_px: 4 }]);
+		expect(settings.sourceOf('border_px')).toBe('cascade');
+		await settings.widen('border_px', 'device');
+		expect(await getMeta(db, 'device_scope')).toMatchObject({ border_px: { value: 4 } });
+		expect(settings.sourceOf('border_px')).toBe('device');
+		await settings.widen('border_px', 'all');
+		expect(await pendingShares(db)).toMatchObject({ border_px: { value: 4 } });
+		expect([settings.value.border_px, settings.sourceOf('border_px')]).toEqual([4, 'all']);
+		// No change made, no offer to take.
+		expect(await settings.widen('show_hooks', 'all')).toBe(false);
 	});
 
-	it('a value moved past a narrower place takes that one out too, and names it', async () => {
-		// The cascade's own 30 is in use; this device's 48, read after it, is hidden.
-		const { db, cascadeWrites } = await fresh({ question_size_px: 30 });
-		await writeLocalPlace(db, 'device', null, { question_size_px: 48 });
-		await settings.reload();
-		expect([settings.value.question_size_px, settings.sourceOf('question_size_px')]).toEqual([30, 'cascade']);
-		await settings.moveTo('question_size_px', 'all');
-		expect(cascadeWrites).toEqual([{ question_size_px: null }]);
-		expect((await getMeta(db, 'device_settings')).question_size_px).toBeUndefined();
-		expect(settings.replaced.question_size_px).toBe('Replaced this device’s 48 px');
-		expect([settings.value.question_size_px, settings.sourceOf('question_size_px')]).toEqual([30, 'all']);
-	});
-
-	it('Reset takes the value out of its place; the next place holding one is used, else the default, the switches staying put', async () => {
-		const { db } = await fresh({ show_hooks: false });
-		await writeLocalPlace(db, 'both', C, { show_hooks: true });
-		await settings.reload();
+	it('a later change here wins over an earlier one made more widely', async () => {
+		const { db } = await fresh({ show_hooks: { value: false, at: '2026-02-01T00:00:00.000Z' } });
+		expect([settings.value.show_hooks, settings.sourceOf('show_hooks')]).toEqual([false, 'cascade']);
+		await settings.change('show_hooks', true);
 		expect([settings.value.show_hooks, settings.sourceOf('show_hooks')]).toEqual([true, 'both']);
-		await settings.reset('show_hooks');
-		expect((await getMeta(db, 'cascade_device_settings'))[C]).toBeUndefined();
-		expect([settings.value.show_hooks, settings.placeOf('show_hooks')]).toEqual([false, 'cascade']);
-		await settings.reset('show_hooks');
-		expect([settings.value.show_hooks, settings.sourceOf('show_hooks'), settings.placeOf('show_hooks')]).toEqual([true, 'default', 'cascade']);
+		// Another tab's change for all cascades on this device, made later still, is read in.
+		await writeLocalScope(db, 'device', null, { show_hooks: false }, new Date(Date.now() + 60_000).toISOString());
+		await settings.reload();
+		expect([settings.value.show_hooks, settings.sourceOf('show_hooks')]).toEqual([false, 'device']);
+	});
+
+	it("stamps a change by the server's clock", async () => {
+		const ahead = 3 * 60 * 60 * 1000;
+		const { db } = await fresh({}, ahead);
+		const before = Date.now();
+		await settings.change('border_px', 6);
+		const at = Date.parse((await getMeta(db, 'cascade_device_scope'))[C].border_px.at);
+		expect(at - before).toBeGreaterThanOrEqual(ahead - 1000);
+		expect(at - before).toBeLessThan(ahead + 60_000);
+	});
+
+	it('a preset applied is one change of every setting, null for the default, and says how many now differ', async () => {
+		const { db } = await fresh();
+		await settings.change('question_size_px', 44);
+		const values = Object.fromEntries(SETTING_KEYS.map((k) => [k, null as unknown]));
+		values.mobile_buttons = 'rows';
+		values.border_px = 10;
+		// question_size_px back to its default, mobile_buttons to rows; border_px was 10 already.
+		expect(await settings.applyValues('preset', values)).toBe(2);
+		expect([settings.value.question_size_px, settings.value.mobile_buttons]).toEqual([36, 'rows']);
+		expect(Object.keys((await getMeta(db, 'cascade_device_scope'))[C])).toHaveLength(SETTING_KEYS.length);
+		await settings.widen('preset', 'device');
+		expect((await getMeta(db, 'device_scope')).mobile_buttons.value).toBe('rows');
+		expect(await settings.applyValues('preset', values)).toBe(0);
 	});
 });

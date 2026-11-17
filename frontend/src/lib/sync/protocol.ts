@@ -43,8 +43,14 @@ export interface SyncResponse {
 	resync_required?: boolean;
 	/** The account's storage and its limit, in bytes, on every response (PLAN.md § Storage limit). */
 	storage?: { used: number; limit: number };
-	/** The account's shared device settings, on every response (lib/settings/device). */
-	device_settings?: Record<string, { value: unknown; at: string }>;
+	/** The account's changes for all cascades on all devices, on every response (lib/settings/everywhere). */
+	settings?: Record<string, { value: unknown; at: string }>;
+	/** The account's presets' version, on every response (lib/settings/presets). */
+	presets_version?: string;
+	/** The account's presets, when the request's `presets_version` was not the account's. */
+	presets?: unknown[];
+	/** The server's time, by which settings changes are stamped (lib/settings/clock). */
+	server_time?: string;
 }
 
 export interface SyncRequest {
@@ -54,8 +60,10 @@ export interface SyncRequest {
 	page_token?: string;
 	question_rows_for: string[];
 	ops?: unknown[];
-	/** Device settings shared on this device and not yet sent (lib/settings/device). */
-	device_settings?: Record<string, { value: unknown; at: string }>;
+	/** Changes for all cascades on all devices made here and not yet sent (lib/settings/everywhere). */
+	settings?: Record<string, { value: unknown; at: string }>;
+	/** The presets' version this device holds; null or absent, and the response carries the list. */
+	presets_version?: string | null;
 }
 
 /** One HTTP exchange: the status, the parsed body and any Retry-After. */

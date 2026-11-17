@@ -109,8 +109,8 @@ test('the question stays put at the top, the menu hides, and display settings ap
 		await expect(dialog.getByRole('region', { name })).toBeVisible();
 	}
 	await expect(dialog.getByRole('region')).toHaveCount(4);
-	// What the switches under each setting do is said once at the top.
-	await expect(dialog.locator('[data-places-intro]')).toHaveText(/^Under each setting, two switches say where its value applies/);
+	// Where a change applies is said once at the top.
+	await expect(dialog.locator('[data-places-intro]')).toHaveText(/^Each cascade has its own settings on each device\./);
 	// The controls are here too, with their reset.
 	const controls = dialog.getByRole('region', { name: 'Controls' });
 	await expect(controls.locator('#controls')).toBeVisible();
@@ -119,7 +119,7 @@ test('the question stays put at the top, the menu hides, and display settings ap
 	// Each section says where it applies, behind the ⓘ beside its heading.
 	await expect(levels.getByText(/They decide how a pass is judged/)).toHaveCount(0);
 	await expect(levels.locator('[data-info*="They decide how a pass is judged, so they are the same on every device."]')).toBeVisible();
-	await expect(dialog.getByRole('region', { name: 'Display' }).locator('[data-info*="the first of those that has a value is used"]')).toBeVisible();
+	await expect(dialog.getByRole('region', { name: 'Display' }).locator('[data-info*="can then be applied more widely"]')).toBeVisible();
 	await expect(levels.getByRole('table', { name: 'Ladder' })).toBeVisible();
 	await expect(levels.getByRole('columnheader')).toHaveText(['Level', 'Questions', 'Pass', 'Last pass', 'Status', 'Actions']);
 	// The clear threshold changes there, for the pass in progress too; out of range is put back.

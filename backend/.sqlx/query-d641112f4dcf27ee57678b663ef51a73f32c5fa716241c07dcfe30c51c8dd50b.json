@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE cascades SET settings = $2::text::jsonb, updated_seq = $3 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d641112f4dcf27ee57678b663ef51a73f32c5fa716241c07dcfe30c51c8dd50b"
+}

@@ -406,6 +406,15 @@ describe('the per-user database', () => {
 				const prefs = { id: 'p', device_seq: 8, seen_seq: 0, at: 't', type: 'set_preferences', leave_value_decimals: 2 };
 				await old.put('outbox', { device_seq: 8, op: prefs } as never);
 			}
+			// Before version 4, settings were set in places: a cascade's own went with its options.
+			if (v < 4) {
+				const own = { id: 's', device_seq: 9, seen_seq: 0, at: 't', type: 'set_cascade_options', cascade_id: 'c1', settings: { show_hooks: false } };
+				await old.put('outbox', { device_seq: 9, cascade_id: 'c1', op: own } as never);
+				const both = { id: 'b', device_seq: 10, seen_seq: 0, at: 't', type: 'set_cascade_options', cascade_id: 'c1', segment_size: 5, settings: {} };
+				await old.put('outbox', { device_seq: 10, cascade_id: 'c1', op: both } as never);
+				await old.put('meta', { show_hooks: true }, 'device_settings');
+				await old.put('meta', { values: {}, pending: {} }, 'shared_device');
+			}
 			old.close();
 			const db = await openUserDb(USER);
 			expect(db.version).toBe(USER_DB_VERSION);
@@ -413,9 +422,18 @@ describe('the per-user database', () => {
 			expect(await db.get('overlay_quiz_questions', ['q1', 3])).toEqual(row);
 			// Version 3 drops the account's preferences and gives each cascade its settings at their defaults.
 			expect(db.objectStoreNames.contains('preferences' as never)).toBe(false);
-			expect(await db.get('cascades', 'c1')).toEqual(v < 3 ? { ...CASCADE_SETTING_DEFAULTS, ...c } : c);
+			// Version 4 starts every cascade's settings over; its next pull brings the server's.
+			expect(await db.get('cascades', 'c1')).toEqual({ ...(v < 3 ? { ...CASCADE_SETTING_DEFAULTS, ...c } : c), ...(v < 4 ? { settings: {} } : {}) });
 			// Version 2 indexes what each queued operation touches, and gives the entries already queued theirs.
-			expect(await db.getAll('outbox')).toEqual([v < 2 ? { ...entry, touches: ['q:q1', 'qq:q1:3'] } : entry]);
+			// Version 4 drops a cascade's settings from a queued options change, and the change with them when nothing else is left.
+			const kept = await db.getAll('outbox');
+			expect(kept[0]).toEqual(v < 2 ? { ...entry, touches: ['q:q1', 'qq:q1:3'] } : entry);
+			if (v < 4) {
+				expect(kept.map((e) => e.device_seq)).toEqual([7, 10]);
+				expect(kept[1].op).toEqual({ id: 'b', device_seq: 10, seen_seq: 0, at: 't', type: 'set_cascade_options', cascade_id: 'c1', segment_size: 5 });
+				expect(await db.get('meta', 'device_settings')).toBeUndefined();
+				expect(await db.get('meta', 'shared_device')).toBeUndefined();
+			} else expect(kept).toHaveLength(1);
 			expect(await db.countFromIndex('outbox', 'touches', 'qq:q1:3')).toBe(v < 2 ? 1 : 0);
 			db.close();
 		}
@@ -443,13 +461,25 @@ describe('the per-user database', () => {
 });
 
 describe("a cascade's settings", () => {
-	it('set_cascade_options sets and clears the cascade\'s own settings, each checked as the server checks it', async () => {
+	it('set_cascade_settings makes changes for the cascade on all devices, each stamped and checked as the server checks it', async () => {
 		const db = await freshDb();
 		await seed(db, { cascade_id: 'c1', source_id: 'q1', count: 5, seed: 1n });
-		await applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', settings: { show_definitions: false, show_hooks: false } });
-		await applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', settings: { reveal_correct: false, leave_value_decimals: 3, show_hooks: null } });
+		const t1 = new Date('2026-11-17T10:00:00.000Z');
+		const t2 = new Date('2026-11-17T11:00:00.000Z');
+		await applyLocally(db, { type: 'set_cascade_settings', cascade_id: 'c1', settings: { show_definitions: false, show_hooks: false } }, () => t1);
+		await applyLocally(db, { type: 'set_cascade_settings', cascade_id: 'c1', settings: { reveal_correct: false, leave_value_decimals: 3, show_hooks: null } }, () => t2);
 		const read = async () => (await view.cascade(db.transaction(APPLY_STORES) as unknown as RwTx, 'c1'))!.settings;
-		expect(await read()).toEqual({ show_definitions: false, reveal_correct: false, leave_value_decimals: 3 });
+		const a = t1.toISOString();
+		const b = t2.toISOString();
+		expect(await read()).toEqual({
+			show_definitions: { value: false, at: a },
+			show_hooks: { value: null, at: b },
+			reveal_correct: { value: false, at: b },
+			leave_value_decimals: { value: 3, at: b }
+		});
+		// An older change to a setting is applied, and loses to the later one.
+		await applyLocally(db, { type: 'set_cascade_settings', cascade_id: 'c1', settings: { show_hooks: true } }, () => t1);
+		expect((await read()).show_hooks).toEqual({ value: null, at: b });
 		const bad = [
 			{ leave_value_decimals: 4 },
 			{ leave_value_decimals: 1.5 },
@@ -458,12 +488,13 @@ describe("a cascade's settings", () => {
 			{ question_font: 'a\u0000b' },
 			{ bindings: 'x'.repeat(17 * 1024) }
 		];
-		for (const settings of bad) {
-			await expect(applyLocally(db, { type: 'set_cascade_options', cascade_id: 'c1', settings } as NewOp)).rejects.toMatchObject({
+		const before = await read();
+		for (const settings of [...bad, {}]) {
+			await expect(applyLocally(db, { type: 'set_cascade_settings', cascade_id: 'c1', settings } as NewOp)).rejects.toMatchObject({
 				reason: 'invalid'
 			});
 		}
-		expect(await read()).toEqual({ show_definitions: false, reveal_correct: false, leave_value_decimals: 3 });
+		expect(await read()).toEqual(before);
 	});
 });
 

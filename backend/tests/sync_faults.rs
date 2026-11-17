@@ -233,7 +233,7 @@ async fn a_sync_never_waits_for_a_second_connection(pool: sqlx::PgPool) {
     let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let r = d
         .raw_sync(json!({ "device_id": d.id, "app_version": 1, "cursor": cursor, "question_rows_for": [], "ops": [],
-                          "device_settings": { "border_px": { "value": 2, "at": at } } }))
+                          "settings": { "border_px": { "value": 2, "at": at } } }))
         .await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
     // A later page of a pull.

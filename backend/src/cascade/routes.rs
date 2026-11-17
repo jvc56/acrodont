@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::order::{questions_hash, to_i64};
-use super::rows::{self, AnswerMode, Progression};
+use super::rows::{self, Progression};
 use crate::app::AppState;
 use crate::auth::{CurrentUser, Session};
 use crate::catalog::tiles::Tile;
@@ -60,9 +60,11 @@ pub struct CreateBody {
     clear_threshold: i64,
     segment_size: i64,
     progression: Progression,
-    /// Optional: typed makes the new cascade's own `answer_mode` setting; flashcard, or none, leaves it unset.
+    /// Optional: the new cascade's starting settings, name -> value (its
+    /// preset's); none, the defaults. Kept as changes made for this cascade on
+    /// all devices at `at` (PLAN.md § Settings → Presets).
     #[serde(default)]
-    answer_mode: Option<AnswerMode>,
+    settings: Option<Value>,
     filters: Value,
 }
 
@@ -80,6 +82,10 @@ pub struct DuplicateBody {
     source_quiz_id: Uuid,
     device_id: Uuid,
     at: DateTime<Utc>,
+    /// The original's settings as they are on the duplicating device, name ->
+    /// value: the copy's starting settings on every device.
+    #[serde(default)]
+    settings: Option<Value>,
 }
 
 struct NewCascade {
@@ -91,8 +97,8 @@ struct NewCascade {
     clear_threshold: i16,
     segment_size: i32,
     progression: Progression,
-    /// The cascade's own settings (PLAN.md § Settings → Where a setting
-    /// applies), as JSON text: Duplicate copies the original's.
+    /// The cascade's starting settings (PLAN.md § Settings → Where a setting
+    /// applies) as JSON text: name -> {value, at}, made at creation.
     settings: String,
     /// Duplicate copies the original's spec; creation stores the request's tree.
     copy_of_spec: Option<Uuid>,
@@ -123,6 +129,16 @@ fn check_fields(state: &AppState, name: &str, threshold: i64, segment_size: i64)
     } else {
         Err(path_errors(errors))
     }
+}
+
+/// A new cascade's starting settings as the column holds them: each value
+/// a change made at the creation's `at`. A value out of range, or past the
+/// bounds, is a `400` on the field `settings`.
+fn starting_settings(values: Option<&Value>, at: DateTime<Utc>) -> Result<String, ApiError> {
+    let Some(v) = values.filter(|v| !v.is_null()) else { return Ok("{}".to_owned()) };
+    let m = super::settings::values_of(v)
+        .map_err(|_| path_errors(vec![PathError::new(&[], "settings", "The settings are not ones a cascade can hold.")]))?;
+    Ok(Value::Object(super::settings::stamped(&m, at)).to_string())
 }
 
 /// An account's cascades each have their own name, the Trash included
@@ -341,19 +357,16 @@ async fn create(
         clear_threshold: b.clear_threshold as i16,
         segment_size: b.segment_size as i32,
         progression: b.progression,
-        settings: match b.answer_mode {
-            Some(AnswerMode::Typed) => r#"{"answer_mode":"typed"}"#.to_owned(),
-            _ => "{}".to_owned(),
-        },
+        settings: starting_settings(b.settings.as_ref(), clamp_at(&state, b.at))?,
         copy_of_spec: None,
     };
     store(&state, &user, n, p).await
 }
 
 /// A new cascade named after the original with the next free number
-/// ([`numbered_name`]), a private copy of the same filters, and
-/// the same threshold, quiz options and own settings. Subject
-/// to the storage limit.
+/// ([`numbered_name`]), a private copy of the same filters, the same
+/// threshold and quiz options, and the settings the request carries (the
+/// original's on the duplicating device). Subject to the storage limit.
 async fn duplicate(
     State(state): State<AppState>,
     Session(user): Session,
@@ -367,7 +380,7 @@ async fn duplicate(
     let mut conn = state.db.acquire().await?;
     let row = sqlx::query!(
         r#"SELECT c.name, c.spec_id, c.clear_threshold, c.segment_size, c.progression AS "progression: Progression",
-                  c.settings::text AS "settings!", l.name AS lexicon
+                  l.name AS lexicon
            FROM cascades c JOIN lexicons l ON l.id = c.lexicon_id WHERE c.id = $1 AND c.user_id = $2"#,
         original,
         user.id
@@ -388,7 +401,7 @@ async fn duplicate(
         clear_threshold: row.clear_threshold,
         segment_size: row.segment_size,
         progression: row.progression,
-        settings: row.settings,
+        settings: starting_settings(b.settings.as_ref(), clamp_at(&state, b.at))?,
         copy_of_spec: Some(row.spec_id),
     };
     store(&state, &user, n, p).await

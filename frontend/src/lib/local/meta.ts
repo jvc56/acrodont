@@ -1,9 +1,12 @@
 // The `meta` store (PLAN.md § On the device → IndexedDB stores): identity,
 // this device's id and next `device_seq`, the sync cursor, what
-// `/api/auth/me` last reported, last-open times, the settings of the places
-// this device holds (PLAN.md § Settings → Where a setting applies), and the
-// budget-dropped ids. All per device and user.
+// `/api/auth/me` last reported, last-open times, the settings changes this
+// device holds (PLAN.md § Settings → Where a setting applies), the presets,
+// the server's clock against this one's, and the budget-dropped ids. All per
+// device and user.
 import type { IDBPTransaction } from 'idb';
+import type { Entries } from '$lib/settings/layers';
+import type { Preset } from '$lib/settings/presets';
 import type { StoreName, UserDb, UserSchema } from './db';
 
 export interface MetaValues {
@@ -27,16 +30,28 @@ export interface MetaValues {
 	 */
 	held: Record<string, string>;
 	/**
-	 * The "Everywhere" place (lib/settings/everywhere): the account's shared
-	 * settings as the last sync response carried them, and the changes made here
-	 * and not yet sent, each setting with the time it was set. A value of null
-	 * takes a setting out of the place.
+	 * Changes for all cascades on all devices (lib/settings/everywhere): the
+	 * account's as the last sync response carried them, and those made here and
+	 * not yet sent. A value of null is the setting's default.
 	 */
-	shared_device: { values: Record<string, { value: unknown; at: string }>; pending: Record<string, { value: unknown; at: string }> };
-	/** The "This device" place: setting name to value, for every cascade studied here. */
-	device_settings: Record<string, unknown>;
-	/** The "This cascade on this device" place: each cascade's settings on this device alone. */
-	cascade_device_settings: Record<string, Record<string, unknown>>;
+	account_settings: { values: Entries; pending: Entries };
+	/** Changes for all cascades on this device. */
+	device_scope: Entries;
+	/** Changes for one cascade on this device alone, by cascade. */
+	cascade_device_scope: Record<string, Entries>;
+	/**
+	 * The server's clock less this device's, in ms, from the last sync
+	 * response's `server_time`: settings changes are stamped by the server's
+	 * clock (PLAN.md § Settings → Clocks).
+	 */
+	clock: { offset_ms: number };
+	/**
+	 * The account's presets (lib/settings/presets) as the last sync response
+	 * that carried them had them, and their version, sent with every sync.
+	 */
+	presets: { version: string | null; list: Preset[] };
+	/** The preset the builder used last on this device, which it starts at; null for Defaults. */
+	last_preset_id: string | null;
 	/** Bytes of each cascade's question keys and answers, measured as they were written. */
 	sizes: Record<string, { key_bytes: number; answer_bytes: number }>;
 }
@@ -50,9 +65,12 @@ export const META_DEFAULTS: { [K in MetaKey]: () => MetaValues[K] } = {
 	opens: () => ({}),
 	budget_dropped: () => [],
 	held: () => ({}),
-	shared_device: () => ({ values: {}, pending: {} }),
-	device_settings: () => ({}),
-	cascade_device_settings: () => ({}),
+	account_settings: () => ({ values: {}, pending: {} }),
+	device_scope: () => ({}),
+	cascade_device_scope: () => ({}),
+	clock: () => ({ offset_ms: 0 }),
+	presets: () => ({ version: null, list: [] }),
+	last_preset_id: () => null,
 	sizes: () => ({})
 };
 

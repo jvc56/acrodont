@@ -154,7 +154,7 @@ let noticesOf: string | null = null;
 // is in the database, which the new build now holds and sends from.
 onUpdatedElsewhere(() => stopSync());
 
-/** The account's settings changed (the "Everywhere" place): an open player reads its places again. */
+/** The account's settings or presets changed: an open player reads its scopes again. */
 function reloadDeviceSettings() {
 	void settings.reload();
 }
@@ -250,7 +250,7 @@ export function startSync(userId: string): () => void {
 							.catch(() => undefined)
 							.then(() => passDone(dm));
 				},
-				// The account's settings (the "Everywhere" place) changed: an open player
+				// The account's settings for all cascades on all devices, or its presets, changed: an open player
 				// shows them, in this tab and in every other.
 				onDeviceSettings: () => {
 					reloadDeviceSettings();

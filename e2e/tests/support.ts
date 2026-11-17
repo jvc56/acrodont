@@ -101,9 +101,10 @@ export async function login(page: Page, username: string) {
 }
 
 /** A cascade through the builder, with the settings every new cascade starts with; returns its player path. */
-export async function createCascade(page: Page, o: { name: string; min?: number; max?: number } = { name: 'x' }): Promise<string> {
+export async function createCascade(page: Page, o: { name: string; min?: number; max?: number; preset?: string } = { name: 'x' }): Promise<string> {
 	await page.goto('/cascades/new');
 	await page.getByLabel('Lexicon').selectOption('EN-FIX');
+	if (o.preset) await page.locator('[data-preset-select]').selectOption({ label: o.preset });
 	await page.getByLabel('Minimum').first().fill(String(o.min ?? 7));
 	await page.getByLabel('Maximum').first().fill(String(o.max ?? 7));
 	await expect(page.getByText(/\d+ questions/).first()).toBeVisible({ timeout: 15_000 });
@@ -126,7 +127,8 @@ export async function apiCascade(
 		filters: unknown;
 		segment_size?: number;
 		progression?: string;
-		answer_mode?: 'flashcard' | 'typed';
+		/** The cascade's starting settings, as a preset would give them. */
+		settings?: Record<string, unknown>;
 	}
 ): Promise<string> {
 	const csrf = (await page.context().cookies()).find((c) => c.name === 'acrodont_csrf')!.value;
@@ -145,7 +147,7 @@ export async function apiCascade(
 			clear_threshold: 80,
 			segment_size: o.segment_size ?? 0,
 			progression: o.progression ?? 'ladder',
-			answer_mode: o.answer_mode ?? 'flashcard',
+			...(o.settings ? { settings: o.settings } : {}),
 			filters: o.filters
 		}
 	});

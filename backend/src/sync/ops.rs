@@ -294,6 +294,7 @@ pub async fn apply(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpRes
         "purge_quiz" => purge_quiz(conn, ctx, op).await,
         "purge_cascade" => purge_cascade(conn, ctx, op).await,
         "set_cascade_options" => set_cascade_options(conn, ctx, op).await,
+        "set_cascade_settings" => set_cascade_settings(conn, ctx, op).await,
         _ => Err(OpError::Rejected(Reason::Invalid)),
     }
 }
@@ -789,27 +790,18 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         None => None,
         Some(v) => Some(rules::check_clear_threshold(v.as_i64().ok_or(Reason::Invalid)?)?),
     };
-    // The cascade's own settings (PLAN.md § Settings → Where a setting applies):
-    // its `settings` object, null taking a value away.
-    let changes = settings::changes_of(&op.body)?;
+    // A cascade's settings are `set_cascade_settings`, merged per setting.
+    if op.body.get("settings").is_some() {
+        return Err(OpError::Rejected(Reason::Invalid));
+    }
     let at = clamp(ctx, at);
     if !options_win(ctx, op, c.options_device_id, c.options_seq, c.options_changed_at, at) {
         return Err(OpError::Rejected(Reason::Stale));
     }
-    let merged = match &changes {
-        None => None,
-        Some(ch) => {
-            let current = sqlx::query_scalar!(r#"SELECT settings::text AS "settings!" FROM cascades WHERE id = $1"#, id)
-                .fetch_one(&mut *conn)
-                .await?;
-            Some(settings::merge(&current, ch)?)
-        }
-    };
     sqlx::query!(
         "UPDATE cascades SET segment_size = coalesce($2, segment_size), progression = coalesce($3, progression),
                              options_changed_at = $4, options_seq = $5, options_device_id = $6, updated_seq = $5,
-                             clear_threshold = coalesce($7, clear_threshold),
-                             settings = coalesce($8::text::jsonb, settings)
+                             clear_threshold = coalesce($7, clear_threshold)
          WHERE id = $1",
         id,
         f.segment_size.map(|s| s as i32),
@@ -818,7 +810,34 @@ async fn set_cascade_options(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp
         ctx.seq,
         ctx.device,
         threshold.map(|t| t as i16),
+    )
+    .execute(conn)
+    .await?;
+    Ok(Effects::default())
+}
+
+/// Changes made for this cascade on all devices (PLAN.md § Settings → Where a
+/// setting applies): its `settings` object of name to value, null meaning the
+/// default. Each is merged into the cascade's own per setting, the later `at`
+/// winning, so two devices changing different settings offline both keep
+/// theirs, and the same setting ends at the last change.
+async fn set_cascade_settings(conn: &mut PgConnection, ctx: &Ctx, op: &IncomingOp) -> OpResult {
+    let id = uuid_of(op, "cascade_id")?;
+    let at = clamp(ctx, at_of(op)?);
+    let c = load_cascade(conn, ctx.user, id).await?;
+    if c.trashed {
+        return Err(OpError::Rejected(Reason::Trashed));
+    }
+    let changes = settings::changes_of(&op.body, at)?;
+    let current = sqlx::query_scalar!(r#"SELECT settings::text AS "settings!" FROM cascades WHERE id = $1 FOR UPDATE"#, id)
+        .fetch_one(&mut *conn)
+        .await?;
+    let merged = settings::merge(&current, &changes)?;
+    sqlx::query!(
+        "UPDATE cascades SET settings = $2::text::jsonb, updated_seq = $3 WHERE id = $1",
+        id,
         merged,
+        ctx.seq,
     )
     .execute(conn)
     .await?;

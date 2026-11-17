@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT settings::text AS \"settings!\" FROM cascades WHERE id = $1",
+  "query": "SELECT settings::text AS \"settings!\" FROM cascades WHERE id = $1 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       null
     ]
   },
-  "hash": "f144213fd19620fdabe04b32ba8435f9d8ee1debb8b1e00d27400578f0812091"
+  "hash": "41beaf03f17d48328d9b5b7216c7ee38efc1b6f4c6a63589490ea979e5a41b38"
 }

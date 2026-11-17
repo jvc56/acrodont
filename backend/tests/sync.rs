@@ -280,10 +280,20 @@ async fn request_level_400s(pool: sqlx::PgPool) {
     o["x"] = json!(1);
     b["ops"] = json!([o]);
     cases.push(("an options op with another field", b));
+    // A cascade's settings are their own operation, never an options one.
+    let mut b = base.clone();
+    b["ops"] = json!([d.op("set_cascade_options", json!({ "cascade_id": Uuid::new_v4(), "settings": { "show_hooks": false } }))]);
+    cases.push(("an options op carrying settings", b));
+    let mut b = base.clone();
+    b["ops"] = json!([d.op("set_cascade_settings", json!({ "cascade_id": Uuid::new_v4(), "settings": {}, "segment_size": 5 }))]);
+    cases.push(("a settings op with another field", b));
+    let mut b = base.clone();
+    b["presets_version"] = json!("one");
+    cases.push(("a presets_version that is no number", b));
     // A NUL is text Postgres cannot hold, in a shared setting's value at any depth.
     for value in [json!("a\u{0}b"), json!({ "inner": ["\u{0}"] }), json!({ "k\u{0}": 1 })] {
         let mut b = base.clone();
-        b["device_settings"] = json!({ "border_px": { "value": value, "at": "2026-11-11T10:00:00Z" } });
+        b["settings"] = json!({ "border_px": { "value": value, "at": "2026-11-11T10:00:00Z" } });
         cases.push(("a NUL in a shared setting", b));
     }
     for (what, body) in cases {
@@ -406,18 +416,19 @@ async fn out_of_range_values_are_invalid_never_error(pool: sqlx::PgPool) {
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 300001 })),
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 1 })),
         d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "progression": "spiral" })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 4 } })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": -1 } })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": "2" } })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 1.5 } })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "show_definitions": "no" } })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": 0 } })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "reveal_correct": "missed" } })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "answer_mode": "spoken" } })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "Bad-Name": 1 } })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "question_font": "a\u{0}b" } })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "bindings": "x".repeat(17 * 1024) } })),
-        d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": "show_hooks" })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 4 } })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": -1 } })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": "2" } })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 1.5 } })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "show_definitions": "no" } })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": 0 } })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "reveal_correct": "missed" } })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "answer_mode": "spoken" } })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "Bad-Name": 1 } })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "question_font": "a\u{0}b" } })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "bindings": "x".repeat(17 * 1024) } })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": "show_hooks" })),
+        d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": {} })),
     ];
     let r = d.sync(ops).await;
     for x in r.json()["results"].as_array().unwrap() {
@@ -669,25 +680,29 @@ async fn latest_wins_whole(pool: sqlx::PgPool) {
     // Having seen it (seen_seq), an older timestamp still applies.
     let oa = a.op_at("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 5 }), t0);
     assert_eq!(result(&a.sync(vec![oa]).await, 0)["status"], "applied");
-    // The cascade's settings likewise: one rule for everything set_cascade_options carries.
-    let pb = b.op_at("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": false } }), t0 + Duration::seconds(5));
+    // The cascade's settings are not options: merged per setting, the later
+    // `at` winning, so A's change to another setting is kept beside B's, and
+    // A's older change to B's setting is applied but loses to it.
+    let pb = b.op_at("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": false } }), t0 + Duration::seconds(5));
     assert_eq!(result(&b.sync(vec![pb]).await, 0)["status"], "applied");
-    let mut stale = a.op_at(
-        "set_cascade_options",
-        json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 2 } }),
+    let mut other = a.op_at(
+        "set_cascade_settings",
+        json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 2, "show_hooks": true } }),
         t0 + Duration::seconds(4),
     );
-    stale["seen_seq"] = json!(0);
-    assert_eq!(result(&a.sync(vec![stale]).await, 0)["reason"], "stale");
+    other["seen_seq"] = json!(0);
+    assert_eq!(result(&a.sync(vec![other]).await, 0)["status"], "applied");
     let settings: String = sqlx::query_scalar("SELECT settings::text FROM cascades").fetch_one(app.db()).await.unwrap();
-    assert_eq!(settings, r#"{"show_hooks": false}"#, "the stale change lost whole");
+    let settings: Value = serde_json::from_str(&settings).unwrap();
+    assert_eq!(settings["show_hooks"]["value"], json!(false), "the later change of a setting wins");
+    assert_eq!(settings["leave_value_decimals"]["value"], json!(2), "another setting's change is kept");
     // Two changes from one device with a clock a day ahead, in one batch: both applied.
     let mut fast = b.sibling(&app);
     fast.skew = Duration::days(1);
     let o1 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 5 }));
     let o2 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "segment_size": 6 }));
-    let p1 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "reveal_correct": false } }));
-    let p2 = fast.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 3 } }));
+    let p1 = fast.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "reveal_correct": false } }));
+    let p2 = fast.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "leave_value_decimals": 3 } }));
     let r = fast.sync(vec![o1, o2, p1, p2]).await;
     for i in 0..4 {
         assert_eq!(result(&r, i)["status"], "applied", "{i}");
@@ -832,7 +847,7 @@ async fn an_options_change_right_after_creation_from_a_slow_clock(pool: sqlx::Pg
         .post("/api/cascades", json!({
             "id": id, "source_quiz_id": Uuid::new_v4(), "device_id": d.id, "at": at, "name": format!("A cascade {}", Uuid::new_v4().simple()),
             "lexicon": "EN-FIX", "quiz_type": "anagram", "clear_threshold": 80, "segment_size": 0,
-            "progression": "ladder", "answer_mode": "flashcard",
+            "progression": "ladder",
             "filters": { "op": "and", "children": [{ "type": "length", "negated": false, "min": 7, "max": 7 }] },
         }))
         .await;
@@ -888,10 +903,10 @@ async fn the_clear_threshold_changes_for_the_pass_in_progress(pool: sqlx::PgPool
     assert_eq!((thr, seg), (50, 0), "the threshold alone changed");
 }
 
-/// A cascade's own settings (PLAN.md § Settings → Where a setting applies):
-/// a new cascade has none; `set_cascade_options` sets and clears them, any
-/// subset at a time, null taking one away; they pull back on the cascade's
-/// row; and a quiz's options operation carrying them is a 400.
+/// A cascade's settings (PLAN.md § Settings → Where a setting applies): a
+/// cascade made with no preset has none; `set_cascade_settings` changes any
+/// subset at a time, each stamped with the operation's `at`, null meaning the
+/// default; they pull back on the cascade's row.
 #[sqlx::test]
 async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
     let app = app(pool).await;
@@ -900,24 +915,35 @@ async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
     let mut other = d.sibling(&app);
     let (_, pages) = other.sync_all(vec![]).await;
     assert_eq!(rows(&pages, "cascades")[0]["settings"], json!({}));
-    let o = d.op(
-        "set_cascade_options",
+    let t0 = Utc::now();
+    let o = d.op_at(
+        "set_cascade_settings",
         json!({ "cascade_id": s.cascade_id, "settings": { "show_definitions": false, "show_hooks": false,
                 "leave_value_decimals": 3, "question_size_px": 48, "bindings": [{ "action": "previous" }] } }),
+        t0,
     );
     assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
-    // One setting alone leaves the others as they are; null takes one away.
-    let o = d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": true, "show_definitions": null } }));
+    // One setting alone leaves the others as they are; null is the default, a change like any other.
+    let o = d.op_at(
+        "set_cascade_settings",
+        json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": true, "show_definitions": null } }),
+        t0 + Duration::seconds(1),
+    );
     assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
     let (_, pages) = other.sync_all(vec![]).await;
+    let got = &rows(&pages, "cascades")[0]["settings"];
+    let values: Value = got.as_object().unwrap().iter().map(|(k, e)| (k.clone(), e["value"].clone())).collect();
     assert_eq!(
-        rows(&pages, "cascades")[0]["settings"],
-        json!({ "show_hooks": true, "leave_value_decimals": 3, "question_size_px": 48, "bindings": [{ "action": "previous" }] })
+        values,
+        json!({ "show_hooks": true, "show_definitions": null, "leave_value_decimals": 3, "question_size_px": 48,
+                "bindings": [{ "action": "previous" }] })
     );
+    let at = |k: &str| got[k]["at"].as_str().unwrap().parse::<chrono::DateTime<Utc>>().unwrap();
+    assert!(at("show_hooks") > at("question_size_px"), "each change keeps its own time");
     // Out of range or the wrong type: invalid, and nothing changes.
     let bad: Vec<Value> = [json!({ "leave_value_decimals": 4 }), json!({ "leave_value_decimals": "1" }), json!({ "show_hooks": "true" })]
         .into_iter()
-        .map(|f| d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": f })))
+        .map(|f| d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": f })))
         .collect();
     let r = d.sync(bad).await;
     for x in r.json()["results"].as_array().unwrap() {
@@ -926,52 +952,56 @@ async fn a_cascades_settings_set_and_pull_back(pool: sqlx::PgPool) {
     let decimals: Value = sqlx::query_scalar::<_, String>("SELECT settings::text FROM cascades")
         .fetch_one(app.db())
         .await
-        .map(|t| serde_json::from_str::<Value>(&t).unwrap()["leave_value_decimals"].clone())
+        .map(|t| serde_json::from_str::<Value>(&t).unwrap()["leave_value_decimals"]["value"].clone())
         .unwrap();
     assert_eq!(decimals, json!(3));
+    // A cascade in the Trash takes no settings change.
+    let t = d.op("trash_cascade", json!({ "cascade_id": s.cascade_id }));
+    assert_eq!(result(&d.sync(vec![t]).await, 0)["status"], "applied");
+    let o = d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": false } }));
+    assert_eq!(result(&d.sync(vec![o]).await, 0)["reason"], "trashed");
 }
 
-
-/// Device settings shared with all of an account's devices (PLAN.md §
-/// Settings → This device, or all of them): a sync carries the ones shared on
-/// the device, every response carries the account's, and per setting the
-/// later `at` wins, whichever device sent it and in whatever order.
+/// Changes for all cascades on all devices (PLAN.md § Settings → Where a
+/// setting applies): a sync carries the ones made on the device, every
+/// response carries the account's, and per setting the later `at` wins,
+/// whichever device sent it and in whatever order.
 #[sqlx::test]
-async fn shared_device_settings_merge_and_come_back(pool: sqlx::PgPool) {
+async fn account_settings_merge_and_come_back(pool: sqlx::PgPool) {
     let app = app(pool).await;
     let mut d = device(&app, "alice").await;
     let mut other = d.sibling(&app);
     let body = |dev: &Device, shared: Value| {
         json!({ "device_id": dev.id, "app_version": 1, "cursor": dev.cursor, "question_rows_for": [], "ops": [],
-                "device_settings": shared })
+                "settings": shared })
     };
     // Nothing shared yet: an empty object.
-    assert_eq!(d.sync(vec![]).await.json()["device_settings"], json!({}));
+    assert_eq!(d.sync(vec![]).await.json()["settings"], json!({}));
     let r = d
         .raw_sync(body(&d, json!({ "answer_size_px": { "value": 48, "at": "2026-11-11T10:00:00.000Z" },
                                    "bindings": { "value": [{ "action": "show_next" }], "at": "2026-11-11T10:00:00Z" } })))
         .await;
     assert_eq!(r.status, StatusCode::OK);
     // The other device sees both; `at` comes back in one form.
-    let shared = other.sync(vec![]).await.json()["device_settings"].clone();
+    let shared = other.sync(vec![]).await.json()["settings"].clone();
     assert_eq!(shared["answer_size_px"], json!({ "value": 48, "at": "2026-11-11T10:00:00.000Z" }));
     assert_eq!(shared["bindings"]["at"], json!("2026-11-11T10:00:00.000Z"));
     // An older share of the same setting loses; a newer one wins; others are kept.
     other.raw_sync(body(&other, json!({ "answer_size_px": { "value": 20, "at": "2026-11-11T09:00:00.000Z" } }))).await;
-    assert_eq!(d.sync(vec![]).await.json()["device_settings"]["answer_size_px"]["value"], json!(48));
+    assert_eq!(d.sync(vec![]).await.json()["settings"]["answer_size_px"]["value"], json!(48));
     other.raw_sync(body(&other, json!({ "answer_size_px": { "value": 30, "at": "2026-11-11T11:00:00.000Z" } }))).await;
-    let shared = d.sync(vec![]).await.json()["device_settings"].clone();
+    let shared = d.sync(vec![]).await.json()["settings"].clone();
     assert_eq!((&shared["answer_size_px"]["value"], &shared["bindings"]["value"][0]["action"]), (&json!(30), &json!("show_next")));
     // A share stamped by a clock far ahead is kept as five minutes from now at
     // most, so the next real share of that setting wins it back.
     d.raw_sync(body(&d, json!({ "border_px": { "value": 9, "at": "2099-01-01T00:00:00.000Z" } }))).await;
-    let kept = other.sync(vec![]).await.json()["device_settings"]["border_px"].clone();
+    let kept = other.sync(vec![]).await.json()["settings"]["border_px"].clone();
     let at: chrono::DateTime<Utc> = kept["at"].as_str().unwrap().parse().unwrap();
     assert_eq!(kept["value"], json!(9));
     assert!(at <= Utc::now() + Duration::minutes(5), "clamped: {at}");
     let soon = (Utc::now() + Duration::minutes(6)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     other.raw_sync(body(&other, json!({ "border_px": { "value": 2, "at": soon } }))).await;
-    assert_eq!(d.sync(vec![]).await.json()["device_settings"]["border_px"]["value"], json!(2));
+    assert_eq!(d.sync(vec![]).await.json()["settings"]["border_px"]["value"], json!(2));
     // A malformed share is a 400, and changes nothing.
     for bad in [
         json!([]),
@@ -982,7 +1012,7 @@ async fn shared_device_settings_merge_and_come_back(pool: sqlx::PgPool) {
     ] {
         assert_eq!(d.raw_sync(body(&d, bad.clone())).await.status, StatusCode::BAD_REQUEST, "{bad}");
     }
-    assert_eq!(d.sync(vec![]).await.json()["device_settings"]["answer_size_px"]["value"], json!(30));
+    assert_eq!(d.sync(vec![]).await.json()["settings"]["answer_size_px"]["value"], json!(30));
     // A share that would take the account's settings past 16 KB changes
     // nothing: each request may carry that much, and every response carries
     // them all.
@@ -990,12 +1020,12 @@ async fn shared_device_settings_merge_and_come_back(pool: sqlx::PgPool) {
     for name in ["note_a", "note_b", "note_c"] {
         assert_eq!(d.raw_sync(body(&d, big(name))).await.status, StatusCode::OK);
     }
-    let shared = d.sync(vec![]).await.json()["device_settings"].clone();
+    let shared = d.sync(vec![]).await.json()["settings"].clone();
     assert!(shared.get("note_b").is_some() && shared.get("note_c").is_none(), "the third did not fit");
     assert_eq!(shared["answer_size_px"]["value"], json!(30));
     // Another account sees none of it.
     let mut bob = device(&app, "bob").await;
-    assert_eq!(bob.sync(vec![]).await.json()["device_settings"], json!({}));
+    assert_eq!(bob.sync(vec![]).await.json()["settings"], json!({}));
 }
 
 /// The next data an event stream sends, as text, or None if it sends nothing in `wait`.
@@ -1026,7 +1056,7 @@ async fn other_devices_hear_of_a_change_at_once(pool: sqlx::PgPool) {
     let (_, mut bobs) = bob.client.open_stream(&format!("/api/sync/events?user={bob_user}&device={}", bob.id)).await;
     let short = std::time::Duration::from_millis(700);
 
-    let o = d.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": false } }));
+    let o = d.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "show_hooks": false } }));
     assert_eq!(result(&d.sync(vec![o]).await, 0)["status"], "applied");
     let heard = next_event(&mut theirs, std::time::Duration::from_secs(5)).await.expect("the other device hears of it");
     // With data: EventSource drops an event without any.
@@ -1036,9 +1066,9 @@ async fn other_devices_hear_of_a_change_at_once(pool: sqlx::PgPool) {
     // A sync that applies nothing tells no one.
     d.sync(vec![]).await;
     assert_eq!(next_event(&mut theirs, short).await, None);
-    // Shared device settings are a change too.
+    // A change for all cascades on all devices is a change too.
     let body = json!({ "device_id": d.id, "app_version": 1, "cursor": d.cursor, "question_rows_for": [], "ops": [],
-                       "device_settings": { "border_px": { "value": 4, "at": "2026-11-11T10:00:00Z" } } });
+                       "settings": { "border_px": { "value": 4, "at": "2026-11-11T10:00:00Z" } } });
     assert_eq!(d.raw_sync(body).await.status, StatusCode::OK);
     assert!(next_event(&mut theirs, std::time::Duration::from_secs(5)).await.is_some());
     bob.sync(vec![]).await;

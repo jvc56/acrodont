@@ -40,7 +40,7 @@
 	} from '$lib/filters';
 	import { storeCreated, type Created } from '$lib/local/created';
 	import { getMeta } from '$lib/local/meta';
-	import { CASCADE_SETTING_DEFAULTS } from '$lib/local/rows';
+	import { presetList, rememberPreset, startingPreset, startingSettings, type Preset } from '$lib/settings/presets';
 	import { DEFAULT_STORAGE_LIMIT, formatBytes } from '$lib/cascades/storage';
 	import { userDb } from '$lib/local/open';
 	import { PREVIEW_MANUAL_ENTRIES } from '$lib/sync/config';
@@ -58,6 +58,9 @@
 	let limit = $state(DEFAULT_STORAGE_LIMIT);
 	let name = $state('');
 	let nameEdited = $state(false);
+	/** The presets the new cascade can start from (Defaults first), and the one chosen. */
+	let presets = $state<Preset[]>([]);
+	let presetId = $state('defaults');
 	/** The names of the account's cascades on this device, the Trash included: a new one needs its own. */
 	let takenNames = $state<Set<string>>(new Set());
 	let nameTaken = $derived(takenNames.has(name));
@@ -103,6 +106,8 @@
 			used = server.storage_bytes ?? 0;
 			limit = server.max_storage_bytes ?? DEFAULT_STORAGE_LIMIT;
 			takenNames = new Set((await db.getAll('cascades')).map((c) => c.name));
+			presets = await presetList(db);
+			presetId = (await startingPreset(db, presets)).id;
 		}
 		try {
 			lexicons = await loadLexicons();
@@ -152,7 +157,11 @@
 		createProgress = 0;
 		createCount = null;
 		// This device's id for the account, from the per-user `meta` store.
-		const { device_id } = await getMeta(await userDb(session.userId, session.username), 'device');
+		const db = await userDb(session.userId, session.username);
+		const { device_id } = await getMeta(db, 'device');
+		// The preset chosen gives the new cascade its rules and its starting
+		// settings on every device; Defaults, the defaults (§ Settings → Presets).
+		const preset = presets.find((p) => p.id === presetId) ?? (await presetList(db))[0];
 		// Minted once per press and reused for every retry of it.
 		const body = {
 			id: crypto.randomUUID(),
@@ -162,10 +171,10 @@
 			name,
 			lexicon,
 			quiz_type: quizType,
-			// Every new cascade starts with the same rules and no settings of its own; both are changed in its Settings (§ Settings).
-			clear_threshold: CASCADE_SETTING_DEFAULTS.clear_threshold,
-			segment_size: CASCADE_SETTING_DEFAULTS.segment_size,
-			progression: CASCADE_SETTING_DEFAULTS.progression,
+			clear_threshold: preset.clear_threshold,
+			segment_size: preset.segment_size,
+			progression: preset.progression,
+			settings: startingSettings(preset),
 			filters: wire.tree
 		};
 		try {
@@ -173,7 +182,8 @@
 			// Into the base at once: a cascade starts downloading the moment it is created.
 			createCount = Number(created.source_quiz.question_count);
 			createStage = 'device';
-			await storeCreated(await userDb(session.userId, session.username), created, new Date(), (f) => (createProgress = f));
+			await storeCreated(db, created, new Date(), (f) => (createProgress = f));
+			await rememberPreset(db, preset.id);
 			await goto(`/cascades/${body.id}`);
 		} catch (e) {
 			if (e instanceof ApiError && e.code === 'storage_limit') {
@@ -382,9 +392,15 @@
 					</p>
 				{/if}
 			</div>
+			<div class="grid gap-1">
+				<Label for="preset">Settings</Label>
+				<select id="preset" class="w-72 max-w-full rounded-md border bg-background px-2 py-1 text-sm" bind:value={presetId} data-preset-select>
+					{#each presets as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+				</select>
+			</div>
 			<p class="text-sm text-muted-foreground" data-settings-note>
-				You can change this cascade’s settings, such as its clear threshold, answer mode and segments, in its Settings once it is
-				created. Every new cascade starts with the same ones.
+				The cascade starts with the preset’s settings and rules, or the defaults. You can change its settings, such as its clear
+				threshold, answer mode and segments, in its Settings once it is created.
 			</p>
 			{#if createError}<p class="text-sm text-destructive">{createError}</p>{/if}
 			<!-- What the new cascade will hold, against what is free: an estimate, labelled as one; the server decides. -->

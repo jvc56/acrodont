@@ -4,20 +4,21 @@
 /** Where settings apply, said once at the top of Settings and beside each group's heading. */
 export const SCOPE = {
 	places:
-		'Under each setting, two switches say where its value applies: this cascade or all cascades, on this device or all devices. A setting not yet changed starts at this cascade on this device; a change is saved where its switches point, and switching one moves the value.',
+		'Each cascade has its own settings on each device. A change is saved for this cascade on this device; under it you can then apply the same change to this cascade on all devices, to all cascades on this device, or to all cascades on all devices. Cascades you create later start from the preset you choose.',
 	cascade:
-		'This cascade’s name, and its rules: the clear threshold, segments and progression, which every level follows, the one you are studying included. They decide how a pass is judged, so they are the same on every device. After you change one you can optionally use it for every cascade too.',
+		'This cascade’s name, and its rules: the clear threshold, segments and progression, which every level follows, the one you are studying included. They decide how a pass is judged, so they are the same on every device. After you change one you can optionally use it for every cascade too. Presets save these settings under a name, to apply to another cascade or to start a new one with.',
 	answers:
-		'What a revealed answer shows and how a reveal grades it. Each can be set for this cascade on this device, this cascade, this device, or everywhere; the first of those that has a value is used.',
+		'What a revealed answer shows and how a reveal grades it. A change is saved for this cascade on this device, and can then be applied more widely.',
 	display:
-		'How the player looks and responds. Each can be set for this cascade on this device, this cascade, this device, or everywhere; the first of those that has a value is used.'
+		'How the player looks and responds. A change is saved for this cascade on this device, and can then be applied more widely.'
 } as const;
 
 /** What each part of a cascade's Settings is for, behind an ⓘ beside its heading. */
 export const SECTION = {
-	copy: 'Gives this cascade the other one’s rules, and the same settings of its own (the ones set for “This cascade”).',
+	presets:
+		'A preset holds every setting and the three rules. Apply one to give this cascade its settings on this device and its rules; Defaults puts everything back to the defaults. Save as preset keeps this cascade’s settings as they are here under a name, for another cascade or for a new one (the builder asks which preset to start with). Saving, renaming and deleting a preset need a connection.',
 	controls:
-		'The keys, mouse buttons and wheel directions for each action. They are one setting, which can be set for this cascade on this device, this cascade, this device, or everywhere.'
+		'The keys, mouse buttons and wheel directions for each action. They are one setting, saved for this cascade on this device, which can then be applied more widely.'
 } as const;
 
 export const INFO = {

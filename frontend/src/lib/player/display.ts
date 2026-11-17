@@ -1,6 +1,6 @@
 // How the player's text and layout are drawn: the typefaces offered, each
 // number setting's bounds, and the text styles the player builds from them.
-// The settings themselves can be set in four places (lib/settings/layers);
+// Which value each setting takes is lib/settings/layers' to say;
 // this module only says what a valid value is and how it is drawn.
 //
 // Every value is a number the user types (pixels, em, milliseconds), but for
