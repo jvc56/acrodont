@@ -22,7 +22,7 @@ fn body(lexicon: &str, quiz_type: &str, filters: Value) -> Value {
     json!({
         "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
         "at": "2026-01-01T00:00:00Z", "name": format!("A cascade {}", Uuid::new_v4().simple()), "lexicon": lexicon, "quiz_type": quiz_type,
-        "clear_threshold": 80, "segment_size": 0, "progression": "ladder", "answer_mode": "flashcard",
+        "clear_threshold": 80, "segment_size": 0, "progression": "ladder",
         "filters": filters,
     })
 }
@@ -134,19 +134,28 @@ async fn every_combination_of_quiz_options(pool: sqlx::PgPool) {
             }
         }
     }
-    // An answer mode in the request becomes the cascade's own setting when it is
-    // typed; flashcard, or none, leaves the cascade without one.
-    for (mode, settings) in [(Some("typed"), json!({ "answer_mode": "typed" })), (Some("flashcard"), json!({})), (None, json!({}))] {
+    // A preset's settings in the request are the cascade's starting settings,
+    // each a change made at the creation's `at`; none, the defaults.
+    let mut b = body("EN-FIX", "anagram", sevens());
+    b["settings"] = json!({ "answer_mode": "typed", "question_size_px": 40, "show_hooks": null });
+    let r = c.post("/api/cascades", b).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let at = "2026-01-01T00:00:00.000Z";
+    assert_eq!(
+        r.json()["cascade"]["settings"],
+        json!({ "answer_mode": { "value": "typed", "at": at }, "question_size_px": { "value": 40, "at": at },
+                "show_hooks": { "value": null, "at": at } })
+    );
+    let r = c.post("/api/cascades", body("EN-FIX", "anagram", sevens())).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!(r.json()["cascade"]["settings"], json!({}));
+    // A value out of range, or a setting it cannot name, is a field error.
+    for bad in [json!({ "answer_mode": "spoken" }), json!({ "Bad-Name": 1 }), json!([1])] {
         let mut b = body("EN-FIX", "anagram", sevens());
-        match mode {
-            Some(m) => b["answer_mode"] = json!(m),
-            None => {
-                b.as_object_mut().unwrap().remove("answer_mode");
-            }
-        }
+        b["settings"] = bad;
         let r = c.post("/api/cascades", b).await;
-        assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
-        assert_eq!(r.json()["cascade"]["settings"], settings);
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.json());
+        assert_eq!(r.json()["errors"][0]["field"], "settings");
     }
     // The threshold and the three options are required; a bad value is a field error.
     let mut b = body("EN-FIX", "anagram", sevens());
@@ -209,7 +218,7 @@ async fn creation_is_idempotent_by_device_minted_ids(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test]
-async fn duplicate_copies_the_spec_threshold_options_and_settings(pool: sqlx::PgPool) {
+async fn duplicate_copies_the_spec_threshold_and_options_and_takes_the_devices_settings(pool: sqlx::PgPool) {
     let app = TestApp::new(pool).await;
     let mut c = app.seed_fixture_catalog("root").await;
     let mut b = body("EN-FIX", "leave_value", json!({ "op": "and", "children": [
@@ -221,22 +230,21 @@ async fn duplicate_copies_the_spec_threshold_options_and_settings(pool: sqlx::Pg
     b["progression"] = json!("drill");
     let r = c.post("/api/cascades", b.clone()).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
-    // A new cascade has no settings of its own.
+    // A cascade made with no preset has no settings changes.
     let o = r.json()["cascade"].clone();
     assert_eq!(o["settings"], json!({}));
-    let own = json!({ "show_definitions": false, "reveal_correct": false, "leave_value_decimals": 3,
-                      "show_probability": true, "question_size_px": 48 });
-    sqlx::query("UPDATE cascades SET settings = $1::text::jsonb")
-        .bind(own.to_string())
-        .execute(app.db())
-        .await
-        .unwrap();
+    // The copy starts with the settings the duplicating device sends: the
+    // original's as they are there, each a change made at the copy's creation.
+    let shown = json!({ "show_definitions": false, "reveal_correct": false, "leave_value_decimals": 3,
+                        "show_probability": true, "question_size_px": 48 });
     let so = json!({ "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
-                     "at": "2026-01-01T00:00:00Z" });
+                     "at": "2026-01-02T00:00:00Z", "settings": shown });
     let r = c.post(&format!("/api/cascades/{}/duplicate", b["id"].as_str().unwrap()), so).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
     let n = r.json()["cascade"].clone();
-    assert_eq!(n["settings"], own, "Duplicate copies the cascade's own settings");
+    for (k, v) in shown.as_object().unwrap() {
+        assert_eq!(n["settings"][k], json!({ "value": v, "at": "2026-01-02T00:00:00.000Z" }), "{k}");
+    }
     assert_eq!(n["name"], "Blank leaves (2)", "the original's name with the next free number");
     assert_eq!(n["clear_threshold"], 90);
     assert_eq!(n["segment_size"], 5);

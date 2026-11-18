@@ -251,7 +251,7 @@ pub async fn load_spec(conn: &mut PgConnection, spec_id: Uuid) -> Result<Option<
             T::InWordList => Params::Entries(c.entries.as_deref().map(unpack_entries).unwrap_or_default()),
             T::PartOfSpeech => Params::PartOfSpeech(c.pos.unwrap_or(PartOfSpeech::Noun)),
             T::Definition => Params::Text(c.text_value.unwrap_or_default()),
-            T::FrontInnerHook | T::BackInnerHook => Params::None,
+            T::FrontInnerHook | T::BackInnerHook | T::RootWord => Params::None,
             T::LeaveValue => Params::LeaveValue { min: c.min_leave_value, max: c.max_leave_value },
         };
         children.entry(c.group_id).or_default().push((

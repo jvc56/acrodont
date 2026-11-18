@@ -69,7 +69,9 @@ test('the storage limit: creation stops at it, studying goes past it, deleting f
 });
 
 // A cascade whose segmented attempt left 5,000 cleared chain quizzes opens /trash in budget.
-test('/trash with 5,000 cleared chain quizzes: one collapsed group, pages of 100', async ({ page }) => {
+// @serial: it times the page, which the journeys running beside it slowed past
+// its 15 s budget on CI (21.7 s, with four journeys at once).
+test('/trash with 5,000 cleared chain quizzes: one collapsed group, pages of 100 @serial', async ({ page }) => {
 	test.setTimeout(240_000);
 	const { username } = await newUser(page, 'trash5k');
 	const player = await createCascade(page, { name: 'Many chains' });

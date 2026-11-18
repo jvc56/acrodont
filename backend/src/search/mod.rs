@@ -82,6 +82,7 @@ pub enum ConditionKind {
     NumAnagrams(Range),
     FrontInnerHook,
     BackInnerHook,
+    RootWord,
     LeaveValue { min: Option<f64>, max: Option<f64> },
 }
 

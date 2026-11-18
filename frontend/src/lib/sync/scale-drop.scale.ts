@@ -1,4 +1,4 @@
-// PLAN.md § Scale tests: the drop pass on a 300,000-question cascade, which
+// PLAN.md § Scale tests: the drop pass on a large cascade (QUESTIONS), which
 // is over AUTO_KEEP_OFFLINE_ROWS and so kept automatically once opened (it
 // never leaves the window by age), dropped whole by the quota path, the base
 // left holding only its cascade, quiz and attempt rows. Then the pass on many
@@ -9,19 +9,20 @@
 // levels inside the window: the row count before the pass counts them and the
 // pass removes them too. See PQ-017 for what "still whole" is taken to mean.
 //
-// The single cascade runs at the plan's size. The many-cascade case runs 20
-// large cascades, all opened inside the window and so all kept automatically,
-// against ROW_STORAGE_BUDGET and AUTO_KEEP_OFFLINE_ROWS at a tenth (PQ-019):
-// 56,000-question cascades, the heavy one with five cleared 28,000-question
-// levels. Twenty was the old cascade limit; with none now (PLAN.md § Storage
+// The single cascade runs at QUESTIONS (testing/scale.ts). The many-cascade
+// case runs 20 cascades, all opened inside the window and so all kept
+// automatically, against ROW_STORAGE_BUDGET and AUTO_KEEP_OFFLINE_ROWS at a
+// hundredth (a tenth in PQ-019, made smaller again for the suite's runtime):
+// 5,600-question cascades, the heavy one with five cleared 2,800-question
+// levels, every figure below a tenth of what it was at a tenth of the limits. Twenty was the old cascade limit; with none now (PLAN.md § Storage
 // limit), it stays as a case of many automatic keeps, and scale-many.scale.ts
 // covers an account of 500 smaller cascades. The size is chosen so
 // the question rows alone (22.5 × SIZE rows at ROW_BYTES) stay under the tenth
 // and the keys the final download adds (about 54 bytes each) take the total
 // over it: then only the measured pass drops anything, as the plan's case has
-// it. Rows alone over the tenth (from about 63,600) would be dropped by the
+// it. Rows alone over the hundredth (from about 6,360) would be dropped by the
 // final download's own first pass; rows and keys under it (below about
-// 47,000) would give the pass nothing to do.
+// 4,700) would give the pass nothing to do.
 import { describe, expect, it, vi } from 'vitest';
 import { getMeta } from '$lib/local/meta';
 import { ROW_STORAGE_BUDGET, AUTO_KEEP_OFFLINE_ROWS } from './config';
@@ -30,18 +31,19 @@ import { policy } from './policy';
 import { FakeServer } from './testing/fake-server';
 import { DAY, ids, QUESTIONS, report, ScaleDev, ServerPlayer, timed } from './testing/scale';
 
-// A tenth of the plan's limits for this file (see above).
+// A hundredth of the plan's limits for this file (see above).
 vi.mock('./config', async (original) => {
 	const c = await original<typeof import('./config')>();
-	return { ...c, ROW_STORAGE_BUDGET: c.ROW_STORAGE_BUDGET / 10, AUTO_KEEP_OFFLINE_ROWS: c.AUTO_KEEP_OFFLINE_ROWS / 10 };
+	return { ...c, ROW_STORAGE_BUDGET: c.ROW_STORAGE_BUDGET / 100, AUTO_KEEP_OFFLINE_ROWS: c.AUTO_KEEP_OFFLINE_ROWS / 100 };
 });
 
-const ONE_DROP_BUDGET_MS = 120_000;
-const MANY_DROP_BUDGET_MS = 120_000;
+// A fifth of the budgets at the larger sizes.
+const ONE_DROP_BUDGET_MS = 24_000;
+const MANY_DROP_BUDGET_MS = 24_000;
 /** Many large cascades, every one kept automatically (see above). */
 const MANY = 20;
-/** See above: rows alone under a tenth of the budget, rows and keys over it. */
-const SIZE = 56_000;
+/** See above: rows alone under a hundredth of the budget, rows and keys over it. */
+const SIZE = 5_600;
 const CLEARED_LEVELS = 5;
 const HOUR = 3_600_000;
 
@@ -74,7 +76,7 @@ describe('the drop pass at the question ceiling', () => {
 		expect(ms).toBeLessThanOrEqual(ONE_DROP_BUDGET_MS);
 	});
 
-	it('brings twenty automatically kept cascades under ROW_STORAGE_BUDGET, oldest first, and nothing is refetched (56,000 questions each, a tenth of the limits)', async () => {
+	it('brings twenty automatically kept cascades under ROW_STORAGE_BUDGET, oldest first, and nothing is refetched (5,600 questions each, a hundredth of the limits)', async () => {
 		const server = new FakeServer();
 		const all = Array.from({ length: MANY }, (_, i) => ids(i + 1));
 		for (const { cascade, source } of all) server.create({ id: cascade, source_id: source, count: SIZE });

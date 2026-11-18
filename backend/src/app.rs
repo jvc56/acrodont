@@ -73,6 +73,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(crate::catalog::routes::router(&state))
         .merge(crate::search::routes::router())
         .merge(crate::search::saved::router())
+        .merge(crate::presets::router())
         .merge(crate::cascade::routes::router())
         .merge(crate::sync::routes::router())
         .merge(crate::export::routes())

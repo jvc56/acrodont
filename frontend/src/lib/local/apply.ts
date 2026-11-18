@@ -80,8 +80,12 @@ export type NewOp =
 			progression?: Progression;
 			/** The cascade's alone: every finish reads it, the quiz in progress included. */
 			clear_threshold?: number;
-			/** Changes to the cascade's own settings (the "This cascade" place): a value, or null to take one out. */
-			settings?: Record<string, unknown>;
+	  }
+	| {
+			type: 'set_cascade_settings';
+			cascade_id: string;
+			/** Changes for this cascade on all devices: a value, or null for the default. */
+			settings: Record<string, unknown>;
 	  };
 
 export const APPLY_STORES: StoreName[] = [...view.VIEW_STORES, 'meta', 'outbox'];
@@ -475,8 +479,13 @@ export async function applyOp(tx: RwTx, op: WireOp, ctx: ApplyCtx): Promise<Loca
 			if (op.segment_size !== undefined) next.segment_size = checkSegmentSize(op.segment_size as number, ctx.max_quiz_questions);
 			if (op.clear_threshold !== undefined) next.clear_threshold = checkClearThreshold(op.clear_threshold as number);
 			if (op.progression !== undefined) next.progression = op.progression as Progression;
-			if (op.settings !== undefined) next.settings = mergeCascadeSettings(c.settings ?? {}, op.settings);
 			await putCascade(tx, next);
+			return { cascade_id: c.id };
+		}
+		case 'set_cascade_settings': {
+			const c = await loadCascade(tx, op.cascade_id as string);
+			if (c.trashed_at !== null) throw new Rejected('trashed');
+			await putCascade(tx, { ...c, settings: mergeCascadeSettings(c.settings ?? {}, op.settings, at) });
 			return { cascade_id: c.id };
 		}
 		default:

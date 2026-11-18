@@ -28,9 +28,11 @@ use crate::extract::ApiJson;
 
 pub const MAX_INDEX_PAGE: i64 = 50_000;
 
-/// The fields a `set_cascade_options` may carry: the rules and the cascade's own settings.
-const CASCADE_OPTION_FIELDS: [&str; 10] =
-    ["id", "device_seq", "seen_seq", "at", "type", "cascade_id", "segment_size", "progression", "clear_threshold", "settings"];
+/// The fields a `set_cascade_options` may carry: the rules.
+const CASCADE_OPTION_FIELDS: [&str; 9] =
+    ["id", "device_seq", "seen_seq", "at", "type", "cascade_id", "segment_size", "progression", "clear_threshold"];
+/// The fields a `set_cascade_settings` may carry.
+const CASCADE_SETTINGS_FIELDS: [&str; 7] = ["id", "device_seq", "seen_seq", "at", "type", "cascade_id", "settings"];
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -61,73 +63,75 @@ struct Request {
     page_token: Option<PageToken>,
     question_rows_for: Vec<Uuid>,
     ops: Vec<IncomingOp>,
-    /// Device settings shared on the device and not yet sent: name -> {value, at}.
-    device_settings: Option<Value>,
+    /// Changes for all cascades on all devices made on the device and not yet sent: name -> {value, at}.
+    settings: Option<Value>,
+    /// The account's presets version the device holds; the response carries
+    /// the presets when the account's differs.
+    presets_version: Option<i64>,
 }
 
-// The account's shared settings (the "Everywhere" place) have the same bounds
-// as a cascade's own: at most this many per account, each name this long, and
-// this many bytes of them in one request and held by one account.
+// The account's settings (all cascades on all devices) have the same bounds as
+// a cascade's: at most this many per account, each name this long, and this
+// many bytes of them in one request and held by one account.
 use crate::cascade::settings::{has_nul, valid_name, MAX_BYTES as MAX_SHARED_BYTES, MAX_SETTINGS as MAX_SHARED_SETTINGS};
 
-/// A request's shared device settings (PLAN.md § Settings → This device, or
-/// all of them): an object of setting name to `{value, at}`, the time it was
-/// shared, which is written back in one form so the merge can compare it.
+/// A request's changes for all cascades on all devices (PLAN.md § Settings →
+/// Where a setting applies): an object of setting name to `{value, at}`, the
+/// time the change was made, which is written back in one form so the merge
+/// can compare it. A null value is the setting's default.
 /// What a value means is the frontend's to check, as it does with values
 /// from an older build. **The time is clamped** like every other device time
 /// the server compares (PLAN.md § Operations, "Device clocks are clamped"):
 /// `least(at, now + 5 minutes)`, so a device whose clock is months ahead wins
 /// a merge by five minutes at most, not until the calendar catches up.
-fn parse_device_settings(v: Option<&Value>, now: DateTime<Utc>) -> ApiResult<Option<Value>> {
+fn parse_shared_settings(v: Option<&Value>, now: DateTime<Utc>) -> ApiResult<Option<Value>> {
     let Some(v) = v else { return Ok(None) };
     if v.is_null() {
         return Ok(None);
     }
-    let m = v.as_object().ok_or_else(|| bad("device_settings must be an object"))?;
+    let m = v.as_object().ok_or_else(|| bad("settings must be an object"))?;
     if m.len() > MAX_SHARED_SETTINGS || v.to_string().len() > MAX_SHARED_BYTES {
-        return Err(bad("device_settings is too large"));
+        return Err(bad("settings is too large"));
     }
     let mut out = serde_json::Map::new();
     for (k, e) in m {
         if !valid_name(k) {
-            return Err(bad("device_settings names a setting it cannot"));
+            return Err(bad("settings names a setting it cannot"));
         }
         let at = e
             .get("at")
             .and_then(Value::as_str)
             .and_then(|s| s.parse::<DateTime<Utc>>().ok())
-            .ok_or_else(|| bad("device_settings needs each setting's at"))?
+            .ok_or_else(|| bad("settings needs each setting's at"))?
             .min(now + chrono::Duration::minutes(5));
-        let value = e.get("value").ok_or_else(|| bad("device_settings needs each setting's value"))?;
+        let value = e.get("value").ok_or_else(|| bad("settings needs each setting's value"))?;
         if has_nul(value) {
-            return Err(bad("device_settings holds a character that cannot be stored"));
+            return Err(bad("settings holds a character that cannot be stored"));
         }
-        out.insert(
-            k.clone(),
-            json!({ "value": value, "at": at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true) }),
-        );
+        out.insert(k.clone(), json!({ "value": value, "at": crate::cascade::settings::at_text(at) }));
     }
     Ok(Some(Value::Object(out)))
 }
 
-/// Merges shared device settings into the account's: per setting, the later
-/// `at` wins, so two devices sharing the same setting agree on the last one.
+/// Merges changes for all cascades on all devices into the account's: per
+/// setting, the later `at` wins, so two devices changing the same setting
+/// agree on the last one.
 /// A merge past MAX_SHARED_SETTINGS settings, or that would leave the account
 /// holding more than MAX_SHARED_BYTES of them, changes nothing: every sync
 /// response carries them all, and they are outside the storage limit.
-async fn share_device_settings(state: &AppState, user: Uuid, device: Uuid, shared: &Value) -> Result<(), sqlx::Error> {
+async fn share_settings(state: &AppState, user: Uuid, device: Uuid, shared: &Value) -> Result<(), sqlx::Error> {
     let mut tx = state.db.begin().await?;
     let merged = sqlx::query(
-        "WITH kept AS (SELECT device_settings FROM users WHERE id = $1 FOR UPDATE),
+        "WITH kept AS (SELECT settings FROM users WHERE id = $1 FOR UPDATE),
               merged AS (
                   SELECT coalesce(jsonb_object_agg(k, CASE
                              WHEN n.v IS NULL THEN o.v
                              WHEN o.v IS NULL THEN n.v
                              WHEN (n.v->>'at')::timestamptz >= (o.v->>'at')::timestamptz THEN n.v
                              ELSE o.v END), '{}'::jsonb) AS settings
-                  FROM jsonb_each((SELECT device_settings FROM kept)) AS o(k, v)
+                  FROM jsonb_each((SELECT settings FROM kept)) AS o(k, v)
                   FULL JOIN jsonb_each($2::text::jsonb) AS n(k, v) USING (k))
-         UPDATE users SET device_settings = merged.settings
+         UPDATE users SET settings = merged.settings
          FROM merged
          WHERE id = $1
            AND (SELECT count(*) FROM jsonb_object_keys(merged.settings)) <= $3
@@ -139,7 +143,7 @@ async fn share_device_settings(state: &AppState, user: Uuid, device: Uuid, share
     .bind(MAX_SHARED_BYTES as i32)
     .execute(&mut *tx)
     .await?;
-    // The other devices take the shared values at once (sync::notify).
+    // The other devices take the changes at once (sync::notify).
     if merged.rows_affected() > 0 {
         super::notify::changed(&mut tx, user, Some(device)).await?;
     }
@@ -151,7 +155,9 @@ async fn share_device_settings(state: &AppState, user: Uuid, device: Uuid, share
 fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Request> {
     let obj = body.as_object().ok_or_else(|| bad("the body must be an object"))?;
     for k in obj.keys() {
-        if !["device_id", "app_version", "cursor", "page_token", "question_rows_for", "ops", "device_settings"].contains(&k.as_str()) {
+        if !["device_id", "app_version", "cursor", "page_token", "question_rows_for", "ops", "settings", "presets_version"]
+            .contains(&k.as_str())
+        {
             return Err(bad(&format!("unexpected field {k}")));
         }
     }
@@ -206,9 +212,14 @@ fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Reques
         let id = m.get("id").and_then(Value::as_str).and_then(|s| s.parse().ok()).ok_or_else(|| bad("operation id"))?;
         let device_seq = m.get("device_seq").and_then(Value::as_i64).ok_or_else(|| bad("device_seq"))?;
         let op_type = m.get("type").and_then(Value::as_str).unwrap_or_default().to_owned();
-        if op_type == "set_cascade_options" {
+        let fields: &[&str] = match op_type.as_str() {
+            "set_cascade_options" => &CASCADE_OPTION_FIELDS,
+            "set_cascade_settings" => &CASCADE_SETTINGS_FIELDS,
+            _ => &[],
+        };
+        if !fields.is_empty() {
             for k in m.keys() {
-                if !CASCADE_OPTION_FIELDS.contains(&k.as_str()) {
+                if !fields.contains(&k.as_str()) {
                     return Err(bad(&format!("{op_type} carries only the fields that changed; {k} is not one")));
                 }
             }
@@ -223,8 +234,12 @@ fn parse_request(state: &AppState, user: Uuid, body: &Value) -> ApiResult<Reques
         });
     }
     ops.sort_by_key(|o| o.device_seq);
-    let device_settings = parse_device_settings(obj.get("device_settings"), Utc::now())?;
-    Ok(Request { device_id, app_version, cursor, page_token, question_rows_for, ops, device_settings })
+    let settings = parse_shared_settings(obj.get("settings"), Utc::now())?;
+    let presets_version = match obj.get("presets_version") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(integer(v).ok_or_else(|| bad("presets_version"))?),
+    };
+    Ok(Request { device_id, app_version, cursor, page_token, question_rows_for, ops, settings, presets_version })
 }
 
 fn recorded(
@@ -580,19 +595,33 @@ async fn push(state: &AppState, user: Uuid, req: &Request) -> Result<Pushed, Api
 
 /// What every response carries about the account: its storage against its
 /// limit (STORAGE_LIMIT_PLAN.md § S1), read after the push so it counts what
-/// the push's finishes and purges just changed, and its shared device settings.
+/// the push's finishes and purges just changed; its settings for all cascades
+/// on all devices; its presets' version, and the presets themselves when the
+/// device's version (`known`) differs; and the server's time, by which the
+/// device stamps its settings changes (PLAN.md § Settings → Clocks).
 ///
 /// It reads on the caller's connection. A request holds one connection of the
 /// pool at a time and never waits for a second while it has one: with every
 /// connection held by a request waiting for another, none would ever come
 /// free, and each would wait out the pool's timeout.
-async fn with_account(conn: &mut PgConnection, state: &AppState, user: Uuid, mut v: Value) -> Result<Value, sqlx::Error> {
+async fn with_account(
+    conn: &mut PgConnection,
+    state: &AppState,
+    user: Uuid,
+    known: Option<i64>,
+    mut v: Value,
+) -> Result<Value, sqlx::Error> {
     v["storage"] = crate::storage::usage(conn, user, state.config.max_storage_bytes_per_user).await?.json();
-    let shared: String = sqlx::query_scalar("SELECT device_settings::text FROM users WHERE id = $1")
+    let (shared, version): (String, i64) = sqlx::query_as("SELECT settings::text, presets_version FROM users WHERE id = $1")
         .bind(user)
         .fetch_one(&mut *conn)
         .await?;
-    v["device_settings"] = serde_json::from_str(&shared).unwrap_or_else(|_| json!({}));
+    v["settings"] = serde_json::from_str(&shared).unwrap_or_else(|_| json!({}));
+    v["presets_version"] = json!(version.to_string());
+    if known != Some(version) {
+        v["presets"] = json!(crate::presets::all(conn, user).await?);
+    }
+    v["server_time"] = json!(crate::cascade::settings::at_text(state.clock.now()));
     Ok(v)
 }
 
@@ -600,7 +629,7 @@ async fn with_account(conn: &mut PgConnection, state: &AppState, user: Uuid, mut
 /// connection. A transient failure (the pool has no connection to give, the
 /// connection dropped) answers `503` as the push's does: what the push applied
 /// is recorded, and the device sends the same request again.
-async fn pulled(state: &AppState, user: Uuid, token: Option<&PageToken>, mut v: Value) -> ApiResult<Value> {
+async fn pulled(state: &AppState, user: Uuid, known: Option<i64>, token: Option<&PageToken>, mut v: Value) -> ApiResult<Value> {
     let read = async {
         let mut conn = state.db.acquire().await?;
         if let Some(token) = token {
@@ -610,7 +639,7 @@ async fn pulled(state: &AppState, user: Uuid, token: Option<&PageToken>, mut v: 
                 v["next_page_token"] = json!(n.encode());
             }
         }
-        with_account(&mut conn, state, user, v).await
+        with_account(&mut conn, state, user, known, v).await
     };
     read.await.map_err(transient)
 }
@@ -632,17 +661,17 @@ async fn sync(
 
     if let Some(token) = &req.page_token {
         // A page request takes no new sequence; its token fixes the ceiling.
-        let v = pulled(&state, user.id, Some(token), json!({ "results": [], "sync_seq": token.ceil.to_string() })).await?;
+        let v = pulled(&state, user.id, req.presets_version, Some(token), json!({ "results": [], "sync_seq": token.ceil.to_string() })).await?;
         return Ok(respond(StatusCode::OK, v));
     }
 
-    if let Some(shared) = &req.device_settings {
-        share_device_settings(&state, user.id, req.device_id, shared).await.map_err(transient)?;
+    if let Some(shared) = &req.settings {
+        share_settings(&state, user.id, req.device_id, shared).await.map_err(transient)?;
     }
     let (results, seq, floor) = match push(&state, user.id, &req).await? {
         Pushed::AheadOfServer { seq } => {
             let v = json!({ "results": [], "sync_seq": seq.to_string(), "resync_required": true });
-            return Ok(respond(StatusCode::OK, pulled(&state, user.id, None, v).await?));
+            return Ok(respond(StatusCode::OK, pulled(&state, user.id, req.presets_version, None, v).await?));
         }
         Pushed::Done { results, seq, floor } => (results, seq, floor),
     };
@@ -654,10 +683,10 @@ async fn sync(
     };
     if req.cursor.is_some_and(|c| c < floor) {
         let v = json!({ "results": results, "sync_seq": seq.to_string(), "resync_required": true });
-        return Ok(respond(status, pulled(&state, user.id, None, v).await?));
+        return Ok(respond(status, pulled(&state, user.id, req.presets_version, None, v).await?));
     }
     let token = PageToken { u: user.id, cur: req.cursor, ceil: seq, qrf: req.question_rows_for.clone(), table: 0, after: vec![] };
-    let v = pulled(&state, user.id, Some(&token), json!({ "results": results, "sync_seq": seq.to_string() })).await?;
+    let v = pulled(&state, user.id, req.presets_version, Some(&token), json!({ "results": results, "sync_seq": seq.to_string() })).await?;
     Ok(respond(status, v))
 }
 

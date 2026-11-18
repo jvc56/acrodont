@@ -148,7 +148,7 @@ test('alphabetical order in typed mode', async ({ page }) => {
 	await expect(page.getByLabel('Type an answer')).toHaveCount(0);
 	await next(page, false);
 	// With the setting off, the same sequence grades correct. This cascade is made typed: each keeps its own settings.
-	const plain = await apiCascade(page, { name: 'Plain', filters: AEINRST, answer_mode: 'typed' });
+	const plain = await apiCascade(page, { name: 'Plain', filters: AEINRST, settings: { answer_mode: 'typed' } });
 	await open(page, plain);
 	for (const w of ['NASTIER', 'ANTSIER', 'RATINES', 'ANESTRI', 'RETAINS', 'RETINAS', 'RETSINA', 'STAINER', 'STEARIN']) await type(page, w);
 	await type(page, '');
@@ -158,7 +158,7 @@ test('alphabetical order in typed mode', async ({ page }) => {
 test('a cascade made typed opens typed, with its tiles, and keeps its mode apart from the others', async ({ page }) => {
 	test.setTimeout(180_000);
 	await newUser(page, 'madetyped');
-	const typed = await apiCascade(page, { name: 'Typed', filters: lengths(7, 7), answer_mode: 'typed' });
+	const typed = await apiCascade(page, { name: 'Typed', filters: lengths(7, 7), settings: { answer_mode: 'typed' } });
 	await page.goto(typed);
 	await expect(page.getByLabel('Type an answer')).toBeVisible({ timeout: 30_000 });
 	await expect(page.getByText(/needs a connection/)).toHaveCount(0);

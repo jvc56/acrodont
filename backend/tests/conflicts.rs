@@ -323,17 +323,18 @@ async fn options_against_a_finish(pool: sqlx::PgPool) {
     assert_eq!(one(&mut b, o).await, "applied");
 }
 
-/// A cascade's own settings are the cascade's alone: `set_cascade_options`
-/// carries them and the other device pulls them; no other operation can.
+/// A change for a cascade on all devices is the cascade's alone:
+/// `set_cascade_settings` carries it and the other device pulls it; no other
+/// operation can.
 #[sqlx::test]
-async fn own_settings_are_the_cascades(pool: sqlx::PgPool) {
+async fn cascade_settings_are_the_cascades(pool: sqlx::PgPool) {
     let app = app(pool).await;
     let (mut a, mut b, s) = two(&app, Setup::new(5)).await;
-    let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "answer_mode": "typed" } }));
+    let o = a.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "answer_mode": "typed" } }));
     assert_eq!(one(&mut a, o).await, "applied");
     let (_, pages) = b.sync_all(vec![]).await;
-    assert_eq!(rows(&pages, "cascades")[0]["settings"], json!({ "answer_mode": "typed" }));
-    let o = a.op("set_cascade_options", json!({ "cascade_id": s.cascade_id, "settings": { "answer_mode": "spoken" } }));
+    assert_eq!(rows(&pages, "cascades")[0]["settings"]["answer_mode"]["value"], json!("typed"));
+    let o = a.op("set_cascade_settings", json!({ "cascade_id": s.cascade_id, "settings": { "answer_mode": "spoken" } }));
     assert_eq!(one(&mut a, o).await, "invalid");
     // `set_quiz_options` is no operation now: rejected like any unknown type.
     let o = a.op("set_quiz_options", json!({ "quiz_id": s.source_id, "settings": { "answer_mode": "typed" } }));

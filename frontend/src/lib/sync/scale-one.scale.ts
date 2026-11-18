@@ -16,26 +16,27 @@ import { CARDS_PAGE, KEYS_PAGE } from './downloads';
 import { FakeServer } from './testing/fake-server';
 import { ids, QUESTIONS, report, ScaleDev, timed, writes } from './testing/scale';
 
-// Budgets for disk-backed Chromium IndexedDB, about twice what the development
-// machine measured (in brackets), which writes 5,000–15,000 indexed rows a second.
-/** 300,000 Source rows with positions, written in one transaction [45 s]. */
-const CREATE_BUDGET_MS = 120_000;
-/** 3 keys pages and 30 answer pages into IndexedDB [74 s]. */
-const DOWNLOAD_BUDGET_MS = 180_000;
-/** 600 requests, each acknowledged batch rebased [425 s, before the in-memory server's own fix]. */
-const PUSH_BUDGET_MS = 900_000;
-/** The finish: 300,000 rows reset and a 150,000-question Level 2, then acknowledged [177 s]. */
-const FINISH_BUDGET_MS = 400_000;
+// Budgets for disk-backed Chromium IndexedDB, a fifth of those at the 300,000
+// ceiling, which were about twice what the development machine measured there
+// (in brackets); the suite now runs at a tenth of it (testing/scale.ts).
+/** QUESTIONS Source rows with positions, written in one transaction [45 s at the ceiling]. */
+const CREATE_BUDGET_MS = 24_000;
+/** The keys pages and answer pages into IndexedDB [74 s at the ceiling]. */
+const DOWNLOAD_BUDGET_MS = 36_000;
+/** QUESTIONS / 500 requests, each acknowledged batch rebased [425 s at the ceiling]. */
+const PUSH_BUDGET_MS = 180_000;
+/** The finish: every row reset and a half-size Level 2, then acknowledged [177 s at the ceiling]. */
+const FINISH_BUDGET_MS = 80_000;
 /** The drain's IndexedDB writes per operation it pushed. */
 const WRITES_PER_OP = 6;
 /** Overlay rows left once the outbox has drained. */
 const OVERLAY_ROWS = 10;
 /** About ten characters a key, at least: 2.5 MB at the old 300,000-question cap. */
 const KEY_BYTES_MIN = (2.5e6 * QUESTIONS) / 300_000;
-const KEY_BYTES_MAX = 3.5e6;
+const KEY_BYTES_MAX = (3.5e6 * QUESTIONS) / 300_000;
 
-describe('a 300,000-question cascade on the device', () => {
-	it('creates, downloads, pushes 600 batches with proportional rebase work, pulls and finishes within budget', async () => {
+describe(`a ${QUESTIONS}-question cascade on the device`, () => {
+	it(`creates, downloads, pushes ${QUESTIONS / 500} batches with proportional rebase work, pulls and finishes within budget`, async () => {
 		const server = new FakeServer();
 		const { cascade, source } = ids(1);
 		const d = await ScaleDev.make(server);
@@ -65,7 +66,7 @@ describe('a 300,000-question cascade on the device', () => {
 		// grades are queued in one transaction (what 300,000 applyLocally calls
 		// leave; testing/scale.test.ts): the budget is the drain, not the tapping.
 		const [, gradeMs] = await timed(() => d.queueGrades(source, (p) => p % 2 === 1));
-		report('queueing 300,000 grades (setup)', gradeMs, null, `${await d.count('outbox')} operations queued`);
+		report(`queueing ${QUESTIONS} grades (setup)`, gradeMs, null, `${await d.count('outbox')} operations queued`);
 		expect(await d.count('outbox')).toBe(QUESTIONS);
 		const before = writes.n;
 		const serverBefore = d.serverMs;

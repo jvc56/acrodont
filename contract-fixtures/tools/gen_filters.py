@@ -38,9 +38,10 @@ def table_after(marker: str) -> list:
 
 # 1. The type list, in the API's order.
 type_line = next(i for i, l in enumerate(PLAN) if l.startswith("`type` is one of "))
-type_text = " ".join(PLAN[type_line:type_line + 6])
+type_end = next(i for i in range(type_line, len(PLAN)) if "Only the" in PLAN[i])
+type_text = " ".join(PLAN[type_line:type_end + 1])
 types = re.findall(r"`([a-z_]+)`", type_text.split("Only the")[0])[1:]  # skip "type"
-assert len(types) == 23, types
+assert len(types) == 24, types
 
 # 2. Fields per type from the parameter table.
 fields = {}
@@ -51,7 +52,7 @@ for type_cell, field_cell, _form in table_after("The parameter fields, by type:"
         fields[n] = fs
 assert set(fields) == set(types), set(types) ^ set(fields)
 
-# 3. Labels, Not and limits from the Filter reference (rows 1–23 in type order).
+# 3. Labels, Not and limits from the Filter reference (rows 1–24 in type order).
 reference = table_after("### Filter reference")
 labels, negatable, limit = {}, {}, {}
 for row, t in zip(reference, types):

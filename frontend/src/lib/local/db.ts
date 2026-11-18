@@ -121,6 +121,32 @@ export const MIGRATIONS: Array<
 				row = await row.continue();
 			}
 		}
+	},
+	// 4: each cascade on each device has its own settings (PLAN.md § Settings →
+	// Where a setting applies), each change kept with its time. The places that
+	// came before go, with any change to a cascade's own settings still waiting
+	// to be sent, and each cascade's own settings until its next pull.
+	async (_db, tx) => {
+		const meta = tx.objectStore('meta');
+		for (const key of ['shared_device', 'device_settings', 'cascade_device_settings']) await meta.delete(key);
+		let entry = await tx.objectStore('outbox').openCursor();
+		while (entry) {
+			const op = entry.value.op as { type: string; settings?: unknown };
+			if (op.type === 'set_cascade_options' && op.settings !== undefined) {
+				const { settings: _gone, ...rest } = op;
+				const keys = Object.keys(rest).filter((k) => !['id', 'device_seq', 'seen_seq', 'at', 'type', 'cascade_id'].includes(k));
+				if (keys.length) await entry.update({ ...entry.value, op: rest as typeof entry.value.op });
+				else await entry.delete();
+			}
+			entry = await entry.continue();
+		}
+		for (const store of [BASE[0], OVERLAY[0], STAGING[0]]) {
+			let row = await tx.objectStore(store).openCursor();
+			while (row) {
+				await row.update({ ...row.value, settings: {} });
+				row = await row.continue();
+			}
+		}
 	}
 ];
 

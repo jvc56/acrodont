@@ -24,7 +24,7 @@ fn body(lexicon: &str, quiz_type: &str, filters: Value) -> Value {
         "id": Uuid::new_v4(), "source_quiz_id": Uuid::new_v4(), "device_id": Uuid::new_v4(),
         "at": "2026-01-01T00:00:00Z", "name": format!("A cascade {}", Uuid::new_v4().simple()), "lexicon": lexicon, "quiz_type": quiz_type,
         "clear_threshold": 80, "segment_size": 0, "progression": "ladder",
-        "answer_mode": "flashcard", "filters": filters,
+        "filters": filters,
     })
 }
 

@@ -218,3 +218,28 @@ A database made by the earlier file no longer matches: `./scripts/dev.py --reset
 (and `make sqlx-db` for the compile-check database), and the production
 database is reset: `scripts/deploy.sh --reset-database` (docs/runbook.md,
 Deploying).
+
+## 2026-11-17: each cascade on each device has its own settings, and presets
+
+Settings are no longer set in four places read in order (SETTINGS_PLAN.md;
+PLAN.md § Settings → Where a setting applies). Each change is kept with the
+time it was made, and the latest one covering a cascade on a device is used.
+
+- `users.device_settings` becomes `users.settings`: the changes made for all
+  cascades on all devices, setting name -> `{value, at}`, a null value meaning
+  the default.
+- `cascades.settings` holds the changes made for that cascade on all devices
+  in the same shape, its preset's values at creation among them, merged per
+  setting by the new `set_cascade_settings` operation (`sync_op_type` gains it).
+  `set_cascade_options` carries only the rules.
+- `users.presets_version` and the `setting_presets` table: presets, at most 50
+  per account, outside the storage limit; a sync response carries them when
+  the device's version differs.
+- `condition_type` gains `root_word`, the Root Word filter (PLAN.md § Filter
+  reference), negatable and with no parameters, which the two
+  `search_conditions` checks name.
+
+A database made by the earlier file no longer matches: `./scripts/dev.py --reset`
+(and `make sqlx-db` for the compile-check database), and the production
+database is reset: `scripts/deploy.sh --reset-database` (docs/runbook.md,
+Deploying).

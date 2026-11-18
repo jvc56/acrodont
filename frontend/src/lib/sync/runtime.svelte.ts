@@ -27,6 +27,8 @@ class SyncState {
 	pending = $state<number | null>(null);
 	/** Cascades a rebase changed: a player showing one refreshes (step 5). */
 	changed = $state<{ ids: string[]; tick: number }>({ ids: [], tick: 0 });
+	/** Bumped when a sync brought the account's settings or presets: pages listing presets read them again. */
+	settingsTick = $state(0);
 }
 
 export const syncState = new SyncState();
@@ -154,9 +156,10 @@ let noticesOf: string | null = null;
 // is in the database, which the new build now holds and sends from.
 onUpdatedElsewhere(() => stopSync());
 
-/** The account's settings changed (the "Everywhere" place): an open player reads its places again. */
+/** The account's settings or presets changed: an open player reads its scopes again. */
 function reloadDeviceSettings() {
 	void settings.reload();
+	syncState.settingsTick += 1;
 }
 
 type Message =
@@ -250,7 +253,7 @@ export function startSync(userId: string): () => void {
 							.catch(() => undefined)
 							.then(() => passDone(dm));
 				},
-				// The account's settings (the "Everywhere" place) changed: an open player
+				// The account's settings for all cascades on all devices, or its presets, changed: an open player
 				// shows them, in this tab and in every other.
 				onDeviceSettings: () => {
 					reloadDeviceSettings();

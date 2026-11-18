@@ -4,9 +4,10 @@
 	// quiz area with the question at the top, and a status bar along the bottom;
 	// tap zones otherwise. The three actions from mouse, wheel, keys and taps;
 	// typed mode; the Settings dialog, which holds every setting there is: this
-	// cascade's rules (synced; a change offers to be used for every cascade too,
-	// and another cascade's can be copied), then the answer, display and
-	// control settings, each set in any of four places (lib/settings/layers);
+	// cascade's rules (synced; a change offers to be used for every cascade too),
+	// its presets (applied, or saved from this cascade), then the answer, display
+	// and control settings, each this cascade's on this device, a change offering
+	// to be made more widely (lib/settings/layers);
 	// banners, the completion screen, and a trashed cascade's Restore.
 	import { INFO, SCOPE, SECTION } from '$lib/settings-info';
 	import { onMount, untrack } from 'svelte';
@@ -29,21 +30,25 @@
 	import { Button } from '$lib/components/ui/button';
 	import { textStyle } from '$lib/player/display';
 	import { settings } from '$lib/settings/store.svelte';
-	import type { SettingKey } from '$lib/settings/layers';
-	import LayeredSetting from '$lib/components/settings/LayeredSetting.svelte';
+	import { SETTING_KEYS, type SettingKey } from '$lib/settings/layers';
+	import AnswerSettings from '$lib/components/settings/AnswerSettings.svelte';
 	import { applyOrRefuse, CHANGE_REFUSED, optsOf, type NewOp } from '$lib/local/apply';
 	import { storeCreated, storeRenamed, type Created } from '$lib/local/created';
 	import type { UserDb } from '$lib/local/db';
 	import { getMeta, recordOpen } from '$lib/local/meta';
 	import { DEFAULT_STORAGE_LIMIT, formatBytes } from '$lib/cascades/storage';
+	import { applyToAll, reachable, rulesToApply, type CascadeSettings, type Widening } from '$lib/settings/cascade';
+	import { presetFailure, presetNameError } from '$lib/settings/preset-actions';
 	import {
-		applyToAll,
-		copySettings,
-		copySources,
-		reachable,
-		type CascadeSettings,
-		type Widening
-	} from '$lib/settings/cascade';
+		deletePreset,
+		isDefaults,
+		presetFrom,
+		presetList,
+		renamePreset,
+		savePreset,
+		type Preset
+	} from '$lib/settings/presets';
+	import ScopeOffer from '$lib/components/settings/ScopeOffer.svelte';
 	import { userDb } from '$lib/local/open';
 	import type { AttemptRow, CascadeRow } from '$lib/local/rows';
 	import type { RwTx } from '$lib/local/view';
@@ -162,11 +167,19 @@
 	type Offer = { fields: CascadeSettings; reach: number; serial: number };
 	let offers = $state<Record<string, Offer>>({});
 	let offerSerial = 0;
-	/** The cascades whose settings this one can copy, the one chosen, and what copying did. */
-	let sources = $state<CascadeRow[]>([]);
-	let copyFrom = $state('');
-	let copied = $state<string | null>(null);
-	/** Bumped when a copy changes the options under the forms, so they show the new ones. */
+	/** The presets to apply (Defaults first), the one chosen, and what applying it did. */
+	let presets = $state<Preset[]>([]);
+	let presetId = $state('');
+	let applied = $state<string | null>(null);
+	/** Save as preset: the name typed, and what saving, renaming or deleting one said. */
+	let presetName = $state('');
+	let presetSaved = $state<string | null>(null);
+	let presetError = $state<string | null>(null);
+	let presetBusy = $state(false);
+	/** The preset being renamed, and its new name. */
+	let renaming = $state<string | null>(null);
+	let renameTo = $state('');
+	/** Bumped when a preset changes the options under the forms, so they show the new ones. */
 	let formKey = $state(0);
 
 	async function refreshSide() {
@@ -197,9 +210,9 @@
 			const max = (await getMeta(d, 'server')).max_quiz_questions;
 			if (cancelled) return;
 			maxQuiz = max;
-			// Every place's settings for this cascade; its own come with its row (setCascade below).
-			await settings.open(d, { id, settings: {} }, {
-				writeCascade: (changes) => write({ type: 'set_cascade_options', cascade_id: id, settings: changes }),
+			// Every scope's changes for this cascade; its own come with its row (setCascade below).
+			await settings.open(d, { id, settings: {}, created_at: '' }, {
+				writeCascade: (values, at) => write({ type: 'set_cascade_settings', cascade_id: id, settings: values }, at),
 				afterChange: settingsChanged
 			});
 			if (cancelled) return;
@@ -457,14 +470,14 @@
 	 * was showing what another tab or a sync has since changed): the page says
 	 * so and reads again, so what it shows is true before the next press.
 	 */
-	async function write(op: NewOp): Promise<boolean> {
+	async function write(op: NewOp, at?: Date): Promise<boolean> {
 		if (!db) return false;
-		const applied = await applyOrRefuse(db, op);
-		if (applied) afterLocalWrite();
+		const done = await applyOrRefuse(db, op, at ? () => at : undefined);
+		if (done) afterLocalWrite();
 		else cascadeError = CHANGE_REFUSED;
 		await refreshSide();
 		await player?.load(true);
-		return applied !== null;
+		return done !== null;
 	}
 
 	/**
@@ -483,8 +496,8 @@
 	$effect(() => settings.setCascade(v?.cascade ?? null));
 
 	/**
-	 * After a setting changed in any place (§ Settings → Where a setting
-	 * applies): the change syncs if it is the cascade's or the account's, and
+	 * After a setting changed in any scope (§ Settings → Where a setting
+	 * applies): the change syncs if it is for all devices, and
 	 * the player shows it. Definitions, hooks or probability orders change what
 	 * an answer holds: the cards in memory go, and a download pass fetches the
 	 * extras the cards lack. A new answer mode resets the card's typed entries.
@@ -504,14 +517,19 @@
 		cascadeOptions = c ? { segment_size: clampPrefill(c.segment_size, maxQuiz), progression: c.progression } : null;
 		cascadeError = null;
 		offers = {};
-		settings.resetRows();
-		copied = null;
-		copyFrom = '';
+		settings.resetOffers();
+		applied = null;
+		presetId = '';
+		presetName = '';
+		presetSaved = null;
+		presetError = null;
+		renaming = null;
 		if (db) {
 			// Duplicate makes a new cascade, which needs room; the server checks the exact figure.
 			const server = await getMeta(db, 'server');
 			atLimit = (server.storage_bytes ?? 0) >= (server.max_storage_bytes ?? DEFAULT_STORAGE_LIMIT);
-			sources = c ? await copySources(db, c) : [];
+			settings.reach = (await reachable(db)).length;
+			presets = await presetList(db);
 		}
 		settingsOpen = true;
 	}
@@ -568,25 +586,129 @@
 		await setCascade({ clear_threshold: n });
 	}
 
-	/** Gives this cascade every setting of the one chosen that applies to it, in one change. */
-	async function copySettingsFrom() {
+	/**
+	 * Applies the preset chosen (§ Settings → Presets): its settings for this
+	 * cascade on this device, with the offer to make them more widely, and its
+	 * rules for this cascade, with the offer to use them for every cascade.
+	 */
+	async function applyPreset() {
 		const c = v?.cascade;
-		const from = sources.find((o) => o.id === copyFrom);
-		if (!db || !c || !from) return;
+		const p = presets.find((o) => o.id === presetId);
+		if (!db || !c || !p) return;
+		applied = null;
 		player?.settingsChanged();
-		const n = await copySettings(db, from, c);
-		afterLocalWrite();
-		await refreshSide();
-		// The cascade first, then its card, which may now be typed or hold more.
-		await player?.load(true);
+		const values = Object.fromEntries(SETTING_KEYS.map((k) => [k, p.settings[k] ?? null]));
+		let n = await settings.applyValues('preset', values);
+		const rules = rulesToApply(c, p);
+		if (Object.keys(rules).length) {
+			if (!(await write({ type: 'set_cascade_options', cascade_id: c.id, ...rules } as NewOp))) return;
+			n += Object.keys(rules).length;
+			await offer('preset-rules', rules);
+		}
+		// The card may now be typed or hold more.
 		await player?.modeChanged();
 		// The forms show what the cascade has now.
 		cascadeOptions = v?.cascade
 			? { segment_size: clampPrefill(v.cascade.segment_size, maxQuiz), progression: v.cascade.progression }
 			: cascadeOptions;
-		offers = {};
 		formKey++;
-		copied = n ? `Copied ${n} setting${n === 1 ? '' : 's'} from “${from.name}”.` : `“${from.name}” already has the same settings.`;
+		applied = n ? `Applied “${p.name}”: ${n} setting${n === 1 ? '' : 's'} changed.` : `This cascade already matches “${p.name}”.`;
+	}
+
+	/**
+	 * Save as preset: every setting as this cascade shows it on this device, and
+	 * its rules. Under the name typed, or over `over`, one of the user's
+	 * presets chosen from the list; a name already taken, or a preset
+	 * overwritten, asks first, then replaces that preset.
+	 */
+	async function saveAsPreset(over: Preset | null = null) {
+		const c = v?.cascade;
+		if (!db || !c || presetBusy) return;
+		const name = over ? over.name : presetName.trim();
+		presetSaved = null;
+		presetError = over ? null : presetNameError(name, null, presets);
+		if (presetError) return;
+		if (!navigator.onLine) {
+			presetError = 'Saving a preset needs a connection.';
+			return;
+		}
+		const same = over ?? presets.find((o) => !isDefaults(o) && o.name === name);
+		if (same) {
+			const ok = await confirmAction({
+				title: `Replace your preset “${name}”?`,
+				body: 'It will hold this cascade’s settings as they are on this device, and its rules. Cascades made with it keep their settings.',
+				action: 'Replace'
+			});
+			if (!ok) return;
+		}
+		presetBusy = true;
+		try {
+			await savePreset(db, presetFrom(same?.id ?? crypto.randomUUID(), name, settings.value, c));
+			presets = await presetList(db);
+			presetSaved = same ? `Replaced “${name}”.` : `Saved “${name}”.`;
+			if (!over) presetName = '';
+			afterLocalWrite();
+		} catch (e) {
+			presetError = presetFailure(e, 'Saving a preset', 'saved');
+		} finally {
+			presetBusy = false;
+		}
+	}
+
+	async function renameThePreset(p: Preset) {
+		if (!db || presetBusy) return;
+		const name = renameTo.trim();
+		presetSaved = null;
+		if (name === p.name) {
+			renaming = null;
+			return;
+		}
+		presetError = presetNameError(name, p.id, presets);
+		if (presetError) return;
+		if (!navigator.onLine) {
+			presetError = 'Renaming a preset needs a connection.';
+			return;
+		}
+		presetBusy = true;
+		try {
+			await renamePreset(db, p.id, name);
+			presets = await presetList(db);
+			presetSaved = `Renamed “${p.name}” to “${name}”.`;
+			renaming = null;
+			afterLocalWrite();
+		} catch (e) {
+			presetError = presetFailure(e, 'Renaming a preset', 'renamed');
+		} finally {
+			presetBusy = false;
+		}
+	}
+
+	async function removePreset(p: Preset) {
+		if (!db || presetBusy) return;
+		presetSaved = null;
+		presetError = null;
+		const ok = await confirmAction({
+			title: `Delete the preset “${p.name}”?`,
+			body: 'Cascades made with it, or that it was applied to, keep their settings.',
+			action: 'Delete'
+		});
+		if (!ok) return;
+		if (!navigator.onLine) {
+			presetError = 'Deleting a preset needs a connection.';
+			return;
+		}
+		presetBusy = true;
+		try {
+			await deletePreset(db, p.id);
+			presets = await presetList(db);
+			if (presetId === p.id) presetId = '';
+			presetSaved = `Deleted “${p.name}”.`;
+			afterLocalWrite();
+		} catch (e) {
+			presetError = presetFailure(e, 'Deleting a preset', 'deleted');
+		} finally {
+			presetBusy = false;
+		}
 	}
 
 	async function restore() {
@@ -662,7 +784,9 @@
 		});
 		if (!ok) return;
 		const { device_id } = await getMeta(db, 'device');
-		const body = { id: crypto.randomUUID(), source_quiz_id: crypto.randomUUID(), device_id, at: new Date().toISOString() };
+		// The copy starts with this cascade's settings as they are on this device, on every device.
+		const shown = Object.fromEntries(SETTING_KEYS.map((k) => [k, settings.value[k]]));
+		const body = { id: crypto.randomUUID(), source_quiz_id: crypto.randomUUID(), device_id, at: new Date().toISOString(), settings: shown };
 		cascadeError = null;
 		if (!navigator.onLine) {
 			cascadeError = 'Duplicating a cascade needs a connection.';
@@ -670,8 +794,8 @@
 		}
 		starting = { stage: 'server', progress: 0, count: null };
 		try {
-			// The server copies the settings it holds: one changed here and not
-			// yet sent is sent first, and waited for a few seconds.
+			// The server copies the rules it holds: one changed here and not yet
+			// sent is sent first, and waited for a few seconds.
 			await sendPending(db, id);
 			// Retried with the same ids on a 5xx, a 429 or a dropped connection, as
 			// Create Cascade is (builder/create.ts): the server answers a repeat
@@ -1127,17 +1251,6 @@
 	</div>
 {/snippet}
 
-{#snippet flag(
-	key: 'show_definitions' | 'show_hooks' | 'show_found_count' | 'require_alphabetical' | 'show_probability' | 'definition_column' | 'hooks_on_question',
-	label: string,
-	id: string,
-	info: string
-)}
-	<LayeredSetting {key} {label} for={id} {info}>
-		<input {id} type="checkbox" checked={dsp[key]} onchange={(e) => settings.change(key, e.currentTarget.checked)} />
-	</LayeredSetting>
-{/snippet}
-
 {#snippet subHead(id: string, title: string, text: string | null = null)}
 	<div class="flex items-center gap-1 pt-2">
 		<h4 {id} class="text-sm font-semibold">{title}</h4>
@@ -1148,10 +1261,10 @@
 {#if settingsOpen}
 	<div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" role="presentation" onclick={() => (settingsOpen = false)}>
 		<!-- Every setting there is, in one place: this cascade's rules, which are
-		     always its own, then the answer, display and control settings, each of
-		     which says under its name where its value comes from and can be set in
-		     any of four places (§ Settings → Where a setting applies). Each setting
-		     is saved as soon as it is changed. -->
+		     always its own, and its presets, then the answer, display and control
+		     settings, each saved for this cascade on this device, with an offer to
+		     make the change more widely (§ Settings → Where a setting applies).
+		     Each setting is saved as soon as it is changed. -->
 		<div
 			class="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-lg border bg-background shadow-lg"
 			role="dialog"
@@ -1216,24 +1329,86 @@
 								{@render widen('levels')}
 							{/if}
 						{/key}
-						{#if sources.length}
-							<div class="space-y-3" role="group" aria-labelledby="settings-copy">
-								{@render subHead(
-									'settings-copy',
-									'Copy another cascade’s settings',
-									SECTION.copy
-								)}
-								<div class="flex flex-wrap items-center justify-end gap-2 text-sm">
-									<label for="copy-from" class="sr-only">Cascade to copy from</label>
-									<select id="copy-from" class="max-w-full min-w-0 flex-1 rounded border bg-background px-2 py-1 sm:max-w-xs" bind:value={copyFrom}>
-										<option value="" disabled>Choose a cascade</option>
-										{#each sources as o (o.id)}<option value={o.id}>{o.name}</option>{/each}
-									</select>
-									<Button size="sm" variant="outline" disabled={!copyFrom} onclick={copySettingsFrom}>Copy settings</Button>
-								</div>
-								{#if copied}<p class="text-right text-xs text-green-700 dark:text-green-500" role="status" data-copied>✓ {copied}</p>{/if}
+						<div class="space-y-3" role="group" aria-labelledby="settings-presets" data-presets>
+							{@render subHead('settings-presets', 'Presets', SECTION.presets)}
+							<div class="flex flex-wrap items-center justify-end gap-2 text-sm">
+								<label for="preset-apply" class="sr-only">Preset to apply</label>
+								<select id="preset-apply" class="max-w-full min-w-0 flex-1 rounded border bg-background px-2 py-1 sm:max-w-xs" bind:value={presetId}>
+									<option value="" disabled>Choose a preset</option>
+									{#each presets as o (o.id)}<option value={o.id}>{o.name}</option>{/each}
+								</select>
+								<Button size="sm" variant="outline" disabled={!presetId} onclick={applyPreset}>Apply preset</Button>
 							</div>
-						{/if}
+							{#if applied}<p class="text-right text-xs text-green-700 dark:text-green-500" role="status" data-applied>✓ {applied}</p>{/if}
+							<ScopeOffer id="preset" saved="Its settings saved for this cascade on this device" />
+							{@render widen('preset-rules')}
+							<div class="flex flex-wrap items-center justify-end gap-2 text-sm">
+								<label for="preset-name" class="sr-only">New preset’s name</label>
+								<input
+									id="preset-name"
+									class="max-w-full min-w-0 flex-1 rounded-md border bg-background px-2 py-1 sm:max-w-xs"
+									type="text"
+									maxlength="100"
+									placeholder="Preset name"
+									bind:value={presetName}
+									oninput={() => (presetError = null)}
+									onkeydown={(e) => e.key === 'Enter' && saveAsPreset()}
+								/>
+								<Button size="sm" variant="outline" disabled={!presetName.trim() || presetBusy} onclick={() => saveAsPreset()}>Save as preset</Button>
+							</div>
+							{#if presets.some((o) => !isDefaults(o))}
+								<ul class="space-y-1 text-sm" data-preset-list>
+									{#each presets.filter((o) => !isDefaults(o)) as o (o.id)}
+										<li class="flex flex-wrap items-center justify-end gap-2" data-preset={o.name}>
+											{#if renaming === o.id}
+												<label for="preset-rename" class="sr-only">New name for “{o.name}”</label>
+												<input
+													id="preset-rename"
+													class="max-w-full min-w-0 flex-1 rounded-md border bg-background px-2 py-1 sm:max-w-xs"
+													type="text"
+													maxlength="100"
+													bind:value={renameTo}
+													onkeydown={(e) => {
+														if (e.key === 'Enter') void renameThePreset(o);
+														if (e.key === 'Escape') {
+															e.stopPropagation();
+															renaming = null;
+														}
+													}}
+													{@attach (el: HTMLInputElement) => el.focus()}
+												/>
+												<Button size="sm" variant="outline" disabled={presetBusy} onclick={() => renameThePreset(o)}>Save name</Button>
+												<Button size="sm" variant="ghost" onclick={() => (renaming = null)}>Cancel</Button>
+											{:else}
+												<span class="min-w-0 flex-1 truncate">{o.name}</span>
+												<Button size="sm" variant="ghost" href={`/presets/${o.id}`} aria-label={`Edit “${o.name}”`}>Edit</Button>
+												<Button
+													size="sm"
+													variant="ghost"
+													disabled={presetBusy}
+													title="Save this cascade’s settings and rules into this preset"
+													aria-label={`Overwrite “${o.name}” with this cascade’s settings`}
+													onclick={() => saveAsPreset(o)}>Overwrite</Button
+												>
+												<Button
+													size="sm"
+													variant="ghost"
+													aria-label={`Rename “${o.name}”`}
+													onclick={() => {
+														renaming = o.id;
+														renameTo = o.name;
+														presetError = null;
+													}}>Rename</Button
+												>
+												<Button size="sm" variant="ghost" class="hover:text-destructive" aria-label={`Delete “${o.name}”`} onclick={() => removePreset(o)}>Delete</Button>
+											{/if}
+										</li>
+									{/each}
+								</ul>
+							{/if}
+							{#if presetError}<p class="text-right text-sm text-destructive" role="alert">{presetError}</p>{/if}
+							{#if presetSaved}<p class="text-right text-xs text-green-700 dark:text-green-500" role="status" data-preset-saved>✓ {presetSaved}</p>{/if}
+						</div>
 						{#if cascadeError}<p class="text-sm text-destructive" role="alert">{cascadeError}</p>{/if}
 						<div class="flex flex-wrap gap-2 pt-2">
 							<!-- The title is on a wrapper: a disabled button takes no pointer events, so its own would never show. -->
@@ -1248,56 +1423,7 @@
 					{@const c = v.cascade}
 					<section class="space-y-4" aria-labelledby="settings-answers">
 						{@render scopeHead('settings-answers', 'Answers', SCOPE.answers)}
-						{#if c.quiz_type === 'anagram'}
-							<!-- Typing answers is for anagram quizzes only. -->
-							<LayeredSetting key="answer_mode" label="Answer mode" info={INFO.answer_mode} for="player-mode">
-								<select
-									id="player-mode"
-									class="rounded border bg-background px-2 py-1"
-									value={dsp.answer_mode}
-									onchange={(e) => settings.change('answer_mode', e.currentTarget.value === 'typed' ? 'typed' : 'flashcard')}
-								>
-									<option value="flashcard">Flashcard</option>
-									<option value="typed">Typed</option>
-								</select>
-							</LayeredSetting>
-						{/if}
-						<LayeredSetting key="reveal_correct" label="When an answer is revealed, mark it" info={INFO.reveal_correct} for="cascade-reveal">
-							<select
-								id="cascade-reveal"
-								class="rounded border bg-background px-2 py-1"
-								value={dsp.reveal_correct ? 'correct' : 'missed'}
-								onchange={(e) => settings.change('reveal_correct', e.currentTarget.value === 'correct')}
-							>
-								<option value="correct">Correct</option>
-								<option value="missed">Missed</option>
-							</select>
-						</LayeredSetting>
-						{#if c.quiz_type === 'anagram'}
-							{@render flag('show_definitions', 'Show definitions', 'cascade-definitions', INFO.show_definitions)}
-							{@render flag('show_hooks', 'Show hooks', 'cascade-hooks', INFO.show_hooks)}
-							{@render flag('show_found_count', 'Show how many anagrams are found in typed mode', 'cascade-found-count', INFO.found_count)}
-							{@render flag('require_alphabetical', 'Typed answers must be in alphabetical order', 'cascade-alphabetical', INFO.alphabetical)}
-						{/if}
-						{#if c.quiz_type !== 'leave_value'}
-							{@render flag('show_probability', 'Show each word’s probability order', 'cascade-probability', INFO.show_probability)}
-							{@render flag('definition_column', 'Definitions in their own column', 'cascade-definition-column', INFO.definition_column)}
-						{/if}
-						{#if c.quiz_type === 'definition'}
-							{@render flag('hooks_on_question', 'Show the word once, with its hooks, in the question', 'cascade-hooks-on-question', INFO.hooks_on_question)}
-						{/if}
-						{#if c.quiz_type === 'leave_value'}
-							<LayeredSetting key="leave_value_decimals" label="Round leave values to (decimal places)" info={INFO.leave_value_decimals} for="cascade-decimals">
-								<select
-									id="cascade-decimals"
-									class="rounded border bg-background px-2 py-1"
-									value={String(dsp.leave_value_decimals)}
-									onchange={(e) => settings.change('leave_value_decimals', Number(e.currentTarget.value))}
-								>
-									{#each [0, 1, 2, 3] as d (d)}<option value={String(d)}>{d}</option>{/each}
-								</select>
-							</LayeredSetting>
-						{/if}
+						<AnswerSettings quizType={c.quiz_type} />
 					</section>
 				{/if}
 				<section class="space-y-4" aria-labelledby="settings-display">

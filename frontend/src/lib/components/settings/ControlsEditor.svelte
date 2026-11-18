@@ -3,9 +3,8 @@
 	// by pressing a key, clicking or scrolling inside a capture box; Escape
 	// cancels and cannot be bound; a stroke moves from another action with a
 	// notice; every action keeps one binding; Reset to defaults. The whole list
-	// is one setting, which can be set in any of four places like every other
-	// (lib/settings/layers): a change, or a reset, saves in the place its two
-	// switches show, at the top.
+	// is one setting, saved for this cascade on this device like every other
+	// (lib/settings/layers); the offer under the list makes a change more widely.
 	/** What a punctuation key shows where the browser has no keyboard layout map (Firefox). */
 	const PUNCTUATION: Record<string, string> = {
 		Comma: ',',
@@ -22,11 +21,12 @@
 	};
 	import { Button } from '$lib/components/ui/button';
 	import { confirmAction } from '$lib/confirm.svelte';
-	import { settings } from '$lib/settings/store.svelte';
-	import PlaceSwitches from './PlaceSwitches.svelte';
+	import { useSettings } from '$lib/settings/source';
+	import ScopeOffer from './ScopeOffer.svelte';
 	import { bind, DEFAULT_BINDINGS, keyStroke, mayNotReceive, mouseStroke, unbind, wheelStroke, type Action, type Binding, type Stroke } from '$lib/player/bindings';
 
-	// The caller opens `settings` for the cascade first.
+	// The cascade's settings, opened by the caller first, or the preset editor's.
+	const settings = useSettings();
 	const bindings = $derived(settings.value.bindings);
 
 	const ACTIONS: { action: Action; label: string }[] = [
@@ -83,8 +83,7 @@
 	}
 </script>
 
-<div id="controls" class="grid gap-4 text-sm" data-setting="bindings">
-	<div><PlaceSwitches key="bindings" label="Controls" /></div>
+<div id="controls" class="grid gap-4 text-sm" data-setting="bindings" data-source={settings.sourceOf?.('bindings')}>
 	{#each ACTIONS as a (a.action)}
 		<div>
 			<p class="font-medium">{a.label}</p>
@@ -124,12 +123,13 @@
 		</div>
 	{/if}
 	{#if notice}<p role="status">{notice}</p>{/if}
+	{#if settings.scoped}<ScopeOffer id="bindings" />{/if}
 	<Button
 		variant="outline"
 		onclick={async () => {
 			const ok = await confirmAction({
 				title: 'Reset the controls to their defaults?',
-				body: 'Every binding you added or removed is replaced by the defaults, where the controls are set (the switches above).',
+				body: 'Every binding you added or removed is replaced by the defaults, for this cascade on this device. You can then apply the defaults more widely.',
 				action: 'Reset to defaults'
 			});
 			if (ok) await save(DEFAULT_BINDINGS);

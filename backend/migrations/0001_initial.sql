@@ -41,7 +41,7 @@ CREATE TYPE finish_outcome AS ENUM (
 CREATE TYPE sync_op_type AS ENUM (
     'grade', 'move_cursor', 'finish', 'finish_segment', 'restore_quiz',
     'trash_cascade', 'restore_cascade', 'purge_quiz', 'purge_cascade',
-    'set_cascade_options'
+    'set_cascade_options', 'set_cascade_settings'
 );
 
 CREATE TYPE sync_op_status AS ENUM ('applied', 'rejected');
@@ -71,6 +71,7 @@ CREATE TYPE condition_type AS ENUM (
     'num_anagrams',
     'front_inner_hook',
     'back_inner_hook',
+    'root_word',
     'leave_value'
 );
 
@@ -108,11 +109,16 @@ CREATE TABLE users (
     storage_limit_bytes BIGINT CHECK (storage_limit_bytes >= 0),
                             -- set only via SQL: replaces MAX_STORAGE_BYTES_PER_USER
                             -- for this account
-    device_settings     JSONB NOT NULL DEFAULT '{}'::jsonb
-                            CHECK (jsonb_typeof(device_settings) = 'object'),
-                            -- the account's settings, the "Everywhere" place:
-                            -- setting name -> {value, at}, a null value taking
-                            -- one out (Where a setting applies)
+    settings            JSONB NOT NULL DEFAULT '{}'::jsonb
+                            CHECK (jsonb_typeof(settings) = 'object'),
+                            -- the changes made for all cascades on all devices:
+                            -- setting name -> {value, at}, a null value meaning
+                            -- the default; the latest change covering a cascade
+                            -- on a device is its value (Where a setting applies)
+    presets_version     BIGINT NOT NULL DEFAULT 0,
+                            -- bumped by every change to the account's presets;
+                            -- a sync response carries them all when the
+                            -- device's version differs (Presets)
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
                             -- when the address was confirmed: a row is made by
                             -- the confirmation, never before it
@@ -343,7 +349,8 @@ CREATE TABLE search_conditions (
     CHECK (NOT negated OR condition_type IN (
         'anagram_match', 'pattern_match', 'subanagram_match', 'in_lexicon',
         'in_word_list', 'includes_letters', 'takes_prefix', 'takes_suffix',
-        'part_of_speech', 'definition', 'front_inner_hook', 'back_inner_hook')),
+        'part_of_speech', 'definition', 'front_inner_hook', 'back_inner_hook',
+        'root_word')),
 
     -- Exactly the parameters each type uses are present.
     CHECK (CASE
@@ -384,7 +391,8 @@ CREATE TABLE search_conditions (
                               min_value, max_value, min_leave_value,
                               max_leave_value, lax) = 1
         WHEN condition_type IN ('in_word_list',   -- its entries are in entries
-                                'front_inner_hook', 'back_inner_hook')  -- no parameters
+                                'front_inner_hook', 'back_inner_hook',  -- no parameters
+                                'root_word')
             THEN num_nonnulls(text_value, part_of_speech_value, other_lexicon_id,
                               min_value, max_value, min_leave_value,
                               max_leave_value, lax) = 0
@@ -407,6 +415,24 @@ CREATE TABLE saved_searches (
                             -- storage formula (Storage limit); counted in users.storage_bytes
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (user_id, name)
+);
+
+-- A preset (PLAN.md § Settings → Presets): every setting's value and a
+-- cascade's three rules, saved under a name to apply to a cascade or to start
+-- one with. Outside the storage limit, like the account's settings: at most
+-- 50 per account (MAX_PRESETS), each's settings at most 16 KB.
+CREATE TABLE setting_presets (
+    id              UUID PRIMARY KEY,           -- device-generated, so a save can be retried
+    user_id         UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    name            TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
+    settings        JSONB NOT NULL CHECK (jsonb_typeof(settings) = 'object'),
+                        -- setting name -> value, as the cascade showed it when saved
+    clear_threshold SMALLINT NOT NULL CHECK (clear_threshold BETWEEN 1 AND 100),
+    segment_size    INTEGER NOT NULL CHECK (segment_size = 0 OR segment_size BETWEEN 5 AND 300000),
+    progression     quiz_progression NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (user_id, name)
 );
 
@@ -435,10 +461,10 @@ CREATE TABLE cascades (
     progression          quiz_progression NOT NULL DEFAULT 'ladder',
     settings             JSONB NOT NULL DEFAULT '{}'::jsonb
                              CHECK (jsonb_typeof(settings) = 'object'),
-                                 -- the cascade's own settings, the "This cascade"
-                                 -- place: setting name to value, for every device;
-                                 -- one it does not name falls through to the
-                                 -- device's and the account's (Where a setting applies)
+                                 -- the changes made for this cascade on all devices
+                                 -- (its preset's values at creation among them):
+                                 -- setting name -> {value, at}, a null value
+                                 -- meaning the default (Where a setting applies)
     options_changed_at   TIMESTAMPTZ NOT NULL,   -- device time of creation or of the latest
                              -- set_cascade_options; an older operation is rejected whole
     options_seq          BIGINT NOT NULL,            -- sync sequence of that change, for seen_seq

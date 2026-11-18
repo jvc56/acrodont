@@ -90,6 +90,7 @@ pub fn label(t: ConditionType) -> &'static str {
         NumAnagrams => "Number of Anagrams",
         FrontInnerHook => "Front Inner Hook",
         BackInnerHook => "Back Inner Hook",
+        RootWord => "Root Word",
         LeaveValue => "Leave Value",
     }
 }
@@ -514,6 +515,7 @@ impl Validator<'_> {
             }
             (T::FrontInnerHook, Params::None) => Some(ConditionKind::FrontInnerHook),
             (T::BackInnerHook, Params::None) => Some(ConditionKind::BackInnerHook),
+            (T::RootWord, Params::None) => Some(ConditionKind::RootWord),
             (T::LeaveValue, Params::LeaveValue { min, max }) => {
                 if min.is_none() && max.is_none() {
                     self.err(path, "min", "Fill in at least one bound.");

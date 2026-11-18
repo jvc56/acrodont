@@ -23,9 +23,9 @@ export interface CascadeRow {
 	segment_size: number;
 	progression: Progression;
 	/**
-	 * The cascade's own settings, the "This cascade" place (PLAN.md § Settings →
-	 * Where a setting applies): setting name to value, for every device. One it
-	 * does not name falls through to this device's places and the account's.
+	 * The changes made for this cascade on all devices (PLAN.md § Settings →
+	 * Where a setting applies): setting name to `{ value, at }`, a null value
+	 * meaning the default. Its preset's values at creation are among them.
 	 */
 	settings: Record<string, unknown>;
 	/** What the cascade holds on the server, in bytes, as the server last counted it (PLAN.md § Storage limit). */

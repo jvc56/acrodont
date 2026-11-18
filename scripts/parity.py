@@ -112,7 +112,7 @@ def main() -> int:
             "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "name": f"parity {s['name']}", "lexicon": LEXICON, "quiz_type": "definition",
             "clear_threshold": 80, "segment_size": 0, "progression": "ladder",
-            "answer_mode": "flashcard", "filters": s["filters"],
+            "filters": s["filters"],
         }
         t0 = time.monotonic()
         status, created = http.json("POST", "/api/cascades", body)

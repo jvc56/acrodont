@@ -32,13 +32,14 @@ const FIRST_SYNC_BUDGET_MS = 5_000;
  * worst rate, 1,500 rows a second, at this size (250 s), with room to spare,
  * so a real slowdown still fails (PQ-019, decided).
  */
-const OPEN_SYNC_BUDGET_MS = 300_000;
+// At a tenth of the ceiling (testing/scale.ts), a fifth of the budget.
+const OPEN_SYNC_BUDGET_MS = 60_000;
 /** The played cascade's open: its two active quizzes' index lists, positions, keys and answers. */
-const MATERIALISE_BUDGET_MS = 300_000;
+const MATERIALISE_BUDGET_MS = 60_000;
 const GRADED = QUESTIONS + QUESTIONS / 4;
 const PAGE_ROWS = 50_000;
 
-describe('a new device on an account with ten 300,000-question cascades', () => {
+describe(`a new device on an account with ten ${QUESTIONS}-question cascades`, () => {
 	it('first syncs with no question rows, then pulls 375,000 graded rows through the staging split, and materialises', async () => {
 		const server = new FakeServer();
 		const all = Array.from({ length: CASCADES }, (_, i) => ids(i + 1));

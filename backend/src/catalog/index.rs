@@ -41,6 +41,8 @@ pub struct WordEntry {
     pub max_playability_order: u32,
     /// Parts of speech as a bitmask of `PartOfSpeech::bit`.
     pub pos: u16,
+    /// Whether the word is a root, from the definitions (`roots`).
+    pub is_root: bool,
     pub definition: Box<str>,
 }
 
@@ -146,6 +148,15 @@ impl LexiconIndex {
             alphagram_words[a as usize].push(w as u32);
         }
 
+        // Root words: a sense naming a word, in capitals, is a form of it.
+        let definitions: Vec<&str> = raw.iter().map(|w| w.definition.as_str()).collect();
+        let is_root = super::roots::roots(&definitions, |caps| {
+            let mut tiles = Vec::new();
+            d.greedy(caps, false, &mut tiles).ok()?;
+            word_lookup.get(tiles.as_slice()).copied()
+        });
+        drop(definitions);
+
         // Hooks and inner hooks.
         let n = raw.len();
         let mut front_hooks: Vec<Vec<Tile>> = vec![Vec::new(); n];
@@ -197,6 +208,7 @@ impl LexiconIndex {
                 min_playability_order: 0,
                 max_playability_order: 0,
                 pos: pos::parse(&w.definition),
+                is_root: is_root[i],
                 definition: w.definition.into_boxed_str(),
                 tiles: w.tiles.into_boxed_slice(),
             });

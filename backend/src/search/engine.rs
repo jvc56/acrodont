@@ -152,7 +152,7 @@ fn cost(k: &ConditionKind) -> u8 {
     use ConditionKind::*;
     match k {
         Length(_) | NumVowels(_) | NumUniqueLetters(_) | PointValue(_) | NumAnagrams(_) | ProbabilityOrder { .. }
-        | PlayabilityOrder { .. } | FrontInnerHook | BackInnerHook | LeaveValue { .. } | PartOfSpeech(_) => 0,
+        | PlayabilityOrder { .. } | FrontInnerHook | BackInnerHook | RootWord | LeaveValue { .. } | PartOfSpeech(_) => 0,
         IncludesLetters(_) | ConsistsOf { .. } | AnagramMatch { .. } | SubanagramMatch(_) => 1,
         PatternMatch(_) | InLexicon(_) | InWordList(_) | TakesPrefix(_) | TakesSuffix(_) => 2,
         Definition(_) => 3,
@@ -399,6 +399,7 @@ fn word_test(l: &LexiconIndex, k: &ConditionKind, w: &WordEntry) -> bool {
         NumAnagrams(r) => r.contains(w.num_anagrams),
         FrontInnerHook => w.has_front_inner_hook,
         BackInnerHook => w.has_back_inner_hook,
+        RootWord => w.is_root,
         // Validation keeps these off word targets.
         LeaveValue { .. } | LimitByProbabilityOrder { .. } | LimitByPlayabilityOrder { .. } => true,
     }
@@ -426,7 +427,7 @@ fn leave_test(k: &ConditionKind, l: &LeaveEntry) -> bool {
         LeaveValue { min, max } => min.is_none_or(|m| l.value >= m) && max.is_none_or(|m| l.value <= m),
         // Validation keeps word-only filters off leave targets.
         InLexicon(_) | PlayabilityOrder { .. } | TakesPrefix(_) | TakesSuffix(_) | PartOfSpeech(_)
-        | Definition(_) | FrontInnerHook | BackInnerHook | LimitByProbabilityOrder { .. }
+        | Definition(_) | FrontInnerHook | BackInnerHook | RootWord | LimitByProbabilityOrder { .. }
         | LimitByPlayabilityOrder { .. } => true,
     }
 }

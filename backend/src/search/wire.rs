@@ -39,8 +39,8 @@ pub enum GroupOp {
     Or,
 }
 
-/// The 23 condition types, in the order of Zyzzyva's dropdown and then the
-/// three Acrodont-only filters (PLAN.md § Filter reference).
+/// The 24 condition types, in the order of Zyzzyva's dropdown and then the
+/// four Acrodont-only filters (PLAN.md § Filter reference).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "condition_type", rename_all = "snake_case")]
@@ -67,11 +67,12 @@ pub enum ConditionType {
     NumAnagrams,
     FrontInnerHook,
     BackInnerHook,
+    RootWord,
     LeaveValue,
 }
 
 impl ConditionType {
-    pub const ALL: [ConditionType; 23] = [
+    pub const ALL: [ConditionType; 24] = [
         ConditionType::AnagramMatch,
         ConditionType::PatternMatch,
         ConditionType::SubanagramMatch,
@@ -94,6 +95,7 @@ impl ConditionType {
         ConditionType::NumAnagrams,
         ConditionType::FrontInnerHook,
         ConditionType::BackInnerHook,
+        ConditionType::RootWord,
         ConditionType::LeaveValue,
     ];
 
@@ -121,6 +123,7 @@ impl ConditionType {
             ConditionType::NumAnagrams => "num_anagrams",
             ConditionType::FrontInnerHook => "front_inner_hook",
             ConditionType::BackInnerHook => "back_inner_hook",
+            ConditionType::RootWord => "root_word",
             ConditionType::LeaveValue => "leave_value",
         }
     }
@@ -146,6 +149,7 @@ impl ConditionType {
                 | Definition
                 | FrontInnerHook
                 | BackInnerHook
+                | RootWord
         )
     }
 
@@ -159,7 +163,7 @@ impl ConditionType {
         match self {
             LeaveValue => q == QuizType::LeaveValue,
             InLexicon | PlayabilityOrder | LimitByPlayabilityOrder | TakesPrefix | TakesSuffix
-            | FrontInnerHook | BackInnerHook | PartOfSpeech | Definition => q != QuizType::LeaveValue,
+            | FrontInnerHook | BackInnerHook | RootWord | PartOfSpeech | Definition => q != QuizType::LeaveValue,
             _ => true,
         }
     }
@@ -179,7 +183,7 @@ impl ConditionType {
             InWordList => &["entries"],
             PartOfSpeech => &["part_of_speech"],
             Definition => &["text"],
-            FrontInnerHook | BackInnerHook => &[],
+            FrontInnerHook | BackInnerHook | RootWord => &[],
             LeaveValue => &["min", "max"],
         }
     }
@@ -414,7 +418,7 @@ fn parse_condition(o: &Map<String, Value>, path: &[usize], errors: &mut Vec<Path
             let v = get("text").cloned();
             Params::Text(string(v.as_ref(), "text", errors))
         }
-        FrontInnerHook | BackInnerHook => Params::None,
+        FrontInnerHook | BackInnerHook | RootWord => Params::None,
         LeaveValue => {
             let (a, b) = (get("min").cloned(), get("max").cloned());
             let num = |v: Option<Value>, field: &str, errors: &mut Vec<PathError>| -> Option<f64> {

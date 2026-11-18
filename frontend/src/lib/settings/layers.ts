@@ -1,30 +1,50 @@
 // Where a setting applies (PLAN.md § Settings → Where a setting applies).
-// Every setting but a cascade's four rules can be set in four places, and the
-// first of them that holds a value is the one used:
+// Every cascade on every device has its own settings. A change is made in one
+// of four scopes, and kept as `{ value, at }`, `at` being when it was made:
 //
-//   1. this cascade on this device  ('both': this device's meta store)
-//   2. this cascade                 ('cascade': the cascade row's `settings`, synced)
-//   3. this device                  ('device': this device's meta store)
-//   4. everywhere                   ('all': the account's shared settings, synced)
+//   'both'     this cascade on this device   (this device's meta store)
+//   'cascade'  this cascade on all devices   (the cascade row's `settings`, synced)
+//   'device'   all cascades on this device   (this device's meta store)
+//   'all'      all cascades on all devices   (the account's settings, synced)
 //
-// and Acrodont's default after them. A cascade's own value beats a device's,
-// so a cascade can ask for something wherever it is studied; one device can
-// still differ for one cascade, in the first place. A value from another build
-// that this one cannot read is passed over, as if that place held none.
+// A setting's value for a cascade on this device is the latest change among
+// the four that cover it. A change for all cascades ('device', 'all') made
+// before the cascade was created is passed over: a new cascade starts from
+// its preset, or the defaults. A null value is the setting's default, and a
+// value from another build that this one cannot read is passed over, as if
+// that change had not been made. With no change left, the default is used.
 import type { AnswerMode } from '$lib/local/rows';
 import { DEFAULT_BINDINGS, normalizeBindings, type Binding } from '$lib/player/bindings';
 import { clampSetting, FONTS, type LimitKey } from '$lib/player/display';
 
-export type Place = 'both' | 'cascade' | 'device' | 'all';
-/** The places in the order they are read: the first holding a value wins. */
-export const PLACES: Place[] = ['both', 'cascade', 'device', 'all'];
+export type Scope = 'both' | 'cascade' | 'device' | 'all';
+/** The scopes, narrowest first: of two changes made at the same time, the narrower wins. */
+export const SCOPES: Scope[] = ['both', 'cascade', 'device', 'all'];
+/** The scopes that cover every cascade, whose changes before a cascade was created do not reach it. */
+const ALL_CASCADES = new Set<Scope>(['device', 'all']);
 
+/** A change to a setting: its value (null: the default) and when it was made. */
+export type Entry = { value: unknown; at: string };
+export type Entries = Record<string, Entry>;
+export type Layers = Record<Scope, Entries>;
 export type Values = Record<string, unknown>;
-export type Layers = Record<Place, Values>;
 
 export const emptyLayers = (): Layers => ({ both: {}, cascade: {}, device: {}, all: {} });
 
-/** What every setting of the four places holds once resolved. */
+/** Whether `e` is an entry this build can compare: an object with a parseable `at`. */
+export function isEntry(e: unknown): e is Entry {
+	return typeof e === 'object' && e !== null && 'value' in e && typeof (e as Entry).at === 'string' && Number.isFinite(Date.parse((e as Entry).at));
+}
+
+/** `entries` as plain entries, each one this build can compare; anything else is dropped. */
+export function entriesOf(v: unknown): Entries {
+	if (typeof v !== 'object' || v === null || Array.isArray(v)) return {};
+	const out: Entries = {};
+	for (const [k, e] of Object.entries(v)) if (isEntry(e)) out[k] = { value: e.value, at: e.at };
+	return out;
+}
+
+/** Every setting's value for a cascade on this device, once resolved. */
 export interface Settings {
 	/** Anagram cascades: flashcard or typed. */
 	answer_mode: AnswerMode;
@@ -181,59 +201,54 @@ export function sameValue(a: unknown, b: unknown): boolean {
 	return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** The value `place` holds for `key`, made valid, or undefined when it holds none it can read. */
-export function valueIn<K extends SettingKey>(layers: Layers, place: Place, key: K): Settings[K] | undefined {
-	const held = layers[place];
-	if (!Object.prototype.hasOwnProperty.call(held, key)) return undefined;
-	return DEFINITIONS[key].clean(held[key]) as Settings[K] | undefined;
+/** The default of `key`, a fresh copy. */
+export function defaultOf<K extends SettingKey>(key: K): Settings[K] {
+	const d = DEFINITIONS[key].default;
+	return (Array.isArray(d) ? d.map((b) => ({ ...b })) : d) as Settings[K];
 }
 
-/** The value used for `key`, and the place it comes from. */
-export function resolve<K extends SettingKey>(layers: Layers, key: K): { value: Settings[K]; from: Place | 'default' } {
-	for (const place of PLACES) {
-		const v = valueIn(layers, place, key);
-		if (v !== undefined) return { value: v, from: place };
+/**
+ * The value used for `key` and the scope of the change it comes from: the
+ * latest change covering it, with a change for all cascades made before
+ * `createdAt` passed over, and one whose value cannot be read passed over too.
+ */
+export function resolve<K extends SettingKey>(
+	layers: Layers,
+	key: K,
+	createdAt: string | null = null
+): { value: Settings[K]; from: Scope | 'default' } {
+	const born = createdAt ? Date.parse(createdAt) : NaN;
+	const found: { scope: Scope; t: number; rank: number; value: unknown }[] = [];
+	SCOPES.forEach((scope, rank) => {
+		const held = layers[scope];
+		if (!Object.prototype.hasOwnProperty.call(held, key)) return;
+		const e = held[key];
+		if (!isEntry(e)) return;
+		const t = Date.parse(e.at);
+		if (ALL_CASCADES.has(scope) && t < born) return;
+		found.push({ scope, t, rank, value: e.value });
+	});
+	found.sort((a, b) => b.t - a.t || a.rank - b.rank);
+	for (const f of found) {
+		if (f.value === null || f.value === undefined) return { value: defaultOf(key), from: f.scope };
+		const v = DEFINITIONS[key].clean(f.value) as Settings[K] | undefined;
+		if (v !== undefined) return { value: v, from: f.scope };
 	}
-	const d = DEFINITIONS[key].default;
-	return { value: (Array.isArray(d) ? d.map((b) => ({ ...b })) : d) as Settings[K], from: 'default' };
+	return { value: defaultOf(key), from: 'default' };
 }
 
 /** Every setting's value. */
-export function resolveAll(layers: Layers): Settings {
-	return Object.fromEntries(SETTING_KEYS.map((k) => [k, resolve(layers, k).value])) as unknown as Settings;
+export function resolveAll(layers: Layers, createdAt: string | null = null): Settings {
+	return Object.fromEntries(SETTING_KEYS.map((k) => [k, resolve(layers, k, createdAt).value])) as unknown as Settings;
 }
 
 export function settingText<K extends SettingKey>(key: K, v: Settings[K]): string {
 	return DEFINITIONS[key].text(v);
 }
 
-/** Each place's name, as what a move replaced names it. */
-export const PLACE_NAMES: Record<Place | 'default', string> = {
-	both: 'This cascade on this device',
-	cascade: 'This cascade',
-	device: 'This device',
-	all: 'Everywhere',
-	default: 'Default'
-};
-
-/** One side of a place: this cascade or every cascade, this device or every device. */
-export type Side = 'this' | 'all';
-/** A place as its two switches show it. */
-export interface Sides {
-	cascades: Side;
-	devices: Side;
-}
-
-export function sidesOf(place: Place): Sides {
-	return { cascades: place === 'both' || place === 'cascade' ? 'this' : 'all', devices: place === 'both' || place === 'device' ? 'this' : 'all' };
-}
-
-export function placeAt({ cascades, devices }: Sides): Place {
-	if (cascades === 'this') return devices === 'this' ? 'both' : 'cascade';
-	return devices === 'this' ? 'device' : 'all';
-}
-
-/** The places narrower than `place`: the ones read before it, whose values hide its own. */
-export function narrowerThan(place: Place): Place[] {
-	return PLACES.slice(0, PLACES.indexOf(place));
+/** `entries` with every one of `values` made a change at `at`. */
+export function stamp(entries: Entries, values: Values, at: string): Entries {
+	const out = { ...entries };
+	for (const [k, v] of Object.entries(values)) out[k] = { value: v === undefined ? null : v, at };
+	return out;
 }

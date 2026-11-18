@@ -33,6 +33,7 @@ export type ConditionType =
 	| 'num_anagrams'
 	| 'front_inner_hook'
 	| 'back_inner_hook'
+	| 'root_word'
 	| 'leave_value';
 
 export type ParamKind =
@@ -103,6 +104,8 @@ export const FILTERS: FilterDef[] = [
 	{ type: 'num_anagrams', label: 'Number of Anagrams', fields: ['min', 'max'], kind: 'range', negatable: false, limit: false, appliesTo: ALL, floor: 0, ceiling: 'num_anagrams' },
 	{ type: 'front_inner_hook', label: 'Front Inner Hook', fields: [], kind: 'none', negatable: true, limit: false, appliesTo: WORDS },
 	{ type: 'back_inner_hook', label: 'Back Inner Hook', fields: [], kind: 'none', negatable: true, limit: false, appliesTo: WORDS },
+	{ type: 'root_word', label: 'Root Word', fields: [], kind: 'none', negatable: true, limit: false, appliesTo: WORDS,
+		help: 'The word has a definition of its own, rather than being a form of another word: EAT, EATER and BIZARRE are roots; EATS and MICE are not. Not finds the inflected forms. Read from the definitions, where a form names its root in capitals (EATS: “EAT, to consume food”); a lexicon whose definitions don’t do that has every word a root.' },
 	{ type: 'leave_value', label: 'Leave Value', fields: ['min', 'max'], kind: 'leave_value', negatable: false, limit: false, appliesTo: ['leave_value'] }
 ];
 

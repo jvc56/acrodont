@@ -3,7 +3,10 @@
 // Locks API; where Web Locks is missing every tab syncs and idempotency keeps
 // that correct. It pushes the outbox in batches of up to BATCH_OPS, pulls
 // every page, rebases, and backs off on 429 and 503 by Retry-After.
-import { pendingShares, takeShared, type SharedSettings } from '$lib/settings/everywhere';
+import { offsetOf } from '$lib/settings/clock';
+import { pendingShares, takeShared } from '$lib/settings/everywhere';
+import type { Entries } from '$lib/settings/layers';
+import { presetsVersion, takePresets } from '$lib/settings/presets';
 import { ApiError, request } from '$lib/api';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';
@@ -53,7 +56,7 @@ export interface EngineHooks {
 	onNotices?: (n: Notice[]) => void;
 	/** After every completed pull: the download manager's turn (§ Downloads). */
 	onSynced?: (o: RebaseOutcome) => void | Promise<void>;
-	/** A display setting or the controls changed here, taken from the account's shared ones. */
+	/** The account's settings for all cascades on all devices, or its presets, changed here. */
 	onDeviceSettings?: () => void;
 	/**
 	 * A pull's write found no room on the device: the drop pass, then the answer
@@ -251,8 +254,8 @@ export class SyncEngine {
 		await this.release(rctx);
 		if (refused) return;
 		let cursor = sync.cursor;
-		// Device settings shared here and not yet sent go with the first request.
-		let shares: SharedSettings | null = await pendingShares(this.db);
+		// Changes for all cascades on all devices made here and not yet sent go with the first request.
+		let shares: Entries | null = await pendingShares(this.db);
 		let madeRoom = false;
 		for (;;) {
 			const batch: OutboxEntry[] = await this.db.getAll('outbox', undefined, BATCH_OPS);
@@ -265,9 +268,11 @@ export class SyncEngine {
 				ops: batch.map((e) => e.op)
 			};
 			const sent = shares ?? {};
-			if (Object.keys(sent).length) req.device_settings = sent;
+			if (Object.keys(sent).length) req.settings = sent;
 			shares = null;
+			req.presets_version = await presetsVersion(this.db);
 			const reply = await this.send(req);
+			const receivedAt = Date.now();
 			if (!reply) return;
 			if (reply.status === 401) {
 				// Studying continues; the outbox waits for the next login.
@@ -295,7 +300,11 @@ export class SyncEngine {
 				const s = await getMeta(this.db, 'server');
 				await this.db.put('meta', { ...s, storage_bytes: body.storage.used, max_storage_bytes: body.storage.limit }, 'server');
 			}
-			if (body.device_settings && (await takeShared(this.db, body.device_settings, sent))) this.hooks.onDeviceSettings?.();
+			const offset = offsetOf(body.server_time, receivedAt);
+			if (offset !== null) await this.db.put('meta', { offset_ms: offset }, 'clock');
+			let settingsChanged = !!body.settings && (await takeShared(this.db, body.settings, sent));
+			if (await takePresets(this.db, body.presets_version, body.presets)) settingsChanged = true;
+			if (settingsChanged) this.hooks.onDeviceSettings?.();
 			if (body.resync_required) {
 				// A full pull, with the same batch: the server answers each operation
 				// from its record. Its results go to the rebase with the rows they
@@ -375,7 +384,9 @@ export class SyncEngine {
 				// A page request carries no operations; its token fixes the rest.
 				cursor,
 				page_token: page.next_page_token,
-				question_rows_for: []
+				question_rows_for: [],
+				// The first response brought the presets if they had changed.
+				presets_version: first.presets_version ?? null
 			});
 			// A page that is not one ends the pull unapplied: taken for the last
 			// page, it would advance the cursor past rows that never arrived.

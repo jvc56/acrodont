@@ -320,14 +320,18 @@ export class FakeServer {
 		// they refuse keeps their reason; this stand-in checks it first, which
 		// differs only for a finish refused twice over.
 		if (type === 'finish' && finishesRefused(this.storage().used, this.storageLimit)) throw new Rejected('storage_limit');
-		// The cascade's own settings, checked before anything changes, as the server's are.
-		const settings = type === 'set_cascade_options' && w.settings !== undefined ? mergeCascadeSettings(e.settings, w.settings) : null;
+		// A cascade's settings: merged per setting, the later change winning, as on the server.
+		if (type === 'set_cascade_settings') {
+			if (e.sim.state.trashed) throw new Rejected('trashed');
+			e.settings = mergeCascadeSettings(e.settings, w.settings, at);
+			this.track(e, seq, at, device, undefined);
+			return {};
+		}
 		const before = new Set(e.sim.quizzes.keys());
 		const r = e.sim.apply(op as unknown as Op);
 		if (type === 'trash_cascade') e.trashed_at = at;
 		if (type === 'restore_cascade' || (type === 'restore_quiz' && !e.sim.state.trashed)) e.trashed_at = null;
 		if (type === 'set_cascade_options') {
-			if (settings) e.settings = settings;
 			e.options_at = at;
 			e.options_seq = seq;
 			e.options_device = device;

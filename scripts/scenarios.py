@@ -145,7 +145,9 @@ class Seeder:
             "id": str(uuid.uuid4()), "source_quiz_id": str(uuid.uuid4()), "device_id": self.device_id,
             "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
             "name": name, "lexicon": lexicon or self.lexicon, "quiz_type": quiz_type, "clear_threshold": 80,
-            "segment_size": segment_size, "progression": "ladder", "answer_mode": answer_mode,
+            "segment_size": segment_size, "progression": "ladder",
+            # A typed cascade starts with the answer mode a preset would give it.
+            **({"settings": {"answer_mode": "typed"}} if answer_mode == "typed" else {}),
             "filters": filters,
         })
         if status != 201:

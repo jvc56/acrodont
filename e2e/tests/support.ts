@@ -101,9 +101,10 @@ export async function login(page: Page, username: string) {
 }
 
 /** A cascade through the builder, with the settings every new cascade starts with; returns its player path. */
-export async function createCascade(page: Page, o: { name: string; min?: number; max?: number } = { name: 'x' }): Promise<string> {
+export async function createCascade(page: Page, o: { name: string; min?: number; max?: number; preset?: string } = { name: 'x' }): Promise<string> {
 	await page.goto('/cascades/new');
 	await page.getByLabel('Lexicon').selectOption('EN-FIX');
+	if (o.preset) await page.locator('[data-preset-select]').selectOption({ label: o.preset });
 	await page.getByLabel('Minimum').first().fill(String(o.min ?? 7));
 	await page.getByLabel('Maximum').first().fill(String(o.max ?? 7));
 	await expect(page.getByText(/\d+ questions/).first()).toBeVisible({ timeout: 15_000 });
@@ -126,7 +127,8 @@ export async function apiCascade(
 		filters: unknown;
 		segment_size?: number;
 		progression?: string;
-		answer_mode?: 'flashcard' | 'typed';
+		/** The cascade's starting settings, as a preset would give them. */
+		settings?: Record<string, unknown>;
 	}
 ): Promise<string> {
 	const csrf = (await page.context().cookies()).find((c) => c.name === 'acrodont_csrf')!.value;
@@ -145,7 +147,7 @@ export async function apiCascade(
 			clear_threshold: 80,
 			segment_size: o.segment_size ?? 0,
 			progression: o.progression ?? 'ladder',
-			answer_mode: o.answer_mode ?? 'flashcard',
+			...(o.settings ? { settings: o.settings } : {}),
 			filters: o.filters
 		}
 	});
@@ -162,8 +164,8 @@ export const AEINRST_WORDS = ['ANESTRI', 'ANTSIER', 'NASTIER', 'RATINES', 'RETAI
 export const lengths = (min: number, max: number) => ({ op: 'and', children: [{ type: 'length', negated: false, min, max }] });
 
 /**
- * Sets a cascade's own settings (the "This cascade" place) on the server, as
- * another device would, with a `set_cascade_options` through the sync
+ * Changes a cascade's settings for it on all devices on the server, as
+ * another device would, with a `set_cascade_settings` through the sync
  * endpoint. Used on a cascade made with `apiCascade` before this device has
  * seen it, so it downloads with them.
  */
@@ -183,7 +185,7 @@ export async function apiSettings(page: Page, path: string, fields: Record<strin
 					device_seq: 1,
 					seen_seq: 0,
 					at: new Date().toISOString(),
-					type: 'set_cascade_options',
+					type: 'set_cascade_settings',
 					cascade_id: path.split('/').pop(),
 					settings: fields
 				}
