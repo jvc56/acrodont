@@ -168,6 +168,10 @@ test('a cascade’s rules for it alone or all; presets saved, applied, replaced,
 	await saveAs(page, 'Typed');
 	await confirm(page, 'Replace');
 	await expect(presets(page).getByText('✓ Replaced “Typed”.')).toBeVisible({ timeout: 15_000 });
+	// Or chosen from the list, with no name to type: asked the same, then replaced.
+	await presets(page).getByRole('button', { name: 'Overwrite “Typed” with this cascade’s settings' }).click();
+	await confirm(page, 'Replace');
+	await expect(presets(page).getByText('✓ Replaced “Typed”.')).toBeVisible({ timeout: 15_000 });
 	// Renamed, and offline, nothing is saved.
 	await presets(page).getByRole('button', { name: 'Rename “Typed”' }).click();
 	await presets(page).getByLabel('New name for “Typed”').fill('Plain');

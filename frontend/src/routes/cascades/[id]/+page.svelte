@@ -617,20 +617,22 @@
 
 	/**
 	 * Save as preset: every setting as this cascade shows it on this device, and
-	 * its rules. A name already taken asks first, then replaces that preset.
+	 * its rules. Under the name typed, or over `over`, one of the user's
+	 * presets chosen from the list; a name already taken, or a preset
+	 * overwritten, asks first, then replaces that preset.
 	 */
-	async function saveAsPreset() {
+	async function saveAsPreset(over: Preset | null = null) {
 		const c = v?.cascade;
 		if (!db || !c || presetBusy) return;
-		const name = presetName.trim();
+		const name = over ? over.name : presetName.trim();
 		presetSaved = null;
-		presetError = presetNameError(name, null, presets);
+		presetError = over ? null : presetNameError(name, null, presets);
 		if (presetError) return;
 		if (!navigator.onLine) {
 			presetError = 'Saving a preset needs a connection.';
 			return;
 		}
-		const same = presets.find((o) => !isDefaults(o) && o.name === name);
+		const same = over ?? presets.find((o) => !isDefaults(o) && o.name === name);
 		if (same) {
 			const ok = await confirmAction({
 				title: `Replace your preset “${name}”?`,
@@ -644,7 +646,7 @@
 			await savePreset(db, presetFrom(same?.id ?? crypto.randomUUID(), name, settings.value, c));
 			presets = await presetList(db);
 			presetSaved = same ? `Replaced “${name}”.` : `Saved “${name}”.`;
-			presetName = '';
+			if (!over) presetName = '';
 			afterLocalWrite();
 		} catch (e) {
 			presetError = presetFailure(e, 'Saving a preset', 'saved');
@@ -1352,7 +1354,7 @@
 									oninput={() => (presetError = null)}
 									onkeydown={(e) => e.key === 'Enter' && saveAsPreset()}
 								/>
-								<Button size="sm" variant="outline" disabled={!presetName.trim() || presetBusy} onclick={saveAsPreset}>Save as preset</Button>
+								<Button size="sm" variant="outline" disabled={!presetName.trim() || presetBusy} onclick={() => saveAsPreset()}>Save as preset</Button>
 							</div>
 							{#if presets.some((o) => !isDefaults(o))}
 								<ul class="space-y-1 text-sm" data-preset-list>
@@ -1380,6 +1382,14 @@
 											{:else}
 												<span class="min-w-0 flex-1 truncate">{o.name}</span>
 												<Button size="sm" variant="ghost" href={`/presets/${o.id}`} aria-label={`Edit “${o.name}”`}>Edit</Button>
+												<Button
+													size="sm"
+													variant="ghost"
+													disabled={presetBusy}
+													title="Save this cascade’s settings and rules into this preset"
+													aria-label={`Overwrite “${o.name}” with this cascade’s settings`}
+													onclick={() => saveAsPreset(o)}>Overwrite</Button
+												>
 												<Button
 													size="sm"
 													variant="ghost"

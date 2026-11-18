@@ -16,7 +16,7 @@ export const SCOPE = {
 /** What each part of a cascade's Settings is for, behind an ⓘ beside its heading. */
 export const SECTION = {
 	presets:
-		'A preset holds every setting and the three rules. Apply one to give this cascade its settings on this device and its rules; Defaults puts everything back to the defaults. Save as preset keeps this cascade’s settings as they are here under a name, for another cascade or for a new one (the builder asks which preset to start with). Saving, renaming and deleting a preset need a connection.',
+		'A preset holds every setting and the three rules. Apply one to give this cascade its settings on this device and its rules; Defaults puts everything back to the defaults. Save as preset keeps this cascade’s settings as they are here under a name (Overwrite beside one of your presets saves them into it), for another cascade or for a new one (the builder asks which preset to start with). Saving, renaming and deleting a preset need a connection.',
 	controls:
 		'The keys, mouse buttons and wheel directions for each action. They are one setting, saved for this cascade on this device, which can then be applied more widely.',
 	presets_list:

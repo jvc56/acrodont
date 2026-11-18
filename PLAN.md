@@ -911,7 +911,9 @@ In a cascade's Settings, under This Cascade, the **Presets** group holds:
   "✓ Saved “Phone”." or "✓ Replaced “Phone”."; offline, "Saving a preset
   needs a connection."; with 50 presets, "You have 50 presets, the most an
   account can hold. Delete one to make room."
-- **The user's presets**, by name, each with **Rename** (a name field in its
+- **The user's presets**, by name, each with **Overwrite** (Save as preset
+  into that preset, with no name to type: the same "Replace your preset
+  “Phone”?", then "✓ Replaced “Phone”."), **Rename** (a name field in its
   place, with Save name and Cancel; "✓ Renamed “Phone” to “Laptop”.", or
   "You already have a preset with that name.") and **Delete**, which asks
   "Delete the preset “Phone”?" ("Cascades made with it, or that it was
@@ -1274,7 +1276,7 @@ as the term of the data model and the API.
     threshold" (the cascade's, saved with `set_cascade_options`, for every
     level, the one being studied included, from the current card);
     **Presets** (Apply preset, Save as preset, and the user's presets with
-    Rename and Delete; see [Presets](#presets)); then Duplicate and Move to
+    Overwrite, Rename and Delete; see [Presets](#presets)); then Duplicate and Move to
     Trash. Duplicate is disabled when the account's
     [storage](#storage-limit) is full (`Duplicate cascade: your storage is full`); a
     `409 storage_limit` says what duplicating needs and how much is free. The
