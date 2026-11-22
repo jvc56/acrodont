@@ -10,7 +10,9 @@
 	// middle of the row whatever sits either side; each hook column is as wide
 	// as its widest hooks and no wider; the definition takes the room that is
 	// left, up to the definition width setting, which also limits a definition
-	// under its word. The probability order and the hooks,
+	// under its word. The hooks sit close to the word, in its colour, and
+	// further from the probability order and the definition, so they read as
+	// the word's, not the definition's. The probability order and the hooks,
 	// smaller than the word, are centred on it, not sat on its baseline, and
 	// the word and the definition are centred on each other however many
 	// lines the definition wraps to; a short part of
@@ -116,7 +118,7 @@
 </script>
 
 {#snippet hookCell(mine: string | undefined, sizes: string, side: 'front' | 'back')}
-	<span class="hooks inline-grid font-normal text-muted-foreground" class:justify-items-end={side === 'front'} style={hookStyle} data-hooks={side}>
+	<span class="hooks inline-grid font-normal text-foreground" class:justify-items-end={side === 'front'} style={hookStyle} data-hooks={side}>
 		<span style="grid-area: 1 / 1;">{#if mine}<TileText text={mine} lower />{/if}</span>
 		{#if sizes}<span class="sizer" style="grid-area: 1 / 1;" data-sizes={sizes} aria-hidden="true"></span>{/if}
 	</span>
@@ -192,20 +194,23 @@
 <style>
 	/* Left of the word | the word | right of the word: the outer two share what is left equally, so the word is in the middle.
 	   A row's cells are centred on each other: the smaller probability order and hooks on the word, and
-	   the word on its definition, however tall that is. */
+	   the word on its definition, however tall that is.
+	   The hooks are close to the word and further from what is beyond them. The word's cell already has
+	   an inner-hook dot's width (seen or not) at each end, so the gap beside it is small; the gaps beyond
+	   the hooks are larger. All scale with the fit, as the dot does. */
 	.rows {
 		display: grid;
 		width: 100%;
 		grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
 		align-items: center;
-		column-gap: 0.75rem;
+		column-gap: calc(0.25rem * var(--fit, 1));
 	}
 	.left {
 		grid-column: 1;
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
-		column-gap: 0.75rem;
+		column-gap: calc(1.25rem * var(--fit, 1));
 	}
 	.word {
 		grid-column: 2;
@@ -246,7 +251,7 @@
 			display: grid;
 			grid-template-columns: auto minmax(0, 1fr);
 			align-items: center;
-			column-gap: 0.75rem;
+			column-gap: calc(1.5rem * var(--fit, 1));
 		}
 		.right.own-column > .hooks {
 			grid-column: 1;

@@ -72,9 +72,12 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	// By default the definition is a column of its own, after the back hooks on the word's line.
 	let [w, d, b] = [await box(word), await box(definition), await box(backHooks)];
 	expect(d.x).toBeGreaterThanOrEqual(b.x + b.width);
-	// The back hooks' column is as wide as the hooks, so the definition starts just after them, centred on the word's line.
-	expect(d.x - (b.x + b.width)).toBeLessThan(20);
+	// The back hooks' column is as wide as the hooks, so the definition starts soon after them, centred on the word's line.
+	expect(d.x - (b.x + b.width)).toBeLessThan(40);
 	expect(b.width).toBeLessThan(w.width);
+	// The hooks read as the word's: nearer its letters (past the room its inner-hook dot keeps) than the definition.
+	const letters = word.locator(':scope > span').nth(1);
+	expect(b.x - ((await box(letters)).x + (await box(letters)).width)).toBeLessThan(d.x - (b.x + b.width));
 	expect(Math.abs(d.y + d.height / 2 - (w.y + w.height / 2))).toBeLessThan(3);
 	// The word stays in the middle of the quiz area, whatever sits either side of it.
 	// (Measured afresh each time: opening Settings shows the menu, which narrows the area.)
@@ -89,6 +92,9 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	await expect(probability).toHaveText(/^\s*\d+\s*$/);
 	const [p, f] = [await box(probability), await box(frontHooks)];
 	expect(p.x + p.width).toBeLessThanOrEqual(f.x);
+	// The front hooks too are nearer the word's letters than the probability order.
+	const first = await box(word.locator(':scope > span').nth(1));
+	expect(first.x - (f.x + f.width)).toBeLessThan(f.x - (p.x + p.width));
 	expect(await offCentre()).toBeLessThan(3);
 	// Turned off, the definition is centred under the word.
 	await playerSetting(page, 'Definitions in their own column', false);
