@@ -140,6 +140,9 @@ export interface LexiconInfo {
 	max_order_rank: number;
 	max_leave_num_anagrams: number | null;
 	max_leave_order_rank: number | null;
+	/** The revisions of the words the server searches; Search rebuilds its copy when they move. */
+	definitions_revision?: number;
+	playability_revision?: number;
 }
 
 export interface CeilingContext {

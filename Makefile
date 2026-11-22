@@ -27,18 +27,29 @@ export CARGO_BUILD_JOBS ?= 2
         test-integration test-e2e test-e2e-core test-e2e-main test-e2e-seeding test-ops-image test-scale test-scale-backend test-scale-frontend test-parity \
         frontend-deps e2e-deps e2e-binary e2e-pass-full e2e-pass-ttl e2e-pass-purge e2e-pass-answers \
         e2e-pass-budget e2e-pass-webkit $(addprefix e2e-up-,full ttl purge answers budget) $(addprefix e2e-down-,full ttl purge answers budget) \
-        sqlx-db sqlx-prepare
+        sqlx-db sqlx-prepare wasm
 
 test: test-unit test-integration test-e2e
 
 frontend-deps:
 	cd frontend && { [ -d node_modules ] || npm ci; }
 
-## cargo test --lib, npm run check, Vitest. No services.
+## The browser's search engine (PLAN.md § Search page): the lexicon crate as
+## WebAssembly, where Vite imports it. The frontend image builds its own; this
+## is for `vite dev` and `npm run build` on this machine. Needs
+## `rustup target add wasm32-unknown-unknown`.
+WASM_OUT := frontend/src/lib/search/search.wasm
+wasm:
+	# In backend/, where its rust-toolchain.toml picks the toolchain.
+	(cd backend && cargo build --locked --release -p search-wasm --target wasm32-unknown-unknown)
+	mkdir -p $(dir $(WASM_OUT))
+	cp backend/target/wasm32-unknown-unknown/release/search_wasm.wasm $(WASM_OUT)
+
+## cargo test --lib (the server, the lexicon crate, the browser's search), npm run check, Vitest. No services.
 test-unit: test-unit-backend test-unit-frontend
 
 test-unit-backend:
-	cd backend && cargo test --lib
+	cd backend && cargo test --lib --workspace
 
 test-unit-frontend: frontend-deps
 	cd frontend && npm run check && npx vitest run --passWithNoTests

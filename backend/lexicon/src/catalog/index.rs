@@ -5,7 +5,6 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use super::pos;
 use super::probability::{leave_combinations, word_combinations};
@@ -107,6 +106,15 @@ fn rank<V: Copy>(
     }
 }
 
+/// Root words: a sense naming a word, in capitals, is a form of it.
+fn roots_of(d: &Distribution, word_lookup: &HashMap<Box<[Tile]>, u32>, definitions: &[&str]) -> Vec<bool> {
+    super::roots::roots(definitions, |caps| {
+        let mut tiles = Vec::new();
+        d.greedy(caps, false, &mut tiles).ok()?;
+        word_lookup.get(tiles.as_slice()).copied()
+    })
+}
+
 impl LexiconIndex {
     pub fn build(
         id: i16,
@@ -114,7 +122,7 @@ impl LexiconIndex {
         distribution: Arc<Distribution>,
         mut raw: Vec<RawWord>,
     ) -> Self {
-        let start = Instant::now();
+        let start = crate::clock::now_ms();
         let d = &distribution;
         raw.sort_by(|a, b| a.tiles.cmp(&b.tiles));
         raw.dedup_by(|a, b| a.tiles == b.tiles);
@@ -148,13 +156,8 @@ impl LexiconIndex {
             alphagram_words[a as usize].push(w as u32);
         }
 
-        // Root words: a sense naming a word, in capitals, is a form of it.
         let definitions: Vec<&str> = raw.iter().map(|w| w.definition.as_str()).collect();
-        let is_root = super::roots::roots(&definitions, |caps| {
-            let mut tiles = Vec::new();
-            d.greedy(caps, false, &mut tiles).ok()?;
-            word_lookup.get(tiles.as_slice()).copied()
-        });
+        let is_root = roots_of(d, &word_lookup, &definitions);
         drop(definitions);
 
         // Hooks and inner hooks.
@@ -271,7 +274,7 @@ impl LexiconIndex {
             })
             .sum::<usize>()
             + alphagrams.iter().map(|a| a.len() * 2 + 64).sum::<usize>();
-        let build_ms = start.elapsed().as_millis() as u64;
+        let build_ms = (crate::clock::now_ms() - start) as u64;
         tracing::info!(
             lexicon = name,
             words = words.len(),
@@ -298,13 +301,34 @@ impl LexiconIndex {
         }
     }
 
+    /// Gives the words their definitions, one per word in id order, and with
+    /// them their parts of speech and root flags: the index `build` makes
+    /// from the same words with these definitions. A device searches a
+    /// lexicon before its definitions arrive, then adds them (PLAN.md §
+    /// Search page → Lexicon packs).
+    pub fn set_definitions(&mut self, definitions: Vec<String>) -> Result<(), String> {
+        if definitions.len() != self.words.len() {
+            return Err(format!("{} definitions for {} words.", definitions.len(), self.words.len()));
+        }
+        let refs: Vec<&str> = definitions.iter().map(String::as_str).collect();
+        let is_root = roots_of(&self.distribution, &self.word_lookup, &refs);
+        drop(refs);
+        for ((w, def), root) in self.words.iter_mut().zip(definitions).zip(is_root) {
+            self.approx_bytes = self.approx_bytes - w.definition.len() + def.len();
+            w.pos = pos::parse(&def);
+            w.is_root = root;
+            w.definition = def.into_boxed_str();
+        }
+        Ok(())
+    }
+
     pub fn word_count(&self) -> usize {
         self.words.len()
     }
 
     /// The revisions of the stored words this index was built from.
-    pub fn revisions(&self) -> super::store::Revisions {
-        super::store::Revisions { definitions: self.definitions_revision, playability: self.playability_revision }
+    pub fn revisions(&self) -> super::Revisions {
+        super::Revisions { definitions: self.definitions_revision, playability: self.playability_revision }
     }
 
     pub fn find(&self, tiles: &[Tile]) -> Option<&WordEntry> {
@@ -367,7 +391,7 @@ pub struct LeaveSetIndex {
 
 impl LeaveSetIndex {
     pub fn build(id: i32, lexicon: &LexiconIndex, mut raw: Vec<(Vec<Tile>, f64)>) -> Self {
-        let start = Instant::now();
+        let start = crate::clock::now_ms();
         let d = lexicon.distribution.clone();
         for (t, _) in raw.iter_mut() {
             t.sort_unstable();
@@ -436,7 +460,7 @@ impl LeaveSetIndex {
             .iter()
             .map(|l| std::mem::size_of::<LeaveEntry>() + l.tiles.len() * 2 + l.counts.len() + 48)
             .sum();
-        let build_ms = start.elapsed().as_millis() as u64;
+        let build_ms = (crate::clock::now_ms() - start) as u64;
         tracing::info!(
             leave_set = id,
             leaves = leaves.len(),

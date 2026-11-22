@@ -574,6 +574,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             "Clear site data): its sync cursors no longer match anything on the server.")
 
     profiles = ["hot-reload"] if args.hot_reload else []
+    if args.hot_reload and not (ROOT / "frontend/src/lib/search/search.wasm").exists():
+        # `vite dev` serves the checkout, which has no search engine until it
+        # is built here (the frontend image builds its own).
+        log("building the search engine for vite dev (make wasm)")
+        if subprocess.run(["make", "wasm"], cwd=ROOT).returncode != 0:
+            log("make wasm failed: run `rustup target add wasm32-unknown-unknown` in backend/ and try again")
+            return 1
     try:
         base_url = stack.up(args.project, args.port, env, build=not args.no_build, profiles=profiles)
     except stack.StackFailed as e:

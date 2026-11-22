@@ -11,7 +11,7 @@
 	// banners, the completion screen, and a trashed cascade's Restore.
 	import { INFO, SCOPE, SECTION } from '$lib/settings-info';
 	import { onMount, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { goto, pushState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, ApiError } from '$lib/api';
 	import { isRetriable, sendWithRetry } from '$lib/builder/create';
@@ -56,6 +56,10 @@
 	import { PLAYER_LOCK } from '$lib/sync/downloads';
 	import { afterLocalWrite, downloadInBackground, ensureCascade, fetchAhead, fetchCard, fetchDistribution, playerActs, sendPending, syncState } from '$lib/sync/runtime.svelte';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import SearchView from '$lib/components/search/SearchView.svelte';
+	import { searchEngine } from '$lib/search/engine.svelte';
+	import type { LexiconInfo } from '$lib/filters';
 	import PanelBottomCloseIcon from '@lucide/svelte/icons/panel-bottom-close';
 	import PanelBottomOpenIcon from '@lucide/svelte/icons/panel-bottom-open';
 	import { actionFor, Debounce, inputOwns, keyStroke, mouseStroke, wheelStroke, type Action } from '$lib/player/bindings';
@@ -77,6 +81,21 @@
 	let windowWidth = $state(1280);
 	let landscape = $state(false);
 	let settingsOpen = $state(false);
+	/**
+	 * Search over the quiz (PLAN.md § Search page): opened by the Search binding
+	 * (Q, Alt+Q), the menu or the 🔍 button, closed by the same keys, Escape or
+	 * Back. The quiz stays mounted underneath, so it is as it was left; Search
+	 * stays mounted once opened, so it opens again at once.
+	 */
+	let searchOpen = $state(false);
+	let searchMounted = $state(false);
+	/** The strokes that open and close Search, for titles: "Q, Alt+Q or Esc". */
+	let searchKeys = $derived.by(() => {
+		const keys = dsp.bindings
+			.filter((b) => b.action === 'search' && b.kind === 'key')
+			.map((b) => [b.ctrl && 'Ctrl', b.alt && 'Alt', b.shift && 'Shift', b.meta && 'Meta', b.code.replace(/^Key/, '').replace(/^Digit/, '')].filter(Boolean).join('+'));
+		return `Search (${[...keys, 'Esc to close'].join(', ')})`;
+	});
 	/** The Name field's answer: an error under it, or that the rename was saved. */
 	let nameError = $state<string | null>(null);
 	let nameSaved = $state(false);
@@ -288,6 +307,11 @@
 	 * its writes are saved (PLAN.md § Taking a quiz → Instant at any size).
 	 */
 	function act(a: Action) {
+		if (a === 'search') {
+			if (searchOpen) closeSearch();
+			else openSearch();
+			return;
+		}
 		// The completion screen is in front: the new pass under it takes no action.
 		if (!player || v?.completion || !actions.pass(a, performance.now())) return;
 		const card = v?.card;
@@ -305,16 +329,58 @@
 
 		// Background downloads start no chunk while the action and its writes run.
 		void playerActs(async () => {
-			if (a === 'show_next') await p.showNext();
-			else if (a === 'toggle_grade') await p.toggle();
-			else await p.previous();
+			switch (a) {
+				case 'show_next':
+					return p.showNext();
+				case 'toggle_grade':
+					return p.toggle();
+				case 'previous':
+					return p.previous();
+				default: {
+					// Every action is named above: a new one must say what it does.
+					const unhandled: never = a;
+					throw new Error(`unhandled action ${String(unhandled)}`);
+				}
+			}
 		}).catch((e) => console.error('player action failed', e));
 	}
+
+	function openSearch() {
+		if (searchOpen) return;
+		searchMounted = true;
+		searchOpen = true;
+		menuOpen = desktop && menuOpen;
+		// A history entry, so a phone's Back gesture closes it.
+		pushState('', { search: true });
+	}
+
+	function closeSearch() {
+		if (!searchOpen) return;
+		searchOpen = false;
+		if (page.state.search) history.back();
+	}
+
+	// Back (the gesture, or the browser's button) closes Search.
+	$effect(() => {
+		if (!page.state.search && searchOpen) searchOpen = false;
+	});
+
+	// Search warms up while the quiz is up: the cascade's lexicon is read back
+	// into the worker if this device has it, so the first Q waits for nothing.
+	let warmed = false;
+	$effect(() => {
+		const c = v?.cascade;
+		const d = db;
+		if (warmed || !c || !d || v?.status !== 'ready') return;
+		warmed = true;
+		const info = { name: c.lexicon, letter_distribution: c.letter_distribution } as LexiconInfo;
+		setTimeout(() => void searchEngine.ensure(d, info, { download: false }).catch(() => {}), 1500);
+	});
 
 
 	/** The column layout on a phone: a tap in the quiz area acts by its third, Previous, Toggle or Show / Next. */
 	function tapColumn(e: MouseEvent) {
-		if ((e.target as HTMLElement).closest('input,button,a')) return;
+		if (searchOpen || (e.target as HTMLElement).closest('input,button,a')) return;
 		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
 		const third = Math.min(2, Math.max(0, Math.floor(((e.clientX - r.left) / Math.max(1, r.width)) * 3)));
 		act((['previous', 'toggle_grade', 'show_next'] as const)[third]);
@@ -323,8 +389,25 @@
 	function onKey(e: KeyboardEvent) {
 		// A confirmation owns the keyboard: Space or Enter there must not also act on the quiz.
 		if (confirmState.current) return;
+		const t0 = e.target as HTMLElement | null;
+		const inField = !!t0 && (t0.tagName === 'INPUT' || t0.tagName === 'TEXTAREA' || t0.tagName === 'SELECT' || t0.isContentEditable);
+		// The Search binding, wherever it is pressed, unless a text box is owed the key (a plain Q).
+		const searchKey = actionFor(dsp.bindings, keyStroke(e)) === 'search' && !(inField && inputOwns(e));
+		if (searchOpen) {
+			// Search keeps every other key: its boxes are typed in, its list scrolled.
+			if (e.key === 'Escape' || searchKey) {
+				e.preventDefault();
+				if (!e.repeat) closeSearch();
+			}
+			return;
+		}
 		if (settingsOpen) {
 			if (e.key === 'Escape') settingsOpen = false;
+			return;
+		}
+		if (searchKey && v) {
+			e.preventDefault();
+			if (!e.repeat) openSearch();
 			return;
 		}
 		// The completion screen keeps its keys: Space or Enter presses its focused button.
@@ -347,6 +430,7 @@
 	 * up: a click's answer is not held for the length of the click.
 	 */
 	function onMouse(e: MouseEvent) {
+		if (searchOpen) return;
 		// Middle-click autoscroll and paste are off everywhere in the quiz area.
 		if (e.button === 1) e.preventDefault();
 		if ((e.target as HTMLElement).closest('input,button,a')) return;
@@ -368,6 +452,7 @@
 	}
 
 	function onWheel(e: WheelEvent) {
+		if (searchOpen) return;
 		const s = wheelStroke(e);
 		if (!s) return;
 		const a = actionFor(dsp.bindings, s);
@@ -1036,9 +1121,36 @@
 		class="rounded px-2 py-1 text-left hover:bg-muted max-sm:py-2"
 		onclick={() => {
 			if (!desktop) menuOpen = false;
+			openSearch();
+		}}
+		title={searchKeys}>Search</button
+	>
+	<button
+		class="rounded px-2 py-1 text-left hover:bg-muted max-sm:py-2"
+		onclick={() => {
+			if (!desktop) menuOpen = false;
 			void openSettings();
 		}}>Settings</button
 	>
+{/snippet}
+
+{#snippet searchButton(cls: string)}
+	<button
+		class="{cls} z-10 rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+		onclick={openSearch}
+		aria-label="Search"
+		title={searchKeys}
+		data-open-search><SearchIcon class="size-4" /></button
+	>
+{/snippet}
+
+{#snippet searchLayer()}
+	<!-- Over the whole player; mounted from the first opening on, so it opens again at once. -->
+	{#if searchMounted}
+		<div class="fixed inset-0 z-30 flex flex-col bg-background p-3 md:p-6" class:hidden={!searchOpen} data-search-layer>
+			<SearchView cascadeLexicon={v?.cascade?.lexicon ?? null} onclose={closeSearch} closeHint={searchKeys} active={searchOpen} />
+		</div>
+	{/if}
 {/snippet}
 
 {#snippet statusBar()}
@@ -1143,7 +1255,7 @@
 {/snippet}
 
 {#if desktop}
-	<div class="flex h-screen">
+	<div class="flex h-screen" inert={searchOpen}>
 		{#if menuOpen}
 			<nav class="flex w-48 shrink-0 flex-col gap-1 border-r p-4 text-sm" aria-label="Player menu">{@render menuItems()}</nav>
 		{/if}
@@ -1163,6 +1275,7 @@
 				onwheel={onWheel}
 			>
 				{#if !menuOpen}{@render showMenu('absolute top-3 left-3')}{/if}
+				{@render searchButton('absolute top-3 right-3')}
 				<div class="relative flex min-h-0 flex-1 flex-col items-center">
 					<div bind:this={fitArea} data-fit-area class="flex flex-1 flex-col items-center self-stretch overflow-y-auto px-8 pb-8" style={`padding-top: ${dsp.question_top_px}px;`}>
 						<!-- The whole width of the page: a definition's column runs to its right edge. -->
@@ -1184,11 +1297,12 @@
 	     area, with its label at the bottom; or the question, then three rows of buttons
 	     under it, Previous, Toggle and Show / Next, the last nearest the thumb. ☰ opens
 	     the menu, Settings with it. -->
-	<div class="flex h-dvh flex-col">
+	<div class="flex h-dvh flex-col" inert={searchOpen}>
 		{#if v?.status === 'ready'}
 			{#if dsp.mobile_buttons === 'rows'}
 				<div class="relative flex min-h-0 flex-1 select-none" class:flex-col={!landscape} style="touch-action: manipulation">
 					{@render showMenu('absolute top-1 left-1')}
+					{@render searchButton('absolute top-1 right-1')}
 					<div
 						bind:this={fitArea}
 						data-fit-area
@@ -1214,6 +1328,7 @@
 					data-grade={gradeState ?? undefined}
 				>
 					{@render showMenu('absolute top-1 left-1')}
+					{@render searchButton('absolute top-1 right-1')}
 					<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 					<div
 						bind:this={fitArea}
@@ -1237,6 +1352,7 @@
 		{:else}
 			<div class="relative min-h-0 flex-1 p-6">
 				{@render showMenu('absolute top-1 left-1')}
+				{@render searchButton('absolute top-1 right-1')}
 				<div class="pt-8">{@render status()}</div>
 			</div>
 		{/if}
@@ -1251,6 +1367,7 @@
 		</div>
 	{/if}
 {/if}
+{@render searchLayer()}
 
 {#snippet widen(key: string)}
 	{@const o = offers[key]}

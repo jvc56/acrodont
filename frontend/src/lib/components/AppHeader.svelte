@@ -2,13 +2,14 @@
 	// The signed-in site header, on every page but the player, which keeps the
 	// whole screen for the quiz and has its own rail. Acrodont goes to the
 	// Cascades page, the landing page, which holds New cascade and the Trash;
-	// an admin also has Admin.
+	// Search lists words (PLAN.md § Search page); an admin also has Admin.
 	import { page } from '$app/state';
 	import { session } from '$lib/auth/session.svelte';
 	import SyncStatus from '$lib/components/SyncStatus.svelte';
 	import OfflineStatus from '$lib/components/OfflineStatus.svelte';
 
 	const links = $derived([
+		{ href: '/search', label: 'Search' },
 		...(session.isAdmin ? [{ href: '/admin', label: 'Admin' }] : [])
 	]);
 

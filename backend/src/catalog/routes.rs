@@ -17,7 +17,7 @@ use uuid::Uuid;
 use super::upload::{self, UploadErrors};
 use super::{ItemKind, store};
 use crate::app::AppState;
-use crate::auth::Admin;
+use crate::auth::{Admin, Session};
 use crate::auth::routes::ClientIp;
 use crate::error::{ApiError, ApiResult};
 
@@ -46,6 +46,8 @@ pub fn router(state: &AppState) -> Router<AppState> {
     Router::new()
         .route("/api/lexicons", get(lexicons))
         .route("/api/letter-distributions/{name}", get(letter_distribution))
+        .route("/api/lexicons/{name}/pack", get(pack_core))
+        .route("/api/lexicons/{name}/pack/definitions", get(pack_definitions))
         .route("/api/admin/catalog", get(admin_catalog))
         .route(
             "/api/admin/letter-distributions/{id}",
@@ -70,6 +72,10 @@ pub struct LexiconListing {
     max_order_rank: u32,
     max_leave_num_anagrams: Option<u32>,
     max_leave_order_rank: Option<u32>,
+    /// The revisions of the words this instance searches: a device refreshes
+    /// its packs for Search when they move (PLAN.md § Search page).
+    definitions_revision: i32,
+    playability_revision: i32,
 }
 
 /// Only items loaded by every live instance are listed, so no listed item can
@@ -124,9 +130,66 @@ async fn lexicons(
             max_order_rank: lex.max_order_rank,
             max_leave_num_anagrams: leaves.map(|s| s.max_num_anagrams),
             max_leave_order_rank: leaves.map(|s| s.max_order_rank),
+            definitions_revision: lex.definitions_revision,
+            playability_revision: lex.playability_revision,
         });
     }
     Ok(Json(out))
+}
+
+#[derive(Clone, Copy)]
+enum PackPart {
+    Core,
+    Definitions,
+}
+
+async fn pack_core(state: State<AppState>, session: Session, name: Path<String>) -> ApiResult<Response> {
+    pack(state, session, name, PackPart::Core).await
+}
+
+async fn pack_definitions(state: State<AppState>, session: Session, name: Path<String>) -> ApiResult<Response> {
+    pack(state, session, name, PackPart::Definitions).await
+}
+
+/// A lexicon for the device's own search (PLAN.md § Search page → Lexicon
+/// packs), in this instance's index's word order so the two parts line up:
+/// the core is `word⇥playability` lines, the definitions one line per word.
+/// Signed-in accounts only, under the search limit; the response is
+/// compressed like every API response, and `X-Lexicon-Revisions` names the
+/// `definitions.playability` revisions it was written at.
+async fn pack(State(state): State<AppState>, Session(user): Session, Path(name): Path<String>, part: PackPart) -> ApiResult<Response> {
+    state.limits.search.check(&user.id)?;
+    let Some(lex) = state.catalog.snapshot().lexicon_by_name(&name).cloned() else {
+        return Err(ApiError::NotFound);
+    };
+    let revisions = lex.revisions();
+    let body = tokio::task::spawn_blocking(move || {
+        let d = &lex.distribution;
+        let mut out = String::with_capacity(lex.words.len() * 16);
+        for w in &lex.words {
+            match part {
+                PackPart::Core => {
+                    out.push_str(&d.to_magpie(&w.tiles));
+                    out.push('\t');
+                    out.push_str(&w.playability.to_string());
+                }
+                PackPart::Definitions => out.push_str(&w.definition),
+            }
+            out.push('\n');
+        }
+        out
+    })
+    .await
+    .map_err(|e| ApiError::Internal(e.into()))?;
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8".to_owned()),
+            (axum::http::header::CACHE_CONTROL, "private, no-store".to_owned()),
+            (axum::http::HeaderName::from_static("x-lexicon-revisions"), format!("{}.{}", revisions.definitions, revisions.playability)),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 #[derive(Serialize)]

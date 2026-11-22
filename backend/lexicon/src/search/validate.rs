@@ -16,7 +16,6 @@ use super::wire::{ConditionType, Params, PathError, WireCondition, WireGroup, Wi
 use super::{Condition, ConditionKind, Group, Node, QuizType, Range, SearchSpec};
 use crate::catalog::index::{LeaveSetIndex, LexiconIndex};
 use crate::catalog::tiles::{Distribution, NotationError, Tile, BLANK};
-use crate::catalog::Snapshot;
 
 pub const MAX_ROWS: usize = 100;
 /// Matches the `search_groups.id` CHECK (0–99), counting the top group.
@@ -37,7 +36,9 @@ pub struct TargetInfo<'a> {
     pub lexicon: &'a Arc<LexiconIndex>,
     /// The lexicon's leave values, required for a Leave Value quiz.
     pub leaves: Option<&'a Arc<LeaveSetIndex>>,
-    pub snapshot: &'a Snapshot,
+    /// Another lexicon by name, for In Lexicon: the server's catalog
+    /// snapshot, or the lexicons the browser has loaded.
+    pub lexicon_named: &'a dyn Fn(&str) -> Option<Arc<LexiconIndex>>,
 }
 
 impl TargetInfo<'_> {
@@ -485,7 +486,7 @@ impl Validator<'_> {
                     return None;
                 }
                 let x = self.target?;
-                match x.snapshot.lexicon_by_name(name) {
+                match (x.lexicon_named)(name) {
                     None => {
                         self.err(path, "lexicon", format!("There is no lexicon named {name}."));
                         None
@@ -498,7 +499,7 @@ impl Validator<'_> {
                         );
                         None
                     }
-                    Some(other) => Some(ConditionKind::InLexicon(other.clone())),
+                    Some(other) => Some(ConditionKind::InLexicon(other)),
                 }
             }
             (T::InWordList, Params::Entries(e)) => self.entries(e, path),

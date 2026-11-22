@@ -1,11 +1,26 @@
 # syntax=docker/dockerfile:1.7
 # Nginx serving the SvelteKit static build and proxying /api to the backend.
 # Pinned by digest, as in backend.Dockerfile.
+# The browser's search engine (PLAN.md § Search page): the backend's lexicon
+# crate built as WebAssembly, the same Rust image and toolchain as the server.
+FROM rust:1.98-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e AS wasm
+ARG CARGO_BUILD_JOBS=2
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
+WORKDIR /src/backend
+COPY backend/ ./
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/backend/target \
+    find src lexicon search-wasm Cargo.toml Cargo.lock -type f -exec touch {} + \
+    && rustup target add wasm32-unknown-unknown \
+    && cargo build --locked --release -p search-wasm --target wasm32-unknown-unknown \
+    && cp target/wasm32-unknown-unknown/release/search_wasm.wasm /search.wasm
+
 FROM node:22-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9 AS build
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend/ ./
+COPY --from=wasm /search.wasm src/lib/search/search.wasm
 COPY contract-fixtures/ /src/contract-fixtures/
 # The monotonic build number and git hash (PLAN.md § API → POST /api/sync).
 ARG APP_BUILD=0

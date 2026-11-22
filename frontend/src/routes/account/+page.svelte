@@ -14,6 +14,7 @@
 	import { removeAccountData } from '$lib/local/accounts';
 	import { closeUserDb, countUnsent } from '$lib/local/open';
 	import SettingRow from '$lib/components/SettingRow.svelte';
+	import LexiconPacks from '$lib/components/search/LexiconPacks.svelte';
 	import { syncNow, syncState, tabMaySync, unsentCount } from '$lib/sync/runtime.svelte';
 	import { updates } from '$lib/sw/client.svelte';
 
@@ -175,6 +176,8 @@
 			<Button variant="outline" onclick={doLogout}>Log out</Button>
 		</Card.Content>
 	</Card.Root>
+
+	<LexiconPacks />
 
 	<Card.Root>
 		<Card.Header>

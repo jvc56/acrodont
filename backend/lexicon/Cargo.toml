@@ -1,0 +1,16 @@
+[package]
+name = "lexicon"
+version = "0.1.0"
+edition = "2024"
+description = "The lexicon index and the search engine (PLAN.md § Catalog Indexes, § Search Engine): no I/O, shared by the server and the browser's WebAssembly build."
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+tracing = "0.1.44"
+sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "macros"], optional = true }
+
+[features]
+# The server stores quiz types, group ops, condition types and parts of
+# speech as Postgres enums; the browser's build has no database.
+sqlx = ["dep:sqlx"]

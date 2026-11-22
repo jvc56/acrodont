@@ -679,10 +679,27 @@ describe('controls', () => {
 		for (let i = 0; many.length < MAX_BINDINGS; i++) many = bind(many, 'show_next', { ...x, code: `F${i}`, alt: true }).bindings;
 		expect(many).toHaveLength(MAX_BINDINGS);
 		expect(JSON.stringify(many).length).toBeLessThan(16_000);
-		expect(bind(many, 'show_next', { ...x, code: 'KeyQ' }).refused).toBe(true);
+		expect(bind(many, 'show_next', { ...x, code: 'KeyZ' }).refused).toBe(true);
 		// Moving a stroke it already holds adds nothing, so it still may.
 		expect(bind(many, 'previous', x).refused).toBe(false);
-		expect(normalizeBindings([...many, { action: 'previous', kind: 'key', code: 'KeyQ' }])).toHaveLength(MAX_BINDINGS);
+		expect(normalizeBindings([...many, { action: 'previous', kind: 'key', code: 'KeyZ' }])).toHaveLength(MAX_BINDINGS);
+	});
+
+	it('a list saved before Search existed keeps its bindings and gains Q and Alt+Q, or what of them is free', () => {
+		const q = { kind: 'key', code: 'KeyQ', ctrl: false, shift: false, alt: false, meta: false } as const;
+		const old = DEFAULT_BINDINGS.filter((b) => b.action !== 'search').map((b) => (b.code === 'KeyJ' ? { ...b, code: 'KeyK' } : b));
+		const merged = normalizeBindings(old);
+		expect(merged.slice(0, old.length)).toEqual(old);
+		expect(merged.filter((b) => b.action === 'search')).toEqual([
+			{ action: 'search', ...q },
+			{ action: 'search', ...q, alt: true }
+		]);
+		// Q already the user's for Previous: Search gets Alt+Q alone.
+		const qTaken = normalizeBindings([...old, { action: 'previous', ...q }]);
+		expect(actionFor(qTaken, q)).toBe('previous');
+		expect(qTaken.filter((b) => b.action === 'search')).toEqual([{ action: 'search', ...q, alt: true }]);
+		// Both taken: nothing is free, so the list is the defaults, as an unreadable one is.
+		expect(normalizeBindings([...old, { action: 'previous', ...q }, { action: 'previous', ...q, alt: true }])).toEqual(DEFAULT_BINDINGS);
 	});
 
 	it('the same action twice within the repeat guard counts once', () => {

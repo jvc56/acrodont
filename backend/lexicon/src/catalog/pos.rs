@@ -4,9 +4,10 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "part_of_speech", rename_all = "snake_case")]
+#[cfg_attr(feature = "sqlx", sqlx(type_name = "part_of_speech", rename_all = "snake_case"))]
 pub enum PartOfSpeech {
     Adjective,
     Adverb,

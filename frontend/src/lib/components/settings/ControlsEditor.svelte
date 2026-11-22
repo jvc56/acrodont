@@ -32,7 +32,8 @@
 	const ACTIONS: { action: Action; label: string }[] = [
 		{ action: 'show_next', label: 'Show / Next' },
 		{ action: 'toggle_grade', label: 'Toggle grade' },
-		{ action: 'previous', label: 'Previous' }
+		{ action: 'previous', label: 'Previous' },
+		{ action: 'search', label: 'Search' }
 	];
 
 	let capturing = $state<Action | null>(null);

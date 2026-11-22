@@ -18,6 +18,9 @@ Thumbs.db
 !.env.example
 !.env.test
 
+# Built by `make wasm`, or in the frontend image (PLAN.md § Search page)
+/src/lib/search/search.wasm
+
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*

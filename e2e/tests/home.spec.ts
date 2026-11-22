@@ -11,7 +11,7 @@ test('signed out, / is the log-in page, with the way to create an account', asyn
 	await expect(page).toHaveURL(/\/register$/);
 });
 
-test('signed in, / is the Cascades page, with New cascade and the Trash on it; the header has Admin only for admins', async ({ page }) => {
+test('signed in, / is the Cascades page, with New cascade and the Trash on it; the header has Search, and Admin only for admins', async ({ page }) => {
 	await newUser(page, 'home');
 	await page.goto('/');
 	await expect(page).toHaveURL(ROOT_URL);
@@ -19,7 +19,8 @@ test('signed in, / is the Cascades page, with New cascade and the Trash on it; t
 	await expect(page.getByRole('link', { name: 'New cascade' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Trash' })).toBeVisible();
 	await expect(page.getByText('The Trash is empty.')).toBeVisible();
-	await expect(page.getByRole('navigation', { name: 'Main' })).toHaveCount(0);
+	const nav = page.getByRole('navigation', { name: 'Main' });
+	await expect(nav.getByRole('link')).toHaveText(['Search']);
 	// An old link to /trash lands on it.
 	await page.goto('/trash');
 	await expect(page).toHaveURL(/^https?:\/\/[^/]+\/#trash$/);

@@ -14,6 +14,7 @@ import type {
 	QuestionRow,
 	QuizRow
 } from './rows';
+import type { LexiconPackRow } from '$lib/search/packs';
 import { CASCADE_SETTING_DEFAULTS, touchesOf } from './rows';
 
 type QuestionKeyPath = [string, number];
@@ -47,6 +48,7 @@ export interface UserSchema extends DBSchema {
 	questions: { key: QuestionKeyPath; value: QuestionKey; indexes: { cascade_id: string } };
 	cards: { key: QuestionKeyPath; value: CardRow; indexes: { cascade_id: string } };
 	outbox: { key: number; value: OutboxEntry; indexes: { cascade_id: string; cursor_quiz: string; touches: string } };
+	lexicon_packs: { key: string; value: LexiconPackRow };
 }
 
 export type UserDb = IDBPDatabase<UserSchema>;
@@ -147,6 +149,11 @@ export const MIGRATIONS: Array<
 				row = await row.continue();
 			}
 		}
+	},
+	// 5: each lexicon Search has built on this device, kept to read back
+	// (PLAN.md § Search page → Lexicon packs).
+	(db) => {
+		db.createObjectStore('lexicon_packs', { keyPath: 'lexicon' });
 	}
 ];
 

@@ -67,7 +67,7 @@ jobs:
         with:
           workspaces: backend
       - name: cargo clippy
-        run: cd backend && SQLX_OFFLINE=true cargo clippy --locked --all-targets -- -D warnings
+        run: cd backend && SQLX_OFFLINE=true cargo clippy --locked --workspace --all-targets -- -D warnings
 
   unit-backend:
     runs-on: ubuntu-24.04
@@ -80,7 +80,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: backend
-      - name: make test-unit-backend (cargo test --lib)
+      - name: make test-unit-backend (cargo test --lib --workspace)
         run: make test-unit-backend
 
   unit-frontend:

@@ -42,6 +42,7 @@
 	import { getMeta } from '$lib/local/meta';
 	import { presetList, rememberPreset, startingPreset, startingSettings, type Preset } from '$lib/settings/presets';
 	import { DEFAULT_STORAGE_LIMIT, formatBytes } from '$lib/cascades/storage';
+	import { takeHandoff } from '$lib/search/state.svelte';
 	import { userDb } from '$lib/local/open';
 	import { PREVIEW_MANUAL_ENTRIES } from '$lib/sync/config';
 	import type { Distribution } from '$lib/tiles';
@@ -112,6 +113,14 @@
 		try {
 			lexicons = await loadLexicons();
 			lexicon = lexicons[0]?.name ?? '';
+			// New cascade from this search (PLAN.md § Search page): its lexicon and
+			// filters, under Definition, the quiz type whose questions are words.
+			const handed = takeHandoff();
+			if (handed) {
+				quizType = lastType = 'definition';
+				if (lexicons.some((l) => l.name === handed.lexicon)) lexicon = handed.lexicon;
+				root = handed.root;
+			}
 		} catch {
 			loadError = 'Could not load the lexicons. Creating a cascade needs a connection.';
 		}

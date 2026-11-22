@@ -50,6 +50,11 @@ Any cascade or quiz can be downloaded as a word list of everything in it, or of
 just what was answered correctly or missed. See
 [Exporting words](#exporting-words).
 
+**Search** lists the words a set of filters matches in a lexicon, and
+downloads the list, without making a cascade; it searches on the device, so
+it works offline once the lexicon is there, and a quiz switches to it and
+back with `Q`. See [Search page](#search-page).
+
 A cascade's Source quiz can hold up to **300,000 questions**: any word search
 over a whole lexicon fits.
 
@@ -1668,6 +1673,13 @@ The default desktop bindings are:
 | **Show / Next** | Left click | Space, `,`, Enter |
 | **Toggle grade** | Right click | `X`, `M` |
 | **Previous** | Middle click | Backspace, `J` |
+| **Search** | — | `Q`, Alt+`Q` |
+
+**Search** opens the [Search page](#search-page) over the quiz and closes it
+again (Escape closes it too). In typed mode a plain `Q` is the answer's
+letter, so Alt+`Q` is the stroke that works there; inside Search a plain `Q`
+in a box is a letter for the same reason. While Search is open no other
+binding acts on the quiz.
 
 An action can hold any number of bindings, up to 64 on a device in all, but always at least one. A device
 whose bindings were saved before `,`, `M`, `J` and Enter were added gets them
@@ -1721,9 +1733,11 @@ with **Reset controls to defaults**.
   (see [Where a setting applies](#where-a-setting-applies)): a laptop's
   trackpad and a desktop's five-button mouse want different bindings (all
   cascades on this device), and one cascade can differ. A change applies to
-  this cascade on this device, then offers the wider scopes. A list that is
-  unreadable, or leaves an action with none,
-  is read as the defaults. There is no `set_bindings` operation and no
+  this cascade on this device, then offers the wider scopes. An action the
+  list has none for gets its default bindings that no other action holds, so
+  a list saved before Search existed keeps its own and gains `Q` and Alt+`Q`
+  (or whichever of them is free). A list that is unreadable, or still leaves
+  an action with none, is read as the defaults. There is no `set_bindings` operation and no
   bindings table on the server.
 
 #### Touch zones
@@ -1969,6 +1983,83 @@ local data. A `404` from the token request means the quiz or cascade was purged 
 another device or by the retention period while the dialog was open; the dialog
 says it has been deleted and, two seconds later, goes to the Cascades page, rather than offering
 the offline fallback, which would fail for the same reason.
+
+### Search page
+
+**Search** (`/search`, in the header, and over the player with the
+[Search binding](#controls), the player menu or its 🔍 button) has the
+builder's lexicon select and filter rows, and lists the words that match
+instead of making a cascade, as Zyzzyva's Search tab does. Like every page but
+the sign-in pages it is for signed-in accounts only. How it was designed, and
+the eleven decisions behind it, are in `SEARCH_PLAN.md`.
+
+- **The page.** No quiz type: Search lists words, so the filters are those a
+  Definition quiz allows, every type but Leave Value. It starts as one AND
+  group holding one **Anagram Match** row with an empty pattern, the cursor in
+  it. A row with nothing typed in it yet is unfinished rather than wrong and
+  shows no error. Results follow the filters 150 ms after the last change,
+  with the count and the time the search took; a row in error keeps the last
+  result, dimmed. **Clear** goes back to the one empty row.
+- **The list.** One row per word, laid out like an answer row: probability
+  order, front hooks, the word with its inner-hook dots, back hooks,
+  playability order (off by default) and definition, each optional. The order
+  is alphagram then word, as Zyzzyva sorts, with each set of anagrams banded;
+  alphabetical, probability (length, then probability order), playability
+  (length, then playability order) and length are the others. Only the rows
+  in view are drawn, fetched from the worker 200 at a time, so a whole
+  lexicon scrolls like twenty words. There is no cap on results; the 2,000 ms
+  deadline the server uses is the only limit ("too broad").
+- **Download** writes the whole result in the worker: **Text**, a word a
+  line, or **CSV** (RFC 4180, CRLF, a header) with any of `word`,
+  `alphagram`, `length`, `probability_order`, `playability_order`,
+  `front_hooks`, `back_hooks`, `inner_hooks` (`front`, `back`, `both` or
+  empty) and `definition`, in that order, a definition that a spreadsheet
+  would read as a formula written after an apostrophe as in
+  [Exporting words](#exporting-words). The file is named for the lexicon and
+  the filters, as a new cascade's name is.
+- **Load Search… and Save Search…** are the builder's, online only. **New
+  cascade from this search** opens the builder with this lexicon and these
+  filters, under Definition.
+- **One search, remembered.** The page and the player's Search show the same
+  search, kept in `meta` (`search_state`) 300 ms after each change, so a
+  reload, or the next Q, finds it as it was left.
+- **From a quiz.** The Search binding opens Search over the whole player,
+  with the cascade's lexicon; the binding again, Escape or Back (opening
+  adds a history entry) closes it. The quiz underneath stays mounted and
+  inert, so a revealed answer, typed words, a toggled grade and the scroll
+  are all as they were; Search stays mounted once opened, so it opens again
+  at once. While the quiz is up, the worker reads in the cascade's lexicon if
+  the device has it, so the first Q waits for nothing.
+
+**Searching on the device.** The search engine and the lexicon index are the
+`lexicon` crate (`backend/lexicon/`), which the server uses and which
+`backend/search-wasm/` builds as WebAssembly for the browser, so a search on
+the device returns exactly the words a cascade made from the same filters
+holds. It runs in a module Web Worker (`lib/search/worker.ts`) that holds the
+lexicons this tab has loaded and the latest result; the page asks it only for
+the rows it draws. The WebAssembly file is precached with the app shell, and
+the page's `script-src` carries `'wasm-unsafe-eval'` so it compiles.
+
+**Lexicon packs.** The server sends a lexicon as two packs, in its index's
+word order: the **core**, `word⇥playability` lines
+(`GET /api/lexicons/:name/pack`), and the **definitions**, a line per word
+(`…/pack/definitions`), each named by the revisions it was written at. A
+lexicon is downloaded only once a row has something in it, so opening Search,
+or passing through a lexicon on the way to another, fetches nothing. The
+worker builds its index from the core, and adds the definitions only once
+something reads them: the Definitions column (on by default), a Definition,
+Part of Speech or Root Word row, or a CSV with definitions. What the device
+keeps (`lexicon_packs`, one row per lexicon) is the **built index**, encoded
+(`lexicon::catalog::encoded`) and gzipped: reading it back takes a fraction of
+a second where building takes seconds (CSW24: 2.5 s to build in WebAssembly
+on a desktop, 1.3 s to add its definitions, 0.5 s to read back, about 145 MB
+in the worker). A kept index is used as it is, and rebuilt in the background
+when `GET /api/lexicons` shows newer revisions or the encoding's format
+changes; it is never evicted, and Account lists each with its size and
+**Remove**. **Once a lexicon is on the device, Search works entirely
+offline**: every filter but Leave Value, the list and the download. In
+Lexicon needs the other lexicon on the device too. The lexicon list is kept in
+`meta` (`lexicons`) for the select offline.
 
 ---
 
@@ -2812,7 +2903,13 @@ never block requests.
 
 ## Search Engine
 
-`backend/src/search/` is a pure Rust module with no I/O:
+The engine is pure Rust with no I/O, in the `lexicon` crate
+(`backend/lexicon/src/search/`, with the index in `…/catalog/`), which the
+server re-exports as `crate::search` and `crate::catalog` and the browser runs
+as WebAssembly for the [Search page](#search-page). A search's deadline is a
+`clock::Deadline`, an `Instant` on the server and the page's clock in the
+browser; In Lexicon finds the other lexicon through a lookup the caller
+passes:
 
 ```rust
 pub struct SearchSpec { pub root: Group }
@@ -3123,6 +3220,7 @@ question set is written for it; the [scale tests](#scale-tests) run there:
 | Saved searches, admin, account changes | Trash: restoring quizzes and cascades (a restored quiz whose rows were dropped is playable once they are fetched), Delete forever |
 | Downloading a cascade's answer cards | Changing a cascade's settings (quiz options included), the display settings and controls |
 | Exporting answers or definitions the device has not downloaded | Exporting anything the device already has |
+| The first download of a lexicon for [Search](#search-page), its definitions, and a newer revision of either (the kept one searches meanwhile) | Searching a lexicon on the device, with every filter but Leave Value; the results list and its download; switching between a quiz and Search |
 
 ### On the device
 
@@ -3263,7 +3361,7 @@ stores are:
 
 | Store | Contents |
 |---|---|
-| `meta` | user id, username, `device_id` (a UUID made once per device **and user**: it lives in this user-scoped store, so each account on a device syncs as its own device, and its `device_seq` counts from 1 for that account), sync cursor, last sync time, the trash retention period and `max_quiz_questions` as `/api/auth/me` last reported them, the account's [storage](#storage-limit) (`storage_bytes` and `max_storage_bytes`) as `/api/auth/me` or the latest sync response reported it, when this device last opened each cascade (see [Downloads](#on-the-device) for what counts as an open), and the ids the [budget](#on-the-device) pass dropped while they were still inside the window, which are treated as outside it until the user opens them; `held`, the cascades whose last replay held operations back, each with the quiz whose rows they wait for (see [The sync cycle](#the-sync-cycle), step 4); the settings changes of the [scopes](#where-a-setting-applies) this device holds, each setting name to `{ value, at }`: `cascade_device_scope` (this cascade on this device, by cascade), `device_scope` (all cascades on this device), and `account_settings`, the account's changes for all cascades on all devices as the last sync response carried them (`values`) with the changes made here and not yet sent (`pending`); `clock` (`offset_ms`, the server's clock less this device's, from the last sync response's `server_time`; see [Clocks](#clocks)); `presets` (`{ version, list }`, the account's [presets](#presets) as the last sync response that carried them had them); and `last_preset_id`, the preset the builder used last (null for Defaults). The distribution tiles live in their own store below, not here |
+| `meta` | user id, username, `device_id` (a UUID made once per device **and user**: it lives in this user-scoped store, so each account on a device syncs as its own device, and its `device_seq` counts from 1 for that account), sync cursor, last sync time, the trash retention period and `max_quiz_questions` as `/api/auth/me` last reported them, the account's [storage](#storage-limit) (`storage_bytes` and `max_storage_bytes`) as `/api/auth/me` or the latest sync response reported it, when this device last opened each cascade (see [Downloads](#on-the-device) for what counts as an open), and the ids the [budget](#on-the-device) pass dropped while they were still inside the window, which are treated as outside it until the user opens them; `held`, the cascades whose last replay held operations back, each with the quiz whose rows they wait for (see [The sync cycle](#the-sync-cycle), step 4); the settings changes of the [scopes](#where-a-setting-applies) this device holds, each setting name to `{ value, at }`: `cascade_device_scope` (this cascade on this device, by cascade), `device_scope` (all cascades on this device), and `account_settings`, the account's changes for all cascades on all devices as the last sync response carried them (`values`) with the changes made here and not yet sent (`pending`); `clock` (`offset_ms`, the server's clock less this device's, from the last sync response's `server_time`; see [Clocks](#clocks)); `presets` (`{ version, list }`, the account's [presets](#presets) as the last sync response that carried them had them); and `last_preset_id`, the preset the builder used last (null for Defaults); `lexicons`, `GET /api/lexicons` as it last answered, and `search_state`, the [Search page](#search-page)'s search as it was left. The distribution tiles live in their own store below, not here |
 | `distributions` | the tiles (letter, blank letter, value, vowel) of every distribution the user's cascades use, keyed by name. A pulled cascade row carries its `lexicon` and `letter_distribution` names, and the download manager fetches a distribution the store lacks from `GET /api/letter-distributions/:name` before any cascade on it shows **Available offline**; typed mode on a cascade whose distribution is missing shows "needs a connection" like a missing card, since it cannot split typed text into tiles |
 | `cascades`, `quizzes`, `quiz_questions`, `quiz_attempts` | the **base**: the server's rows as of the last pull, written only by the sync engine. A base question row also holds its `position`, which the device computes from the quiz's seed in a worker when it builds or rebuilds the quiz, once per attempt; the player keeps the inverse map in memory for the quiz being played. A base quiz row also carries a `pending` flag, set by the staging move and the drop pass on an **active** quiz when its question rows are yet to be fetched and its counters show any grade (an unplayed quiz needs only its index list; a cleared quiz is never flagged, since its rows are fetched only for a restore or an export), and cleared only by the full fetch sequence |
 | `overlay_cascades`, `overlay_quizzes`, `overlay_quiz_questions`, `overlay_quiz_attempts` | the **overlay**: only the rows the outbox has changed or created, keyed like the base. The player's view of any row is the overlay's version if there is one, else the base's. It holds a few hundred rows in normal use, never a second copy of a cascade, except for a level created by a `finish` that is still in the outbox, which lives there until the finish is acknowledged, and except during a long offline session, when it holds one row per pending grade until the outbox drains |
@@ -3271,8 +3369,9 @@ stores are:
 | `cards` | the **answers** per cascade, keyed by `(cascade_id, idx)`, with the definitions and hooks when the cascade's settings asked for them. This is the only store eviction ever touches |
 | `staging_cascades`, `staging_quizzes`, `staging_quiz_questions`, `staging_quiz_attempts` | the **staging** stores, mirroring the four base stores: where a pull's rows land when the rebase cannot write them straight to the base (see [The sync cycle](#the-sync-cycle)). Written by the pull, read only by the rebase, and cleared at the start of every pull, so an interrupted one leaves nothing behind |
 | `outbox` | operations not yet accepted by the server, in `device_seq` order |
+| `lexicon_packs` | the lexicons [Search](#search-page) has built on this device, one row per lexicon: the encoded index, gzipped, with the revisions and the format it was built at and whether it holds the definitions. Never evicted; Account's **Remove** deletes one |
 
-**Schema versions.** The per-user database is at **version 4**. Each migration
+**Schema versions.** The per-user database is at **version 5**. Each migration
 upgrades from one version to the next inside the upgrade transaction, and they
 run one after another (`upgradeFrom` in `lib/local/db.ts`): a migration that
 rewrites rows finishes its rewrites before the next one starts, so two never
@@ -3289,7 +3388,7 @@ brings the server's; version 4 moves to settings kept as changes in
 `settings` out of every `set_cascade_options` still in the outbox (deleting
 the entry when nothing else is left in it), and resets each cascade row's
 `settings` in the base, overlay and staging stores to `{}` until its next
-pull brings the server's.
+pull brings the server's; version 5 creates `lexicon_packs`.
 
 **Downloads.**
 - A cascade starts downloading the moment it is created. That covers the user
@@ -5896,8 +5995,10 @@ endpoints (see [Presets](#presets-api)).
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/lexicons` | `[{ name, letter_distribution, word_count, leave_count, max_num_anagrams, max_order_rank, max_leave_num_anagrams, max_leave_order_rank }]`, where every `leave_` figure is `null` for a lexicon without leave values. The four maxima are the range [ceilings](#filter-reference) the client cannot derive for itself, all taken from the [index](#derived-attributes): `max_num_anagrams` is the largest `num_anagrams` over the words, and `max_order_rank` the size of the largest length bucket, which is the highest rank Probability Order and Playability Order can reach, with the two `leave_` figures the same over the leaves, by size. The other ceilings need no endpoint: the quiz type gives 15 or 6, `GET /api/letter-distributions/:name` gives the highest tile value behind Point Value's, and `word_count` and `leave_count` are the two limit filters', which rank a whole group's survivors together. Only items loaded by every live instance, per `catalog_instance_status`, are listed, so no listed item can fail on another instance. |
+| `GET` | `/api/lexicons` | `[{ name, letter_distribution, word_count, leave_count, max_num_anagrams, max_order_rank, max_leave_num_anagrams, max_leave_order_rank, definitions_revision, playability_revision }]`, the two revisions being those of the words this instance searches, which a device compares its [Search](#search-page) copy with, where every `leave_` figure is `null` for a lexicon without leave values. The four maxima are the range [ceilings](#filter-reference) the client cannot derive for itself, all taken from the [index](#derived-attributes): `max_num_anagrams` is the largest `num_anagrams` over the words, and `max_order_rank` the size of the largest length bucket, which is the highest rank Probability Order and Playability Order can reach, with the two `leave_` figures the same over the leaves, by size. The other ceilings need no endpoint: the quiz type gives 15 or 6, `GET /api/letter-distributions/:name` gives the highest tile value behind Point Value's, and `word_count` and `leave_count` are the two limit filters', which rank a whole group's survivors together. Only items loaded by every live instance, per `catalog_instance_status`, are listed, so no listed item can fail on another instance. |
 | `GET` | `/api/letter-distributions/:name` | `{ name, tiles: [{ letter, blank_letter, count, value, is_vowel }] }` in tile order (blank first), for parsing, display and the tile palette. Read straight from `letter_distribution_tiles`, never from an in-memory index, so it needs no `catalog_instance_status` gate and a device can fetch a distribution from an instance that is still indexing the lexicons built on it |
+| `GET` | `/api/lexicons/:name/pack` | The lexicon for the device's own [search](#search-page): `word⇥playability` lines in the index's word order, `text/plain`, compressed like every response, `Cache-Control: private, no-store`, with `X-Lexicon-Revisions: <definitions>.<playability>`. Signed-in accounts only (`401` otherwise), under the search rate limit; `404` for a lexicon this instance has not loaded |
+| `GET` | `/api/lexicons/:name/pack/definitions` | The same lexicon's definitions, one line per word in the same order, with the same headers and rules |
 | `POST` | `/api/search/preview` | Body `{ lexicon, quiz_type, filters }` → `{ count, sample[], over_cap, storage_bytes }`, where `storage_bytes` (a number) is what a cascade made from this search would hold as created, by the [storage formula](#storage-limit) with the keys' real bytes and the spec, which is exactly what creation then stores, or `400` with `{ errors: [{ path, field, message }] }`, where `path` is the row's child indexes from the top group |
 | `GET` | `/api/searches` | `[{ id, name, quiz_type, word_list_entries, created_at, updated_at }]`: the user's saved searches **without their trees**, with `word_list_entries` the tree's total In Word List entries, so the list **Load Search…** shows stays small however many 300,000-entry lists a user keeps (as many as fit in the account's [storage](#storage-limit)) |
 | `GET` | `/api/searches/:id` | One saved search's whole tree, `{ id, name, quiz_type, filters }`, in the same shape `POST` accepts, In Word List entries included: what Load Search… fetches for the search the user picks, and rebuilds the form from. The `quiz_type` is what lets the builder flag an In Word List row on load. `404` for another user's or a deleted search |
@@ -6654,7 +6755,9 @@ October 2026, taught most of what follows (BIRDTEST_LESSONS_PLAN.md).
     places that can each express part of it, because neither can hold all of it.
     - **SvelteKit's `kit.csp`, in `hash` mode**, writes a
       `<meta http-equiv="Content-Security-Policy">` into every built page:
-      `default-src 'self'; script-src 'self' <the build's hashes>; style-src 'self' 'unsafe-inline'; object-src 'none'`.
+      `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' <the build's hashes>; style-src 'self' 'unsafe-inline'; object-src 'none'`.
+      `'wasm-unsafe-eval'` lets the [Search](#search-page) worker compile its
+      WebAssembly and allows no `eval`.
       `adapter-static` starts the app from an **inline** bootstrap `<script>`,
       which a plain `script-src 'self'` would block, leaving a blank page online
       and offline alike; the hashes allow exactly that script and nothing else,

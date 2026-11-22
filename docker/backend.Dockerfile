@@ -30,7 +30,7 @@ COPY backend/ ./
 # cargo and the image shipped another checkout's binary. Touch first (MIG-2).
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/backend/target \
-    find src migrations build.rs Cargo.toml Cargo.lock -type f -exec touch {} + \
+    find src lexicon search-wasm migrations build.rs Cargo.toml Cargo.lock -type f -exec touch {} + \
     && cargo build --release --locked --bin acrodont \
     && cp target/release/acrodont /usr/local/bin/acrodont
 

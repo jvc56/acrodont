@@ -21,7 +21,9 @@ export default defineConfig({
 				mode: 'hash',
 				directives: {
 					'default-src': ['self'],
-					'script-src': ['self'],
+					// wasm-unsafe-eval lets the search worker compile its WebAssembly
+					// (PLAN.md § Search page), and allows no eval.
+					'script-src': ['self', 'wasm-unsafe-eval'],
 					'style-src': ['self', 'unsafe-inline'],
 					'object-src': ['none']
 				}
