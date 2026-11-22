@@ -38,7 +38,8 @@ test('segments and progression', async ({ page }) => {
 	// The status bar's two rows (PLAN.md § Desktop layout): the level, and under it the segment,
 	// each as its name, pass, card and share graded, and grades.
 	const rows = page.locator('[data-status-rows]');
-	const bar = async () => (await rows.locator('p').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim());
+	// What the bar shows: on a phone the pass is in the name, and its own cell is hidden.
+	const bar = () => rows.locator('p').evaluateAll((ps) => ps.filter((p) => p.checkVisibility()).map((p) => (p as HTMLElement).innerText.replace(/\s+/g, ' ').trim()));
 	await expect.poll(bar, { timeout: 30_000 }).toEqual(['Level 1 of 1', 'Pass 1', '1 / 18 (0.00%)', '0 ✓ 0 ✗', 'Segment 1 of 4', 'Pass 1', '1 / 5 (0.00%)', '0 ✓ 0 ✗']);
 	// One card graded: the level's percentage is coloured by its threshold, and the
 	// segment's own, now shown, carries no colour: a segment has no threshold.
@@ -62,27 +63,54 @@ test('segments and progression', async ({ page }) => {
 	await expect
 		.poll(bar)
 		.toEqual(['Level 1 of 1', 'Pass 1', '6 / 18 (27.78%)', '3 ✓ 2 ✗ (60.00%)', 'Segment 2 of 4', 'Pass 1', '1 / 5 (0.00%)', '0 ✓ 0 ✗']);
-	// On a phone the two names take a line each and the figures stay in columns under them.
-	// The resize swaps the desktop layout for the phone's, which renders the status bar
+	// On a phone each row's name, with its pass, takes a line of its own, and the position
+	// and grades share the line under it; on a screen too narrow for both, the grades go
+	// under the position. Either way the figures stay in columns and nothing runs off the
+	// bar. The resize swaps the desktop layout for the phone's, which renders the status bar
 	// again: measured mid-swap, a row is detached and has no box, so the check is retried.
-	await page.setViewportSize({ width: 360, height: 740 });
-	await expect(async () => {
-		const [levelName, levelPass, segmentName, segmentPass] = await Promise.all(
-			['[data-status-row="level"]', '[data-status-row="level"] + p', '[data-status-row="segment"]', '[data-status-row="segment"] + p'].map((s) => rows.locator(s).boundingBox({ timeout: 1_000 }))
-		);
-		if (!levelName || !levelPass || !segmentName || !segmentPass) throw new Error('a status row has no box yet');
-		expect(levelPass.y).toBeGreaterThan(levelName.y + levelName.height / 2);
-		expect(segmentName.y).toBeGreaterThan(levelPass.y + levelPass.height / 2);
-		expect(segmentPass.y).toBeGreaterThan(segmentName.y + segmentName.height / 2);
-		expect(segmentPass.x).toBe(levelPass.x);
-		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-		// The banner, still up until Show, follows the question instead of covering it.
-		const [question, banner] = await Promise.all(
-			[page.locator('[data-question]'), page.getByRole('status').filter({ hasText: 'Drill done' })].map((l) => l.boundingBox({ timeout: 1_000 }))
-		);
-		if (!question || !banner) throw new Error('the question or the banner has no box yet');
-		expect(banner.y).toBeGreaterThanOrEqual(question.y + question.height);
-	}).toPass({ timeout: 10_000 });
+	for (const [width, stacked] of [
+		[360, false],
+		[240, true]
+	] as const) {
+		await page.setViewportSize({ width, height: 740 });
+		await expect(async () => {
+			expect(await bar()).toEqual(['Level 1 of 1 · Pass 1', '6 / 18 (27.78%)', '3 ✓ 2 ✗ (60.00%)', 'Segment 2 of 4 · Pass 1', '1 / 5 (0.00%)', '0 ✓ 0 ✗']);
+			const [levelName, levelAt, levelGrades, segmentName, segmentAt, segmentGrades, footer] = await Promise.all(
+				[
+					rows.locator('[data-status-row="level"]'),
+					rows.locator('[data-status-row="level"] + p + p'),
+					rows.locator('[data-status-row="level"] + p + p + p'),
+					rows.locator('[data-status-row="segment"]'),
+					rows.locator('[data-status-row="segment"] + p + p'),
+					rows.locator('[data-status-row="segment"] + p + p + p'),
+					rows.locator('xpath=ancestor::footer')
+				].map((l) => l.boundingBox({ timeout: 1_000 }))
+			);
+			if (!levelName || !levelAt || !levelGrades || !segmentName || !segmentAt || !segmentGrades || !footer) throw new Error('a status row has no box yet');
+			const below = (a: typeof levelName, b: typeof levelName) => expect(a.y).toBeGreaterThan(b.y + b.height / 2);
+			below(levelAt, levelName);
+			if (stacked) {
+				below(levelGrades, levelAt);
+				expect(levelGrades.x).toBe(levelAt.x);
+			} else {
+				expect(levelGrades.y).toBe(levelAt.y);
+				expect(levelGrades.x).toBeGreaterThan(levelAt.x + levelAt.width);
+			}
+			below(segmentName, levelGrades);
+			below(segmentAt, segmentName);
+			expect(segmentAt.x).toBe(levelAt.x);
+			expect(segmentGrades.x).toBe(levelGrades.x);
+			for (const b of [levelName, levelAt, levelGrades, segmentName, segmentAt, segmentGrades]) expect(b.x + b.width).toBeLessThanOrEqual(footer.x + footer.width);
+			// Only at a real phone's width: at 240px the rest of the player is not made to fit.
+			if (width === 360) expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+			// The banner, still up until Show, follows the question instead of covering it.
+			const [question, banner] = await Promise.all(
+				[page.locator('[data-question]'), page.getByRole('status').filter({ hasText: 'Drill done' })].map((l) => l.boundingBox({ timeout: 1_000 }))
+			);
+			if (!question || !banner) throw new Error('the question or the banner has no box yet');
+			expect(banner.y).toBeGreaterThanOrEqual(question.y + question.height);
+		}).toPass({ timeout: 10_000 });
+	}
 	await page.setViewportSize({ width: 1280, height: 720 });
 	// Previous refuses to go back into segment 1.
 	await press(page, 'Backspace');

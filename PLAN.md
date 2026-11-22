@@ -1321,7 +1321,12 @@ as the term of the data model and the API.
     of the segment's questions with the share of them graded, and the grades
     within the segment with the share correct. The figures of the two rows
     sit in the same columns, so they read against each other. On a phone each
-    row's name takes a line of its own with its figures in columns under it.
+    row's name takes a line of its own with its pass beside it (`Segment 2 of 6
+    · Pass 1`), and the position and grades share the line under it. Where
+    those two are wider than the bar, as six-digit counts are on a 360px
+    screen, the grades go under the position instead of running off the
+    screen: the choice is the figures' own width, measured as they change.
+    Without segments the Level row does the same.
     The segment's percentage has no colour: a segment has no threshold, and
     whatever it misses is drilled.
   - **A drill is its segment's next pass, not a level the bar speaks of.**
@@ -8211,7 +8216,9 @@ through the ordinary endpoints, so there is still no test-only path.
   Throughout, the status bar's two rows read as [Desktop layout](#desktop-layout)
   says: the Segment row under the Level row with its own figures, a drill
   shown as the segment's second pass with the Level row still on the level
-  above, and at phone width each row's name on its own line.
+  above, and at phone width each row's name and pass on its own line with
+  the figures under it, at 240px wide the grades under the position, and
+  nothing past the bar's edge.
 - **Export:** download the missed words of a level as a word list and the whole
   cascade as a CSV, offline, and check the contents; then ask for definitions
   that were never downloaded, while offline, and see the fallback notice. With

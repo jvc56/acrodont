@@ -22,6 +22,7 @@
 	import TileText from '$lib/components/TileText.svelte';
 	import AnswerView from '$lib/components/player/AnswerView.svelte';
 	import DisplaySettings from '$lib/components/player/DisplaySettings.svelte';
+	import { stackWhenTooWide } from '$lib/components/player/stack-when-too-wide';
 	import ApplyWider from '$lib/components/settings/ApplyWider.svelte';
 	import ControlsEditor from '$lib/components/settings/ControlsEditor.svelte';
 	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
@@ -1070,8 +1071,12 @@
 			<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 leading-7 max-sm:gap-x-3">
 				{#if !dsp.status_bar_hidden && v?.quiz && v.cascade && levelQuiz}
 					{#snippet levelRow(cell: string)}
-						<p class="font-medium {cell}" data-status-row="level">Level {levelQuiz.level} of {v!.cascade!.depth}</p>
-						<p class="text-muted-foreground {cell ? 'whitespace-nowrap' : ''}">Pass {levelQuiz.attempt}</p>
+						<!-- On a phone the pass joins the row's name, which takes a line of its own, and
+						     the figures share the line under it (PLAN.md § Desktop layout). -->
+						<p class="font-medium max-sm:basis-full {cell}" data-status-row="level">
+							Level {levelQuiz.level} of {v!.cascade!.depth}<span class="font-normal text-muted-foreground sm:hidden">{' · '}Pass {levelQuiz.attempt}</span>
+						</p>
+						<p class="text-muted-foreground max-sm:hidden {cell ? 'whitespace-nowrap' : ''}">Pass {levelQuiz.attempt}</p>
 						<p class={cell ? 'whitespace-nowrap' : ''} title="The card shown, and the share of the level graded in this pass">
 							<!-- The count in its own element, apart from its percentage: it is read on its own. -->
 							<!-- data-played-position marks the position of the quiz being played: this one, or the Segment row's during a drill. -->
@@ -1090,13 +1095,20 @@
 					{/snippet}
 					{#if segment}
 						<!-- A level studied in segments: the Segment row under the Level row, its figures in
-						     the same columns so the two read against each other. On a phone each row's name
-						     takes a line of its own and the figures stay in columns under it. A drill of the
+						     the same columns so the two read against each other. On a phone each row's name,
+						     with its pass, takes a line of its own, and the position and grades share the line
+						     under it, or stack when they are too wide to (stackWhenTooWide). A drill of the
 						     segment's misses is the segment's next pass: the Level row stays on the level. -->
-						<div class="grid grid-cols-[auto_auto_auto] justify-start gap-x-3 tabular-nums sm:grid-cols-[auto_auto_auto_auto] sm:gap-x-5" data-status-rows>
+						<div
+							class="grid grid-cols-[auto_auto] justify-start gap-x-3 tabular-nums max-sm:data-stacked:grid-cols-[auto] sm:grid-cols-[auto_auto_auto_auto] sm:gap-x-5"
+							data-status-rows
+							{@attach stackWhenTooWide}
+						>
 							{@render levelRow('max-sm:col-span-full whitespace-nowrap')}
-							<p class="font-medium whitespace-nowrap max-sm:col-span-full" data-status-row="segment">Segment {segment.segment} of {segment.total}</p>
-							<p class="whitespace-nowrap text-muted-foreground" title="1 is the segment itself; each drill of its misses is the next pass">
+							<p class="font-medium whitespace-nowrap max-sm:col-span-full" data-status-row="segment">
+								Segment {segment.segment} of {segment.total}<span class="font-normal text-muted-foreground sm:hidden">{' · '}Pass {segment.pass}</span>
+							</p>
+							<p class="whitespace-nowrap text-muted-foreground max-sm:hidden" title="1 is the segment itself; each drill of its misses is the next pass">
 								Pass {segment.pass}
 							</p>
 							<p class="whitespace-nowrap" title="The card shown, and the share of the segment graded in this pass">
@@ -1113,7 +1125,8 @@
 					{/if}
 					{#if foundCount}<p>{foundCount}</p>{/if}
 				{/if}
-				<div class="ml-auto"><SyncStatus quiet={dsp.status_bar_hidden || dsp.sync_status_hidden} /></div>
+				<!-- At the bar's foot when the figures take several lines, not halfway up them. -->
+				<div class="ml-auto self-end"><SyncStatus quiet={dsp.status_bar_hidden || dsp.sync_status_hidden} /></div>
 			</div>
 		</div>
 	</footer>
