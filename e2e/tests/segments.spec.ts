@@ -76,6 +76,12 @@ test('segments and progression', async ({ page }) => {
 		expect(segmentPass.y).toBeGreaterThan(segmentName.y + segmentName.height / 2);
 		expect(segmentPass.x).toBe(levelPass.x);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		// The banner, still up until Show, follows the question instead of covering it.
+		const [question, banner] = await Promise.all(
+			[page.locator('[data-question]'), page.getByRole('status').filter({ hasText: 'Drill done' })].map((l) => l.boundingBox({ timeout: 1_000 }))
+		);
+		if (!question || !banner) throw new Error('the question or the banner has no box yet');
+		expect(banner.y).toBeGreaterThanOrEqual(question.y + question.height);
 	}).toPass({ timeout: 10_000 });
 	await page.setViewportSize({ width: 1280, height: 720 });
 	// Previous refuses to go back into segment 1.

@@ -1119,6 +1119,12 @@
 	</footer>
 {/snippet}
 
+{#snippet phoneBanner()}
+	<!-- On a phone the banner follows the question in the page, so it never covers it, however
+	     tall the banner or short the screen. Show clears it, and the answer takes its place. -->
+	{#if v?.banner}<p class="mx-auto mt-4 max-w-[90%] rounded-md bg-muted px-3 py-2 text-center text-sm" role="status">{v.banner}</p>{/if}
+{/snippet}
+
 {#snippet showMenu(cls: string)}
 	<button class="{cls} z-10 rounded px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" onclick={() => (menuOpen = true)} aria-label="Show menu" title="Show menu">☰</button>
 {/snippet}
@@ -1170,7 +1176,6 @@
 			{#if dsp.mobile_buttons === 'rows'}
 				<div class="relative flex min-h-0 flex-1 select-none" class:flex-col={!landscape} style="touch-action: manipulation">
 					{@render showMenu('absolute top-1 left-1')}
-					{#if v.banner}<p class="absolute top-2 right-2 left-12 z-10 rounded-md bg-muted px-3 py-2 text-sm" role="status">{v.banner}</p>{/if}
 					<div
 						bind:this={fitArea}
 						data-fit-area
@@ -1179,6 +1184,7 @@
 						data-grade={gradeState ?? undefined}
 					>
 						{@render question()}
+						{@render phoneBanner()}
 					</div>
 					<!-- Show / Next at the bottom, nearest the thumb; in landscape the rows stand at
 					     the bottom of a column on the right. Each row is mobile_row_px tall. -->
@@ -1195,7 +1201,6 @@
 					data-grade={gradeState ?? undefined}
 				>
 					{@render showMenu('absolute top-1 left-1')}
-					{#if v.banner}<p class="absolute top-2 right-2 left-12 z-10 rounded-md bg-muted px-3 py-2 text-sm" role="status">{v.banner}</p>{/if}
 					<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 					<div
 						bind:this={fitArea}
@@ -1206,6 +1211,7 @@
 						onclick={tapColumn}
 					>
 						{@render question()}
+						{@render phoneBanner()}
 					</div>
 					<div class="relative grid shrink-0 grid-cols-3 text-sm text-muted-foreground">
 						<button class="h-14 active:bg-muted/60" onclick={() => act('previous')}>↶ Previous</button>
