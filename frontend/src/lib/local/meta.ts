@@ -7,6 +7,8 @@
 import type { IDBPTransaction } from 'idb';
 import type { Entries } from '$lib/settings/layers';
 import type { Preset } from '$lib/settings/presets';
+import type { LexiconInfo } from '$lib/filters';
+import type { SavedSearch } from '$lib/search/state.svelte';
 import type { StoreName, UserDb, UserSchema } from './db';
 
 export interface MetaValues {
@@ -49,11 +51,15 @@ export interface MetaValues {
 	 * The account's presets (lib/settings/presets) as the last sync response
 	 * that carried them had them, and their version, sent with every sync.
 	 */
-	presets: { version: string | null; list: Preset[] };
+	presets: { version: string | null; list: Preset[]; edits?: number };
 	/** The preset the builder used last on this device, which it starts at; null for Defaults. */
 	last_preset_id: string | null;
 	/** Bytes of each cascade's question keys and answers, measured as they were written. */
 	sizes: Record<string, { key_bytes: number; answer_bytes: number }>;
+	/** `GET /api/lexicons` as it last answered, so Search lists the lexicons offline. */
+	lexicons: LexiconInfo[];
+	/** The Search page's search, as it was left (PLAN.md § Search page). */
+	search_state: SavedSearch | null;
 }
 export type MetaKey = keyof MetaValues;
 
@@ -71,7 +77,9 @@ export const META_DEFAULTS: { [K in MetaKey]: () => MetaValues[K] } = {
 	clock: () => ({ offset_ms: 0 }),
 	presets: () => ({ version: null, list: [] }),
 	last_preset_id: () => null,
-	sizes: () => ({})
+	sizes: () => ({}),
+	lexicons: () => [],
+	search_state: () => null
 };
 
 type Tx = IDBPTransaction<UserSchema, StoreName[], 'readwrite' | 'readonly'>;

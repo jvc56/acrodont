@@ -172,7 +172,9 @@ export class Distribution {
 	/**
 	 * A typed pattern in canonical form: tokens separated by single spaces.
 	 * Brackets always mean a set; inside and out, pieces are matched greedily,
-	 * and a space separates tiles.
+	 * and a space separates tiles. Where there is no blank tile to match (any
+	 * quiz type but Leave Value), a typed `?` is any single tile, as `.` is: the
+	 * blank, as Zyzzyva and a rack write it.
 	 */
 	canonicalPattern(typed: string, allowBlank: boolean): string {
 		const cs = chars(typed.toUpperCase());
@@ -188,9 +190,9 @@ export class Distribution {
 				buf = [];
 			};
 			for (const c of piece) {
-				if (c === '.' || c === '*') {
+				if (c === '.' || c === '*' || (c === '?' && !allowBlank)) {
 					emit();
-					toks.push(c);
+					toks.push(c === '?' ? '.' : c);
 				} else buf.push(c);
 			}
 			emit();

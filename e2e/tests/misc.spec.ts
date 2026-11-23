@@ -1,4 +1,4 @@
-import { test, expect, chromium, type Page } from '@playwright/test';
+import { test, expect, chromium, type Locator, type Page } from '@playwright/test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -72,9 +72,12 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	// By default the definition is a column of its own, after the back hooks on the word's line.
 	let [w, d, b] = [await box(word), await box(definition), await box(backHooks)];
 	expect(d.x).toBeGreaterThanOrEqual(b.x + b.width);
-	// The back hooks' column is as wide as the hooks, so the definition starts just after them, centred on the word's line.
-	expect(d.x - (b.x + b.width)).toBeLessThan(20);
+	// The back hooks' column is as wide as the hooks, so the definition starts soon after them, centred on the word's line.
+	expect(d.x - (b.x + b.width)).toBeLessThan(40);
 	expect(b.width).toBeLessThan(w.width);
+	// The hooks read as the word's: nearer its letters (past the room its inner-hook dot keeps) than the definition.
+	const letters = word.locator(':scope > span').nth(1);
+	expect(b.x - ((await box(letters)).x + (await box(letters)).width)).toBeLessThan(d.x - (b.x + b.width));
 	expect(Math.abs(d.y + d.height / 2 - (w.y + w.height / 2))).toBeLessThan(3);
 	// The word stays in the middle of the quiz area, whatever sits either side of it.
 	// (Measured afresh each time: opening Settings shows the menu, which narrows the area.)
@@ -89,6 +92,9 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	await expect(probability).toHaveText(/^\s*\d+\s*$/);
 	const [p, f] = [await box(probability), await box(frontHooks)];
 	expect(p.x + p.width).toBeLessThanOrEqual(f.x);
+	// The front hooks too are nearer the word's letters than the probability order.
+	const first = await box(word.locator(':scope > span').nth(1));
+	expect(first.x - (f.x + f.width)).toBeLessThan(f.x - (p.x + p.width));
 	expect(await offCentre()).toBeLessThan(3);
 	// Turned off, the definition is centred under the word.
 	await playerSetting(page, 'Definitions in their own column', false);
@@ -124,9 +130,13 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	const wide = page.viewportSize()!;
 	await page.setViewportSize({ width: 660, height: wide.height });
 	// (The narrower window lays the player out afresh: for a moment the definition is not there to measure.)
-	await expect.poll(async () => (await parts.boundingBox())?.height ?? 0).toBeGreaterThan(lines.height + 10);
-	const [x2, wrapped] = [await box(page.locator('[data-answer]').filter({ hasText: /EXIT/ })), await box(parts)];
-	expect(Math.abs(wrapped.y + wrapped.height / 2 - (x2.y + x2.height / 2))).toBeLessThan(3);
+	// Measured together and retried: the layout can be replaced between two readings.
+	await expect(async () => {
+		const [x2, wrapped] = await Promise.all([page.locator('[data-answer]').filter({ hasText: /EXIT/ }), parts].map((l) => l.boundingBox({ timeout: 1_000 })));
+		if (!x2 || !wrapped) throw new Error('the word or its definition has no box yet');
+		expect(wrapped.height).toBeGreaterThan(lines.height + 10);
+		expect(Math.abs(wrapped.y + wrapped.height / 2 - (x2.y + x2.height / 2))).toBeLessThan(3);
+	}).toPass({ timeout: 10_000 });
 	await page.setViewportSize(wide);
 	// Each hook column is as wide as its own widest hooks, the same for every row, and the two differ:
 	// AT has front hooks enopqrv and back hook e, TA front hook e and back hooks noprx.
@@ -382,6 +392,109 @@ test('a Definition cascade can show its word once, with its hooks, in the questi
 	await expect(page.locator('[data-definition]').filter({ hasText: 'a harbour' })).toBeVisible();
 	await expect(question.locator('[data-hooks="front"]')).toContainText('s');
 	await expect(question).toContainText('PORT');
+});
+
+// PLAN.md § Answers: on a phone, hooks too wide for their half of a row move the
+// word aside; where that would shrink the row, they wrap beside it instead, and
+// nothing shrinks for them. A Definition card's word in the question does the
+// same, never moves on the reveal, and never shrinks the definition under it.
+test('on a phone, long hooks move the word aside, then wrap, never off the screen or over the word', async ({ page }) => {
+	test.setTimeout(180_000);
+	await newUser(page, 'hookfit');
+	await page.setViewportSize({ width: 360, height: 740 });
+	const hookSize = async (px: number) => {
+		await openPlayerSettings(page);
+		const input = page.getByRole('dialog', { name: 'Settings' }).getByLabel('Hook size', { exact: true });
+		await input.fill(String(px));
+		await input.press('Tab');
+		await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close' }).click();
+	};
+	const fontPx = (l: Locator) => l.evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+	/** The quiz area inside its padding: where the answer and the question have to stay. */
+	const content = () =>
+		page.locator('[data-fit-area]').evaluate((e) => {
+			const r = e.getBoundingClientRect();
+			const s = getComputedStyle(e);
+			return { left: r.left + parseFloat(s.paddingLeft), right: r.right - parseFloat(s.paddingRight), centre: (r.left + r.right) / 2 };
+		});
+	/** A word's hooks, inside the screen and clear of its letters; how far off centre the letters are, and whether a hook cell wraps. */
+	async function row(front: Locator, letters: Locator, back: Locator) {
+		const [f, w, b] = await Promise.all([front, letters, back].map((l) => l.boundingBox({ timeout: 1_000 })));
+		if (!f || !w || !b) throw new Error('a row has no box yet');
+		const c = await content();
+		// Within the fit's own tolerance of a pixel (scrollWidth is a whole number), inside the area's padding.
+		expect(f.x).toBeGreaterThanOrEqual(c.left - 1);
+		expect(b.x + b.width).toBeLessThanOrEqual(c.right + 1);
+		expect(f.x + f.width).toBeLessThanOrEqual(w.x + 0.5);
+		expect(b.x).toBeGreaterThanOrEqual(w.x + w.width - 0.5);
+		const wraps = async (h: Locator, box: { height: number }) => box.height > 1.6 * (await fontPx(h));
+		return { offCentre: Math.abs(w.x + w.width / 2 - c.centre), wraps: (await wraps(front, f)) || (await wraps(back, b)) };
+	}
+
+	// An answer: AT has front hooks enopqrv and back hook e, TA front hook e and back hooks noprx.
+	await page.goto(await apiCascade(page, { name: 'At', filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'A T' }] } }));
+	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
+	await press(page, 'Space');
+	await expect(page.locator('[data-answer]')).toHaveCount(2, { timeout: 30_000 });
+	const rows = page.locator('[data-answer-rows]');
+	const at = page.getByRole('listitem').filter({ has: page.locator('[data-answer]').filter({ hasText: /^\W*AT\W*$/ }) });
+	const atRow = () => row(at.locator('[data-hooks="front"]'), at.locator('[data-answer] > span').nth(1), at.locator('[data-hooks="back"]'));
+	const answerPx = () => fontPx(at.locator('[data-answer]'));
+	// Room for every hook beside its word, at its size: the words in the middle.
+	await expect(async () => {
+		const r = await atRow();
+		expect(r.offCentre).toBeLessThan(3);
+		expect(r.wraps).toBe(false);
+		expect(await rows.getAttribute('data-hooks-wrap')).toBeNull();
+		expect(await answerPx()).toBe(36);
+	}).toPass({ timeout: 10_000 });
+	// Front hooks wider than half: the word steps aside for them, still at (almost) its size, nothing wrapping.
+	await hookSize(36);
+	await expect(async () => {
+		const r = await atRow();
+		expect(r.offCentre).toBeGreaterThan(5);
+		expect(r.wraps).toBe(false);
+		expect(await rows.getAttribute('data-hooks-wrap')).toBeNull();
+		expect(await answerPx()).toBeGreaterThanOrEqual(36 * 0.95);
+	}).toPass({ timeout: 10_000 });
+	// Far too wide to step aside for: the hooks wrap beside the word, and nothing shrinks.
+	await hookSize(64);
+	await expect(async () => {
+		const r = await atRow();
+		expect(r.wraps).toBe(true);
+		expect(await rows.getAttribute('data-hooks-wrap')).toBe('');
+		expect(await answerPx()).toBe(36);
+		expect(await fontPx(page.locator('[data-definition]').first())).toBe(20);
+	}).toPass({ timeout: 10_000 });
+
+	// A Definition card with its word in the question: the hooks' places are kept before the
+	// reveal, so the word does not move; they wrap there too, and the definition keeps its size.
+	await page.goto(
+		await apiCascade(page, {
+			name: 'At definitions',
+			quiz_type: 'definition',
+			filters: { op: 'and', children: [{ type: 'anagram_match', negated: false, pattern: 'A T' }] }
+		})
+	);
+	await expect(page.getByText('1 / 2')).toBeVisible({ timeout: 30_000 });
+	await playerSetting(page, 'Show the word once, with its hooks, in the question', true);
+	await hookSize(96);
+	const question = page.locator('[data-question]');
+	const word = question.locator('[data-hooks="front"] + span');
+	const letters = word.locator(':scope > span').nth(1);
+	await expect(letters).toBeVisible();
+	await expect(question.locator('[data-hooks="front"] > span')).toBeHidden();
+	const before = await letters.boundingBox();
+	await press(page, 'Space');
+	await expect(page.locator('[data-definition]')).toBeVisible({ timeout: 30_000 });
+	await expect(async () => {
+		const r = await row(question.locator('[data-hooks="front"]'), letters, question.locator('[data-hooks="back"]'));
+		expect(r.wraps).toBe(true);
+		expect(await page.locator('[data-hooked-question]').getAttribute('data-hooks-wrap')).toBe('');
+		expect(Math.abs((await letters.boundingBox())!.x - before!.x)).toBeLessThan(1);
+		expect(await fontPx(question)).toBe(36);
+		expect(await fontPx(page.locator('[data-definition]'))).toBe(20);
+	}).toPass({ timeout: 10_000 });
 });
 
 // PLAN.md § Desktop layout: the Previous, Toggle and Show / Next buttons show

@@ -77,6 +77,8 @@ pub struct Distribution {
     by_blank_letter: HashMap<String, Tile>,
     /// Letters longest first, for greedy matching of typed text.
     letters_by_len: Vec<(Vec<char>, Tile)>,
+    /// `C(count in bag, k)` per tile (`probability::choose_table`).
+    pub(crate) choose: Vec<[u128; super::probability::CHOOSE_K]>,
 }
 
 impl Distribution {
@@ -95,7 +97,9 @@ impl Distribution {
             }
         }
         letters_by_len.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then(a.1.cmp(&b.1)));
+        let choose = super::probability::choose_table(tiles.iter().map(|t| t.count));
         Distribution {
+            choose,
             id,
             name: name.into(),
             tiles,
@@ -328,8 +332,9 @@ impl Distribution {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+/// Distributions for tests, here and in the server's tests.
+#[doc(hidden)]
+pub mod testing {
     use super::*;
 
     pub fn tiledef(letter: &str, blank: &str, count: u16, value: u16, vowel: bool) -> TileDef {
@@ -363,6 +368,12 @@ pub(crate) mod tests {
             ],
         )
     }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    pub use super::testing::*;
 
     #[test]
     fn bracketed_and_typed_forms_give_three_tiles() {

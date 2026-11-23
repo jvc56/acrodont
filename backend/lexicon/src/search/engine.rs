@@ -2,33 +2,33 @@
 //! reference → Lax).
 
 use std::cmp::Ordering;
-use std::time::Instant;
 
 use super::pattern::matches_in_order;
 use super::{Condition, ConditionKind, Group, GroupOp, Node, QuizType, Range, SearchError, SearchSpec, Target};
 use crate::catalog::index::{LeaveEntry, LexiconIndex, WordEntry};
 use crate::catalog::tiles::{Tile, BLANK};
+use crate::clock::Deadline;
 
 /// The deadline is checked every this many candidates, and before each limit ranking.
 pub const CHECK_EVERY: usize = 4096;
 
 struct Ctx<'a> {
     target: Target<'a>,
-    deadline: Instant,
+    deadline: &'a dyn Deadline,
     ticks: usize,
 }
 
 impl Ctx<'_> {
     fn tick(&mut self) -> Result<(), SearchError> {
         self.ticks += 1;
-        if self.ticks.is_multiple_of(CHECK_EVERY) && Instant::now() > self.deadline {
+        if self.ticks.is_multiple_of(CHECK_EVERY) && self.deadline.passed() {
             return Err(SearchError::TooBroad);
         }
         Ok(())
     }
 
     fn check(&self) -> Result<(), SearchError> {
-        if Instant::now() > self.deadline {
+        if self.deadline.passed() {
             Err(SearchError::TooBroad)
         } else {
             Ok(())
@@ -40,7 +40,7 @@ pub fn run(
     target: Target,
     quiz_type: QuizType,
     spec: &SearchSpec,
-    deadline: Instant,
+    deadline: impl Deadline,
     shortcuts: bool,
 ) -> Result<Vec<Box<[Tile]>>, SearchError> {
     let ids = run_ids(target, spec, deadline, shortcuts)?;
@@ -48,8 +48,8 @@ pub fn run(
 }
 
 /// The matching candidate ids (words or leaves), ascending.
-pub fn run_ids(target: Target, spec: &SearchSpec, deadline: Instant, shortcuts: bool) -> Result<Vec<u32>, SearchError> {
-    let mut ctx = Ctx { target, deadline, ticks: 0 };
+pub fn run_ids(target: Target, spec: &SearchSpec, deadline: impl Deadline, shortcuts: bool) -> Result<Vec<u32>, SearchError> {
+    let mut ctx = Ctx { target, deadline: &deadline, ticks: 0 };
     let candidates = if shortcuts { shortcut_candidates(target, &spec.root) } else { None }
         .unwrap_or_else(|| all_candidates(target));
     eval_group(&mut ctx, &spec.root, &candidates)

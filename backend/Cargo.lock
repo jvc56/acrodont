@@ -20,6 +20,7 @@ dependencies = [
  "hex",
  "hkdf",
  "http-body-util",
+ "lexicon",
  "pasetors",
  "proptest",
  "rand 0.10.3",
@@ -2005,6 +2006,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
+name = "lexicon"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tracing",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2727,6 +2738,15 @@ checksum = "da046153aa2352493d6cb7da4b6e5c0c057d8a1d0a9aa8560baffdd945acd414"
 dependencies = [
  "ring",
  "untrusted",
+]
+
+[[package]]
+name = "search-wasm"
+version = "0.1.0"
+dependencies = [
+ "lexicon",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

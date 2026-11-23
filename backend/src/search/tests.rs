@@ -34,7 +34,8 @@ fn check(f: &Fixtures, q: QuizType, filters: Value) -> Result<SearchSpec, Vec<Pa
     let snap = snapshot(f);
     let tree = parse_tree(&filters)?;
     let leaves = if q.is_leave() { Some(&f.en_leaves) } else { None };
-    let info = TargetInfo { lexicon: &f.en, leaves, snapshot: &snap };
+    let lexicon_named = |n: &str| snap.lexicon_by_name(n).cloned();
+    let info = TargetInfo { lexicon: &f.en, leaves, lexicon_named: &lexicon_named };
     validate(&tree, q, Some(&info)).map(|s| s.unwrap())
 }
 
@@ -547,7 +548,8 @@ fn a_broad_search_past_its_deadline_is_too_broad() {
         let snap = Snapshot::default();
         let lex = std::sync::Arc::new(big);
         let tree = parse_tree(&and(vec![c("definition", json!({ "text": "zzz" }))])).unwrap();
-        let info = TargetInfo { lexicon: &lex, leaves: None, snapshot: &snap };
+        let lexicon_named = |n: &str| snap.lexicon_by_name(n).cloned();
+        let info = TargetInfo { lexicon: &lex, leaves: None, lexicon_named: &lexicon_named };
         let spec = validate(&tree, QuizType::Definition, Some(&info)).unwrap().unwrap();
         let deadline = Instant::now() + Duration::from_millis(1);
         let r = run(Target::Words(&lex), QuizType::Definition, &spec, deadline, true);

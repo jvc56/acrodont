@@ -7,22 +7,7 @@ use super::index::RawWord;
 use super::tiles::{Distribution, Tile, TileDef};
 use super::upload::ParsedDistribution;
 
-/// The two revisions of a lexicon's words: `lexicons.definitions_revision`
-/// and `lexicons.playability_revision`. The words are one stored text, so a
-/// text is the one read at a pair of them, and a replacement of either part
-/// applies only while both are still the pair it read.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Revisions {
-    pub definitions: i32,
-    pub playability: i32,
-}
-
-impl Revisions {
-    /// Whether an index read at `self` is no older than `other` in either part.
-    pub fn covers(self, other: Revisions) -> bool {
-        self.definitions >= other.definitions && self.playability >= other.playability
-    }
-}
+pub use lexicon::catalog::Revisions;
 
 pub struct Items {
     pub distributions: Vec<i16>,

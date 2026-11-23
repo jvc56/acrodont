@@ -634,7 +634,7 @@ pub fn parse_leaves(bytes: &[u8], dist: &Distribution) -> Result<Vec<ParsedLeave
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::tiles::tests::catalan_like;
+    use crate::catalog::tiles::testing::catalan_like;
 
     fn lines(e: &UploadErrors) -> Vec<Option<u32>> {
         e.errors.iter().map(|x| x.line).collect()

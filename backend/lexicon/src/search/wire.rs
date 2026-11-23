@@ -8,9 +8,10 @@ use serde_json::{json, Map, Value};
 
 use crate::catalog::pos::PartOfSpeech;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "quiz_type", rename_all = "snake_case")]
+#[cfg_attr(feature = "sqlx", sqlx(type_name = "quiz_type", rename_all = "snake_case"))]
 pub enum QuizType {
     Anagram,
     Definition,
@@ -31,9 +32,10 @@ impl QuizType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "group_op", rename_all = "snake_case")]
+#[cfg_attr(feature = "sqlx", sqlx(type_name = "group_op", rename_all = "snake_case"))]
 pub enum GroupOp {
     And,
     Or,
@@ -41,9 +43,10 @@ pub enum GroupOp {
 
 /// The 24 condition types, in the order of Zyzzyva's dropdown and then the
 /// four Acrodont-only filters (PLAN.md § Filter reference).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "condition_type", rename_all = "snake_case")]
+#[cfg_attr(feature = "sqlx", sqlx(type_name = "condition_type", rename_all = "snake_case"))]
 pub enum ConditionType {
     AnagramMatch,
     PatternMatch,

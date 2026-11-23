@@ -1530,11 +1530,18 @@ async fn playabilities_are_replaced_whole_and_nothing_else(pool: sqlx::PgPool) {
         .collect();
     assert_eq!(stored, original);
     // The overview shows the revision, and the figures /api/lexicons reports are those of before:
-    // the highest rank is the size of the largest length, which no playability changes.
+    // the highest rank is the size of the largest length, which no playability changes. Only
+    // EN-FIX's playability revision moves, which tells a device its kept index is stale.
     let c = a.get("/api/admin/catalog").await.json();
     let en = c["lexicons"].as_array().unwrap().iter().find(|l| l["name"] == "EN-FIX").unwrap();
     assert_eq!((en["playability_revision"].as_i64(), en["definitions_revision"].as_i64()), (Some(2), Some(1)));
-    assert_eq!(a.get("/api/lexicons").await.json(), figures);
+    let mut expected = figures.clone();
+    for l in expected.as_array_mut().unwrap() {
+        if l["name"] == "EN-FIX" {
+            l["playability_revision"] = json!(2);
+        }
+    }
+    assert_eq!(a.get("/api/lexicons").await.json(), expected);
 
     // The definitions can still be replaced after it, from a file holding the new playabilities.
     let r = a

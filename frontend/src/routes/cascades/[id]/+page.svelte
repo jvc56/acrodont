@@ -11,7 +11,7 @@
 	// banners, the completion screen, and a trashed cascade's Restore.
 	import { INFO, SCOPE, SECTION } from '$lib/settings-info';
 	import { onMount, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { goto, pushState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, ApiError } from '$lib/api';
 	import { isRetriable, sendWithRetry } from '$lib/builder/create';
@@ -22,6 +22,7 @@
 	import TileText from '$lib/components/TileText.svelte';
 	import AnswerView from '$lib/components/player/AnswerView.svelte';
 	import DisplaySettings from '$lib/components/player/DisplaySettings.svelte';
+	import { stackWhenTooWide } from '$lib/components/player/stack-when-too-wide';
 	import ApplyWider from '$lib/components/settings/ApplyWider.svelte';
 	import ControlsEditor from '$lib/components/settings/ControlsEditor.svelte';
 	import CreatingCascade from '$lib/components/CreatingCascade.svelte';
@@ -55,10 +56,16 @@
 	import { PLAYER_LOCK } from '$lib/sync/downloads';
 	import { afterLocalWrite, downloadInBackground, ensureCascade, fetchAhead, fetchCard, fetchDistribution, playerActs, sendPending, syncState } from '$lib/sync/runtime.svelte';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import AppHeader from '$lib/components/AppHeader.svelte';
+	import SearchPage from '../../search/+page.svelte';
+	import { searchEngine } from '$lib/search/engine.svelte';
+	import type { LexiconInfo } from '$lib/filters';
 	import PanelBottomCloseIcon from '@lucide/svelte/icons/panel-bottom-close';
 	import PanelBottomOpenIcon from '@lucide/svelte/icons/panel-bottom-open';
-	import { actionFor, Debounce, inputOwns, keyStroke, mouseStroke, wheelStroke, type Action } from '$lib/player/bindings';
-	import { Player, type PlayerView } from '$lib/player/controller';
+	import { actionFor, Debounce, inputOwns, isSearchKey, keyStroke, mouseStroke, searchTitle, wheelStroke, type Action } from '$lib/player/bindings';
+	import type { Snapshot } from './$types';
+	import { Player, type PlayerView, type Resume } from '$lib/player/controller';
 	import { levelRows, type LevelRow } from '$lib/player/ladder';
 	import { clampPrefill, type QuizOptions } from '$lib/options';
 	import { confirmAction, confirmState } from '$lib/confirm.svelte';
@@ -106,6 +113,8 @@
 	let levelPos = $derived(!levelQuiz ? 0 : v?.bar && !v.bar.played ? levelQuiz.cursor : (v?.card?.pos ?? levelQuiz.cursor));
 	/** Every setting's value for this cascade on this device, from whichever place holds it. */
 	let dsp = $derived(settings.value);
+	/** The strokes that go to Search, and from it back here, for titles: "Search (Q, Alt+Q)". */
+	let searchKeys = $derived(searchTitle(dsp.bindings));
 	/**
 	 * The desktop layout, or the touch layout with its Previous, Toggle and
 	 * Show / Next buttons: those on a touch screen, in a window narrower than
@@ -250,6 +259,8 @@
 			});
 			unsub = p.subscribe((x) => (v = x));
 			player = p;
+			if (resumeLater) p.resume(resumeLater);
+			resumeLater = null;
 			await refreshSide();
 			await p.load();
 		})();
@@ -287,6 +298,10 @@
 	 * its writes are saved (PLAN.md § Taking a quiz → Instant at any size).
 	 */
 	function act(a: Action) {
+		if (a === 'search') {
+			openSearch();
+			return;
+		}
 		// The completion screen is in front: the new pass under it takes no action.
 		if (!player || v?.completion || !actions.pass(a, performance.now())) return;
 		const card = v?.card;
@@ -304,16 +319,83 @@
 
 		// Background downloads start no chunk while the action and its writes run.
 		void playerActs(async () => {
-			if (a === 'show_next') await p.showNext();
-			else if (a === 'toggle_grade') await p.toggle();
-			else await p.previous();
+			switch (a) {
+				case 'show_next':
+					return p.showNext();
+				case 'toggle_grade':
+					return p.toggle();
+				case 'previous':
+					return p.previous();
+				default: {
+					// Every action is named above: a new one must say what it does.
+					const unhandled: never = a;
+					throw new Error(`unhandled action ${String(unhandled)}`);
+				}
+			}
 		}).catch((e) => console.error('player action failed', e));
 	}
+
+	/**
+	 * The Search page (PLAN.md § Search page), the one the header links to, shown
+	 * over the quiz at /search?from=<cascade> (SvelteKit shallow routing): the quiz
+	 * stays mounted underneath, so going to Search and back is instant and finds it
+	 * as it was. Its button, the Search keys or Back close it (Back pops the entry
+	 * opening it pushed). Once opened it stays mounted, hidden, so it opens again at once.
+	 */
+	let searchOpen = $derived(!!page.state.search);
+	let searchMounted = $state(false);
+	function openSearch() {
+		if (searchOpen) return;
+		searchMounted = true;
+		menuOpen = desktop && menuOpen;
+		pushState(`/search?from=${encodeURIComponent(id)}`, { search: true });
+	}
+	function closeSearch() {
+		if (page.state.search) history.back();
+	}
+	let searchLayerEl = $state<HTMLElement | null>(null);
+	// Closed, Search is hidden, not gone: focus left in its boxes would take the quiz's keys
+	// (a Q typed into a hidden pattern), so it comes back to the quiz, or its typed input.
+	$effect(() => {
+		if (searchOpen) return;
+		const a = document.activeElement;
+		if (!(a instanceof HTMLElement) || !searchLayerEl?.contains(a)) return;
+		a.blur();
+		if (typingCard) typedInput?.focus();
+	});
+
+	/**
+	 * What only the screen holds, kept while the page is left and shown again when
+	 * history comes back to it: the card revealed or not, its grade as toggled, the
+	 * words typed so far and the half-typed one, and the banner.
+	 */
+	let resumeLater: Resume | null = null;
+	export const snapshot: Snapshot<{ card: Resume | null; typedText: string }> = {
+		capture: () => ({ card: player?.resumeState() ?? null, typedText }),
+		restore: (s) => {
+			typedText = s.typedText;
+			if (!s.card) return;
+			if (player) player.resume(s.card);
+			else resumeLater = s.card;
+		}
+	};
+
+	// Search warms up while the quiz is up: the cascade's lexicon is read back
+	// into the worker if this device has it, so the first Q waits for nothing.
+	let warmed = false;
+	$effect(() => {
+		const c = v?.cascade;
+		const d = db;
+		if (warmed || !c || !d || v?.status !== 'ready') return;
+		warmed = true;
+		const info = { name: c.lexicon, letter_distribution: c.letter_distribution } as LexiconInfo;
+		setTimeout(() => void searchEngine.ensure(d, info, { download: false }).catch(() => {}), 1500);
+	});
 
 
 	/** The column layout on a phone: a tap in the quiz area acts by its third, Previous, Toggle or Show / Next. */
 	function tapColumn(e: MouseEvent) {
-		if ((e.target as HTMLElement).closest('input,button,a')) return;
+		if (searchOpen || (e.target as HTMLElement).closest('input,button,a')) return;
 		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
 		const third = Math.min(2, Math.max(0, Math.floor(((e.clientX - r.left) / Math.max(1, r.width)) * 3)));
 		act((['previous', 'toggle_grade', 'show_next'] as const)[third]);
@@ -321,9 +403,20 @@
 
 	function onKey(e: KeyboardEvent) {
 		// A confirmation owns the keyboard: Space or Enter there must not also act on the quiz.
-		if (confirmState.current) return;
+		// So does Search over the quiz, which reads its own keys (the way back among them).
+		if (confirmState.current || searchOpen) return;
+		// The Search binding, wherever it is pressed, unless a text box is owed the key (a plain Q).
+		const searchKey = isSearchKey(dsp.bindings, e);
 		if (settingsOpen) {
 			if (e.key === 'Escape') settingsOpen = false;
+			return;
+		}
+		if (searchKey && v) {
+			e.preventDefault();
+			// The Search page, kept mounted, listens on the window too: opened by this press,
+			// it would take the same press as its way back. This listener is the older one.
+			e.stopImmediatePropagation();
+			if (!e.repeat) openSearch();
 			return;
 		}
 		// The completion screen keeps its keys: Space or Enter presses its focused button.
@@ -346,6 +439,7 @@
 	 * up: a click's answer is not held for the length of the click.
 	 */
 	function onMouse(e: MouseEvent) {
+		if (searchOpen) return;
 		// Middle-click autoscroll and paste are off everywhere in the quiz area.
 		if (e.button === 1) e.preventDefault();
 		if ((e.target as HTMLElement).closest('input,button,a')) return;
@@ -367,6 +461,7 @@
 	}
 
 	function onWheel(e: WheelEvent) {
+		if (searchOpen) return;
 		const s = wheelStroke(e);
 		if (!s) return;
 		const a = actionFor(dsp.bindings, s);
@@ -377,40 +472,75 @@
 
 	/**
 	 * Fits the answer, definitions included, on the screen: when the quiz area
-	 * would scroll, down or across, its sizes are scaled down (the --fit factor AnswerView reads)
-	 * as far as needed, to a floor of FIT_MIN. Runs before the browser paints,
-	 * so the answer never shows at a size that scrolls.
+	 * would scroll down, or the answer runs past its sides, its sizes are scaled
+	 * down (the --fit factor AnswerView reads) as far as needed, to a floor of
+	 * FIT_MIN. Runs before the browser paints, so the answer never shows at a
+	 * size that scrolls.
+	 *
+	 * Hooks too wide for their half of a row move the word aside (AnswerView's
+	 * columns). Where the rows would still have to shrink below WRAP_BELOW to fit
+	 * across, they keep their size and their hooks wrap instead (data-hooks-wrap):
+	 * a word with many hooks, such as ARE, would otherwise shrink its whole answer.
+	 * A Definition card's word in the question gets the same two rules, with a
+	 * factor of its own (--question-fit). The answer's fit measures only the answer,
+	 * so a question too wide for the screen never shrinks it.
 	 */
 	const FIT_MIN = 0.3;
-	function fit() {
-		const area = fitArea;
-		const box = answerBox;
-		if (!area || !box) return;
-		// Too tall, or too wide: a long line of hooks on a phone runs past the edge otherwise.
-		const fits = () => area.scrollHeight <= area.clientHeight + 1 && area.scrollWidth <= area.clientWidth + 1;
-		box.style.setProperty('--fit', '1');
-		if (fits()) return;
+	const WRAP_BELOW = 0.95;
+	/** A text style whose size follows the question's own fit factor. */
+	const questionFitted = (style: string) => style.replace(/font-size: ([\d.]+)px;/, 'font-size: calc($1px * var(--question-fit, 1));');
+	let questionHookStyle = $derived(`font-size: calc(${dsp.hook_size_px}px * var(--question-fit, 1));`);
+	/** The question's hooks when they wrap: between any two letters, in lines of even length. */
+	const hookWrap = 'group-data-[hooks-wrap]:min-w-0 group-data-[hooks-wrap]:break-all group-data-[hooks-wrap]:leading-[1.05] group-data-[hooks-wrap]:[text-wrap:balance]';
+	/** The largest factor from FIT_MIN to 1 that passes `ok`, left set. */
+	function largest(set: (f: number) => void, ok: () => boolean): number {
+		set(1);
+		if (ok()) return 1;
 		let lo = FIT_MIN;
 		let hi = 1;
 		for (let i = 0; i < 8; i++) {
 			const mid = (lo + hi) / 2;
-			box.style.setProperty('--fit', String(mid));
-			if (fits()) lo = mid;
+			set(mid);
+			if (ok()) lo = mid;
 			else hi = mid;
 		}
-		box.style.setProperty('--fit', String(lo));
+		set(lo);
+		return lo;
+	}
+	/** Steps the hooks of `row` aside, or wraps them; then fits the rest with `ok`. */
+	function fitHooks(row: HTMLElement | null, set: (f: number) => void, across: () => boolean, ok: () => boolean) {
+		if (row) {
+			delete row.dataset.hooksWrap;
+			if (largest(set, across) < WRAP_BELOW) row.dataset.hooksWrap = '';
+		}
+		largest(set, ok);
+	}
+	function fit() {
+		const area = fitArea;
+		const box = answerBox;
+		if (!area || !box) return;
+		const question = area.querySelector<HTMLElement>('[data-hooked-question]');
+		if (question) {
+			const across = () => question.scrollWidth <= question.clientWidth + 1;
+			fitHooks(question, (f) => question.style.setProperty('--question-fit', String(f)), across, across);
+		}
+		const across = () => box.scrollWidth <= box.clientWidth + 1;
+		const down = () => area.scrollHeight <= area.clientHeight + 1;
+		fitHooks(box.querySelector<HTMLElement>('[data-answer-rows]'), (f) => box.style.setProperty('--fit', String(f)), across, () => across() && down());
 	}
 
 	// Refit when the area changes size or anything in it changes: a reveal, a
-	// typed word, definitions arriving, a display setting. The fit's own change
-	// to the answer's style is not a reason to refit.
+	// typed word, definitions arriving, a display setting. The fit's own changes
+	// to the answer's and the question's style are not a reason to refit.
 	$effect(() => {
 		const area = fitArea;
 		if (!area) return;
 		const resize = new ResizeObserver(() => fit());
 		resize.observe(area);
 		const changes = new MutationObserver((records) => {
-			if (records.some((r) => !(r.target === answerBox && r.attributeName === 'style'))) fit();
+			const own = (r: MutationRecord) =>
+				r.attributeName === 'style' && (r.target === answerBox || (r.target instanceof HTMLElement && r.target.hasAttribute('data-hooked-question')));
+			if (records.some((r) => !own(r))) fit();
 		});
 		changes.observe(area, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['style', 'class'] });
 		fit();
@@ -853,24 +983,28 @@
 			{@const hooked = v.cascade?.quiz_type === 'definition' && dsp.hooks_on_question ? card.word : null}
 			{#if hooked}
 				<!-- A Definition card shows its word once (hooks_on_question): here, with its hooks and
-				     inner hooks once the answer is shown. The dots' places are kept before then and the
-				     hooks sit either side, so the reveal never moves the word. -->
-				<div
-					class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 font-semibold"
-					style={textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing)}
-					data-question
-				>
-					<span class="justify-self-end font-normal text-muted-foreground" style={`font-size: ${dsp.hook_size_px}px;`} data-hooks="front">
-						{#if card.revealed}<TileText text={hooked.front_hooks} lower />{/if}
-					</span>
-					<span class="whitespace-nowrap">
-						<span class:invisible={!(card.revealed && hooked.front_inner)} aria-hidden={!(card.revealed && hooked.front_inner)}>·</span><TileText
-							text={card.key}
-						/><span class:invisible={!(card.revealed && hooked.back_inner)} aria-hidden={!(card.revealed && hooked.back_inner)}>·</span>
-					</span>
-					<span class="justify-self-start font-normal text-muted-foreground" style={`font-size: ${dsp.hook_size_px}px;`} data-hooks="back">
-						{#if card.revealed}<TileText text={hooked.back_hooks} lower />{/if}
-					</span>
+				     inner hooks once the answer is shown. Their places are kept, unseen, before then, so
+				     the reveal never moves the word. As in an answer (AnswerView), hooks too wide for their
+				     half move the word aside, and where that is not enough they wrap; fit() decides, and
+				     sets --question-fit and data-hooks-wrap on the wrapper, whose style Svelte leaves alone. -->
+				<div class="group" data-hooked-question>
+					<div
+						class="grid grid-cols-[minmax(min-content,1fr)_auto_minmax(min-content,1fr)] items-center font-semibold group-data-[hooks-wrap]:grid-cols-[minmax(0,max-content)_auto_minmax(0,max-content)] group-data-[hooks-wrap]:justify-center"
+						style={`${questionFitted(textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing))} column-gap: calc(0.25rem * var(--question-fit, 1));`}
+						data-question
+					>
+						<span class="justify-self-end text-right font-normal text-muted-foreground {hookWrap}" style={questionHookStyle} data-hooks="front">
+							<span class:invisible={!card.revealed} aria-hidden={!card.revealed}><TileText text={hooked.front_hooks} lower /></span>
+						</span>
+						<span class="whitespace-nowrap">
+							<span class:invisible={!(card.revealed && hooked.front_inner)} aria-hidden={!(card.revealed && hooked.front_inner)}>·</span><TileText
+								text={card.key}
+							/><span class:invisible={!(card.revealed && hooked.back_inner)} aria-hidden={!(card.revealed && hooked.back_inner)}>·</span>
+						</span>
+						<span class="justify-self-start font-normal text-muted-foreground {hookWrap}" style={questionHookStyle} data-hooks="back">
+							<span class:invisible={!card.revealed} aria-hidden={!card.revealed}><TileText text={hooked.back_hooks} lower /></span>
+						</span>
+					</div>
 				</div>
 			{:else}
 				<div class="text-center font-semibold" style={textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing)} data-question><TileText text={card.key} /></div>
@@ -1035,9 +1169,37 @@
 		class="rounded px-2 py-1 text-left hover:bg-muted max-sm:py-2"
 		onclick={() => {
 			if (!desktop) menuOpen = false;
+			openSearch();
+		}}
+		title={searchKeys}>Search</button
+	>
+	<button
+		class="rounded px-2 py-1 text-left hover:bg-muted max-sm:py-2"
+		onclick={() => {
+			if (!desktop) menuOpen = false;
 			void openSettings();
 		}}>Settings</button
 	>
+{/snippet}
+
+{#snippet searchButton(cls: string)}
+	<button
+		class="{cls} z-10 rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+		onclick={openSearch}
+		aria-label="Search"
+		title={searchKeys}
+		data-open-search><SearchIcon class="size-4" /></button
+	>
+{/snippet}
+
+{#snippet searchLayer()}
+	<!-- The Search page as it is at /search, header and all, over the whole player. -->
+	{#if (searchMounted || searchOpen) && v?.cascade}
+		<div bind:this={searchLayerEl} class="fixed inset-0 z-30 overflow-hidden bg-background" class:hidden={!searchOpen} data-search-layer>
+			<AppHeader path="/search" />
+			<SearchPage quiz={{ id, lexicon: v.cascade.lexicon, bindings: dsp.bindings, active: searchOpen, back: closeSearch }} />
+		</div>
+	{/if}
 {/snippet}
 
 {#snippet statusBar()}
@@ -1070,8 +1232,14 @@
 			<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 leading-7 max-sm:gap-x-3">
 				{#if !dsp.status_bar_hidden && v?.quiz && v.cascade && levelQuiz}
 					{#snippet levelRow(cell: string)}
-						<p class="font-medium {cell}" data-status-row="level">Level {levelQuiz.level} of {v!.cascade!.depth}</p>
-						<p class="text-muted-foreground {cell ? 'whitespace-nowrap' : ''}">Pass {levelQuiz.attempt}</p>
+						<!-- On a phone the pass joins the row's name, which takes a line of its own, and
+						     the figures share the line under it (PLAN.md § Desktop layout). The name's own
+						     paragraph holds the name alone, so it reads the same at every width. -->
+						<div class="flex gap-x-1 max-sm:basis-full {cell}" data-status-row="level">
+							<p class="font-medium">Level {levelQuiz.level} of {v!.cascade!.depth}</p>
+							<span class="text-muted-foreground sm:hidden">· Pass {levelQuiz.attempt}</span>
+						</div>
+						<p class="text-muted-foreground max-sm:hidden {cell ? 'whitespace-nowrap' : ''}">Pass {levelQuiz.attempt}</p>
 						<p class={cell ? 'whitespace-nowrap' : ''} title="The card shown, and the share of the level graded in this pass">
 							<!-- The count in its own element, apart from its percentage: it is read on its own. -->
 							<!-- data-played-position marks the position of the quiz being played: this one, or the Segment row's during a drill. -->
@@ -1090,13 +1258,21 @@
 					{/snippet}
 					{#if segment}
 						<!-- A level studied in segments: the Segment row under the Level row, its figures in
-						     the same columns so the two read against each other. On a phone each row's name
-						     takes a line of its own and the figures stay in columns under it. A drill of the
+						     the same columns so the two read against each other. On a phone each row's name,
+						     with its pass, takes a line of its own, and the position and grades share the line
+						     under it, or stack when they are too wide to (stackWhenTooWide). A drill of the
 						     segment's misses is the segment's next pass: the Level row stays on the level. -->
-						<div class="grid grid-cols-[auto_auto_auto] justify-start gap-x-3 tabular-nums sm:grid-cols-[auto_auto_auto_auto] sm:gap-x-5" data-status-rows>
+						<div
+							class="grid grid-cols-[auto_auto] justify-start gap-x-3 tabular-nums max-sm:data-stacked:grid-cols-[auto] sm:grid-cols-[auto_auto_auto_auto] sm:gap-x-5"
+							data-status-rows
+							{@attach stackWhenTooWide}
+						>
 							{@render levelRow('max-sm:col-span-full whitespace-nowrap')}
-							<p class="font-medium whitespace-nowrap max-sm:col-span-full" data-status-row="segment">Segment {segment.segment} of {segment.total}</p>
-							<p class="whitespace-nowrap text-muted-foreground" title="1 is the segment itself; each drill of its misses is the next pass">
+							<div class="flex gap-x-1 whitespace-nowrap max-sm:col-span-full" data-status-row="segment">
+								<p class="font-medium">Segment {segment.segment} of {segment.total}</p>
+								<span class="text-muted-foreground sm:hidden">· Pass {segment.pass}</span>
+							</div>
+							<p class="whitespace-nowrap text-muted-foreground max-sm:hidden" title="1 is the segment itself; each drill of its misses is the next pass">
 								Pass {segment.pass}
 							</p>
 							<p class="whitespace-nowrap" title="The card shown, and the share of the segment graded in this pass">
@@ -1113,10 +1289,17 @@
 					{/if}
 					{#if foundCount}<p>{foundCount}</p>{/if}
 				{/if}
-				<div class="ml-auto"><SyncStatus quiet={dsp.status_bar_hidden || dsp.sync_status_hidden} /></div>
+				<!-- At the bar's foot when the figures take several lines, not halfway up them. -->
+				<div class="ml-auto self-end"><SyncStatus quiet={dsp.status_bar_hidden || dsp.sync_status_hidden} /></div>
 			</div>
 		</div>
 	</footer>
+{/snippet}
+
+{#snippet phoneBanner()}
+	<!-- On a phone the banner follows the question in the page, so it never covers it, however
+	     tall the banner or short the screen. Show clears it, and the answer takes its place. -->
+	{#if v?.banner}<p class="mx-auto mt-4 max-w-[90%] rounded-md bg-muted px-3 py-2 text-center text-sm" role="status">{v.banner}</p>{/if}
 {/snippet}
 
 {#snippet showMenu(cls: string)}
@@ -1124,7 +1307,7 @@
 {/snippet}
 
 {#if desktop}
-	<div class="flex h-screen">
+	<div class="flex h-screen" inert={searchOpen}>
 		{#if menuOpen}
 			<nav class="flex w-48 shrink-0 flex-col gap-1 border-r p-4 text-sm" aria-label="Player menu">{@render menuItems()}</nav>
 		{/if}
@@ -1144,6 +1327,7 @@
 				onwheel={onWheel}
 			>
 				{#if !menuOpen}{@render showMenu('absolute top-3 left-3')}{/if}
+				{@render searchButton('absolute top-3 right-3')}
 				<div class="relative flex min-h-0 flex-1 flex-col items-center">
 					<div bind:this={fitArea} data-fit-area class="flex flex-1 flex-col items-center self-stretch overflow-y-auto px-8 pb-8" style={`padding-top: ${dsp.question_top_px}px;`}>
 						<!-- The whole width of the page: a definition's column runs to its right edge. -->
@@ -1165,12 +1349,12 @@
 	     area, with its label at the bottom; or the question, then three rows of buttons
 	     under it, Previous, Toggle and Show / Next, the last nearest the thumb. ☰ opens
 	     the menu, Settings with it. -->
-	<div class="flex h-dvh flex-col">
+	<div class="flex h-dvh flex-col" inert={searchOpen}>
 		{#if v?.status === 'ready'}
 			{#if dsp.mobile_buttons === 'rows'}
 				<div class="relative flex min-h-0 flex-1 select-none" class:flex-col={!landscape} style="touch-action: manipulation">
 					{@render showMenu('absolute top-1 left-1')}
-					{#if v.banner}<p class="absolute top-2 right-2 left-12 z-10 rounded-md bg-muted px-3 py-2 text-sm" role="status">{v.banner}</p>{/if}
+					{@render searchButton('absolute top-1 right-1')}
 					<div
 						bind:this={fitArea}
 						data-fit-area
@@ -1179,6 +1363,7 @@
 						data-grade={gradeState ?? undefined}
 					>
 						{@render question()}
+						{@render phoneBanner()}
 					</div>
 					<!-- Show / Next at the bottom, nearest the thumb; in landscape the rows stand at
 					     the bottom of a column on the right. Each row is mobile_row_px tall. -->
@@ -1195,7 +1380,7 @@
 					data-grade={gradeState ?? undefined}
 				>
 					{@render showMenu('absolute top-1 left-1')}
-					{#if v.banner}<p class="absolute top-2 right-2 left-12 z-10 rounded-md bg-muted px-3 py-2 text-sm" role="status">{v.banner}</p>{/if}
+					{@render searchButton('absolute top-1 right-1')}
 					<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 					<div
 						bind:this={fitArea}
@@ -1206,6 +1391,7 @@
 						onclick={tapColumn}
 					>
 						{@render question()}
+						{@render phoneBanner()}
 					</div>
 					<div class="relative grid shrink-0 grid-cols-3 text-sm text-muted-foreground">
 						<button class="h-14 active:bg-muted/60" onclick={() => act('previous')}>↶ Previous</button>
@@ -1218,6 +1404,7 @@
 		{:else}
 			<div class="relative min-h-0 flex-1 p-6">
 				{@render showMenu('absolute top-1 left-1')}
+				{@render searchButton('absolute top-1 right-1')}
 				<div class="pt-8">{@render status()}</div>
 			</div>
 		{/if}
@@ -1232,6 +1419,8 @@
 		</div>
 	{/if}
 {/if}
+
+{@render searchLayer()}
 
 {#snippet widen(key: string)}
 	{@const o = offers[key]}

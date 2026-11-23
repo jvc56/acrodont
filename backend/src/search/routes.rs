@@ -52,7 +52,8 @@ pub fn prepare(state: &AppState, lexicon: &str, quiz_type: QuizType, filters: &V
         return Err(path_errors(vec![PathError::new(&[], "lexicon", format!("{lexicon} has no leave values."))]));
     }
     let tree = parse_tree(filters).map_err(path_errors)?;
-    let info = TargetInfo { lexicon: &lex, leaves: leaves.as_ref(), snapshot: &snap };
+    let lexicon_named = |n: &str| snap.lexicon_by_name(n).cloned();
+    let info = TargetInfo { lexicon: &lex, leaves: leaves.as_ref(), lexicon_named: &lexicon_named };
     let spec = validate(&tree, quiz_type, Some(&info)).map_err(path_errors)?.expect("a target gives a spec");
     Ok(Prepared { lexicon: lex, leaves, quiz_type, spec, tree })
 }

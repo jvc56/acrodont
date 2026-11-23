@@ -84,10 +84,18 @@ function presetOf(v: unknown): Preset | null {
  * After a sync: the response's version, and its list when it carried one.
  * True when the list this device holds changed.
  */
-export async function takePresets(db: UserDb, version: unknown, list: unknown): Promise<boolean> {
+export async function takePresets(db: UserDb, version: unknown, list: unknown, sentAfter?: number): Promise<boolean> {
 	if (typeof version !== 'string') return false;
 	const tx = db.transaction(['meta'], 'readwrite');
 	const st = await readMeta(tx, 'presets');
+	if (sentAfter !== undefined && (st.edits ?? 0) !== sentAfter) {
+		// Changed here since the request went out: its list may be older than this device's
+		// (a save that reached the server after the request did). The next request asks again.
+		st.version = null;
+		await writeMeta(tx, 'presets', st);
+		await tx.done;
+		return false;
+	}
 	let changed = false;
 	if (Array.isArray(list)) {
 		const next = list.map(presetOf).filter((p): p is Preset => p !== null);
@@ -109,6 +117,15 @@ export async function presetsVersion(db: UserDb): Promise<string | null> {
 }
 
 /**
+ * What a sync request carries, and how many changes this device had made to the
+ * list when it went out: its reply's list is taken only if none was made since.
+ */
+export async function presetsAsSent(db: UserDb): Promise<{ version: string | null; edits: number }> {
+	const st = await getMeta(db, 'presets');
+	return { version: st.version, edits: st.edits ?? 0 };
+}
+
+/**
  * Changes this device's list at once, as the server just did. The version is
  * forgotten, so the next sync brings the account's whole list: another
  * device's change made meanwhile is never missed.
@@ -116,7 +133,7 @@ export async function presetsVersion(db: UserDb): Promise<string | null> {
 async function edit(db: UserDb, fn: (list: Preset[]) => Preset[]) {
 	const tx = db.transaction(['meta'], 'readwrite');
 	const st = await readMeta(tx, 'presets');
-	await writeMeta(tx, 'presets', { version: null, list: fn(st.list) });
+	await writeMeta(tx, 'presets', { version: null, list: fn(st.list), edits: (st.edits ?? 0) + 1 });
 	await tx.done;
 }
 

@@ -6,7 +6,7 @@
 // wrong on another machine, so it is most often set for This device.
 
 export interface Binding {
-	action: 'show_next' | 'toggle_grade' | 'previous';
+	action: 'show_next' | 'toggle_grade' | 'previous' | 'search';
 	kind: 'key' | 'mouse_button' | 'wheel';
 	code: string;
 	ctrl: boolean;
@@ -18,16 +18,16 @@ export interface Binding {
 export type Action = Binding['action'];
 export type Stroke = Omit<Binding, 'action'>;
 
-export const ACTIONS: Action[] = ['show_next', 'toggle_grade', 'previous'];
+export const ACTIONS: Action[] = ['show_next', 'toggle_grade', 'previous', 'search'];
 const KINDS: Binding['kind'][] = ['key', 'mouse_button', 'wheel'];
 
-const binding = (action: Action, kind: Binding['kind'], code: string): Binding => ({
+const binding = (action: Action, kind: Binding['kind'], code: string, alt = false): Binding => ({
 	action,
 	kind,
 	code,
 	ctrl: false,
 	shift: false,
-	alt: false,
+	alt,
 	meta: false
 });
 
@@ -41,7 +41,11 @@ export const DEFAULT_BINDINGS: Binding[] = [
 	binding('toggle_grade', 'key', 'KeyM'),
 	binding('previous', 'mouse_button', 'middle'),
 	binding('previous', 'key', 'Backspace'),
-	binding('previous', 'key', 'KeyJ')
+	binding('previous', 'key', 'KeyJ'),
+	// Search and back (PLAN.md § Search page). In typed mode a plain Q is the
+	// answer's letter, so Alt+Q is the stroke that works there.
+	binding('search', 'key', 'KeyQ'),
+	binding('search', 'key', 'KeyQ', true)
 ];
 
 /**
@@ -54,8 +58,11 @@ export const MAX_BINDINGS = 64;
 
 /**
  * A stored list made valid: well-formed bindings kept, the rest dropped, no
- * stroke twice. One that leaves an action with none, or anything unreadable,
- * is the defaults, so the player always has every action.
+ * stroke twice. An action the list has none for gets its default bindings
+ * that no other action holds: a list saved before an action existed keeps
+ * its own bindings and gains the new action's. One that still leaves an
+ * action with none, or anything unreadable, is the defaults, so the player
+ * always has every action.
  */
 export function normalizeBindings(stored: unknown): Binding[] {
 	if (!Array.isArray(stored)) return DEFAULT_BINDINGS.map((b) => ({ ...b }));
@@ -66,6 +73,12 @@ export function normalizeBindings(stored: unknown): Binding[] {
 		const b: Binding = { action: raw.action!, kind: raw.kind!, code: raw.code, ctrl: !!raw.ctrl, shift: !!raw.shift, alt: !!raw.alt, meta: !!raw.meta };
 		if (b.kind === 'key' && b.code === 'Escape') continue;
 		if (out.length < MAX_BINDINGS && !out.some((o) => sameStroke(o, b))) out.push(b);
+	}
+	for (const a of ACTIONS) {
+		if (out.some((b) => b.action === a)) continue;
+		for (const d of DEFAULT_BINDINGS) {
+			if (d.action === a && out.length < MAX_BINDINGS && !out.some((o) => sameStroke(o, d))) out.push({ ...d });
+		}
 	}
 	return ACTIONS.every((a) => out.some((b) => b.action === a)) ? out : DEFAULT_BINDINGS.map((b) => ({ ...b }));
 }
@@ -111,6 +124,25 @@ export function inputOwns(e: KeyboardEvent): boolean {
 	if (e.ctrlKey || e.altKey || e.metaKey) return false;
 	if (['Space', 'Backspace', 'Delete', 'Enter', 'NumpadEnter'].includes(e.code)) return true;
 	return e.key.length === 1;
+}
+
+/**
+ * Whether `e` is one of the Search binding's strokes, as the player and the
+ * Search page both read it: anywhere, unless a text box is owed the key (a
+ * plain Q typed into it), so Alt+Q works while typing and Q elsewhere.
+ */
+export function isSearchKey(bindings: Binding[], e: KeyboardEvent): boolean {
+	const t = e.target as HTMLElement | null;
+	const inField = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+	return actionFor(bindings, keyStroke(e)) === 'search' && !(inField && inputOwns(e));
+}
+
+/** The Search binding's keys for a title: "Search (Q, Alt+Q)". */
+export function searchTitle(bindings: Binding[]): string {
+	const keys = bindings
+		.filter((b) => b.action === 'search' && b.kind === 'key')
+		.map((b) => [b.ctrl && 'Ctrl', b.alt && 'Alt', b.shift && 'Shift', b.meta && 'Meta', b.code.replace(/^Key/, '').replace(/^Digit/, '')].filter(Boolean).join('+'));
+	return keys.length ? `Search (${keys.join(', ')})` : 'Search';
 }
 
 /** Drops the same action fired twice within `ms` (120 ms for actions, 150 ms for the wheel). */

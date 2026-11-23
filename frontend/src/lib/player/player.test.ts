@@ -285,6 +285,43 @@ describe('the player', () => {
 		expect(p.v.card!.revealed).toBe(false);
 	});
 
+	it('a page left and come back to shows its card as it was, revealed and toggled; never another card', async () => {
+		await cascade(3);
+		const p = player();
+		await p.load();
+		await p.showNext();
+		await p.toggle();
+		// What the page keeps while it is left: plain data, as a snapshot stores it.
+		const kept = JSON.parse(JSON.stringify(p.resumeState()));
+		// The page comes back: a new player, given what was kept before it has a card.
+		const q = player();
+		q.resume(kept);
+		await q.load();
+		expect([q.v.card!.pos, q.v.card!.revealed, q.v.card!.grade]).toEqual([0, true, 'missed']);
+		// Nothing was saved for it: Show / Next saves it as shown.
+		expect(await ops()).toEqual([]);
+		await q.showNext();
+		expect(await ops()).toEqual(['grade', 'move_cursor']);
+		// Kept for a card that is not the one shown: the card is left as it is.
+		const r = player();
+		r.resume({ ...kept, pos: 0 });
+		await r.load();
+		expect([r.v.card!.pos, r.v.card!.revealed]).toEqual([1, false]);
+	});
+
+	it('a typed card come back to has the words found so far, still being typed', async () => {
+		await cascade(3);
+		await makeTyped();
+		const t = player();
+		await t.load();
+		expect((await t.enter('ab'))!.kind).toBe('found');
+		const typed = JSON.parse(JSON.stringify(t.resumeState()));
+		const u = player();
+		u.resume(typed);
+		await u.load();
+		expect([u.v.card!.revealed, u.v.card!.typed!.found]).toEqual([false, ['AB']]);
+	});
+
 	it('Toggle before the reveal shows the answer marked missed; Previous shows the earlier card with its saved grade and discards the unsaved reveal', async () => {
 		await cascade(3);
 		const p = player();
@@ -679,10 +716,27 @@ describe('controls', () => {
 		for (let i = 0; many.length < MAX_BINDINGS; i++) many = bind(many, 'show_next', { ...x, code: `F${i}`, alt: true }).bindings;
 		expect(many).toHaveLength(MAX_BINDINGS);
 		expect(JSON.stringify(many).length).toBeLessThan(16_000);
-		expect(bind(many, 'show_next', { ...x, code: 'KeyQ' }).refused).toBe(true);
+		expect(bind(many, 'show_next', { ...x, code: 'KeyZ' }).refused).toBe(true);
 		// Moving a stroke it already holds adds nothing, so it still may.
 		expect(bind(many, 'previous', x).refused).toBe(false);
-		expect(normalizeBindings([...many, { action: 'previous', kind: 'key', code: 'KeyQ' }])).toHaveLength(MAX_BINDINGS);
+		expect(normalizeBindings([...many, { action: 'previous', kind: 'key', code: 'KeyZ' }])).toHaveLength(MAX_BINDINGS);
+	});
+
+	it('a list saved before Search existed keeps its bindings and gains Q and Alt+Q, or what of them is free', () => {
+		const q = { kind: 'key', code: 'KeyQ', ctrl: false, shift: false, alt: false, meta: false } as const;
+		const old = DEFAULT_BINDINGS.filter((b) => b.action !== 'search').map((b) => (b.code === 'KeyJ' ? { ...b, code: 'KeyK' } : b));
+		const merged = normalizeBindings(old);
+		expect(merged.slice(0, old.length)).toEqual(old);
+		expect(merged.filter((b) => b.action === 'search')).toEqual([
+			{ action: 'search', ...q },
+			{ action: 'search', ...q, alt: true }
+		]);
+		// Q already the user's for Previous: Search gets Alt+Q alone.
+		const qTaken = normalizeBindings([...old, { action: 'previous', ...q }]);
+		expect(actionFor(qTaken, q)).toBe('previous');
+		expect(qTaken.filter((b) => b.action === 'search')).toEqual([{ action: 'search', ...q, alt: true }]);
+		// Both taken: nothing is free, so the list is the defaults, as an unreadable one is.
+		expect(normalizeBindings([...old, { action: 'previous', ...q }, { action: 'previous', ...q, alt: true }])).toEqual(DEFAULT_BINDINGS);
 	});
 
 	it('the same action twice within the repeat guard counts once', () => {

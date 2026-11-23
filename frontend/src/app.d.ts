@@ -10,7 +10,10 @@ declare global {
 		// interface Error {}
 		// interface Locals {}
 		// interface PageData {}
-		// interface PageState {}
+		interface PageState {
+			/** The Search page shown over the quiz, at /search?from=<cascade>: Back closes it. */
+			search?: boolean;
+		}
 		// interface Platform {}
 	}
 }

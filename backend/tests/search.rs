@@ -156,3 +156,58 @@ async fn preview_needs_the_account_binding(pool: sqlx::PgPool) {
     c.user_id = mine;
     assert_eq!(c.post("/api/search/preview", body).await.status, StatusCode::OK);
 }
+
+/// PLAN.md § Search page → Lexicon packs: a signed-in device gets a lexicon's
+/// words and playabilities, and its definitions, as two packs in the same
+/// word order, named by the revisions they were written at.
+#[sqlx::test]
+async fn lexicon_packs_are_for_signed_in_accounts_and_line_up(pool: sqlx::PgPool) {
+    let app = TestApp::new(pool).await;
+    let mut c = app.seed_fixture_catalog("root").await;
+
+    // Signed out: refused, as every search is.
+    assert_eq!(app.get("/api/lexicons/EN-FIX/pack").await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.get("/api/lexicons/EN-FIX/pack/definitions").await.status, StatusCode::UNAUTHORIZED);
+
+    let core = c.get("/api/lexicons/EN-FIX/pack").await;
+    assert_eq!(core.status, StatusCode::OK);
+    assert_eq!(core.headers["content-type"], "text/plain; charset=utf-8");
+    assert_eq!(core.headers["cache-control"], "private, no-store");
+    assert_eq!(core.headers["x-lexicon-revisions"], "1.1");
+    let defs = c.get("/api/lexicons/EN-FIX/pack/definitions").await;
+    assert_eq!(defs.status, StatusCode::OK);
+    assert_eq!(defs.headers["x-lexicon-revisions"], "1.1");
+
+    let core = String::from_utf8(core.body.to_vec()).unwrap();
+    let defs = String::from_utf8(defs.body.to_vec()).unwrap();
+    let rows: Vec<(&str, f64)> = core
+        .lines()
+        .map(|l| {
+            let (w, p) = l.split_once('\t').unwrap();
+            (w, p.parse().unwrap())
+        })
+        .collect();
+    let defs: Vec<&str> = defs.lines().collect();
+    // Every fixture word once, in the index's (alphabetical, here) order, its definition beside it.
+    let fixture = std::fs::read_to_string(common::fixture_path("EN-FIX.tsv")).unwrap();
+    let mut expected: Vec<(&str, f64, &str)> = fixture
+        .lines()
+        .map(|l| {
+            let f: Vec<&str> = l.splitn(3, '\t').collect();
+            (f[0], f[1].parse().unwrap(), f[2])
+        })
+        .collect();
+    expected.sort_by(|a, b| a.0.cmp(b.0));
+    assert_eq!(rows.len(), expected.len());
+    assert_eq!(defs.len(), expected.len());
+    for (i, (w, p, d)) in expected.iter().enumerate() {
+        assert_eq!((rows[i].0, rows[i].1, defs[i]), (*w, *p, *d));
+    }
+
+    // The listing names the revisions a device compares its copy with.
+    let list = c.get("/api/lexicons").await.json();
+    let en = list.as_array().unwrap().iter().find(|l| l["name"] == "EN-FIX").unwrap().clone();
+    assert_eq!((en["definitions_revision"].clone(), en["playability_revision"].clone()), (json!(1), json!(1)));
+
+    assert_eq!(c.get("/api/lexicons/NOPE/pack").await.status, StatusCode::NOT_FOUND);
+}

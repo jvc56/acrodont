@@ -1,0 +1,14 @@
+[package]
+name = "search-wasm"
+version = "0.1.0"
+edition = "2024"
+description = "The search engine for the browser (PLAN.md § Search page): the lexicon crate behind a few plain WebAssembly exports, driven by frontend/src/lib/search/worker.ts."
+
+[lib]
+# cdylib for the browser; rlib so the native tests can call the same code.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+lexicon = { path = "../lexicon" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
