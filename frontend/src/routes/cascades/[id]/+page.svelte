@@ -1184,10 +1184,12 @@
 				{#if !dsp.status_bar_hidden && v?.quiz && v.cascade && levelQuiz}
 					{#snippet levelRow(cell: string)}
 						<!-- On a phone the pass joins the row's name, which takes a line of its own, and
-						     the figures share the line under it (PLAN.md § Desktop layout). -->
-						<p class="font-medium max-sm:basis-full {cell}" data-status-row="level">
-							Level {levelQuiz.level} of {v!.cascade!.depth}<span class="font-normal text-muted-foreground sm:hidden">{' · '}Pass {levelQuiz.attempt}</span>
-						</p>
+						     the figures share the line under it (PLAN.md § Desktop layout). The name's own
+						     paragraph holds the name alone, so it reads the same at every width. -->
+						<div class="flex gap-x-1 max-sm:basis-full {cell}" data-status-row="level">
+							<p class="font-medium">Level {levelQuiz.level} of {v!.cascade!.depth}</p>
+							<span class="text-muted-foreground sm:hidden">· Pass {levelQuiz.attempt}</span>
+						</div>
 						<p class="text-muted-foreground max-sm:hidden {cell ? 'whitespace-nowrap' : ''}">Pass {levelQuiz.attempt}</p>
 						<p class={cell ? 'whitespace-nowrap' : ''} title="The card shown, and the share of the level graded in this pass">
 							<!-- The count in its own element, apart from its percentage: it is read on its own. -->
@@ -1217,9 +1219,10 @@
 							{@attach stackWhenTooWide}
 						>
 							{@render levelRow('max-sm:col-span-full whitespace-nowrap')}
-							<p class="font-medium whitespace-nowrap max-sm:col-span-full" data-status-row="segment">
-								Segment {segment.segment} of {segment.total}<span class="font-normal text-muted-foreground sm:hidden">{' · '}Pass {segment.pass}</span>
-							</p>
+							<div class="flex gap-x-1 whitespace-nowrap max-sm:col-span-full" data-status-row="segment">
+								<p class="font-medium">Segment {segment.segment} of {segment.total}</p>
+								<span class="text-muted-foreground sm:hidden">· Pass {segment.pass}</span>
+							</div>
 							<p class="whitespace-nowrap text-muted-foreground max-sm:hidden" title="1 is the segment itself; each drill of its misses is the next pass">
 								Pass {segment.pass}
 							</p>

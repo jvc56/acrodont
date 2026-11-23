@@ -38,7 +38,7 @@ test('segments and progression', async ({ page }) => {
 	// The status bar's two rows (PLAN.md § Desktop layout): the level, and under it the segment,
 	// each as its name, pass, card and share graded, and grades.
 	const rows = page.locator('[data-status-rows]');
-	// What the bar shows: on a phone the pass is in the name, and its own cell is hidden.
+	// The bar's paragraphs that show: on a phone the pass joins the name's line instead, and its own cell is hidden.
 	const bar = () => rows.locator('p').evaluateAll((ps) => ps.filter((p) => p.checkVisibility()).map((p) => (p as HTMLElement).innerText.replace(/\s+/g, ' ').trim()));
 	await expect.poll(bar, { timeout: 30_000 }).toEqual(['Level 1 of 1', 'Pass 1', '1 / 18 (0.00%)', '0 ✓ 0 ✗', 'Segment 1 of 4', 'Pass 1', '1 / 5 (0.00%)', '0 ✓ 0 ✗']);
 	// One card graded: the level's percentage is coloured by its threshold, and the
@@ -74,7 +74,8 @@ test('segments and progression', async ({ page }) => {
 	] as const) {
 		await page.setViewportSize({ width, height: 740 });
 		await expect(async () => {
-			expect(await bar()).toEqual(['Level 1 of 1 · Pass 1', '6 / 18 (27.78%)', '3 ✓ 2 ✗ (60.00%)', 'Segment 2 of 4 · Pass 1', '1 / 5 (0.00%)', '0 ✓ 0 ✗']);
+			expect(await bar()).toEqual(['Level 1 of 1', '6 / 18 (27.78%)', '3 ✓ 2 ✗ (60.00%)', 'Segment 2 of 4', '1 / 5 (0.00%)', '0 ✓ 0 ✗']);
+			for (const name of ['level', 'segment']) await expect(rows.locator(`[data-status-row="${name}"] > span`)).toHaveText('· Pass 1', { timeout: 1_000 });
 			const [levelName, levelAt, levelGrades, segmentName, segmentAt, segmentGrades, footer] = await Promise.all(
 				[
 					rows.locator('[data-status-row="level"]'),
