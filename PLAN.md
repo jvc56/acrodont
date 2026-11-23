@@ -1507,6 +1507,17 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   what is right of it share the page's width equally, so every word starts at
   the same place and the column is in the middle of the page whatever the
   others hold; the answer is as wide as the quiz area.
+  - **Hooks too wide for their half** (on a phone, a word like ARE, with 15
+    front hooks and 6 back) are never cut off by the screen's edge or drawn
+    over the word. First the word **steps aside**: that side is as wide as its
+    hooks, and the other takes what is left. Where the rows would then have to
+    shrink below 95% to fit across, they keep their size and the hooks
+    **wrap** instead, between any two letters in lines of even length, each
+    side as wide as its hooks when there is room and taking what the other
+    side leaves when there is not. So EDUCTION's `drs` moves the word a few
+    pixels aside on a 360 px phone, while ARE keeps its size with its front
+    hooks on three lines. The [fit](#controls) decides which, as it fits the
+    answer (`data-hooks-wrap` on the rows).
   - **The probability order** is the word's rank by
     [probability](#probability-and-probability-order) among the lexicon's
     words of its length (1 is the likeliest). The column is empty unless the
@@ -1552,7 +1563,9 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   question itself (which is the word) gains its front and back hooks either
   side and its inner-hook dots, whose places it keeps before the reveal so the
   word never moves, and the answer is the definition alone, centred, as wide
-  as the *Definition width* allows.
+  as the *Definition width* allows. The question's hooks follow the answer's
+  rules: 0.25 rem from the word, stepping aside, then wrapping, with a fit of
+  the question's own (`--question-fit`) for a word too wide even so.
 - **Leave Value**: the value rounded to the cascade's decimal places (half away
   from zero), e.g. `34.1` or `-8.4`: a negative value has its `-`, and a
   positive one no `+`. A value that rounds to zero is
@@ -1701,9 +1714,14 @@ with **Reset controls to defaults**.
   wheel** inside the quiz area: a bound direction acts and does not scroll, and
   an unbound direction scrolls as usual. **An answer is fitted to the panel**:
   when the answer — an anagram list with definitions, a long definition —
-  would make the quiz area scroll, its words and definitions are scaled down
-  together until it fits, before the browser paints it, and back up when there
-  is room again (a resize, a hidden menu). The question keeps its size. The
+  would make the quiz area scroll, or runs past its sides, its words and
+  definitions are scaled down together until it fits, before the browser
+  paints it, and back up when there is room again (a resize, a hidden menu).
+  Only the answer's own overflow counts: a question too wide for the screen
+  never shrinks the answer. The question keeps its size, but for a Definition
+  card's word with its hooks, which is fitted across on its own.
+  Long hooks move the word aside or wrap first ([Answers](#answers)), so they
+  never shrink a whole answer. The
   scale stops at 30%; an answer too long even then overflows the panel, shows a
   scrollbar, and scrolls with it or with any arrow or Page key that is not
   itself bound, so a user who

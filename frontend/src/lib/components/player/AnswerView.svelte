@@ -16,7 +16,11 @@
 	// smaller than the word, are centred on it, not sat on its baseline, and
 	// the word and the definition are centred on each other however many
 	// lines the definition wraps to; a short part of
-	// speech ("[n -S]") is never split.
+	// speech ("[n -S]") is never split. Hooks wider than their half of the row
+	// move the word aside just enough; where even that would make the player
+	// shrink the answer by more than a little, the player sets data-hooks-wrap
+	// on the rows and the hooks wrap between letters instead, each side taking
+	// the room the other leaves (PLAN.md § Answers).
 	// Unfound words are highlighted after a typed-mode reveal; before it, only the
 	// words typed so far show, bare: no hooks, inner hooks or definitions, which
 	// would give hints. The words and a leave value are drawn in the answer font
@@ -134,7 +138,7 @@
 
 {#snippet row(w: Word, hooks: boolean, peers: Word[], text: string | undefined, muted: boolean, missing = false, last = false)}
 	<!-- Left of the word: the probability order, then the front hooks, right-aligned against the word. -->
-	<span class="left">
+	<span class="left" class:with-probability={showProbability}>
 		<span class="justify-self-end font-normal text-muted-foreground tabular-nums" style={hookStyle} data-probability>
 			{#if showProbability && w.probability_order}{w.probability_order}{/if}
 		</span>
@@ -166,7 +170,7 @@
 
 {#if quizType === 'anagram'}
 	<!-- A list of the anagrams; each item is `display: contents`, so its cells stay in the grid's columns. -->
-	<div role="list" class="rows" style={`${answerStyle} ${rowVars} row-gap: calc(0.5rem * var(--fit, 1));`} data-typing={typing ? '' : undefined}>
+	<div role="list" class="rows" data-answer-rows style={`${answerStyle} ${rowVars} row-gap: calc(0.5rem * var(--fit, 1));`} data-typing={typing ? '' : undefined}>
 		{#each words as w (w.word)}
 			<div role="listitem" class="contents">
 				{@render row(w, hooks, words, definitions ? w.definition : undefined, true, !typing && found !== null && !found.includes(w.word), w.word === latest)}
@@ -179,7 +183,7 @@
 {:else if quizType === 'definition'}
 	<!-- The word with its hooks and inner hooks, and the definition: prose, in the definitions' own typeface and size. -->
 	{#if word}
-		<div class="rows" style={`${answerStyle} ${rowVars} row-gap: 1rem;`}>
+		<div class="rows" data-answer-rows style={`${answerStyle} ${rowVars} row-gap: 1rem;`}>
 			{@render row(word, true, [word], String(answer), false)}
 		</div>
 	{:else}
@@ -192,7 +196,8 @@
 {/if}
 
 <style>
-	/* Left of the word | the word | right of the word: the outer two share what is left equally, so the word is in the middle.
+	/* Left of the word | the word | right of the word: the outer two share what is left equally, so the word is in the middle,
+	   unless one side's hooks need more than half: that side is then as wide as its hooks, and the word moves aside.
 	   A row's cells are centred on each other: the smaller probability order and hooks on the word, and
 	   the word on its definition, however tall that is.
 	   The hooks are close to the word and further from what is beyond them. The word's cell already has
@@ -201,7 +206,7 @@
 	.rows {
 		display: grid;
 		width: 100%;
-		grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+		grid-template-columns: minmax(min-content, 1fr) auto minmax(min-content, 1fr);
 		align-items: center;
 		column-gap: calc(0.25rem * var(--fit, 1));
 	}
@@ -210,7 +215,32 @@
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
+	}
+	/* The gap before the front hooks is the probability order's: none without it. */
+	.left.with-probability {
 		column-gap: calc(1.25rem * var(--fit, 1));
+	}
+	/* Hooks too long to step aside for (the player's fit decides): each side as wide as its hooks
+	   when there is room and what the other leaves when there is not, and the hooks wrap between
+	   letters, in lines of even length. Nothing shrinks for them. */
+	.rows:global([data-hooks-wrap]) {
+		grid-template-columns: minmax(0, max-content) auto minmax(0, max-content);
+		justify-content: center;
+	}
+	.rows:global([data-hooks-wrap]) .left,
+	.rows:global([data-hooks-wrap]) .hooks {
+		min-width: 0;
+	}
+	.rows:global([data-hooks-wrap]) .hooks {
+		word-break: break-all;
+		text-wrap: balance;
+		line-height: 1.05;
+	}
+	.rows:global([data-hooks-wrap]) .hooks[data-hooks='front'] {
+		text-align: right;
+	}
+	.rows:global([data-hooks-wrap]) .sizer {
+		display: none;
 	}
 	.word {
 		grid-column: 2;

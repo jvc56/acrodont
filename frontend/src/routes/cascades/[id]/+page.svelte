@@ -463,40 +463,75 @@
 
 	/**
 	 * Fits the answer, definitions included, on the screen: when the quiz area
-	 * would scroll, down or across, its sizes are scaled down (the --fit factor AnswerView reads)
-	 * as far as needed, to a floor of FIT_MIN. Runs before the browser paints,
-	 * so the answer never shows at a size that scrolls.
+	 * would scroll down, or the answer runs past its sides, its sizes are scaled
+	 * down (the --fit factor AnswerView reads) as far as needed, to a floor of
+	 * FIT_MIN. Runs before the browser paints, so the answer never shows at a
+	 * size that scrolls.
+	 *
+	 * Hooks too wide for their half of a row move the word aside (AnswerView's
+	 * columns). Where the rows would still have to shrink below WRAP_BELOW to fit
+	 * across, they keep their size and their hooks wrap instead (data-hooks-wrap):
+	 * a word with many hooks, such as ARE, would otherwise shrink its whole answer.
+	 * A Definition card's word in the question gets the same two rules, with a
+	 * factor of its own (--question-fit). The answer's fit measures only the answer,
+	 * so a question too wide for the screen never shrinks it.
 	 */
 	const FIT_MIN = 0.3;
-	function fit() {
-		const area = fitArea;
-		const box = answerBox;
-		if (!area || !box) return;
-		// Too tall, or too wide: a long line of hooks on a phone runs past the edge otherwise.
-		const fits = () => area.scrollHeight <= area.clientHeight + 1 && area.scrollWidth <= area.clientWidth + 1;
-		box.style.setProperty('--fit', '1');
-		if (fits()) return;
+	const WRAP_BELOW = 0.95;
+	/** A text style whose size follows the question's own fit factor. */
+	const questionFitted = (style: string) => style.replace(/font-size: ([\d.]+)px;/, 'font-size: calc($1px * var(--question-fit, 1));');
+	let questionHookStyle = $derived(`font-size: calc(${dsp.hook_size_px}px * var(--question-fit, 1));`);
+	/** The question's hooks when they wrap: between any two letters, in lines of even length. */
+	const hookWrap = 'group-data-[hooks-wrap]:min-w-0 group-data-[hooks-wrap]:break-all group-data-[hooks-wrap]:leading-[1.05] group-data-[hooks-wrap]:[text-wrap:balance]';
+	/** The largest factor from FIT_MIN to 1 that passes `ok`, left set. */
+	function largest(set: (f: number) => void, ok: () => boolean): number {
+		set(1);
+		if (ok()) return 1;
 		let lo = FIT_MIN;
 		let hi = 1;
 		for (let i = 0; i < 8; i++) {
 			const mid = (lo + hi) / 2;
-			box.style.setProperty('--fit', String(mid));
-			if (fits()) lo = mid;
+			set(mid);
+			if (ok()) lo = mid;
 			else hi = mid;
 		}
-		box.style.setProperty('--fit', String(lo));
+		set(lo);
+		return lo;
+	}
+	/** Steps the hooks of `row` aside, or wraps them; then fits the rest with `ok`. */
+	function fitHooks(row: HTMLElement | null, set: (f: number) => void, across: () => boolean, ok: () => boolean) {
+		if (row) {
+			delete row.dataset.hooksWrap;
+			if (largest(set, across) < WRAP_BELOW) row.dataset.hooksWrap = '';
+		}
+		largest(set, ok);
+	}
+	function fit() {
+		const area = fitArea;
+		const box = answerBox;
+		if (!area || !box) return;
+		const question = area.querySelector<HTMLElement>('[data-hooked-question]');
+		if (question) {
+			const across = () => question.scrollWidth <= question.clientWidth + 1;
+			fitHooks(question, (f) => question.style.setProperty('--question-fit', String(f)), across, across);
+		}
+		const across = () => box.scrollWidth <= box.clientWidth + 1;
+		const down = () => area.scrollHeight <= area.clientHeight + 1;
+		fitHooks(box.querySelector<HTMLElement>('[data-answer-rows]'), (f) => box.style.setProperty('--fit', String(f)), across, () => across() && down());
 	}
 
 	// Refit when the area changes size or anything in it changes: a reveal, a
-	// typed word, definitions arriving, a display setting. The fit's own change
-	// to the answer's style is not a reason to refit.
+	// typed word, definitions arriving, a display setting. The fit's own changes
+	// to the answer's and the question's style are not a reason to refit.
 	$effect(() => {
 		const area = fitArea;
 		if (!area) return;
 		const resize = new ResizeObserver(() => fit());
 		resize.observe(area);
 		const changes = new MutationObserver((records) => {
-			if (records.some((r) => !(r.target === answerBox && r.attributeName === 'style'))) fit();
+			const own = (r: MutationRecord) =>
+				r.attributeName === 'style' && (r.target === answerBox || (r.target instanceof HTMLElement && r.target.hasAttribute('data-hooked-question')));
+			if (records.some((r) => !own(r))) fit();
 		});
 		changes.observe(area, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['style', 'class'] });
 		fit();
@@ -939,24 +974,28 @@
 			{@const hooked = v.cascade?.quiz_type === 'definition' && dsp.hooks_on_question ? card.word : null}
 			{#if hooked}
 				<!-- A Definition card shows its word once (hooks_on_question): here, with its hooks and
-				     inner hooks once the answer is shown. The dots' places are kept before then and the
-				     hooks sit either side, so the reveal never moves the word. -->
-				<div
-					class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 font-semibold"
-					style={textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing)}
-					data-question
-				>
-					<span class="justify-self-end font-normal text-muted-foreground" style={`font-size: ${dsp.hook_size_px}px;`} data-hooks="front">
-						{#if card.revealed}<TileText text={hooked.front_hooks} lower />{/if}
-					</span>
-					<span class="whitespace-nowrap">
-						<span class:invisible={!(card.revealed && hooked.front_inner)} aria-hidden={!(card.revealed && hooked.front_inner)}>·</span><TileText
-							text={card.key}
-						/><span class:invisible={!(card.revealed && hooked.back_inner)} aria-hidden={!(card.revealed && hooked.back_inner)}>·</span>
-					</span>
-					<span class="justify-self-start font-normal text-muted-foreground" style={`font-size: ${dsp.hook_size_px}px;`} data-hooks="back">
-						{#if card.revealed}<TileText text={hooked.back_hooks} lower />{/if}
-					</span>
+				     inner hooks once the answer is shown. Their places are kept, unseen, before then, so
+				     the reveal never moves the word. As in an answer (AnswerView), hooks too wide for their
+				     half move the word aside, and where that is not enough they wrap; fit() decides, and
+				     sets --question-fit and data-hooks-wrap on the wrapper, whose style Svelte leaves alone. -->
+				<div class="group" data-hooked-question>
+					<div
+						class="grid grid-cols-[minmax(min-content,1fr)_auto_minmax(min-content,1fr)] items-center font-semibold group-data-[hooks-wrap]:grid-cols-[minmax(0,max-content)_auto_minmax(0,max-content)] group-data-[hooks-wrap]:justify-center"
+						style={`${questionFitted(textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing))} column-gap: calc(0.25rem * var(--question-fit, 1));`}
+						data-question
+					>
+						<span class="justify-self-end text-right font-normal text-muted-foreground {hookWrap}" style={questionHookStyle} data-hooks="front">
+							<span class:invisible={!card.revealed} aria-hidden={!card.revealed}><TileText text={hooked.front_hooks} lower /></span>
+						</span>
+						<span class="whitespace-nowrap">
+							<span class:invisible={!(card.revealed && hooked.front_inner)} aria-hidden={!(card.revealed && hooked.front_inner)}>·</span><TileText
+								text={card.key}
+							/><span class:invisible={!(card.revealed && hooked.back_inner)} aria-hidden={!(card.revealed && hooked.back_inner)}>·</span>
+						</span>
+						<span class="justify-self-start font-normal text-muted-foreground {hookWrap}" style={questionHookStyle} data-hooks="back">
+							<span class:invisible={!card.revealed} aria-hidden={!card.revealed}><TileText text={hooked.back_hooks} lower /></span>
+						</span>
+					</div>
 				</div>
 			{:else}
 				<div class="text-center font-semibold" style={textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing)} data-question><TileText text={card.key} /></div>
