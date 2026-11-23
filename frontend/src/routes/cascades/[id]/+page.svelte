@@ -57,13 +57,15 @@
 	import { afterLocalWrite, downloadInBackground, ensureCascade, fetchAhead, fetchCard, fetchDistribution, playerActs, sendPending, syncState } from '$lib/sync/runtime.svelte';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import SearchIcon from '@lucide/svelte/icons/search';
-	import SearchView from '$lib/components/search/SearchView.svelte';
+	import AppHeader from '$lib/components/AppHeader.svelte';
+	import SearchPage from '../../search/+page.svelte';
 	import { searchEngine } from '$lib/search/engine.svelte';
 	import type { LexiconInfo } from '$lib/filters';
 	import PanelBottomCloseIcon from '@lucide/svelte/icons/panel-bottom-close';
 	import PanelBottomOpenIcon from '@lucide/svelte/icons/panel-bottom-open';
-	import { actionFor, Debounce, inputOwns, keyStroke, mouseStroke, wheelStroke, type Action } from '$lib/player/bindings';
-	import { Player, type PlayerView } from '$lib/player/controller';
+	import { actionFor, Debounce, inputOwns, isSearchKey, keyStroke, mouseStroke, searchTitle, wheelStroke, type Action } from '$lib/player/bindings';
+	import type { Snapshot } from './$types';
+	import { Player, type PlayerView, type Resume } from '$lib/player/controller';
 	import { levelRows, type LevelRow } from '$lib/player/ladder';
 	import { clampPrefill, type QuizOptions } from '$lib/options';
 	import { confirmAction, confirmState } from '$lib/confirm.svelte';
@@ -81,21 +83,6 @@
 	let windowWidth = $state(1280);
 	let landscape = $state(false);
 	let settingsOpen = $state(false);
-	/**
-	 * Search over the quiz (PLAN.md § Search page): opened by the Search binding
-	 * (Q, Alt+Q), the menu or the 🔍 button, closed by the same keys, Escape or
-	 * Back. The quiz stays mounted underneath, so it is as it was left; Search
-	 * stays mounted once opened, so it opens again at once.
-	 */
-	let searchOpen = $state(false);
-	let searchMounted = $state(false);
-	/** The strokes that open and close Search, for titles: "Q, Alt+Q or Esc". */
-	let searchKeys = $derived.by(() => {
-		const keys = dsp.bindings
-			.filter((b) => b.action === 'search' && b.kind === 'key')
-			.map((b) => [b.ctrl && 'Ctrl', b.alt && 'Alt', b.shift && 'Shift', b.meta && 'Meta', b.code.replace(/^Key/, '').replace(/^Digit/, '')].filter(Boolean).join('+'));
-		return `Search (${[...keys, 'Esc to close'].join(', ')})`;
-	});
 	/** The Name field's answer: an error under it, or that the rename was saved. */
 	let nameError = $state<string | null>(null);
 	let nameSaved = $state(false);
@@ -126,6 +113,8 @@
 	let levelPos = $derived(!levelQuiz ? 0 : v?.bar && !v.bar.played ? levelQuiz.cursor : (v?.card?.pos ?? levelQuiz.cursor));
 	/** Every setting's value for this cascade on this device, from whichever place holds it. */
 	let dsp = $derived(settings.value);
+	/** The strokes that go to Search, and from it back here, for titles: "Search (Q, Alt+Q)". */
+	let searchKeys = $derived(searchTitle(dsp.bindings));
 	/**
 	 * The desktop layout, or the touch layout with its Previous, Toggle and
 	 * Show / Next buttons: those on a touch screen, in a window narrower than
@@ -270,6 +259,8 @@
 			});
 			unsub = p.subscribe((x) => (v = x));
 			player = p;
+			if (resumeLater) p.resume(resumeLater);
+			resumeLater = null;
 			await refreshSide();
 			await p.load();
 		})();
@@ -308,8 +299,7 @@
 	 */
 	function act(a: Action) {
 		if (a === 'search') {
-			if (searchOpen) closeSearch();
-			else openSearch();
+			openSearch();
 			return;
 		}
 		// The completion screen is in front: the new pass under it takes no action.
@@ -345,25 +335,50 @@
 		}).catch((e) => console.error('player action failed', e));
 	}
 
+	/**
+	 * The Search page (PLAN.md § Search page), the one the header links to, shown
+	 * over the quiz at /search?from=<cascade> (SvelteKit shallow routing): the quiz
+	 * stays mounted underneath, so going to Search and back is instant and finds it
+	 * as it was. Its button, the Search keys or Back close it (Back pops the entry
+	 * opening it pushed). Once opened it stays mounted, hidden, so it opens again at once.
+	 */
+	let searchOpen = $derived(!!page.state.search);
+	let searchMounted = $state(false);
 	function openSearch() {
 		if (searchOpen) return;
 		searchMounted = true;
-		searchOpen = true;
 		menuOpen = desktop && menuOpen;
-		// A history entry, so a phone's Back gesture closes it.
-		pushState('', { search: true });
+		pushState(`/search?from=${encodeURIComponent(id)}`, { search: true });
 	}
-
 	function closeSearch() {
-		if (!searchOpen) return;
-		searchOpen = false;
 		if (page.state.search) history.back();
 	}
-
-	// Back (the gesture, or the browser's button) closes Search.
+	let searchLayerEl = $state<HTMLElement | null>(null);
+	// Closed, Search is hidden, not gone: focus left in its boxes would take the quiz's keys
+	// (a Q typed into a hidden pattern), so it comes back to the quiz, or its typed input.
 	$effect(() => {
-		if (!page.state.search && searchOpen) searchOpen = false;
+		if (searchOpen) return;
+		const a = document.activeElement;
+		if (!(a instanceof HTMLElement) || !searchLayerEl?.contains(a)) return;
+		a.blur();
+		if (typingCard) typedInput?.focus();
 	});
+
+	/**
+	 * What only the screen holds, kept while the page is left and shown again when
+	 * history comes back to it: the card revealed or not, its grade as toggled, the
+	 * words typed so far and the half-typed one, and the banner.
+	 */
+	let resumeLater: Resume | null = null;
+	export const snapshot: Snapshot<{ card: Resume | null; typedText: string }> = {
+		capture: () => ({ card: player?.resumeState() ?? null, typedText }),
+		restore: (s) => {
+			typedText = s.typedText;
+			if (!s.card) return;
+			if (player) player.resume(s.card);
+			else resumeLater = s.card;
+		}
+	};
 
 	// Search warms up while the quiz is up: the cascade's lexicon is read back
 	// into the worker if this device has it, so the first Q waits for nothing.
@@ -388,25 +403,19 @@
 
 	function onKey(e: KeyboardEvent) {
 		// A confirmation owns the keyboard: Space or Enter there must not also act on the quiz.
-		if (confirmState.current) return;
-		const t0 = e.target as HTMLElement | null;
-		const inField = !!t0 && (t0.tagName === 'INPUT' || t0.tagName === 'TEXTAREA' || t0.tagName === 'SELECT' || t0.isContentEditable);
+		// So does Search over the quiz, which reads its own keys (the way back among them).
+		if (confirmState.current || searchOpen) return;
 		// The Search binding, wherever it is pressed, unless a text box is owed the key (a plain Q).
-		const searchKey = actionFor(dsp.bindings, keyStroke(e)) === 'search' && !(inField && inputOwns(e));
-		if (searchOpen) {
-			// Search keeps every other key: its boxes are typed in, its list scrolled.
-			if (e.key === 'Escape' || searchKey) {
-				e.preventDefault();
-				if (!e.repeat) closeSearch();
-			}
-			return;
-		}
+		const searchKey = isSearchKey(dsp.bindings, e);
 		if (settingsOpen) {
 			if (e.key === 'Escape') settingsOpen = false;
 			return;
 		}
 		if (searchKey && v) {
 			e.preventDefault();
+			// The Search page, kept mounted, listens on the window too: opened by this press,
+			// it would take the same press as its way back. This listener is the older one.
+			e.stopImmediatePropagation();
 			if (!e.repeat) openSearch();
 			return;
 		}
@@ -1184,10 +1193,11 @@
 {/snippet}
 
 {#snippet searchLayer()}
-	<!-- Over the whole player; mounted from the first opening on, so it opens again at once. -->
-	{#if searchMounted}
-		<div class="fixed inset-0 z-30 flex flex-col bg-background p-3 md:p-6" class:hidden={!searchOpen} data-search-layer>
-			<SearchView cascadeLexicon={v?.cascade?.lexicon ?? null} onclose={closeSearch} closeHint={searchKeys} active={searchOpen} />
+	<!-- The Search page as it is at /search, header and all, over the whole player. -->
+	{#if (searchMounted || searchOpen) && v?.cascade}
+		<div bind:this={searchLayerEl} class="fixed inset-0 z-30 overflow-hidden bg-background" class:hidden={!searchOpen} data-search-layer>
+			<AppHeader path="/search" />
+			<SearchPage quiz={{ id, lexicon: v.cascade.lexicon, bindings: dsp.bindings, active: searchOpen, back: closeSearch }} />
 		</div>
 	{/if}
 {/snippet}
@@ -1409,6 +1419,7 @@
 		</div>
 	{/if}
 {/if}
+
 {@render searchLayer()}
 
 {#snippet widen(key: string)}

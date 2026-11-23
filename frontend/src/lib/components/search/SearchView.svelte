@@ -39,9 +39,9 @@
 		cascadeLexicon?: string | null;
 		/** Opened from a quiz: back to it. */
 		onclose?: (() => void) | null;
-		/** The keys that close it, for the button's title. */
+		/** The keys that go back, for the button's title. */
 		closeHint?: string;
-		/** Shown: the player keeps Search mounted while the quiz is in front. */
+		/** Showing: the player keeps the page mounted, hidden, while its quiz is in front. */
 		active?: boolean;
 	} = $props();
 

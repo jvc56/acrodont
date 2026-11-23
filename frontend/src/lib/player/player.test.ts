@@ -285,6 +285,43 @@ describe('the player', () => {
 		expect(p.v.card!.revealed).toBe(false);
 	});
 
+	it('a page left and come back to shows its card as it was, revealed and toggled; never another card', async () => {
+		await cascade(3);
+		const p = player();
+		await p.load();
+		await p.showNext();
+		await p.toggle();
+		// What the page keeps while it is left: plain data, as a snapshot stores it.
+		const kept = JSON.parse(JSON.stringify(p.resumeState()));
+		// The page comes back: a new player, given what was kept before it has a card.
+		const q = player();
+		q.resume(kept);
+		await q.load();
+		expect([q.v.card!.pos, q.v.card!.revealed, q.v.card!.grade]).toEqual([0, true, 'missed']);
+		// Nothing was saved for it: Show / Next saves it as shown.
+		expect(await ops()).toEqual([]);
+		await q.showNext();
+		expect(await ops()).toEqual(['grade', 'move_cursor']);
+		// Kept for a card that is not the one shown: the card is left as it is.
+		const r = player();
+		r.resume({ ...kept, pos: 0 });
+		await r.load();
+		expect([r.v.card!.pos, r.v.card!.revealed]).toEqual([1, false]);
+	});
+
+	it('a typed card come back to has the words found so far, still being typed', async () => {
+		await cascade(3);
+		await makeTyped();
+		const t = player();
+		await t.load();
+		expect((await t.enter('ab'))!.kind).toBe('found');
+		const typed = JSON.parse(JSON.stringify(t.resumeState()));
+		const u = player();
+		u.resume(typed);
+		await u.load();
+		expect([u.v.card!.revealed, u.v.card!.typed!.found]).toEqual([false, ['AB']]);
+	});
+
 	it('Toggle before the reveal shows the answer marked missed; Previous shows the earlier card with its saved grade and discards the unsaved reveal', async () => {
 		await cascade(3);
 		const p = player();

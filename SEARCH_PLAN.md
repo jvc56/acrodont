@@ -45,6 +45,16 @@ Built as planned, with these differences:
   `KeyboardEvent.code` `KeyQ`), so there is nothing to warn about.
 - **A Search link in the header for every signed-in user**, beside Admin for
   admins.
+- **One Search page, shown over the quiz.** The overlay first built used its
+  own wrapper; then Q navigated to `/search`, which rebuilt the player on
+  return. Now the player renders the `/search` route's own page component
+  (with the header) in its layer, at `/search?from=<cascade>` by SvelteKit
+  shallow routing, so there is one page to maintain and the switch is instant.
+  The page takes the quiz as a prop (lexicon, Search keys, the way back) and
+  offers **Back to the quiz**; that button, the Search keys or Back close it.
+  Escape no longer does. A reload at that address shows the page on its own,
+  which finds the cascade itself; the player keeps what only the screen holds
+  in a SvelteKit snapshot for the way back from there.
 
 ## The goal
 

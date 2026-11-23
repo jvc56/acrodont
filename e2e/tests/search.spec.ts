@@ -4,8 +4,8 @@ import { AEINRST, AEINRST_WORDS, apiCascade, newUser, playerSetting, press } fro
 
 // PLAN.md § Search page: the builder's lexicon and filter rows, listing the
 // words that match on this device instead of making a cascade; downloading
-// the list; searching offline once the lexicon is here; and switching to and
-// from a quiz with Q (Alt+Q while typing), the quiz as it was left.
+// the list; searching offline once the lexicon is here; and going to it from a
+// quiz with Q (Alt+Q while typing) and back, the quiz as it was left.
 
 const pattern = (page: Page) => page.locator('[data-search]').getByLabel('Pattern').first();
 const count = (page: Page) => page.locator('[data-search-count]');
@@ -116,40 +116,50 @@ test('Search lists the words that match, sorted and downloadable, and searches o
 	await expect(page.locator('[data-lexicon-packs]')).toContainText('with definitions');
 });
 
-test('from a quiz, Q opens Search with its lexicon, and Q, Alt+Q or Escape returns to the card as it was', async ({ page }) => {
+test('from a quiz, Q opens the Search page with its lexicon, and Alt+Q, its button or Back return to the card as it was', async ({ page }) => {
 	test.setTimeout(120_000);
 	await newUser(page, 'searchq');
 	const player = await apiCascade(page, { name: 'Retains', filters: AEINRST });
 	await page.goto(player);
 	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
+	// Shown, not yet moved past: only the screen holds that, until Show / Next saves it.
 	await press(page, 'Space');
 	const answers = page.locator('[data-answer]');
 	await expect(answers).toHaveCount(9);
 
 	await press(page, 'q');
-	const layer = page.locator('[data-search-layer]');
-	await expect(layer).toBeVisible();
-	await expect(layer.locator('#search-lexicon')).toHaveValue('EN-FIX');
+	// The one Search page, as the header's link opens it, told which quiz it came from.
+	await expect(page).toHaveURL(/\/search\?from=/);
+	await expect(page.locator('#search-lexicon')).toHaveValue('EN-FIX');
 	// Straight to typing: a plain Q in the pattern box is a letter, not the way back.
 	await expect(pattern(page)).toBeFocused({ timeout: 30_000 });
 	await page.keyboard.type('aetq');
 	await expect(pattern(page)).toHaveValue('aetq');
 	await pattern(page).fill('aet');
 	await expect(count(page)).toContainText('4 words', { timeout: 60_000 });
-	// Alt+Q returns from inside a box; the answer is still shown, its grade unchanged.
+	// Alt+Q goes back from inside a box: the card as it was left, its answer still shown.
 	await page.keyboard.press('Alt+q');
-	await expect(layer).toBeHidden();
-	await expect(answers).toHaveCount(9);
+	await expect(page).toHaveURL(new RegExp(`${player}$`));
+	await expect(answers).toHaveCount(9, { timeout: 30_000 });
 	await expect(page.getByText('1 / 1')).toBeVisible();
-	// Again: the search is as it was left, at once.
+	// Again: the search as it was left; its button goes back too.
 	await press(page, 'q');
-	await expect(layer).toBeVisible();
-	await expect(count(page)).toContainText('4 words');
-	await page.keyboard.press('Escape');
-	await expect(layer).toBeHidden();
-	await expect(answers).toHaveCount(9);
+	await expect(page.locator('[data-search-layer]')).toBeVisible();
+	await expect(count(page)).toContainText('4 words', { timeout: 30_000 });
+	await page.getByRole('button', { name: 'Back to the quiz' }).click();
+	await expect(page).toHaveURL(new RegExp(`${player}$`));
+	await expect(answers).toHaveCount(9, { timeout: 30_000 });
+	// And the browser's Back.
+	await press(page, 'q');
+	await expect(page).toHaveURL(/\/search\?from=/);
+	await page.goBack();
+	await expect(answers).toHaveCount(9, { timeout: 30_000 });
 	// Keys pressed in Search never reached the quiz.
 	await expect(page.locator('[data-grade="missed"]')).toHaveCount(0);
+	// From the header there is no quiz to go back to.
+	await page.goto('/search');
+	await expect(pattern(page)).toBeFocused({ timeout: 30_000 });
+	await expect(page.getByRole('button', { name: 'Back to the quiz' })).toHaveCount(0);
 });
 
 test('in typed mode, Alt+Q goes to Search and back with the words typed so far kept', async ({ page }) => {
@@ -167,16 +177,18 @@ test('in typed mode, Alt+Q goes to Search and back with the words typed so far k
 	// A plain Q is the answer's letter.
 	await page.keyboard.press('q');
 	await expect(input).toHaveValue('q');
-	await expect(page.locator('[data-search-layer]')).toHaveCount(0);
+	await expect(page).toHaveURL(new RegExp(`${player}$`));
 	await input.fill('');
 	await page.keyboard.press('Alt+q');
-	await expect(page.locator('[data-search-layer]')).toBeVisible();
+	await expect(page).toHaveURL(/\/search\?from=/);
+	await expect(pattern(page)).toBeFocused({ timeout: 30_000 });
 	await page.keyboard.press('Alt+q');
-	await expect(page.locator('[data-search-layer]')).toBeHidden();
-	await expect(page.locator('[data-answer]').filter({ hasText: 'RETAINS' })).toBeVisible();
+	await expect(page).toHaveURL(new RegExp(`${player}$`));
+	await expect(page.locator('[data-answer]').filter({ hasText: 'RETAINS' })).toBeVisible({ timeout: 30_000 });
+	await expect(page.locator('[data-answer]')).toHaveCount(1);
 });
 
-test('on a phone, Search is in the menu, and Back closes it', async ({ page }) => {
+test('on a phone, Search is in the menu and behind a button, and Back returns to the quiz', async ({ page }) => {
 	test.setTimeout(120_000);
 	await newUser(page, 'searchp');
 	const player = await apiCascade(page, { name: 'Retains', filters: AEINRST });
@@ -185,13 +197,14 @@ test('on a phone, Search is in the menu, and Back closes it', async ({ page }) =
 	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
 	await page.getByRole('button', { name: 'Show menu' }).click();
 	await page.getByRole('navigation', { name: 'Player menu' }).getByRole('button', { name: 'Search' }).click();
-	await expect(page.locator('[data-search-layer]')).toBeVisible();
+	await expect(page).toHaveURL(/\/search\?from=/);
 	await page.goBack();
-	await expect(page.locator('[data-search-layer]')).toBeHidden();
 	await expect(page).toHaveURL(new RegExp(`${player}$`));
-	// The 🔍 button opens it too.
+	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
+	// The 🔍 button opens it too, and its button comes back.
 	await page.locator('[data-open-search]').click();
-	await expect(page.locator('[data-search-layer]')).toBeVisible();
-	await page.locator('[data-search-close]').click();
-	await expect(page.locator('[data-search-layer]')).toBeHidden();
+	await expect(page).toHaveURL(/\/search\?from=/);
+	await page.getByRole('button', { name: 'Back to the quiz' }).click();
+	await expect(page).toHaveURL(new RegExp(`${player}$`));
+	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
 });

@@ -11,7 +11,7 @@ declare global {
 		// interface Locals {}
 		// interface PageData {}
 		interface PageState {
-			/** The player's Search is open (a history entry, so Back closes it). */
+			/** The Search page shown over the quiz, at /search?from=<cascade>: Back closes it. */
 			search?: boolean;
 		}
 		// interface Platform {}

@@ -126,6 +126,25 @@ export function inputOwns(e: KeyboardEvent): boolean {
 	return e.key.length === 1;
 }
 
+/**
+ * Whether `e` is one of the Search binding's strokes, as the player and the
+ * Search page both read it: anywhere, unless a text box is owed the key (a
+ * plain Q typed into it), so Alt+Q works while typing and Q elsewhere.
+ */
+export function isSearchKey(bindings: Binding[], e: KeyboardEvent): boolean {
+	const t = e.target as HTMLElement | null;
+	const inField = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+	return actionFor(bindings, keyStroke(e)) === 'search' && !(inField && inputOwns(e));
+}
+
+/** The Search binding's keys for a title: "Search (Q, Alt+Q)". */
+export function searchTitle(bindings: Binding[]): string {
+	const keys = bindings
+		.filter((b) => b.action === 'search' && b.kind === 'key')
+		.map((b) => [b.ctrl && 'Ctrl', b.alt && 'Alt', b.shift && 'Shift', b.meta && 'Meta', b.code.replace(/^Key/, '').replace(/^Digit/, '')].filter(Boolean).join('+'));
+	return keys.length ? `Search (${keys.join(', ')})` : 'Search';
+}
+
 /** Drops the same action fired twice within `ms` (120 ms for actions, 150 ms for the wheel). */
 export class Debounce {
 	private last = new Map<string, number>();

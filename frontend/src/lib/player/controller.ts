@@ -42,6 +42,21 @@ export interface Card {
 
 export type Status = 'loading' | 'downloading' | 'needs_connection' | 'ready' | 'trashed' | 'gone';
 
+/**
+ * The card as the page left it, for the page to show again when it comes back
+ * (Search, then back to the quiz): what is only on the screen, not yet saved.
+ * Plain data, so the page can keep it in a SvelteKit snapshot.
+ */
+export interface Resume {
+	quizId: string;
+	pos: number;
+	idx: number;
+	revealed: boolean;
+	grade: Grade;
+	typed: TypedState | null;
+	banner: string | null;
+}
+
 export interface PlayerView {
 	status: Status;
 	cascade: CascadeRow | null;
@@ -139,6 +154,8 @@ export class Player {
 	private aheadRun: Promise<void> | null = null;
 	private order: number[] = [];
 	private rows = new Map<number, QuestionRow>();
+	/** A card to show as it was left, once it is shown again (resume). */
+	private resuming: Resume | null = null;
 	private dist: Distribution | null = null;
 	private retry: (() => Promise<void>) | null = null;
 	private listeners = new Set<(v: PlayerView) => void>();
@@ -371,9 +388,48 @@ export class Player {
 			note: null
 		};
 		this.v.message = null;
+		this.applyResume();
 		this.emit();
 		this.readAhead(pos);
 		this.fillCache(pos);
+	}
+
+	/** The card on the screen as it is, unsaved parts included: for the page to keep while it is left. */
+	resumeState(): Resume | null {
+		const c = this.v.card;
+		const q = this.v.quiz;
+		if (!c || !q) return null;
+		return { quizId: q.id, pos: c.pos, idx: c.idx, revealed: c.revealed, grade: c.grade, typed: c.typed, banner: this.v.banner };
+	}
+
+	/**
+	 * Shows the card as it was left (resumeState): revealed, its grade as
+	 * toggled, the words typed so far, the banner. Waits for the card if it is
+	 * not shown yet, and holds while it is shown again as its parts arrive (its
+	 * answer, the tiles typed mode needs), until an action on it or another card.
+	 */
+	resume(r: Resume) {
+		this.resuming = r;
+		if (this.applyResume()) this.emit();
+	}
+
+	private applyResume(): boolean {
+		const r = this.resuming;
+		const c = this.v.card;
+		const q = this.v.quiz;
+		if (!r || !c || !q) return false;
+		if (q.id !== r.quizId || c.pos !== r.pos || c.idx !== r.idx) {
+			this.resuming = null;
+			return false;
+		}
+		this.v.card = {
+			...c,
+			revealed: c.revealed || r.revealed,
+			grade: r.revealed && c.saved === null ? r.grade : c.grade,
+			typed: c.typed && r.typed ? r.typed : c.typed
+		};
+		if (r.banner && !this.v.banner) this.v.banner = r.banner;
+		return true;
 	}
 
 	/** The card at `pos`: from the cache at once, else read (and fetched if need be). */
@@ -595,6 +651,7 @@ export class Player {
 
 	/** Show / Next. Resolves once its writes are saved; the screen changes before that. */
 	async showNext(): Promise<void> {
+		this.resuming = null;
 		if (this.v.completion) return;
 		const card = this.v.card;
 		if (card && !card.revealed && card.key !== null && this.v.quiz && this.canActNow()) {
@@ -739,6 +796,7 @@ export class Player {
 	}
 
 	toggle(): Promise<void> {
+		this.resuming = null;
 		const flip = () => {
 			const card = this.v.card;
 			if (!card || card.key === null || this.v.status !== 'ready' || this.v.completion) return;
@@ -759,6 +817,7 @@ export class Player {
 
 	/** Previous. Resolves once its write is saved; the screen changes before that. */
 	async previous(): Promise<void> {
+		this.resuming = null;
 		await this.action(() => this.previousNow());
 		await this.flush();
 	}
@@ -791,6 +850,7 @@ export class Player {
 
 	/** Enter in the typed input; returns what happened for the input to show. */
 	async enter(text: string): Promise<Submit | null> {
+		this.resuming = null;
 		const card = this.v.card;
 		if (!card?.typed || card.revealed || !this.dist || !card.key || this.v.completion) return null;
 		const words = this.words(card);

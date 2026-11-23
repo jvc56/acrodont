@@ -1688,11 +1688,11 @@ The default desktop bindings are:
 | **Previous** | Middle click | Backspace, `J` |
 | **Search** | — | `Q`, Alt+`Q` |
 
-**Search** opens the [Search page](#search-page) over the quiz and closes it
-again (Escape closes it too). In typed mode a plain `Q` is the answer's
-letter, so Alt+`Q` is the stroke that works there; inside Search a plain `Q`
-in a box is a letter for the same reason. While Search is open no other
-binding acts on the quiz.
+**Search** shows the [Search page](#search-page), the same page the header
+links to, over the quiz, and closes it again. While it is up no other binding
+acts on the quiz. In typed mode a plain `Q` is
+the answer's letter, so Alt+`Q` is the stroke that works there; on the
+Search page a plain `Q` in a box is a letter for the same reason.
 
 An action can hold any number of bindings, up to 64 on a device in all, but always at least one. A device
 whose bindings were saved before `,`, `M`, `J` and Enter were added gets them
@@ -2004,7 +2004,7 @@ the offline fallback, which would fail for the same reason.
 
 ### Search page
 
-**Search** (`/search`, in the header, and over the player with the
+**Search** (`/search`, in the header, and from the player with the
 [Search binding](#controls), the player menu or its 🔍 button) has the
 builder's lexicon select and filter rows, and lists the words that match
 instead of making a cascade, as Zyzzyva's Search tab does. Like every page but
@@ -2038,16 +2038,23 @@ the eleven decisions behind it, are in `SEARCH_PLAN.md`.
 - **Load Search… and Save Search…** are the builder's, online only. **New
   cascade from this search** opens the builder with this lexicon and these
   filters, under Definition.
-- **One search, remembered.** The page and the player's Search show the same
-  search, kept in `meta` (`search_state`) 300 ms after each change, so a
-  reload, or the next Q, finds it as it was left.
-- **From a quiz.** The Search binding opens Search over the whole player,
-  with the cascade's lexicon; the binding again, Escape or Back (opening
-  adds a history entry) closes it. The quiz underneath stays mounted and
-  inert, so a revealed answer, typed words, a toggled grade and the scroll
-  are all as they were; Search stays mounted once opened, so it opens again
-  at once. While the quiz is up, the worker reads in the cascade's lexicon if
-  the device has it, so the first Q waits for nothing.
+- **One search, remembered.** There is one Search page, and one search on
+  it, kept in `meta` (`search_state`) 300 ms after each change, so a reload,
+  or the next Q, finds it as it was left.
+- **From a quiz.** The Search binding shows the Search page, header and
+  all, over the player at `/search?from=<cascade>` (SvelteKit shallow
+  routing: the address changes, the player stays mounted). It is the same
+  page component as `/search`, handed the quiz: its lexicon, its Search keys
+  and the way back, **Back to the quiz**. That button, the cascade's Search
+  binding (`Q` outside a box, Alt+`Q` anywhere, by default) or Back closes
+  it, and the quiz is exactly as it was: a revealed answer, a toggled grade,
+  typed words and the scroll are untouched. Once opened it stays mounted,
+  hidden, so it opens again at once. Loaded at that address on its own (a
+  reload), the page finds the cascade itself and goes back in history, or to
+  the quiz afresh; the player keeps what only the screen holds (the reveal,
+  a toggled grade, the typed words, the banner) in a SvelteKit snapshot for
+  that case. While the quiz is up, the worker reads in the cascade's lexicon
+  if the device has it, so the first Q waits for nothing.
 
 **Searching on the device.** The search engine and the lexicon index are the
 `lexicon` crate (`backend/lexicon/`), which the server uses and which

@@ -8,6 +8,14 @@
 	import SyncStatus from '$lib/components/SyncStatus.svelte';
 	import OfflineStatus from '$lib/components/OfflineStatus.svelte';
 
+	let {
+		path: given = null
+	}: {
+		/** The page it heads, where that is not the address's (the Search page over a quiz). */
+		path?: string | null;
+	} = $props();
+	const path = $derived(given ?? page.url.pathname);
+
 	const links = $derived([
 		{ href: '/search', label: 'Search' },
 		...(session.isAdmin ? [{ href: '/admin', label: 'Admin' }] : [])
@@ -16,7 +24,6 @@
 	// The most specific link that matches is the current one: /cascades/new is
 	// New cascade, not Cascades.
 	const current = $derived.by(() => {
-		const path = page.url.pathname;
 		const hits = links.filter((l) => path === l.href || path.startsWith(`${l.href}/`));
 		return hits.sort((a, b) => b.href.length - a.href.length)[0]?.href ?? null;
 	});
@@ -41,7 +48,7 @@
 			<SyncStatus compact />
 			<a
 				href="/account"
-				aria-current={page.url.pathname === '/account' ? 'page' : undefined}
+				aria-current={path === '/account' ? 'page' : undefined}
 				class="rounded-md border px-3 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted"
 				title="Account: log out, storage on this device, password"
 			>
