@@ -130,9 +130,13 @@ test('a word row is probability, front hooks, word, back hooks, definition; the 
 	const wide = page.viewportSize()!;
 	await page.setViewportSize({ width: 660, height: wide.height });
 	// (The narrower window lays the player out afresh: for a moment the definition is not there to measure.)
-	await expect.poll(async () => (await parts.boundingBox())?.height ?? 0).toBeGreaterThan(lines.height + 10);
-	const [x2, wrapped] = [await box(page.locator('[data-answer]').filter({ hasText: /EXIT/ })), await box(parts)];
-	expect(Math.abs(wrapped.y + wrapped.height / 2 - (x2.y + x2.height / 2))).toBeLessThan(3);
+	// Measured together and retried: the layout can be replaced between two readings.
+	await expect(async () => {
+		const [x2, wrapped] = await Promise.all([page.locator('[data-answer]').filter({ hasText: /EXIT/ }), parts].map((l) => l.boundingBox({ timeout: 1_000 })));
+		if (!x2 || !wrapped) throw new Error('the word or its definition has no box yet');
+		expect(wrapped.height).toBeGreaterThan(lines.height + 10);
+		expect(Math.abs(wrapped.y + wrapped.height / 2 - (x2.y + x2.height / 2))).toBeLessThan(3);
+	}).toPass({ timeout: 10_000 });
 	await page.setViewportSize(wide);
 	// Each hook column is as wide as its own widest hooks, the same for every row, and the two differ:
 	// AT has front hooks enopqrv and back hook e, TA front hook e and back hooks noprx.
