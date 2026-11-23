@@ -77,6 +77,14 @@ test('Search lists the words that match, sorted and downloadable, and searches o
 	await pattern(page).fill('aet');
 	await expect(count(page)).toContainText('4 words');
 	await expect.poll(() => listed(page)).toEqual(['ATE', 'EAT', 'ETA', 'TEA']);
+	// ? is any single tile too, as Zyzzyva and a rack write the blank: the same words as with a dot.
+	for (const any of ['ae.', 'ae?']) {
+		await pattern(page).fill(any);
+		await expect(count(page)).toContainText('7 words');
+		await expect.poll(() => listed(page)).toEqual(['SEA', 'ATE', 'EAT', 'ETA', 'TEA', 'EAU', 'ZEA']);
+	}
+	await pattern(page).fill('aet');
+	await expect(count(page)).toContainText('4 words');
 	await context.setOffline(false);
 
 	// The search is remembered across a reload, once it is kept.

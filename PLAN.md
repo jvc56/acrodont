@@ -2482,7 +2482,9 @@ distributions.
   typed, and In Lexicon names a lexicon.
 - **Blank.** Written, typed and displayed as `?` everywhere: in upload files,
   In Word List entries, Includes Letters and patterns. The single-tile wildcard
-  in patterns is `.`, never `?`, so the two never collide.
+  in canonical patterns is `.`, never `?`, so the two never collide; a `?`
+  typed into a pattern where there is no blank to match becomes `.`
+  ([Pattern syntax](#pattern-syntax)).
 - **Vowels and point values** come from the distribution, so Number of Vowels,
   Consists of `AEIOU`-style sets, Point Value and probability all work for any
   language.
@@ -2581,21 +2583,22 @@ plus:
 | `.` | Any single tile. In a Leave Value pattern that includes the blank. |
 | `*` | Any number of tiles, including none. More than one `*` in an anagram or subanagram pattern means the same as one. |
 | `[ABC]` | Exactly one tile from the set |
-| `?` | The blank tile itself (Leave Value quizzes only), exactly as it is written in leave files and leaves |
+| `?` | In a Leave Value pattern, the blank tile itself, exactly as it is written in leave files and leaves. Anywhere else, typed, it is any single tile, as `.` is. |
 
-`.` is the only single-tile wildcard. Zyzzyva uses `?` for it; Acrodont does
-not, because `?` is how the blank is written everywhere else, and a leave
-pattern needs both.
+`.` is the canonical single-tile wildcard. Zyzzyva and a rack write it `?`, so
+a `?` typed into a pattern of an Anagram or Definition cascade, or on the
+[Search page](#search-page), is taken as `.`: those words hold no blank for
+it to mean. A leave pattern needs both, so there `?` stays the blank tile.
 
 Input is upper-cased as it is typed and converted to tiles, with multi-character
 tiles matched greedily, separated by spaces, or inserted from the tile palette
 (see [Tiles](#tiles)). Brackets in a pattern always mean a tile set, never
 MAGPIE's multi-character notation, so `[A NY]` and `[ANY]` both mean "`A` or
 `NY`" in a Catalan lexicon. A tile that is not in the distribution, an
-unbalanced bracket, or an empty bracket fails validation, and so does `?` in
-any pattern or tile input (Includes Letters, Consists of, Takes Prefix or
-Suffix, In Word List) of an Anagram or Definition cascade, with the message
-"use `.` for any single tile", since that is what Zyzzyva users will type.
+unbalanced bracket, or an empty bracket fails validation, and so does `?`
+inside a pattern's brackets or in any tile input (Includes Letters, Consists
+of, Takes Prefix or Suffix, In Word List) of an Anagram or Definition cascade,
+with the message "use `.` for any single tile".
 
 ### Filter reference
 

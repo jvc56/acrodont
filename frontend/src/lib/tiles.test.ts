@@ -51,7 +51,10 @@ describe('tiles', () => {
 		expect(cat.canonicalPattern('[any]', false)).toBe('[A NY]');
 		expect(cat.canonicalPattern('.w*m.s'.replace(/[wm]/g, 'a'), false)).toBe('. A * A . S');
 		expect(cat.canonicalPattern('c.nya', false)).toBe('C . NY A');
-		expect(() => cat.canonicalPattern('?a', false)).toThrow(/use `.`/);
+		// Where there is no blank to match, ? is any single tile, as . is; in a leave it is the blank.
+		expect(cat.canonicalPattern('?a', false)).toBe('. A');
+		expect(cat.canonicalPattern('c?ny*?', false)).toBe('C . NY * .');
+		expect(() => cat.canonicalPattern('[a?]', false)).toThrow(/use `.`/);
 		expect(cat.canonicalPattern('?a', true)).toBe('? A');
 	});
 
