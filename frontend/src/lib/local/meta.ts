@@ -51,7 +51,7 @@ export interface MetaValues {
 	 * The account's presets (lib/settings/presets) as the last sync response
 	 * that carried them had them, and their version, sent with every sync.
 	 */
-	presets: { version: string | null; list: Preset[] };
+	presets: { version: string | null; list: Preset[]; edits?: number };
 	/** The preset the builder used last on this device, which it starts at; null for Defaults. */
 	last_preset_id: string | null;
 	/** Bytes of each cascade's question keys and answers, measured as they were written. */

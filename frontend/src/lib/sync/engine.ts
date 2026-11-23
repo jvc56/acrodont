@@ -6,7 +6,7 @@
 import { offsetOf } from '$lib/settings/clock';
 import { pendingShares, takeShared } from '$lib/settings/everywhere';
 import type { Entries } from '$lib/settings/layers';
-import { presetsVersion, takePresets } from '$lib/settings/presets';
+import { presetsAsSent, takePresets } from '$lib/settings/presets';
 import { ApiError, request } from '$lib/api';
 import type { UserDb } from '$lib/local/db';
 import { getMeta } from '$lib/local/meta';
@@ -270,7 +270,8 @@ export class SyncEngine {
 			const sent = shares ?? {};
 			if (Object.keys(sent).length) req.settings = sent;
 			shares = null;
-			req.presets_version = await presetsVersion(this.db);
+			const presetsSent = await presetsAsSent(this.db);
+			req.presets_version = presetsSent.version;
 			const reply = await this.send(req);
 			const receivedAt = Date.now();
 			if (!reply) return;
@@ -303,7 +304,7 @@ export class SyncEngine {
 			const offset = offsetOf(body.server_time, receivedAt);
 			if (offset !== null) await this.db.put('meta', { offset_ms: offset }, 'clock');
 			let settingsChanged = !!body.settings && (await takeShared(this.db, body.settings, sent));
-			if (await takePresets(this.db, body.presets_version, body.presets)) settingsChanged = true;
+			if (await takePresets(this.db, body.presets_version, body.presets, presetsSent.edits)) settingsChanged = true;
 			if (settingsChanged) this.hooks.onDeviceSettings?.();
 			if (body.resync_required) {
 				// A full pull, with the same batch: the server answers each operation

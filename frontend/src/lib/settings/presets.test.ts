@@ -5,7 +5,8 @@
 // cascade's starting settings are the preset's values, none for Defaults.
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { api } from '$lib/api';
 import { openUserDb, type UserDb } from '$lib/local/db';
 import { getMeta, initMeta } from '$lib/local/meta';
 import { CASCADE_SETTING_DEFAULTS } from '$lib/local/rows';
@@ -15,7 +16,9 @@ import {
 	DEFAULTS_ID,
 	isDefaultsName,
 	presetFrom,
+	deletePreset,
 	presetList,
+	presetsAsSent,
 	presetsVersion,
 	rememberPreset,
 	startingPreset,
@@ -59,6 +62,25 @@ describe('presets', () => {
 		await takePresets(db, '4', undefined);
 		expect(await presetsVersion(db)).toBeNull();
 		expect((await getMeta(db, 'presets')).list).toHaveLength(2);
+	});
+
+	it('a sync reply to a request sent before a change made here is not taken; the next request asks again', async () => {
+		const db = await fresh();
+		await takePresets(db, '1', [phone, desk]);
+		// The request goes out; then Desk is deleted here, reaching the server after it.
+		const sent = await presetsAsSent(db);
+		expect(sent).toEqual({ version: '1', edits: 0 });
+		vi.spyOn(api, 'delete').mockResolvedValue(undefined);
+		await deletePreset(db, 'p2');
+		// The reply holds the list as the server had it before: Desk would come back.
+		expect(await takePresets(db, '2', [phone, desk], sent.edits)).toBe(false);
+		expect((await getMeta(db, 'presets')).list.map((p) => p.id)).toEqual(['p1']);
+		expect(await presetsVersion(db)).toBeNull();
+		// The next request, sent after the change, takes what the server holds then.
+		const next = await presetsAsSent(db);
+		expect(await takePresets(db, '3', [phone], next.edits)).toBe(false);
+		expect(await presetsVersion(db)).toBe('3');
+		vi.restoreAllMocks();
 	});
 
 	it('the builder starts at the preset used last on this device, or Defaults once it is gone', async () => {
