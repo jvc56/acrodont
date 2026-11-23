@@ -30,26 +30,27 @@
 </script>
 
 <header class="border-b bg-background">
-	<div class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-2 px-4 sm:gap-x-6 py-3 md:px-6">
-		<a href="/" class="text-lg font-semibold tracking-tight">Acrodont</a>
-		{#if links.length}<nav aria-label="Main" class="flex gap-1 text-sm">
+	<!-- One line at every width: what gives way is the account's name, cut short with an ellipsis. -->
+	<div class="mx-auto flex max-w-6xl items-center gap-x-3 px-4 sm:gap-x-6 py-3 md:px-6">
+		<a href="/" class="shrink-0 text-lg font-semibold tracking-tight">Acrodont</a>
+		{#if links.length}<nav aria-label="Main" class="flex shrink-0 gap-1 text-sm">
 			{#each links as l (l.href)}
 				<a
 					href={l.href}
 					aria-current={current === l.href ? 'page' : undefined}
-					class="rounded-md px-3 py-1.5 whitespace-nowrap text-muted-foreground hover:bg-muted hover:text-foreground aria-[current=page]:bg-muted aria-[current=page]:font-medium aria-[current=page]:text-foreground"
+					class="rounded-md px-2 py-1.5 whitespace-nowrap text-muted-foreground sm:px-3 hover:bg-muted hover:text-foreground aria-[current=page]:bg-muted aria-[current=page]:font-medium aria-[current=page]:text-foreground"
 				>
 					{l.label}
 				</a>
 			{/each}
 		</nav>{/if}
-		<div class="ml-auto flex items-center gap-3 sm:gap-4">
+		<div class="ml-auto flex min-w-0 items-center gap-3 sm:gap-4">
 			<OfflineStatus />
 			<SyncStatus compact />
 			<a
 				href="/account"
 				aria-current={path === '/account' ? 'page' : undefined}
-				class="rounded-md border px-3 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted"
+				class="min-w-0 truncate rounded-md border px-3 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted"
 				title="Account: log out, storage on this device, password"
 			>
 				{session.username || 'Account'}
