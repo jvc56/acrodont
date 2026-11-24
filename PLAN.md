@@ -2055,6 +2055,12 @@ the eleven decisions behind it, are in `SEARCH_PLAN.md`.
   a toggled grade, the typed words, the banner) in a SvelteKit snapshot for
   that case. While the quiz is up, the worker reads in the cascade's lexicon
   if the device has it, so the first Q waits for nothing.
+- **The tab's title** is `Search · Acrodont` while Search shows, on its own or
+  over a quiz; the quiz's is the cascade's name (`Retains · Acrodont`), and
+  every other page's `Acrodont`. The root layout holds the one `<title>` and
+  works it out from the address, the shallow-routing state and the name the
+  player gives it (`lib/title.svelte.ts`): a `<title>` a page puts up is never
+  taken down again when the page goes, so closing Search would leave its title.
 
 **Searching on the device.** The search engine and the lexicon index are the
 `lexicon` crate (`backend/lexicon/`), which the server uses and which

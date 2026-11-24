@@ -122,6 +122,8 @@ test('from a quiz, Q opens the Search page with its lexicon, and Alt+Q, its butt
 	const player = await apiCascade(page, { name: 'Retains', filters: AEINRST });
 	await page.goto(player);
 	await expect(page.getByText('1 / 1')).toBeVisible({ timeout: 30_000 });
+	// The tab is titled with the cascade, Search's own over it, and the cascade's again back on the quiz.
+	await expect(page).toHaveTitle('Retains · Acrodont');
 	// Shown, not yet moved past: only the screen holds that, until Show / Next saves it.
 	await press(page, 'Space');
 	const answers = page.locator('[data-answer]');
@@ -130,6 +132,7 @@ test('from a quiz, Q opens the Search page with its lexicon, and Alt+Q, its butt
 	await press(page, 'q');
 	// The one Search page, as the header's link opens it, told which quiz it came from.
 	await expect(page).toHaveURL(/\/search\?from=/);
+	await expect(page).toHaveTitle('Search · Acrodont');
 	await expect(page.locator('#search-lexicon')).toHaveValue('EN-FIX');
 	// Straight to typing: a plain Q in the pattern box is a letter, not the way back.
 	await expect(pattern(page)).toBeFocused({ timeout: 30_000 });
@@ -140,6 +143,7 @@ test('from a quiz, Q opens the Search page with its lexicon, and Alt+Q, its butt
 	// Alt+Q goes back from inside a box: the card as it was left, its answer still shown.
 	await page.keyboard.press('Alt+q');
 	await expect(page).toHaveURL(new RegExp(`${player}$`));
+	await expect(page).toHaveTitle('Retains · Acrodont');
 	await expect(answers).toHaveCount(9, { timeout: 30_000 });
 	await expect(page.getByText('1 / 1')).toBeVisible();
 	// Again: the search as it was left; its button goes back too.
@@ -154,12 +158,18 @@ test('from a quiz, Q opens the Search page with its lexicon, and Alt+Q, its butt
 	await expect(page).toHaveURL(/\/search\?from=/);
 	await page.goBack();
 	await expect(answers).toHaveCount(9, { timeout: 30_000 });
+	await expect(page).toHaveTitle('Retains · Acrodont');
 	// Keys pressed in Search never reached the quiz.
 	await expect(page.locator('[data-grade="missed"]')).toHaveCount(0);
 	// From the header there is no quiz to go back to.
 	await page.goto('/search');
 	await expect(pattern(page)).toBeFocused({ timeout: 30_000 });
 	await expect(page.getByRole('button', { name: 'Back to the quiz' })).toHaveCount(0);
+	await expect(page).toHaveTitle('Search · Acrodont');
+	// Left for another page in the app, the tab is Acrodont's again.
+	await page.getByRole('link', { name: 'Acrodont', exact: true }).click();
+	await expect(page).toHaveURL(/\/$/);
+	await expect(page).toHaveTitle('Acrodont');
 });
 
 test('in typed mode, Alt+Q goes to Search and back with the words typed so far kept', async ({ page }) => {

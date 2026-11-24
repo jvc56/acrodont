@@ -60,6 +60,7 @@
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import SearchPage from '../../search/+page.svelte';
 	import { searchEngine } from '$lib/search/engine.svelte';
+	import { pageTitle } from '$lib/title.svelte';
 	import type { LexiconInfo } from '$lib/filters';
 	import PanelBottomCloseIcon from '@lucide/svelte/icons/panel-bottom-close';
 	import PanelBottomOpenIcon from '@lucide/svelte/icons/panel-bottom-open';
@@ -343,6 +344,14 @@
 	 * opening it pushed). Once opened it stays mounted, hidden, so it opens again at once.
 	 */
 	let searchOpen = $derived(!!page.state.search);
+	// The tab is titled with the cascade's name (lib/title), Search's own while Search is over the quiz.
+	$effect(() => {
+		const name = v?.cascade?.name ?? null;
+		pageTitle.name = name;
+		return () => {
+			if (pageTitle.name === name) pageTitle.name = null;
+		};
+	});
 	let searchMounted = $state(false);
 	function openSearch() {
 		if (searchOpen) return;

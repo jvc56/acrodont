@@ -12,6 +12,7 @@
 	import Notices from '$lib/components/Notices.svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { documentTitle, pageTitle } from '$lib/title.svelte';
 
 	let { children } = $props();
 
@@ -34,6 +35,9 @@
 	const showHeader = $derived(
 		!!session.userId && !PUBLIC.includes(page.url.pathname) && !PLAYER.test(page.url.pathname)
 	);
+
+	// The tab's title (lib/title): Search's, shown on its own or over a quiz, or the page's own.
+	const title = $derived(documentTitle(page.url.pathname === '/search' || !!page.state.search, pageTitle.name));
 
 	onMount(() => {
 		initSession();
@@ -76,7 +80,7 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} type="image/svg+xml" />
-	<title>Acrodont</title>
+	<title>{title}</title>
 </svelte:head>
 
 <div class="min-h-screen bg-background text-foreground">
