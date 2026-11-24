@@ -63,19 +63,22 @@ test('segments and progression', async ({ page }) => {
 	await expect
 		.poll(bar)
 		.toEqual(['Level 1 of 1', 'Pass 1', '6 / 18 (27.78%)', '3 ✓ 2 ✗ (60.00%)', 'Segment 2 of 4', 'Pass 1', '1 / 5 (0.00%)', '0 ✓ 0 ✗']);
-	// On a phone each row's name, with its pass, takes a line of its own, and the position
-	// and grades share the line under it; on a screen too narrow for both, the grades go
-	// under the position. Either way the figures stay in columns and nothing runs off the
-	// bar. The resize swaps the desktop layout for the phone's, which renders the status bar
-	// again: measured mid-swap, a row is detached and has no box, so the check is retried.
+	// On a phone each row is one line: its name short, its pass only from pass 2 on, the position
+	// without the share graded (the progress line shows it), and the share correct whole. Where
+	// the rows are wider than the bar, each name takes a line of its own, then each figure too.
+	// Either way the figures stay in columns and nothing runs off the bar. The resize swaps the
+	// desktop layout for the phone's, which renders the status bar again: measured mid-swap, a
+	// row is detached and has no box, so the check is retried.
 	for (const [width, stacked] of [
-		[360, false],
-		[240, true]
+		[360, null],
+		[240, 'name'],
+		[160, 'all']
 	] as const) {
 		await page.setViewportSize({ width, height: 740 });
 		await expect(async () => {
-			expect(await bar()).toEqual(['Level 1 of 1', '6 / 18 (27.78%)', '3 ✓ 2 ✗ (60.00%)', 'Segment 2 of 4', '1 / 5 (0.00%)', '0 ✓ 0 ✗']);
-			for (const name of ['level', 'segment']) await expect(rows.locator(`[data-status-row="${name}"] > span`)).toHaveText('· Pass 1', { timeout: 1_000 });
+			expect(await bar()).toEqual(['Level 1/1', '6 / 18', '3 ✓ 2 ✗ (60%)', 'Segment 2/4', '1 / 5', '0 ✓ 0 ✗']);
+			for (const name of ['level', 'segment']) await expect(rows.locator(`[data-status-row="${name}"] > span`)).toHaveCount(0, { timeout: 1_000 });
+			expect(await rows.getAttribute('data-stacked')).toBe(stacked === null ? null : stacked);
 			const [levelName, levelAt, levelGrades, segmentName, segmentAt, segmentGrades, footer] = await Promise.all(
 				[
 					rows.locator('[data-status-row="level"]'),
@@ -89,22 +92,29 @@ test('segments and progression', async ({ page }) => {
 			);
 			if (!levelName || !levelAt || !levelGrades || !segmentName || !segmentAt || !segmentGrades || !footer) throw new Error('a status row has no box yet');
 			const below = (a: typeof levelName, b: typeof levelName) => expect(a.y).toBeGreaterThan(b.y + b.height / 2);
-			below(levelAt, levelName);
-			if (stacked) {
+			const beside = (a: typeof levelName, b: typeof levelName) => {
+				expect(a.y).toBe(b.y);
+				expect(a.x).toBeGreaterThan(b.x + b.width);
+			};
+			if (stacked === null) {
+				beside(levelAt, levelName);
+				beside(segmentAt, segmentName);
+			} else {
+				below(levelAt, levelName);
+				below(segmentAt, segmentName);
+			}
+			if (stacked === 'all') {
 				below(levelGrades, levelAt);
 				expect(levelGrades.x).toBe(levelAt.x);
-			} else {
-				expect(levelGrades.y).toBe(levelAt.y);
-				expect(levelGrades.x).toBeGreaterThan(levelAt.x + levelAt.width);
-			}
+			} else beside(levelGrades, levelAt);
 			below(segmentName, levelGrades);
-			below(segmentAt, segmentName);
 			expect(segmentAt.x).toBe(levelAt.x);
 			expect(segmentGrades.x).toBe(levelGrades.x);
 			for (const b of [levelName, levelAt, levelGrades, segmentName, segmentAt, segmentGrades]) expect(b.x + b.width).toBeLessThanOrEqual(footer.x + footer.width);
 			// Only at a real phone's width: at 240px the rest of the player is not made to fit.
 			if (width === 360) expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-			// The banner, still up until Show, follows the question instead of covering it.
+			// The banner, still up until Show, follows the question instead of covering it (at a phone's widths).
+			if (width < 240) return;
 			const [question, banner] = await Promise.all(
 				[page.locator('[data-question]'), page.getByRole('status').filter({ hasText: 'Drill done' })].map((l) => l.boundingBox({ timeout: 1_000 }))
 			);

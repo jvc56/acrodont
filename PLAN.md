@@ -1325,13 +1325,24 @@ as the term of the data model and the API.
     segment's number as [Segments](#segments) numbers runs, the card shown out
     of the segment's questions with the share of them graded, and the grades
     within the segment with the share correct. The figures of the two rows
-    sit in the same columns, so they read against each other. On a phone each
-    row's name takes a line of its own with its pass beside it (`Segment 2 of 6
-    · Pass 1`), and the position and grades share the line under it. Where
-    those two are wider than the bar, as six-digit counts are on a 360px
-    screen, the grades go under the position instead of running off the
-    screen: the choice is the figures' own width, measured as they change.
-    Without segments the Level row does the same.
+    sit in the same columns, so they read against each other. **On a phone**
+    (narrower than 640 px) each row is one line, shorter:
+
+    ```
+    Level 2/3     9 / 27   5 ✓ 3 ✗ (62%)
+    Segment 2/6   4 / 5    2 ✓ 1 ✗ (66%)
+    ```
+
+    the name says `2/3` for `2 of 3`; the pass is shown only from pass 2 on,
+    beside the name (`Segment 2/6 · Pass 2`); the share graded is left out, as
+    the progress line above the bar shows it; and the share correct is whole,
+    rounded down from the counts, so it never reads as the threshold while
+    it is still below it (79.6% at 80 is a red `79%`). Where the rows are
+    wider than the bar, as six-digit counts are on a 360px screen, each name
+    takes a line of its own with the figures under it, and where even those
+    are too wide each figure takes a line, instead of running off the screen:
+    the choice is the rows' own width, measured as they change. Without
+    segments the Level row reads the same, wrapping where it must.
     The segment's percentage has no colour: a segment has no threshold, and
     whatever it misses is drilled.
   - **A drill is its segment's next pass, not a level the bar speaks of.**
@@ -1354,7 +1365,10 @@ as the term of the data model and the API.
   that icon, so the quiz area and its grade border look
   the same either way. Hiding the bar quiets the sync status too.
 - **The sync status** sits at the very bottom right: the right end of the
-  status bar, shown or hidden.
+  status bar, shown or hidden. On a phone "Synced", "Syncing…" and "Waiting to
+  sync" are the dot alone (green when synced, grey otherwise), as in the
+  header; a tap on the dot shows the word floating above it, and another hides
+  it. What needs attention always has its words.
 - **The sync status shows what is happening**: "Waiting to sync" after an
   answer, "Syncing…" while the device talks to the server (a sync starts
   within about a second of a write), then "Synced"; offline, log in, reload,
@@ -1766,7 +1780,8 @@ and the [status bar](#desktop-layout), which is the desktop's: the level, the
 pass, the card out of the level, the score, the run and the found count,
 wrapping to a second line rather than leave anything out (the second line
 starts under the first item, so nothing sits under the hide icon), with the
-sync status at its right end and the same icon to hide it. **☰** in the quiz
+sync status at its right end and the same icon to hide it. On a phone it is
+the shorter one line a row the Segment row describes, and the sync status its dot. **☰** in the quiz
 area's top-left corner opens the player's menu as a sheet (Acrodont, Admin,
 Account, Settings). The quiz area is divided into three tap zones, one per
 action, laid out by a device setting, **Tap zones on a phone**:
@@ -1786,8 +1801,7 @@ three buttons. Nothing marks the columns' edges: the labels are enough.
 │                             │
 │ ↶Previous ✓⇄✗Toggle  Show ▸ │
 ├─────────────────────────────┤
-│ ▣ Level 2 of 3  Pass 1  37 / 250 (14.80%)
-│   30 ✓ 7 ✗ (81.08%)       ● Synced │  status bar
+│ ▣ Level 2/3  37 / 250  30 ✓ 7 ✗ (81%) ● │  status bar
 └─────────────────────────────┘
 ```
 
@@ -8354,8 +8368,9 @@ through the ordinary endpoints, so there is still no test-only path.
   Throughout, the status bar's two rows read as [Desktop layout](#desktop-layout)
   says: the Segment row under the Level row with its own figures, a drill
   shown as the segment's second pass with the Level row still on the level
-  above, and at phone width each row's name and pass on its own line with
-  the figures under it, at 240px wide the grades under the position, and
+  above, and at phone width each row one short line (`Level 1/1  6 / 18
+  3 ✓ 2 ✗ (60%)`, no pass 1), at 240px wide each name on a line of its own
+  with the figures under it, at 160px each figure on its own line, and
   nothing past the bar's edge.
 - **Export:** download the missed words of a level as a word list and the whole
   cascade as a CSV, offline, and check the contents; then ask for definitions
@@ -8471,7 +8486,9 @@ through the ordinary endpoints, so there is still no test-only path.
     are held back, and middle click still goes back with the input focused.
 - **Touch zones** (mobile viewport emulation, portrait and landscape): each
   zone fires its action, a drag in the Show / Next zone scrolls a long answer
-  without advancing, and a quick double tap advances only once. In typed mode,
+  without advancing, and a quick double tap advances only once. Upright, the
+  status bar reads `Level 1/1` and its sync status is a dot whose word a tap
+  shows above it, inside the screen. In typed mode,
   with the input focused, the bar holds Previous and Show / Next and no Toggle.
 - Set a leave value cascade's decimals to 3 in its Settings and see a leave
   answer rendered to three places.

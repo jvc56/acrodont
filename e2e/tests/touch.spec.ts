@@ -39,9 +39,24 @@ for (const orientation of ['portrait', 'landscape'] as const) {
 		await login(page, username);
 		await page.goto(player);
 		await at(page, 1);
-		// The status bar is the desktop's, sync status included.
-		await expect(page.locator('footer').getByText('Level 1 of 1')).toBeVisible();
-		await expect(page.locator('footer').getByRole('status')).toBeVisible();
+		// The status bar is the desktop's, sync status included; on a phone held upright its names are short,
+		// and an everyday sync status is its dot, its word a tap away, floating above the bar.
+		const footer = page.locator('footer');
+		await expect(footer.getByText(orientation === 'portrait' ? 'Level 1/1' : 'Level 1 of 1', { exact: true })).toBeVisible();
+		await expect(footer.getByRole('status')).toBeVisible();
+		if (orientation === 'portrait') {
+			const show = footer.getByRole('button', { name: 'Show the sync status' });
+			await expect(show).toBeVisible({ timeout: 30_000 });
+			const word = footer.getByRole('status').getByText(/^(Synced|Syncing…|Waiting to sync)$/);
+			expect((await word.boundingBox())!.width).toBeLessThan(3);
+			const bar = (await footer.boundingBox())!;
+			await show.tap();
+			const shown = (await word.boundingBox())!;
+			expect(shown.width).toBeGreaterThan(30);
+			expect(shown.y + shown.height).toBeLessThanOrEqual(bar.y + bar.height);
+			expect(shown.x + shown.width).toBeLessThanOrEqual(viewport.width);
+			await footer.getByRole('button', { name: 'Hide the sync status' }).tap();
+		}
 
 		// Columns, the default: Previous, Toggle and Show / Next, a third of the quiz area each.
 		const area = page.locator('[data-zone="columns"]');

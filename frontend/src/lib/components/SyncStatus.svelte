@@ -14,12 +14,12 @@
 	 * everyday labels are not shown, only what needs attention.
 	 */
 	/**
-	 * Compact (the site's header): on a phone an everyday label is its dot
-	 * alone, and a tap on the dot shows or hides the word, floating under
-	 * it so the header keeps its one line; what needs
-	 * attention always has its words.
+	 * Compact (the site's header, the player's status bar): on a phone an
+	 * everyday label is its dot alone, and a tap on the dot shows or hides the
+	 * word, floating under it (above it, at the foot of the screen) so showing
+	 * it moves nothing; what needs attention always has its words.
 	 */
-	let { quiet = false, compact = false }: { quiet?: boolean; compact?: boolean } = $props();
+	let { quiet = false, compact = false, above = false }: { quiet?: boolean; compact?: boolean; above?: boolean } = $props();
 	let shown = $state(false);
 	const EVERYDAY = new Set(['Synced', 'Syncing…', 'Waiting to sync']);
 
@@ -60,10 +60,10 @@
 		<button type="button" class="-m-2 p-2 sm:hidden" aria-label={shown ? 'Hide the sync status' : 'Show the sync status'} aria-expanded={shown} onclick={() => (shown = !shown)}>
 			<span class="block h-2 w-2 rounded-full" class:bg-green-600={text === 'Synced'} class:bg-muted-foreground={text !== 'Synced'}></span>
 		</button>
-		<!-- On a phone the word floats under the dot, so showing it never widens the header. -->
+		<!-- On a phone the word floats under the dot (or above it), so showing it never widens the header or the bar. -->
 		<span
 			class="truncate {shown
-				? 'max-sm:absolute max-sm:top-full max-sm:right-0 max-sm:z-20 max-sm:mt-2 max-sm:rounded-md max-sm:border max-sm:bg-background max-sm:px-2 max-sm:py-1 max-sm:shadow-md'
+				? `max-sm:absolute max-sm:right-0 max-sm:z-20 max-sm:rounded-md max-sm:border max-sm:bg-background max-sm:px-2 max-sm:py-1 max-sm:shadow-md ${above ? 'max-sm:bottom-full max-sm:mb-2' : 'max-sm:top-full max-sm:mt-2'}`
 				: 'max-sm:sr-only'}">{text}</span
 		>
 	{:else}
