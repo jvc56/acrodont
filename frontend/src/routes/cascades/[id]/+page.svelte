@@ -1002,7 +1002,7 @@
 						style={`${questionFitted(textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing))} column-gap: calc(0.25rem * var(--question-fit, 1));`}
 						data-question
 					>
-						<span class="justify-self-end text-right font-normal text-muted-foreground {hookWrap}" style={questionHookStyle} data-hooks="front">
+						<span class="justify-self-end text-right font-normal text-foreground {hookWrap}" style={questionHookStyle} data-hooks="front">
 							<span class:invisible={!card.revealed} aria-hidden={!card.revealed}><TileText text={hooked.front_hooks} lower /></span>
 						</span>
 						<span class="whitespace-nowrap">
@@ -1010,7 +1010,7 @@
 								text={card.key}
 							/><span class:invisible={!(card.revealed && hooked.back_inner)} aria-hidden={!(card.revealed && hooked.back_inner)}>·</span>
 						</span>
-						<span class="justify-self-start font-normal text-muted-foreground {hookWrap}" style={questionHookStyle} data-hooks="back">
+						<span class="justify-self-start font-normal text-foreground {hookWrap}" style={questionHookStyle} data-hooks="back">
 							<span class:invisible={!card.revealed} aria-hidden={!card.revealed}><TileText text={hooked.back_hooks} lower /></span>
 						</span>
 					</div>

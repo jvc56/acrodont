@@ -1564,8 +1564,9 @@ quizzes work by default (**flashcard mode**). The answer that Show / Next reveal
   side and its inner-hook dots, whose places it keeps before the reveal so the
   word never moves, and the answer is the definition alone, centred, as wide
   as the *Definition width* allows. The question's hooks follow the answer's
-  rules: 0.25 rem from the word, stepping aside, then wrapping, with a fit of
-  the question's own (`--question-fit`) for a word too wide even so.
+  rules: in the word's colour, 0.25 rem from the word, stepping aside, then
+  wrapping, with a fit of the question's own (`--question-fit`) for a word too
+  wide even so.
 - **Leave Value**: the value rounded to the cascade's decimal places (half away
   from zero), e.g. `34.1` or `-8.4`: a negative value has its `-`, and a
   positive one no `+`. A value that rounds to zero is
@@ -8480,7 +8481,8 @@ through the ordinary endpoints, so there is still no test-only path.
 - **A Definition card's word once** (`misc.spec.ts`): a Definition cascade's
   revealed answer shows the word with its hooks over the definition; with
   *Show the word once, with its hooks, in the question* on, the answer is the
-  definition alone and the question shows the word's front hook.
+  definition alone and the question shows the word's front hook, in the
+  word's colour and as far from it as the answer's hook was.
 - **The player's buttons** (`misc.spec.ts`): a mouse in a wide window has the
   desktop layout and no buttons; **Always** shows Show / Next, which acts on
   a click; back on automatic, a narrow-window width above the window's shows

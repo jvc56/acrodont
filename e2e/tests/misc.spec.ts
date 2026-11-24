@@ -386,12 +386,22 @@ test('a Definition cascade can show its word once, with its hooks, in the questi
 	await expect(page.locator('[data-definition]').filter({ hasText: 'a harbour' })).toBeVisible({ timeout: 30_000 });
 	await expect(page.locator('[data-answer]').filter({ hasText: /PORT/ })).toBeVisible();
 	await expect(question.locator('[data-hooks]')).toHaveCount(0);
+	/** The front hooks' colour, and the gap from them to the word's first letter (past its inner-hook dot's room). */
+	const hookLook = (hooks: Locator, word: Locator) =>
+		Promise.all([hooks.boundingBox(), word.locator(':scope > span').nth(1).boundingBox(), hooks.evaluate((h) => getComputedStyle(h).color), word.evaluate((w) => getComputedStyle(w).color)]).then(
+			([h, letters, color, wordColor]) => ({ gap: Math.round(letters!.x - (h!.x + h!.width)), color, wordColor })
+		);
+	const inAnswer = await hookLook(page.locator('[data-answer-rows] [data-hooks="front"]'), page.locator('[data-answer]'));
+	expect(inAnswer.color).toBe(inAnswer.wordColor);
 	await playerSetting(page, 'Show the word once, with its hooks, in the question', true);
 	// The word once: in the question, with its hooks; the answer is the definition alone.
 	await expect(page.locator('[data-answer]')).toHaveCount(0);
 	await expect(page.locator('[data-definition]').filter({ hasText: 'a harbour' })).toBeVisible();
 	await expect(question.locator('[data-hooks="front"]')).toContainText('s');
 	await expect(question).toContainText('PORT');
+	// Its hooks look as the answer's do: in the word's colour, as close to it.
+	const inQuestion = await hookLook(question.locator('[data-hooks="front"]'), question.locator('[data-hooks="front"] + span'));
+	expect(inQuestion).toEqual(inAnswer);
 });
 
 // PLAN.md § Answers: on a phone, hooks too wide for their half of a row move the
