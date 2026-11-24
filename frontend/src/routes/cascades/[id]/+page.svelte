@@ -60,6 +60,7 @@
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import SearchPage from '../../search/+page.svelte';
 	import { searchEngine } from '$lib/search/engine.svelte';
+	import { pageTitle } from '$lib/title.svelte';
 	import type { LexiconInfo } from '$lib/filters';
 	import PanelBottomCloseIcon from '@lucide/svelte/icons/panel-bottom-close';
 	import PanelBottomOpenIcon from '@lucide/svelte/icons/panel-bottom-open';
@@ -141,6 +142,18 @@
 	let segmentCorrectPct = $derived(segment && segment.correct + segment.missed > 0 ? (segment.correct / (segment.correct + segment.missed)) * 100 : null);
 	/** A percentage to two decimal places, rounded. */
 	const pct = (p: number) => `${p.toFixed(2)}%`;
+	/**
+	 * A phone's share correct: whole, rounded down, from the counts, so it agrees with
+	 * the colour: 79.6% at a threshold of 80 reads 79%, never a red 80%.
+	 */
+	const wholePct = (correct: number, missed: number) => `${Math.floor((correct * 100) / (correct + missed))}%`;
+	/**
+	 * The status bar's phone figures, below Tailwind's sm breakpoint as its classes are: worked
+	 * out here rather than hidden by CSS, so the bar's text is what it shows.
+	 */
+	let phoneBar = $derived(windowWidth < 640);
+	/** "Level 2 of 3", or on a phone "Level 2/3". */
+	const ofTotal = (n: number, total: number) => (phoneBar ? `${n}/${total}` : `${n} of ${total}`);
 	/** Whether the share correct so far would clear the level: green on track, red not; nothing before a grade. */
 	let onTrack = $derived(
 		correctPct === null || !v?.cascade || !levelQuiz
@@ -343,6 +356,14 @@
 	 * opening it pushed). Once opened it stays mounted, hidden, so it opens again at once.
 	 */
 	let searchOpen = $derived(!!page.state.search);
+	// The tab is titled with the cascade's name (lib/title), Search's own while Search is over the quiz.
+	$effect(() => {
+		const name = v?.cascade?.name ?? null;
+		pageTitle.name = name;
+		return () => {
+			if (pageTitle.name === name) pageTitle.name = null;
+		};
+	});
 	let searchMounted = $state(false);
 	function openSearch() {
 		if (searchOpen) return;
@@ -993,7 +1014,7 @@
 						style={`${questionFitted(textStyle(dsp.question_font, dsp.question_size_px, dsp.question_spacing))} column-gap: calc(0.25rem * var(--question-fit, 1));`}
 						data-question
 					>
-						<span class="justify-self-end text-right font-normal text-muted-foreground {hookWrap}" style={questionHookStyle} data-hooks="front">
+						<span class="justify-self-end text-right font-normal text-foreground {hookWrap}" style={questionHookStyle} data-hooks="front">
 							<span class:invisible={!card.revealed} aria-hidden={!card.revealed}><TileText text={hooked.front_hooks} lower /></span>
 						</span>
 						<span class="whitespace-nowrap">
@@ -1001,7 +1022,7 @@
 								text={card.key}
 							/><span class:invisible={!(card.revealed && hooked.back_inner)} aria-hidden={!(card.revealed && hooked.back_inner)}>·</span>
 						</span>
-						<span class="justify-self-start font-normal text-muted-foreground {hookWrap}" style={questionHookStyle} data-hooks="back">
+						<span class="justify-self-start font-normal text-foreground {hookWrap}" style={questionHookStyle} data-hooks="back">
 							<span class:invisible={!card.revealed} aria-hidden={!card.revealed}><TileText text={hooked.back_hooks} lower /></span>
 						</span>
 					</div>
@@ -1232,19 +1253,19 @@
 			<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 leading-7 max-sm:gap-x-3">
 				{#if !dsp.status_bar_hidden && v?.quiz && v.cascade && levelQuiz}
 					{#snippet levelRow(cell: string)}
-						<!-- On a phone the pass joins the row's name, which takes a line of its own, and
-						     the figures share the line under it (PLAN.md § Desktop layout). The name's own
-						     paragraph holds the name alone, so it reads the same at every width. -->
-						<div class="flex gap-x-1 max-sm:basis-full {cell}" data-status-row="level">
-							<p class="font-medium">Level {levelQuiz.level} of {v!.cascade!.depth}</p>
-							<span class="text-muted-foreground sm:hidden">· Pass {levelQuiz.attempt}</span>
+						<!-- On a phone a row is one line (PLAN.md § Desktop layout): its name short ("Level 2/3"),
+						     its pass only from pass 2 on, the position without the share graded (the progress
+						     line above the bar shows it), and the share correct whole. -->
+						<div class="flex gap-x-1 {cell}" data-status-row="level">
+							<p class="font-medium">Level {ofTotal(levelQuiz.level, v!.cascade!.depth)}</p>
+							{#if phoneBar && levelQuiz.attempt > 1}<span class="text-muted-foreground">· Pass {levelQuiz.attempt}</span>{/if}
 						</div>
 						<p class="text-muted-foreground max-sm:hidden {cell ? 'whitespace-nowrap' : ''}">Pass {levelQuiz.attempt}</p>
 						<p class={cell ? 'whitespace-nowrap' : ''} title="The card shown, and the share of the level graded in this pass">
 							<!-- The count in its own element, apart from its percentage: it is read on its own. -->
 							<!-- data-played-position marks the position of the quiz being played: this one, or the Segment row's during a drill. -->
 							<span data-played-position={v?.bar?.played === false ? undefined : ''}>{levelPos + 1} / {levelQuiz.question_count}</span>
-							<span class="text-muted-foreground">({pct(gradedPct)})</span>
+							{#if !phoneBar}<span class="text-muted-foreground">({pct(gradedPct)})</span>{/if}
 						</p>
 						<p
 							class={cell ? 'whitespace-nowrap' : ''}
@@ -1252,36 +1273,40 @@
 						>
 							<span>{levelQuiz.correct_count} ✓ {levelQuiz.missed_count} ✗</span>
 							{#if correctPct !== null}
-								<span class:text-green-600={onTrack} class:text-red-600={onTrack === false} data-on-track={onTrack}>({pct(correctPct)})</span>
+								<span class:text-green-600={onTrack} class:text-red-600={onTrack === false} data-on-track={onTrack}
+									>({phoneBar ? wholePct(levelQuiz.correct_count, levelQuiz.missed_count) : pct(correctPct)})</span
+								>
 							{/if}
 						</p>
 					{/snippet}
 					{#if segment}
 						<!-- A level studied in segments: the Segment row under the Level row, its figures in
-						     the same columns so the two read against each other. On a phone each row's name,
-						     with its pass, takes a line of its own, and the position and grades share the line
-						     under it, or stack when they are too wide to (stackWhenTooWide). A drill of the
-						     segment's misses is the segment's next pass: the Level row stays on the level. -->
+						     the same columns so the two read against each other. On a phone each row is one
+						     line; where the rows are wider than the bar, as six-digit counts are on a 360px
+						     screen, each name takes a line of its own, then each figure too (stackWhenTooWide).
+						     A drill of the segment's misses is the segment's next pass: the Level row stays on the level. -->
 						<div
-							class="grid grid-cols-[auto_auto] justify-start gap-x-3 tabular-nums max-sm:data-stacked:grid-cols-[auto] sm:grid-cols-[auto_auto_auto_auto] sm:gap-x-5"
+							class="group grid grid-cols-[auto_auto_auto] justify-start gap-x-3 tabular-nums max-sm:data-[stacked=all]:grid-cols-[auto] max-sm:data-[stacked=name]:grid-cols-[auto_auto] sm:grid-cols-[auto_auto_auto_auto] sm:gap-x-5"
 							data-status-rows
 							{@attach stackWhenTooWide}
 						>
-							{@render levelRow('max-sm:col-span-full whitespace-nowrap')}
-							<div class="flex gap-x-1 whitespace-nowrap max-sm:col-span-full" data-status-row="segment">
-								<p class="font-medium">Segment {segment.segment} of {segment.total}</p>
-								<span class="text-muted-foreground sm:hidden">· Pass {segment.pass}</span>
+							{@render levelRow('max-sm:group-data-stacked:col-span-full whitespace-nowrap')}
+							<div class="flex gap-x-1 whitespace-nowrap max-sm:group-data-stacked:col-span-full" data-status-row="segment">
+								<p class="font-medium">Segment {ofTotal(segment.segment, segment.total)}</p>
+								{#if phoneBar && segment.pass > 1}<span class="text-muted-foreground">· Pass {segment.pass}</span>{/if}
 							</div>
 							<p class="whitespace-nowrap text-muted-foreground max-sm:hidden" title="1 is the segment itself; each drill of its misses is the next pass">
 								Pass {segment.pass}
 							</p>
 							<p class="whitespace-nowrap" title="The card shown, and the share of the segment graded in this pass">
 								<span data-played-position={v?.bar?.played === false ? '' : undefined}>{segment.position} / {segment.length}</span>
-								<span class="text-muted-foreground">({pct(segmentGradedPct)})</span>
+								{#if !phoneBar}<span class="text-muted-foreground">({pct(segmentGradedPct)})</span>{/if}
 							</p>
 							<p class="whitespace-nowrap" title="Correct and missed in this segment, and the share correct: what is missed is drilled before the next segment">
 								<span>{segment.correct} ✓ {segment.missed} ✗</span>
-								{#if segmentCorrectPct !== null}<span class="text-muted-foreground">({pct(segmentCorrectPct)})</span>{/if}
+								{#if segmentCorrectPct !== null}<span class="text-muted-foreground"
+										>({phoneBar ? wholePct(segment.correct, segment.missed) : pct(segmentCorrectPct)})</span
+									>{/if}
 							</p>
 						</div>
 					{:else}
@@ -1290,7 +1315,8 @@
 					{#if foundCount}<p>{foundCount}</p>{/if}
 				{/if}
 				<!-- At the bar's foot when the figures take several lines, not halfway up them. -->
-				<div class="ml-auto self-end"><SyncStatus quiet={dsp.status_bar_hidden || dsp.sync_status_hidden} /></div>
+				<!-- On a phone an everyday status is its dot alone, its word a tap away (SyncStatus). -->
+				<div class="ml-auto self-end"><SyncStatus compact above quiet={dsp.status_bar_hidden || dsp.sync_status_hidden} /></div>
 			</div>
 		</div>
 	</footer>

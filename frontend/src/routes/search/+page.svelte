@@ -65,7 +65,6 @@
 	}
 </script>
 
-<svelte:head>{#if active}<title>Search · Acrodont</title>{/if}</svelte:head>
 <svelte:window onkeydown={onKey} />
 
 <!-- A fixed height under the header, so the list scrolls inside the page. -->
