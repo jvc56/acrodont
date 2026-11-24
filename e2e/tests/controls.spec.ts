@@ -114,10 +114,15 @@ test('desktop controls', async ({ page, browser, baseURL }) => {
 	await at(page, 2);
 	await press(page, 'Space');
 	await expect(page.locator('[data-grade="correct"]')).toBeVisible();
-	await area(page).hover();
-	await page.mouse.wheel(0, 100);
-	await page.mouse.wheel(0, 100);
-	await page.mouse.wheel(0, 100);
+	// A flick is a burst of wheel events a few milliseconds apart, dispatched here in one task:
+	// separate page.mouse.wheel calls are each a round trip, which on a busy CI runner can
+	// land further apart than the player's 150 ms flick window and so act twice. Two events,
+	// so acting on both would toggle the grade back.
+	await area(page).evaluate((el) => {
+		for (let i = 0; i < 2; i++) el.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }));
+	});
+	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
+	await page.waitForTimeout(300);
 	await expect(page.locator('[data-grade="missed"]')).toBeVisible();
 	await page.waitForTimeout(200);
 	await page.keyboard.press('Shift+KeyT');
